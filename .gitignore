@@ -11,6 +11,7 @@ src-tauri/gen/schemas
 # macOS
 .DS_Store
 Icon?
+!src-tauri/icons/
 
 # IDE
 .vscode/
