@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Rust build output (covered by src-tauri/.gitignore too)
+src-tauri/target/
+src-tauri/gen/schemas
+
+# macOS
+.DS_Store
+Icon?
+
+# IDE
+.vscode/
+.idea/
+
+# Generated docs
+*.pdf
+generate_doc.py
+
+# Environment
+.env
