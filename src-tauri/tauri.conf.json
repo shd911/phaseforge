@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "PhaseForge",
-  "version": "0.1.0",
+  "version": "0.1.52",
   "identifier": "com.phaseforge.desktop",
   "build": {
     "frontendDist": "../dist",
