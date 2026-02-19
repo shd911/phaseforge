@@ -66,13 +66,14 @@ export function yymmdd(): string {
   return `${yy}${mm}${dd}`;
 }
 
-/** Remove special characters, keep [a-zA-Z0-9-] */
+/** Remove filesystem-unsafe characters, keep Unicode letters */
 export function sanitize(name: string): string {
   return name
-    .replace(/[^a-zA-Z0-9\-\s]/g, "")
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "")
     .replace(/\s+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "")
+    .replace(/\.+$/g, "")
     || "untitled";
 }
 
