@@ -289,32 +289,17 @@ function CorrectedImpulseMiniPlot() {
 
       // 6. Compute target impulse (if target enabled)
       let targetIR: ImpulseResult | null = null;
-      let targetScale = 1;
       if (targetMag && targetPhase) {
         targetIR = await invoke<ImpulseResult>("compute_impulse", {
           freq, magnitude: targetMag, phase: targetPhase, sampleRate: sr,
         });
         if (gen !== renderGen) return;
-
-        // Normalize target impulse to corrected peak scale:
-        // Both are peak=100% from Rust, but real peaks differ by passband level ratio
-        let corrDbSum = 0, tgtDbSum = 0, cnt2 = 0;
-        for (let i = 0; i < freq.length; i++) {
-          if (freq[i] >= 200 && freq[i] <= 2000) {
-            corrDbSum += corrMag[i];
-            tgtDbSum += targetMag[i];
-            cnt2++;
-          }
-        }
-        if (cnt2 > 0) {
-          targetScale = Math.pow(10, ((corrDbSum / cnt2) - (tgtDbSum / cnt2)) / 20);
-        }
       }
 
       setHasData(true);
       requestAnimationFrame(() => {
         if (gen !== renderGen) return;
-        renderMiniChart(corrIR, targetIR, targetScale);
+        renderMiniChart(corrIR, targetIR);
       });
     } catch (e) {
       console.error("CorrectedImpulseMiniPlot error:", e);
@@ -322,7 +307,7 @@ function CorrectedImpulseMiniPlot() {
     }
   });
 
-  function renderMiniChart(corrIR: ImpulseResult, targetIR: ImpulseResult | null, targetScale: number = 1) {
+  function renderMiniChart(corrIR: ImpulseResult, targetIR: ImpulseResult | null) {
     if (!containerRef) return;
 
     if (chartRef) { chartRef.destroy(); chartRef = undefined; }
@@ -352,10 +337,8 @@ function CorrectedImpulseMiniPlot() {
     ];
 
     if (targetIR) {
-      // Scale target impulse to corrected peak level (both are peak=100% from Rust)
-      const scaledTarget = targetIR.impulse.map(v => v * targetScale);
       uData[0] = corrTime;
-      uData.push(scaledTarget);
+      uData.push(targetIR.impulse);
       series.push({
         label: "Target",
         stroke: TARGET_COLOR,
