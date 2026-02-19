@@ -307,6 +307,22 @@ function CorrectedImpulseMiniPlot() {
     }
   });
 
+  /** Linearly interpolate srcVal(srcTime) onto dstTime grid */
+  function interpOnGrid(srcTime: number[], srcVal: number[], dstTime: number[]): number[] {
+    const out = new Array(dstTime.length);
+    let j = 0;
+    for (let i = 0; i < dstTime.length; i++) {
+      const t = dstTime[i];
+      while (j < srcTime.length - 2 && srcTime[j + 1] < t) j++;
+      if (t <= srcTime[0]) { out[i] = srcVal[0]; continue; }
+      if (t >= srcTime[srcTime.length - 1]) { out[i] = srcVal[srcTime.length - 1]; continue; }
+      const t0 = srcTime[j], t1 = srcTime[j + 1];
+      const frac = (t1 !== t0) ? (t - t0) / (t1 - t0) : 0;
+      out[i] = srcVal[j] + frac * (srcVal[j + 1] - srcVal[j]);
+    }
+    return out;
+  }
+
   function renderMiniChart(corrIR: ImpulseResult, targetIR: ImpulseResult | null) {
     if (!containerRef) return;
 
@@ -316,9 +332,9 @@ function CorrectedImpulseMiniPlot() {
     const w = Math.max(rect.width, 100);
     const h = Math.max(rect.height, 60);
 
-    // Time in ms
-    const corrTime = corrIR.time.map(t => t * 1000);
-    const corrPeak = peakTimeMs(corrIR.time, corrIR.impulse);
+    // Center corrected impulse: peak = 0 ms
+    const corrPeakMs = peakTimeMs(corrIR.time, corrIR.impulse);
+    const corrTime = corrIR.time.map(t => t * 1000 - corrPeakMs);
 
     // Determine X range from target lobe width + 5ms padding
     let halfSpan = 10; // default ±10ms if no target
@@ -326,8 +342,8 @@ function CorrectedImpulseMiniPlot() {
       const lobeW = targetLobeWidthMs(targetIR.time, targetIR.impulse);
       halfSpan = Math.max(lobeW / 2 + 5, 5);
     }
-    const xMin = corrPeak - halfSpan;
-    const xMax = corrPeak + halfSpan;
+    const xMin = -halfSpan;
+    const xMax = halfSpan;
 
     // Build uPlot data
     const uData: number[][] = [corrTime, corrIR.impulse];
@@ -337,8 +353,11 @@ function CorrectedImpulseMiniPlot() {
     ];
 
     if (targetIR) {
-      uData[0] = corrTime;
-      uData.push(targetIR.impulse);
+      // Center target impulse by its own peak, then interpolate onto corrTime grid
+      const tgtPeakMs = peakTimeMs(targetIR.time, targetIR.impulse);
+      const tgtTime = targetIR.time.map(t => t * 1000 - tgtPeakMs);
+      const tgtInterp = interpOnGrid(tgtTime, targetIR.impulse, corrTime);
+      uData.push(tgtInterp);
       series.push({
         label: "Target",
         stroke: TARGET_COLOR,
