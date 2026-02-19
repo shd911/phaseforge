@@ -5,7 +5,7 @@ import "uplot/dist/uPlot.min.css";
 import { invoke } from "@tauri-apps/api/core";
 import { MEASUREMENT_COLORS } from "../lib/types";
 import type { Measurement, TargetResponse, FilterType } from "../lib/types";
-import { appState, activeBand, isSum, activeTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly } from "../stores/bands";
+import { appState, activeBand, isSum, activeTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand } from "../stores/bands";
 import type { SmoothingMode, BandState } from "../stores/bands";
 import { needAutoFit, setNeedAutoFit } from "../App";
 import { computeFloorBounce } from "../lib/floor-bounce";
@@ -142,10 +142,11 @@ export default function FrequencyPlot() {
 
   function zoomY(factor: number) {
     if (!chart) return;
+    const viewCenter = (curMagMin + curMagMax) / 2;
     const half = ((curMagMax - curMagMin) / 2) * factor;
     if (half * 2 < 2 || half * 2 > 400) return;
-    curMagMin = zoomCenter - half;
-    curMagMax = zoomCenter + half;
+    curMagMin = viewCenter - half;
+    curMagMax = viewCenter + half;
     chart.setScale("mag", { min: curMagMin, max: curMagMax });
   }
 
@@ -267,11 +268,12 @@ export default function FrequencyPlot() {
       if (xs?.min != null && xs?.max != null) { savedXMin = xs.min; savedXMax = xs.max; }
     }
     if (chart) {
-      // Remove crossover event listeners before destroying
+      // Remove event listeners before destroying
       if (chart.over) {
         chart.over.removeEventListener("mousemove", handleXoMouseMove);
         chart.over.removeEventListener("mousedown", handleXoMouseDown);
         chart.over.removeEventListener("dblclick", handleXoDblClick);
+        chart.over.removeEventListener("dblclick", handlePeqDblClick);
       }
       chart.destroy();
       chart = undefined;
@@ -336,12 +338,16 @@ export default function FrequencyPlot() {
     const prevVisMap = new Map<string, boolean>();
     for (const e of legendEntries) prevVisMap.set(e.label, e.visible);
 
+    const curIsAlign = activeTab() === "align";
     let mergedLegend: LegendEntry[] | undefined;
     if (input.legend && input.legend.length > 0) {
-      mergedLegend = input.legend.map((e) => ({
-        ...e,
-        visible: prevVisMap.has(e.label) ? prevVisMap.get(e.label)! : e.visible,
-      }));
+      mergedLegend = input.legend.map((e) => {
+        // On align tab, don't restore previous visibility for measurement — keep hidden
+        if (curIsAlign && e.category === "measurement" && e.label !== "Meas 1/1 oct") {
+          return e; // use the default (visible: false set in renderBandMode)
+        }
+        return { ...e, visible: prevVisMap.has(e.label) ? prevVisMap.get(e.label)! : e.visible };
+      });
       // Apply show to series
       for (const entry of mergedLegend) {
         if (input.uSeries[entry.seriesIdx]) {
@@ -425,43 +431,44 @@ export default function FrequencyPlot() {
 
             ctx.restore();
           },
-          // Selected PEQ band — vertical dashed line
+          // PEQ bands — vertical dashed lines for all enabled bands
           (u: uPlot) => {
-            const selIdx = selectedPeqIdx();
-            if (selIdx == null) return;
             const bd = activeBand();
-            if (!bd || !bd.peqBands || selIdx >= bd.peqBands.length) return;
-            const freqHz = bd.peqBands[selIdx].freq_hz;
-
+            if (!bd?.peqBands?.length) return;
+            const selIdx = selectedPeqIdx();
             const ctx = u.ctx;
-            // valToPos with can=true returns canvas-pixel position including plot offset
-            const cx = u.valToPos(freqHz, "x", true);
             const plotLeft = u.bbox.left;
             const plotTop = u.bbox.top;
             const plotRight = plotLeft + u.bbox.width;
             const plotBottom = plotTop + u.bbox.height;
-
-            if (cx < plotLeft || cx > plotRight) return;
-
-            ctx.save();
-            ctx.strokeStyle = "#FF9F43";
-            ctx.lineWidth = 2;
-            ctx.setLineDash([6, 4]);
-            ctx.beginPath();
-            ctx.moveTo(cx, plotTop);
-            ctx.lineTo(cx, plotBottom);
-            ctx.stroke();
-
-            // Frequency label at top of line
-            ctx.setLineDash([]);
-            ctx.fillStyle = "#FF9F43";
             const dpr = devicePixelRatio || 1;
-            ctx.font = `${Math.round(10 * dpr)}px sans-serif`;
-            ctx.textAlign = "center";
-            const label = freqHz >= 1000 ? (freqHz / 1000).toFixed(1) + "k" : Math.round(freqHz).toString();
-            ctx.fillText(label, cx, plotTop - 4 * dpr);
 
-            ctx.restore();
+            for (let i = 0; i < bd.peqBands.length; i++) {
+              const pb = bd.peqBands[i];
+              if (!pb.enabled) continue;
+              const cx = u.valToPos(pb.freq_hz, "x", true);
+              if (cx < plotLeft || cx > plotRight) continue;
+
+              const isSel = i === selIdx;
+              ctx.save();
+              ctx.strokeStyle = isSel ? "#FF9F43" : "rgba(255,159,67,0.35)";
+              ctx.lineWidth = isSel ? 2 : 1;
+              ctx.setLineDash(isSel ? [6, 4] : [4, 4]);
+              ctx.beginPath();
+              ctx.moveTo(cx, plotTop);
+              ctx.lineTo(cx, plotBottom);
+              ctx.stroke();
+
+              if (isSel) {
+                ctx.setLineDash([]);
+                ctx.fillStyle = "#FF9F43";
+                ctx.font = `${Math.round(10 * dpr)}px sans-serif`;
+                ctx.textAlign = "center";
+                const label = pb.freq_hz >= 1000 ? (pb.freq_hz / 1000).toFixed(1) + "k" : Math.round(pb.freq_hz).toString();
+                ctx.fillText(label, cx, plotTop - 4 * dpr);
+              }
+              ctx.restore();
+            }
           },
           // Crossover markers (SUM mode)
           (u: uPlot) => {
@@ -532,6 +539,16 @@ export default function FrequencyPlot() {
       console.error("uPlot error:", e);
     }
 
+    // Auto-center: if passband avg (zoomCenter) is outside visible range, shift view
+    if (chart) {
+      const halfRange = (curMagMax - curMagMin) / 2;
+      if (zoomCenter < curMagMin || zoomCenter > curMagMax) {
+        curMagMin = zoomCenter - halfRange;
+        curMagMax = zoomCenter + halfRange;
+        chart.setScale("mag", { min: curMagMin, max: curMagMax });
+      }
+    }
+
     // Update legend state (visibility was already applied to series before chart creation)
     if (mergedLegend && mergedLegend.length > 0) {
       setLegendEntries(mergedLegend);
@@ -550,6 +567,11 @@ export default function FrequencyPlot() {
       over.addEventListener("mousemove", handleXoMouseMove);
       over.addEventListener("mousedown", handleXoMouseDown);
       over.addEventListener("dblclick", handleXoDblClick);
+    }
+
+    // PEQ double-click: add new band at cursor frequency (align tab only)
+    if (chart && chart.over) {
+      chart.over.addEventListener("dblclick", handlePeqDblClick);
     }
   }
 
@@ -706,17 +728,20 @@ export default function FrequencyPlot() {
       const legend: LegendEntry[] = [];
       let sIdx = 1;
 
+      const isAlignTab = activeTab() === "align";
+      const measVisible = !isAlignTab; // hide raw measurement on align tab
+
       if (result.measurement && showMag) {
         const color = MEASUREMENT_COLORS[0];
         uSeries.push({ label: result.measurement.name + " dB", stroke: color, width: 2, scale: "mag" });
         uData.push(result.measurement.magnitude);
-        legend.push({ label: "Measurement", color, dash: false, visible: true, seriesIdx: sIdx, category: "measurement" });
+        legend.push({ label: "Measurement", color, dash: false, visible: measVisible, seriesIdx: sIdx, category: "measurement" });
         sIdx++;
 
         if (showPhase && result.measurement.phase) {
           uSeries.push({ label: result.measurement.name + " \u00B0", stroke: color, width: 1, dash: [6, 3], scale: "phase" });
           uData.push(wrapPhase(result.measurement.phase));
-          legend.push({ label: "Meas \u00B0", color, dash: true, visible: true, seriesIdx: sIdx, category: "measurement" });
+          legend.push({ label: "Meas \u00B0", color, dash: true, visible: measVisible, seriesIdx: sIdx, category: "measurement" });
           sIdx++;
         }
       }
@@ -740,7 +765,6 @@ export default function FrequencyPlot() {
       }
 
       // 1/1-octave smoothed measurement — intermediate target for PEQ (shown on align tab)
-      const isAlignTab = activeTab() === "align";
       if (isAlignTab && result.measurement && showMag) {
         try {
           const smoothedHalf = await invoke<number[]>("get_smoothed", {
@@ -1353,6 +1377,26 @@ export default function FrequencyPlot() {
       linearPhase: xo.linearPhase,
       shape: xo.shape,
     });
+  }
+
+  // Double-click on chart → add PEQ band at cursor frequency (align tab only)
+  function handlePeqDblClick(e: MouseEvent) {
+    if (activeTab() !== "align") return;
+    // Don't interfere with crossover dblclick in SUM mode
+    if (isSum()) return;
+    const bd = activeBand();
+    if (!bd || !chart) return;
+
+    const overEl = chart.over ?? containerRef;
+    const rect = overEl?.getBoundingClientRect();
+    if (!rect) return;
+    const mx = e.clientX - rect.left;
+    let freq = chart.posToVal(mx, "x");
+    if (!isFinite(freq) || freq < 20) freq = 20;
+    if (freq > 20000) freq = 20000;
+
+    addPeqBand(bd.id, { freq_hz: Math.round(freq), gain_db: 0, q: 4.32, enabled: true });
+    setSelectedPeqIdx(0); // new band is added at index 0
   }
 
   onCleanup(() => { if (chart) chart.destroy(); });
