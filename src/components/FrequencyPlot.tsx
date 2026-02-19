@@ -202,6 +202,45 @@ export default function FrequencyPlot() {
     chart.setSeries(entry.seriesIdx, { show: newVis });
   }
 
+  // Toggle all series for a given band column in SUM mode
+  function toggleColumn(colName: string) {
+    if (!chart) return;
+    const matching: number[] = [];
+    for (let i = 0; i < legendEntries.length; i++) {
+      const e = legendEntries[i];
+      if (colName === "\u03A3") {
+        if (e.label.startsWith("\u03A3")) matching.push(i);
+      } else {
+        if (e.label === colName || e.label === colName + " tgt" || e.label === colName + " corr") matching.push(i);
+      }
+    }
+    if (matching.length === 0) return;
+    const allOn = matching.every(i => legendEntries[i].visible);
+    const newVis = !allOn;
+    for (const i of matching) {
+      if (legendEntries[i].visible !== newVis) {
+        setLegendEntries(i, "visible", newVis);
+        chart.setSeries(legendEntries[i].seriesIdx, { show: newVis });
+      }
+    }
+  }
+
+  // Find a legend entry for a specific [bandName, category] cell
+  function findCellEntry(colName: string, cat: "measurement" | "target" | "corrected"): LegendEntry | undefined {
+    for (let i = 0; i < legendEntries.length; i++) {
+      const e = legendEntries[i];
+      if (e.category !== cat) continue;
+      if (colName === "\u03A3") {
+        if (e.label.startsWith("\u03A3")) return e;
+      } else {
+        if (cat === "measurement" && e.label === colName) return e;
+        if (cat === "target" && e.label === colName + " tgt") return e;
+        if (cat === "corrected" && e.label === colName + " corr") return e;
+      }
+    }
+    return undefined;
+  }
+
   // Переключение всей категории (targets / measurements / corrected)
   function toggleCategory(cat: "measurement" | "target" | "corrected") {
     if (!chart) return;
@@ -1433,116 +1472,74 @@ export default function FrequencyPlot() {
           </For>
         </Show>
       </div>
-      {/* SUM visibility table */}
+      {/* SUM visibility matrix table */}
       <Show when={isSum() && showLegend() && legendEntries.length > 0}>
         <div class="sum-vis-table">
-          {/* Row: Targets */}
           {(() => {
-            const catEntries = () => legendEntries.filter(e => e.category === "target");
-            const allOn = () => { const ce = catEntries(); return ce.length > 0 && ce.every(e => e.visible); };
-            const anyOn = () => catEntries().some(e => e.visible);
+            const bandNames = () => appState.bands.map(b => b.name);
+            const cols = () => [...bandNames(), "\u03A3"];
+            const categories: ("target" | "measurement" | "corrected")[] = ["target", "measurement", "corrected"];
+            const catLabels: Record<string, string> = { target: "Targets", measurement: "Meas", corrected: "Corrected" };
+            const catColors: Record<string, string> = { target: TARGET_COLOR, measurement: "#4A9EFF", corrected: CORRECTED_COLOR };
+
             return (
-              <div class="sum-vis-row">
-                <button
-                  class={`sum-vis-all ${allOn() ? "on" : anyOn() ? "partial" : ""}`}
-                  onClick={() => toggleCategory("target")}
-                >
-                  <span class="sum-vis-all-swatch" style={{ "border-color": TARGET_COLOR }} />
-                  Targets
-                </button>
-                <div class="sum-vis-items">
-                  <For each={catEntries()}>
-                    {(entry) => {
-                      const idx = () => legendEntries.findIndex(e => e.seriesIdx === entry.seriesIdx);
+              <table>
+                {/* Header row: empty corner + band names + Σ */}
+                <thead>
+                  <tr>
+                    <th class="sum-corner" />
+                    <For each={cols()}>
+                      {(col) => (
+                        <th onClick={() => toggleColumn(col)} title={`Toggle all ${col}`}>
+                          {col}
+                        </th>
+                      )}
+                    </For>
+                  </tr>
+                </thead>
+                <tbody>
+                  <For each={categories}>
+                    {(cat) => {
+                      const catEnts = () => legendEntries.filter(e => e.category === cat);
+                      const allOn = () => { const ce = catEnts(); return ce.length > 0 && ce.every(e => e.visible); };
+                      const anyOn = () => catEnts().some(e => e.visible);
                       return (
-                        <button
-                          class={`legend-item ${entry.visible ? "" : "legend-off"}`}
-                          onClick={() => { const i = idx(); if (i >= 0) toggleLegendEntry(i); }}
-                        >
-                          <span
-                            class={`legend-swatch ${entry.dash ? "legend-swatch-dash" : ""}`}
-                            style={{ "background-color": entry.dash ? "transparent" : entry.color, "border-color": entry.color }}
-                          />
-                          <span class="legend-text">{entry.label}</span>
-                        </button>
+                        <tr>
+                          <td
+                            class={`sum-row-header ${allOn() ? "row-on" : anyOn() ? "row-partial" : ""}`}
+                            onClick={() => toggleCategory(cat)}
+                            title={`Toggle all ${catLabels[cat]}`}
+                          >
+                            <span class="sum-row-swatch" style={{ "border-color": catColors[cat] }} />
+                            {catLabels[cat]}
+                          </td>
+                          <For each={cols()}>
+                            {(col) => {
+                              const entry = () => findCellEntry(col, cat);
+                              const e = entry();
+                              if (!e) return <td class="sum-cell-empty" />;
+                              const idx = () => legendEntries.findIndex(le => le.seriesIdx === e!.seriesIdx);
+                              return (
+                                <td>
+                                  <button
+                                    class={`legend-item ${entry()?.visible ? "" : "legend-off"}`}
+                                    onClick={() => { const i = idx(); if (i >= 0) toggleLegendEntry(i); }}
+                                  >
+                                    <span
+                                      class={`legend-swatch ${e!.dash ? "legend-swatch-dash" : ""}`}
+                                      style={{ "background-color": e!.dash ? "transparent" : e!.color, "border-color": e!.color }}
+                                    />
+                                  </button>
+                                </td>
+                              );
+                            }}
+                          </For>
+                        </tr>
                       );
                     }}
                   </For>
-                </div>
-              </div>
-            );
-          })()}
-          {/* Row: Measurements */}
-          {(() => {
-            const catEntries = () => legendEntries.filter(e => e.category === "measurement");
-            const allOn = () => { const ce = catEntries(); return ce.length > 0 && ce.every(e => e.visible); };
-            const anyOn = () => catEntries().some(e => e.visible);
-            return (
-              <div class="sum-vis-row">
-                <button
-                  class={`sum-vis-all ${allOn() ? "on" : anyOn() ? "partial" : ""}`}
-                  onClick={() => toggleCategory("measurement")}
-                >
-                  <span class="sum-vis-all-swatch" style={{ "border-color": "#4A9EFF" }} />
-                  Measurements
-                </button>
-                <div class="sum-vis-items">
-                  <For each={catEntries()}>
-                    {(entry) => {
-                      const idx = () => legendEntries.findIndex(e => e.seriesIdx === entry.seriesIdx);
-                      return (
-                        <button
-                          class={`legend-item ${entry.visible ? "" : "legend-off"}`}
-                          onClick={() => { const i = idx(); if (i >= 0) toggleLegendEntry(i); }}
-                        >
-                          <span
-                            class={`legend-swatch ${entry.dash ? "legend-swatch-dash" : ""}`}
-                            style={{ "background-color": entry.dash ? "transparent" : entry.color, "border-color": entry.color }}
-                          />
-                          <span class="legend-text">{entry.label}</span>
-                        </button>
-                      );
-                    }}
-                  </For>
-                </div>
-              </div>
-            );
-          })()}
-          {/* Row: Corrected */}
-          {(() => {
-            const catEntries = () => legendEntries.filter(e => e.category === "corrected");
-            const allOn = () => { const ce = catEntries(); return ce.length > 0 && ce.every(e => e.visible); };
-            const anyOn = () => catEntries().some(e => e.visible);
-            return (
-              <div class={`sum-vis-row ${catEntries().length === 0 ? "sum-vis-row-disabled" : ""}`}>
-                <button
-                  class={`sum-vis-all ${allOn() ? "on" : anyOn() ? "partial" : ""}`}
-                  onClick={() => toggleCategory("corrected")}
-                  disabled={catEntries().length === 0}
-                >
-                  <span class="sum-vis-all-swatch" style={{ "border-color": CORRECTED_COLOR }} />
-                  Corrected
-                </button>
-                <div class="sum-vis-items">
-                  <For each={catEntries()}>
-                    {(entry) => {
-                      const idx = () => legendEntries.findIndex(e => e.seriesIdx === entry.seriesIdx);
-                      return (
-                        <button
-                          class={`legend-item ${entry.visible ? "" : "legend-off"}`}
-                          onClick={() => { const i = idx(); if (i >= 0) toggleLegendEntry(i); }}
-                        >
-                          <span
-                            class={`legend-swatch ${entry.dash ? "legend-swatch-dash" : ""}`}
-                            style={{ "background-color": entry.dash ? "transparent" : entry.color, "border-color": entry.color }}
-                          />
-                          <span class="legend-text">{entry.label}</span>
-                        </button>
-                      );
-                    }}
-                  </For>
-                </div>
-              </div>
+                </tbody>
+              </table>
             );
           })()}
         </div>

@@ -1,7 +1,8 @@
-import { createSignal, For, onCleanup } from "solid-js";
+import { createSignal, For, Show, onCleanup } from "solid-js";
 import {
   appState,
   addBand,
+  removeBand,
   setActiveBand,
   setActiveBandSum,
   moveBand,
@@ -81,6 +82,18 @@ export default function BandTabs() {
             onPointerDown={(e) => handlePointerDown(e, idx())}
           >
             <span class="band-tab-label">{band.name}</span>
+            <Show when={appState.bands.length > 1}>
+              <span
+                class="band-tab-close"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (window.confirm(`Delete band "${band.name}"?`)) {
+                    removeBand(band.id);
+                  }
+                }}
+                title={`Delete ${band.name}`}
+              >×</span>
+            </Show>
           </button>
         )}
       </For>
