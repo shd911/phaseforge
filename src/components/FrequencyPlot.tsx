@@ -125,7 +125,7 @@ export default function FrequencyPlot() {
   // Mutable Y-scale state — updated by buttons, used by range function
   let curMagMin = -100;
   let curMagMax = 100;
-  // Y-zoom anchor: passband reference level (avg 200-2000 Hz, or 0 dB without measurements)
+  // Y-zoom anchor: passband reference level (adaptive to HP/LP filters, or 0 dB without measurements)
   let zoomCenter = 0;
 
   const [cursorFreq, setCursorFreq] = createSignal("—");
@@ -142,11 +142,10 @@ export default function FrequencyPlot() {
 
   function zoomY(factor: number) {
     if (!chart) return;
-    const viewCenter = (curMagMin + curMagMax) / 2;
     const half = ((curMagMax - curMagMin) / 2) * factor;
     if (half * 2 < 2 || half * 2 > 400) return;
-    curMagMin = viewCenter - half;
-    curMagMax = viewCenter + half;
+    curMagMin = zoomCenter - half;
+    curMagMax = zoomCenter + half;
     chart.setScale("mag", { min: curMagMin, max: curMagMax });
   }
 
@@ -539,16 +538,6 @@ export default function FrequencyPlot() {
       console.error("uPlot error:", e);
     }
 
-    // Auto-center: if passband avg (zoomCenter) is outside visible range, shift view
-    if (chart) {
-      const halfRange = (curMagMax - curMagMin) / 2;
-      if (zoomCenter < curMagMin || zoomCenter > curMagMax) {
-        curMagMin = zoomCenter - halfRange;
-        curMagMax = zoomCenter + halfRange;
-        chart.setScale("mag", { min: curMagMin, max: curMagMax });
-      }
-    }
-
     // Update legend state (visibility was already applied to series before chart creation)
     if (mergedLegend && mergedLegend.length > 0) {
       setLegendEntries(mergedLegend);
@@ -709,11 +698,20 @@ export default function FrequencyPlot() {
         return;
       }
 
-      // Compute zoom anchor: avg magnitude 200-2000 Hz, or 0 dB without measurement
+      // Compute zoom anchor: avg magnitude in passband (adaptive to HP/LP), or 0 dB without measurement
       if (result.measurement) {
+        // Determine passband from actual HP/LP filters
+        const hpFreq = band.target.high_pass?.freq_hz ?? 20;
+        const lpFreq = band.target.low_pass?.freq_hz ?? 20000;
+        const pbLow = Math.max(20, hpFreq * 1.5);
+        const pbHigh = Math.min(20000, lpFreq * 0.7);
+        // Fallback to 200-2000 if no filters or range is empty
+        const effLow = pbLow < pbHigh ? pbLow : 200;
+        const effHigh = pbLow < pbHigh ? pbHigh : 2000;
+
         let s = 0, n = 0;
         for (let i = 0; i < result.measurement.freq.length; i++) {
-          if (result.measurement.freq[i] >= 200 && result.measurement.freq[i] <= 2000) {
+          if (result.measurement.freq[i] >= effLow && result.measurement.freq[i] <= effHigh) {
             s += result.measurement.magnitude[i]; n++;
           }
         }

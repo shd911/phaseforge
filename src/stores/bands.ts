@@ -215,19 +215,39 @@ export function renameBand(id: string, name: string) {
   markDirty();
 }
 
-/** Переместить полосу из позиции fromIdx в toIdx. Сбрасывает все linkedToNext. */
+/** Переместить полосу из позиции fromIdx в toIdx. Перестраивает фильтры и linked-связи. */
 export function moveBand(fromIdx: number, toIdx: number) {
   if (fromIdx === toIdx) return;
   if (fromIdx < 0 || fromIdx >= state.bands.length) return;
   if (toIdx < 0 || toIdx >= state.bands.length) return;
 
-  const bands = [...state.bands];
+  const bands = [...state.bands].map(b => ({
+    ...b,
+    target: { ...b.target },
+  }));
   const [moved] = bands.splice(fromIdx, 1);
   bands.splice(toIdx, 0, moved);
 
-  // Сбрасываем все linked-связи — после перестановки порядок поменялся
-  for (const b of bands) {
-    b.linkedToNext = false;
+  const n = bands.length;
+  for (let i = 0; i < n; i++) {
+    // First band (bass): remove HP, keep LP
+    if (i === 0 && bands[i].target.high_pass) {
+      bands[i].target = { ...bands[i].target, high_pass: null };
+    }
+    // Last band (tweeter): remove LP, keep HP
+    if (i === n - 1 && bands[i].target.low_pass) {
+      bands[i].target = { ...bands[i].target, low_pass: null };
+    }
+
+    // Rebuild linked-connections: auto-link where LP[i] freq ≈ HP[i+1] freq (±1%)
+    bands[i].linkedToNext = false;
+    if (i < n - 1) {
+      const lp = bands[i].target.low_pass;
+      const hp = bands[i + 1].target.high_pass;
+      if (lp && hp && Math.abs(lp.freq_hz - hp.freq_hz) / lp.freq_hz < 0.01) {
+        bands[i].linkedToNext = true;
+      }
+    }
   }
 
   setState("bands", bands);

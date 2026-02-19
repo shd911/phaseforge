@@ -137,7 +137,7 @@ function App() {
       {/* Top Bar */}
       <div class="top-bar">
         <span class="top-logo">PhaseForge</span>
-        <span class="top-version">v0.1.0-b54</span>
+        <span class="top-version">v0.1.0-b55</span>
         <div class="top-sep" />
         <FileMenu />
         <span class="top-project-name" title={currentProjectPath() ?? "Untitled"}>

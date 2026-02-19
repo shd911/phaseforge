@@ -138,10 +138,12 @@ export default function ExportImpulsePlot() {
       }
     }
 
-    // Show window: from a bit before firstSig to a bit after lastSig
-    const margin = Math.max(64, Math.ceil((lastSig - firstSig) * 0.15));
-    const startIdx = Math.max(0, firstSig - margin);
-    const endIdx = Math.min(impulse.length, lastSig + margin);
+    // Show window: peak at ~25% from left edge, pre-ringing always visible
+    const sigLen = lastSig - firstSig;
+    const viewLen = Math.max(sigLen * 1.3, 256); // minimum 256 samples
+    const prePeak = Math.ceil(viewLen * 0.25); // 25% before peak
+    const startIdx = Math.max(0, peakIdx - prePeak);
+    const endIdx = Math.min(impulse.length, startIdx + Math.ceil(viewLen));
 
     const trimTime = time.slice(startIdx, endIdx);
     const trimNorm = norm.slice(startIdx, endIdx);
