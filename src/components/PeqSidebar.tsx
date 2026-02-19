@@ -289,17 +289,32 @@ function CorrectedImpulseMiniPlot() {
 
       // 6. Compute target impulse (if target enabled)
       let targetIR: ImpulseResult | null = null;
+      let targetScale = 1;
       if (targetMag && targetPhase) {
         targetIR = await invoke<ImpulseResult>("compute_impulse", {
           freq, magnitude: targetMag, phase: targetPhase, sampleRate: sr,
         });
         if (gen !== renderGen) return;
+
+        // Normalize target impulse to corrected peak scale:
+        // Both are peak=100% from Rust, but real peaks differ by passband level ratio
+        let corrDbSum = 0, tgtDbSum = 0, cnt2 = 0;
+        for (let i = 0; i < freq.length; i++) {
+          if (freq[i] >= 200 && freq[i] <= 2000) {
+            corrDbSum += corrMag[i];
+            tgtDbSum += targetMag[i];
+            cnt2++;
+          }
+        }
+        if (cnt2 > 0) {
+          targetScale = Math.pow(10, ((corrDbSum / cnt2) - (tgtDbSum / cnt2)) / 20);
+        }
       }
 
       setHasData(true);
       requestAnimationFrame(() => {
         if (gen !== renderGen) return;
-        renderMiniChart(corrIR, targetIR);
+        renderMiniChart(corrIR, targetIR, targetScale);
       });
     } catch (e) {
       console.error("CorrectedImpulseMiniPlot error:", e);
@@ -307,7 +322,7 @@ function CorrectedImpulseMiniPlot() {
     }
   });
 
-  function renderMiniChart(corrIR: ImpulseResult, targetIR: ImpulseResult | null) {
+  function renderMiniChart(corrIR: ImpulseResult, targetIR: ImpulseResult | null, targetScale: number = 1) {
     if (!containerRef) return;
 
     if (chartRef) { chartRef.destroy(); chartRef = undefined; }
@@ -337,12 +352,10 @@ function CorrectedImpulseMiniPlot() {
     ];
 
     if (targetIR) {
-      const targetTime = targetIR.time.map(t => t * 1000);
-      // Align target to corrected time axis (they should be similar but may differ)
-      // For simplicity, use corrected time axis and interpolate target if needed
-      // Since both use same freq/sr, time arrays should match
+      // Scale target impulse to corrected peak level (both are peak=100% from Rust)
+      const scaledTarget = targetIR.impulse.map(v => v * targetScale);
       uData[0] = corrTime;
-      uData.push(targetIR.impulse);
+      uData.push(scaledTarget);
       series.push({
         label: "Target",
         stroke: TARGET_COLOR,
