@@ -21,6 +21,7 @@ import BandTabs from "./components/BandTabs";
 import ProjectNameDialog from "./components/ProjectNameDialog";
 import WelcomeDialog from "./components/WelcomeDialog";
 import CrossoverDialog from "./components/CrossoverDialog";
+import PeqSidebar from "./components/PeqSidebar";
 import { activeTab } from "./stores/bands";
 
 // Глобальный сигнал для авто-FIT при импорте замера
@@ -136,7 +137,7 @@ function App() {
       {/* Top Bar */}
       <div class="top-bar">
         <span class="top-logo">PhaseForge</span>
-        <span class="top-version">v0.1.0-b51</span>
+        <span class="top-version">v0.1.0-b52</span>
         <div class="top-sep" />
         <FileMenu />
         <span class="top-project-name" title={currentProjectPath() ?? "Untitled"}>
@@ -172,12 +173,18 @@ function App() {
 
       {/* Plot area — dual graph when not SUM */}
       <main class="plot-area">
+        {/* Top row: FrequencyPlot (+ PeqSidebar on align tab) */}
         <div
-          class="freq-plot-area"
+          class="plot-area-row"
           style={{ flex: showBottomPlot() ? `${1 - impulseRatio()}` : "1" }}
         >
-          <Show when={showExportPlot()} fallback={<FrequencyPlot />}>
-            <ExportPlot />
+          <div class="freq-plot-area" style={{ flex: "1" }}>
+            <Show when={showExportPlot()} fallback={<FrequencyPlot />}>
+              <ExportPlot />
+            </Show>
+          </div>
+          <Show when={showPeqPlot() && !isSum()}>
+            <PeqSidebar />
           </Show>
         </div>
         <Show when={showBottomPlot()}>

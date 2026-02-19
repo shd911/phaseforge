@@ -31,11 +31,7 @@ import {
   toggleBandFloorBounce,
   updateBandFloorBounceField,
   setBandPeqBands,
-  removePeqBand,
   clearBandPeqBands,
-  addPeqBand,
-  updatePeqBand,
-  commitPeqBand,
   setBandFirResult,
   setBandMeasurementFile,
   activeTab,
@@ -48,6 +44,7 @@ import {
   setExportTaps,
   exportWindow,
   setExportWindow,
+  setPlotShowOnly,
 } from "../stores/bands";
 import type { PresetName, SmoothingMode, MergeSource, BandState } from "../stores/bands";
 import { invoke } from "@tauri-apps/api/core";
@@ -868,22 +865,13 @@ function AutoAlignTab() {
       setIters(result.iterations);
       setSelectedPeqIdx(null);
       setPendingPeqIdx(null);
+      // Show only corrected curve on FrequencyPlot after optimization
+      setPlotShowOnly(["corrected"]);
     } catch (e) {
       setPeqError(String(e));
     } finally {
       setComputing(false);
     }
-  }
-
-  function handleRemovePeq(idx: number) {
-    const b = band();
-    if (b) removePeqBand(b.id, idx);
-    // Adjust pending index
-    if (pendingPeqIdx() === idx) setPendingPeqIdx(null);
-    else if (pendingPeqIdx() != null && pendingPeqIdx()! > idx) setPendingPeqIdx(pendingPeqIdx()! - 1);
-    // Adjust selection
-    if (selectedPeqIdx() === idx) setSelectedPeqIdx(null);
-    else if (selectedPeqIdx() != null && selectedPeqIdx()! > idx) setSelectedPeqIdx(selectedPeqIdx()! - 1);
   }
 
   function handleClearPeq() {
@@ -1082,136 +1070,7 @@ function AutoAlignTab() {
               </Show>
             </div>
 
-            {/* PEQ Bands Table (editable) */}
-            <div class="align-block">
-              <div class="fb-header">
-                <span class="fb-title">PEQ Bands</span>
-                <button
-                  class="peq-add-btn"
-                  onClick={() => {
-                    const b = band();
-                    if (b) {
-                      // Commit any existing pending band first
-                      if (pendingPeqIdx() != null) {
-                        commitPeqBand(b.id, pendingPeqIdx()!);
-                      }
-                      addPeqBand(b.id, { freq_hz: 1000, gain_db: 0, q: 2.0, enabled: true });
-                      setPendingPeqIdx(0);
-                      setSelectedPeqIdx(0);
-                    }
-                  }}
-                  title="Add PEQ band"
-                >+</button>
-              </div>
-              <Show when={peqBands().length > 0}>
-                <div class="peq-table-scroll">
-                <table class="peq-table">
-                  <thead>
-                    <tr>
-                      <th></th>
-                      <th>#</th>
-                      <th>Freq</th>
-                      <th>Gain</th>
-                      <th>Q</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {peqBands().map((b, i) => {
-                      const isPending = pendingPeqIdx() === i;
-                      return (
-                      <tr
-                        class={`${selectedPeqIdx() === i ? "peq-row-selected" : ""} ${isPending ? "peq-row-pending" : ""} ${!b.enabled ? "peq-row-disabled" : ""}`}
-                        onClick={() => setSelectedPeqIdx(selectedPeqIdx() === i ? null : i)}
-                      >
-                        <td>
-                          <input
-                            type="checkbox"
-                            class="peq-toggle"
-                            checked={b.enabled}
-                            onChange={(e) => {
-                              e.stopPropagation();
-                              const bd = band();
-                              if (bd) updatePeqBand(bd.id, i, { enabled: !b.enabled });
-                            }}
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                        </td>
-                        <td>{i + 1}</td>
-                        <td>
-                          <input
-                            class="peq-input"
-                            type="number"
-                            value={Math.round(b.freq_hz)}
-                            min={20}
-                            max={20000}
-                            step={1}
-                            onChange={(e) => {
-                              const v = parseFloat(e.currentTarget.value);
-                              if (!isNaN(v) && v >= 20 && v <= 20000) {
-                                const bd = band();
-                                if (bd) updatePeqBand(bd.id, i, { freq_hz: v });
-                              }
-                            }}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            class={`peq-input ${b.gain_db > 0 ? "peq-boost" : "peq-cut"}`}
-                            type="number"
-                            value={b.gain_db.toFixed(1)}
-                            min={-18}
-                            max={6}
-                            step={0.1}
-                            onChange={(e) => {
-                              const v = parseFloat(e.currentTarget.value);
-                              if (!isNaN(v) && v >= -18 && v <= 6) {
-                                const bd = band();
-                                if (bd) updatePeqBand(bd.id, i, { gain_db: v });
-                              }
-                            }}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            class="peq-input"
-                            type="number"
-                            value={b.q.toFixed(1)}
-                            min={0.1}
-                            max={20}
-                            step={0.1}
-                            onChange={(e) => {
-                              const v = parseFloat(e.currentTarget.value);
-                              if (!isNaN(v) && v >= 0.1 && v <= 20) {
-                                const bd = band();
-                                if (bd) updatePeqBand(bd.id, i, { q: v });
-                              }
-                            }}
-                          />
-                        </td>
-                        <td>
-                          {isPending ? (
-                            <button class="peq-commit" onClick={(e) => {
-                              e.stopPropagation();
-                              const bd = band();
-                              if (bd) {
-                                const newIdx = commitPeqBand(bd.id, i);
-                                setPendingPeqIdx(null);
-                                setSelectedPeqIdx(newIdx);
-                              }
-                            }} title="Confirm filter">✓</button>
-                          ) : (
-                            <button class="peq-remove" onClick={() => handleRemovePeq(i)}>×</button>
-                          )}
-                        </td>
-                      </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-                </div>
-              </Show>
-            </div>
+            {/* PEQ Bands Table moved to PeqSidebar (right of FrequencyPlot) */}
 
             {/* Cross Section — pure mathematical model, no FIR/taps/window here */}
             <div class="align-block fir-block">

@@ -171,6 +171,70 @@ body {
   overflow: hidden;
 }
 
+/* Flex-row wrapper for FrequencyPlot + optional PEQ Sidebar */
+.plot-area-row {
+  display: flex;
+  min-height: 80px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* PEQ Sidebar (right of FrequencyPlot on Align tab) */
+.peq-sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.peq-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.peq-sidebar-table-scroll {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.peq-sidebar-impulse {
+  flex-shrink: 0;
+  height: 180px;
+  border-top: 1px solid var(--border);
+  position: relative;
+  overflow: hidden;
+}
+
+.peq-sidebar-impulse-label {
+  font-size: 9px;
+  color: var(--text-secondary);
+  padding: 2px 8px;
+  flex-shrink: 0;
+}
+
+.peq-sidebar-impulse-chart {
+  width: 100%;
+  height: calc(100% - 18px);
+}
+
+.peq-sidebar-impulse-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
 .resize-handle-plots {
   height: 4px;
   background: var(--border);

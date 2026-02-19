@@ -58,12 +58,24 @@ export default function PeqResponsePlot() {
     c.setScale("mag", { min: curMagMin, max: curMagMax });
   }
 
+  function peqGainRange(): { top: number; bot: number } {
+    const band = activeBand();
+    const peqBands = (band?.peqBands ?? []).filter((b: any) => b.enabled);
+    let gMin = 0, gMax = 0;
+    for (const pb of peqBands) {
+      if (pb.gain_db < gMin) gMin = pb.gain_db;
+      if (pb.gain_db > gMax) gMax = pb.gain_db;
+    }
+    return { top: Math.max(gMax + 2, 3), bot: Math.min(gMin - 2, -3) };
+  }
+
   function fitData() {
     const c = getChart();
     if (!c) return;
     c.setScale("x", { min: 20, max: 20000 });
-    curMagMin = -24;
-    curMagMax = 12;
+    const { top, bot } = peqGainRange();
+    curMagMin = bot;
+    curMagMax = top;
     c.setScale("mag", { min: curMagMin, max: curMagMax });
   }
 
@@ -95,12 +107,10 @@ export default function PeqResponsePlot() {
       { label: "PEQ \u00B0", stroke: PEQ_PHASE_COLOR, width: 1.5, dash: [6, 3], scale: "phase" },
     ];
 
-    // Auto Y-range from data
-    let magMin = 0, magMax = 0;
-    for (const v of mag) { if (v < magMin) magMin = v; if (v > magMax) magMax = v; }
-    const pad = Math.max(3, (magMax - magMin) * 0.15);
-    const yMin = savedMagMin ?? Math.min(-100, magMin - pad);
-    const yMax = savedMagMax ?? Math.max(100, magMax + pad);
+    // Auto Y-range from PEQ band gains (+2/-2 dB padding)
+    const { top: autoTop, bot: autoBot } = peqGainRange();
+    const yMin = savedMagMin ?? autoBot;
+    const yMax = savedMagMax ?? autoTop;
     curMagMin = yMin;
     curMagMax = yMax;
 

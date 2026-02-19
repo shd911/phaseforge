@@ -658,6 +658,13 @@ export const [activeTab, setActiveTab] = createSignal<ActiveTab>("measurements")
 export const [selectedPeqIdx, setSelectedPeqIdx] = createSignal<number | null>(null);
 
 // ---------------------------------------------------------------------------
+// One-shot command: FrequencyPlot shows only these categories, then resets to null
+// ---------------------------------------------------------------------------
+
+export const [plotShowOnly, setPlotShowOnly] =
+  createSignal<("measurement" | "target" | "corrected")[] | null>(null);
+
+// ---------------------------------------------------------------------------
 // Shared X-scale (sync frequency axis between top FrequencyPlot and bottom PeqResponsePlot)
 // ---------------------------------------------------------------------------
 

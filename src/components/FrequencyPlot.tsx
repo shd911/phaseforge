@@ -5,7 +5,7 @@ import "uplot/dist/uPlot.min.css";
 import { invoke } from "@tauri-apps/api/core";
 import { MEASUREMENT_COLORS } from "../lib/types";
 import type { Measurement, TargetResponse, FilterType } from "../lib/types";
-import { appState, activeBand, isSum, activeTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setBandLowPass, setBandCrossNormDb } from "../stores/bands";
+import { appState, activeBand, isSum, activeTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly } from "../stores/bands";
 import type { SmoothingMode, BandState } from "../stores/bands";
 import { needAutoFit, setNeedAutoFit } from "../App";
 import { computeFloorBounce } from "../lib/floor-bounce";
@@ -219,6 +219,21 @@ export default function FrequencyPlot() {
       }
     }
   }
+
+  // React to external "show only X" command (e.g. after PEQ optimize)
+  createEffect(() => {
+    const cats = plotShowOnly();
+    if (!cats || !chart) return;
+    const showSet = new Set(cats);
+    for (let i = 0; i < legendEntries.length; i++) {
+      const show = showSet.has(legendEntries[i].category);
+      if (legendEntries[i].visible !== show) {
+        setLegendEntries(i, "visible", show);
+        chart.setSeries(legendEntries[i].seriesIdx, { show });
+      }
+    }
+    setPlotShowOnly(null);
+  });
 
   // ----------------------------------------------------------------
   // Универсальный рендерер чарта
