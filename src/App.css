@@ -171,11 +171,19 @@ body {
   overflow: hidden;
 }
 
-/* Flex-row wrapper for FrequencyPlot + optional PEQ Sidebar */
-.plot-area-row {
+/* Full-height row: plots+panel on left, PEQ sidebar on right */
+.main-content-row {
+  flex: 1;
   display: flex;
-  min-height: 80px;
-  position: relative;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.main-content-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
   overflow: hidden;
 }
 

@@ -171,45 +171,49 @@ function App() {
       {/* Band Tabs */}
       <BandTabs />
 
-      {/* Plot area — dual graph when not SUM */}
-      <main class="plot-area">
-        {/* Top row: FrequencyPlot (+ PeqSidebar on align tab) */}
-        <div
-          class="plot-area-row"
-          style={{ flex: showBottomPlot() ? `${1 - impulseRatio()}` : "1" }}
-        >
-          <div class="freq-plot-area" style={{ flex: "1" }}>
-            <Show when={showExportPlot()} fallback={<FrequencyPlot />}>
-              <ExportPlot />
+      {/* Main content row: plots+panel on left, PeqSidebar on right */}
+      <div class="main-content-row">
+        <div class="main-content-col">
+          {/* Plot area — dual graph when not SUM */}
+          <main class="plot-area">
+            <div
+              class="freq-plot-area"
+              style={{ flex: showBottomPlot() ? `${1 - impulseRatio()}` : "1" }}
+            >
+              <Show when={showExportPlot()} fallback={<FrequencyPlot />}>
+                <ExportPlot />
+              </Show>
+            </div>
+            <Show when={showBottomPlot()}>
+              <div class="resize-handle-plots" onMouseDown={onPlotResizeStart} />
+              <div class="impulse-plot-area" style={{ flex: `${impulseRatio()}` }}>
+                <Show when={showExportPlot()}>
+                  <ExportImpulsePlot />
+                </Show>
+                <Show when={showPeqPlot() && !showExportPlot()}>
+                  <PeqResponsePlot />
+                </Show>
+                <Show when={!showPeqPlot() && !showExportPlot()}>
+                  <ImpulseResponsePlot />
+                </Show>
+              </div>
             </Show>
-          </div>
-          <Show when={showPeqPlot() && !isSum()}>
-            <PeqSidebar />
+          </main>
+
+          {/* Resize handle + Control panel — hidden on SUM */}
+          <Show when={!isSum()}>
+            <div class="resize-handle" onMouseDown={onResizeStart} />
+            <div class="ctrl-wrap" style={{ height: `${effectivePanelH()}px` }}>
+              <ControlPanel />
+            </div>
           </Show>
         </div>
-        <Show when={showBottomPlot()}>
-          <div class="resize-handle-plots" onMouseDown={onPlotResizeStart} />
-          <div class="impulse-plot-area" style={{ flex: `${impulseRatio()}` }}>
-            <Show when={showExportPlot()}>
-              <ExportImpulsePlot />
-            </Show>
-            <Show when={showPeqPlot() && !showExportPlot()}>
-              <PeqResponsePlot />
-            </Show>
-            <Show when={!showPeqPlot() && !showExportPlot()}>
-              <ImpulseResponsePlot />
-            </Show>
-          </div>
-        </Show>
-      </main>
 
-      {/* Resize handle + Control panel — hidden on SUM */}
-      <Show when={!isSum()}>
-        <div class="resize-handle" onMouseDown={onResizeStart} />
-        <div class="ctrl-wrap" style={{ height: `${effectivePanelH()}px` }}>
-          <ControlPanel />
-        </div>
-      </Show>
+        {/* PEQ Sidebar — full height, only on align tab */}
+        <Show when={showPeqPlot() && !isSum()}>
+          <PeqSidebar />
+        </Show>
+      </div>
 
       {/* Status bar */}
       <footer class="status-bar">
