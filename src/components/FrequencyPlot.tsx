@@ -1516,21 +1516,25 @@ export default function FrequencyPlot() {
                           <For each={cols()}>
                             {(col) => {
                               const entry = () => findCellEntry(col, cat);
-                              const e = entry();
-                              if (!e) return <td class="sum-cell-empty" />;
-                              const idx = () => legendEntries.findIndex(le => le.seriesIdx === e!.seriesIdx);
                               return (
-                                <td>
-                                  <button
-                                    class={`legend-item ${entry()?.visible ? "" : "legend-off"}`}
-                                    onClick={() => { const i = idx(); if (i >= 0) toggleLegendEntry(i); }}
-                                  >
-                                    <span
-                                      class={`legend-swatch ${e!.dash ? "legend-swatch-dash" : ""}`}
-                                      style={{ "background-color": e!.dash ? "transparent" : e!.color, "border-color": e!.color }}
-                                    />
-                                  </button>
-                                </td>
+                                <Show when={entry()} fallback={<td class="sum-cell-empty" />}>
+                                  {(e) => {
+                                    const idx = () => legendEntries.findIndex(le => le.seriesIdx === e().seriesIdx);
+                                    return (
+                                      <td>
+                                        <button
+                                          class={`legend-item ${e().visible ? "" : "legend-off"}`}
+                                          onClick={() => { const i = idx(); if (i >= 0) toggleLegendEntry(i); }}
+                                        >
+                                          <span
+                                            class={`legend-swatch ${e().dash ? "legend-swatch-dash" : ""}`}
+                                            style={{ "background-color": e().dash ? "transparent" : e().color, "border-color": e().color }}
+                                          />
+                                        </button>
+                                      </td>
+                                    );
+                                  }}
+                                </Show>
                               );
                             }}
                           </For>
