@@ -93,8 +93,8 @@ pub fn compute_impulse_response(
     // The IFFT output is circular. Samples near the end of the buffer
     // represent the "pre-impulse" region (negative time).
     // We include these samples to show what happens before the peak.
-    let threshold_raw = peak * 0.005; // 0.5% of peak
-    let max_pre = fft_size / 10; // max 10% of buffer as pre-peak
+    let threshold_raw = peak * 0.002; // 0.2% of peak (-54 dB) — catch subtle pre-ringing
+    let max_pre = fft_size / 4; // max 25% of buffer as pre-peak
     let mut pre_peak_count = 0usize;
 
     for i in 0..max_pre {
@@ -106,8 +106,8 @@ pub fn compute_impulse_response(
             pre_peak_count = i + 1;
         }
     }
-    // Always include at least 1ms of pre-peak context
-    let min_pre = ((sample_rate * 0.001) as usize).min(max_pre);
+    // Always include at least 5ms of pre-peak context (linear-phase filters need this)
+    let min_pre = ((sample_rate * 0.005) as usize).min(max_pre);
     pre_peak_count = pre_peak_count.max(min_pre);
 
     // --- Determine post-peak trim point ---

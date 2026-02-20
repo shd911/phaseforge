@@ -191,19 +191,6 @@ function CorrectedImpulseMiniPlot() {
 
   const [hasData, setHasData] = createSignal(false);
 
-  // Determine target impulse main lobe width (-20 dB threshold)
-  function targetLobeWidthMs(time: number[], impulse: number[]): number {
-    let peakIdx = 0, peakAbs = 0;
-    for (let i = 0; i < impulse.length; i++) {
-      if (Math.abs(impulse[i]) > peakAbs) { peakAbs = Math.abs(impulse[i]); peakIdx = i; }
-    }
-    const thr = peakAbs * 0.1; // -20 dB
-    let left = peakIdx, right = peakIdx;
-    for (let i = peakIdx; i >= 0; i--) { if (Math.abs(impulse[i]) < thr) { left = i; break; } }
-    for (let i = peakIdx; i < impulse.length; i++) { if (Math.abs(impulse[i]) < thr) { right = i; break; } }
-    return (time[right] - time[left]) * 1000;
-  }
-
   function peakTimeMs(time: number[], impulse: number[]): number {
     let peakIdx = 0, peakAbs = 0;
     for (let i = 0; i < impulse.length; i++) {
@@ -336,14 +323,35 @@ function CorrectedImpulseMiniPlot() {
     const corrPeakMs = peakTimeMs(corrIR.time, corrIR.impulse);
     const corrTime = corrIR.time.map(t => t * 1000 - corrPeakMs);
 
-    // Determine X range from target lobe width + 5ms padding
-    let halfSpan = 10; // default ±10ms if no target
-    if (targetIR) {
-      const lobeW = targetLobeWidthMs(targetIR.time, targetIR.impulse);
-      halfSpan = Math.max(lobeW / 2 + 5, 5);
+    // Determine X range from actual signal extent (both corrected and target)
+    function signalSpanMs(time: number[], impulse: number[]): [number, number] {
+      let peakIdx = 0, peakAbs = 0;
+      for (let i = 0; i < impulse.length; i++) {
+        if (Math.abs(impulse[i]) > peakAbs) { peakAbs = Math.abs(impulse[i]); peakIdx = i; }
+      }
+      const thr = peakAbs * 0.05; // 5% of peak (-26 dB)
+      let first = peakIdx, last = peakIdx;
+      for (let i = 0; i < impulse.length; i++) {
+        if (Math.abs(impulse[i]) > thr) { first = i; break; }
+      }
+      for (let i = impulse.length - 1; i >= 0; i--) {
+        if (Math.abs(impulse[i]) > thr) { last = i; break; }
+      }
+      const peakMs = time[peakIdx] * 1000;
+      return [time[first] * 1000 - peakMs, time[last] * 1000 - peakMs];
     }
-    const xMin = -halfSpan;
-    const xMax = halfSpan;
+
+    const [corrLeft, corrRight] = signalSpanMs(corrIR.time, corrIR.impulse);
+    let xLeft = corrLeft, xRight = corrRight;
+    if (targetIR) {
+      const [tl, tr] = signalSpanMs(targetIR.time, targetIR.impulse);
+      xLeft = Math.min(xLeft, tl);
+      xRight = Math.max(xRight, tr);
+    }
+    const span = xRight - xLeft;
+    const pad = Math.max(span * 0.2, 2); // 20% padding, min 2ms
+    const xMin = xLeft - pad;
+    const xMax = xRight + pad;
 
     // Build uPlot data
     const uData: number[][] = [corrTime, corrIR.impulse];
