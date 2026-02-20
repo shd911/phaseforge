@@ -74,6 +74,14 @@ body {
   user-select: none;
 }
 
+.top-logo-icon {
+  height: 18px;
+  width: auto;
+  margin-right: 4px;
+  vertical-align: middle;
+  margin-top: -1px;
+}
+
 .top-logo {
   font-weight: 700;
   font-size: 13px;
@@ -1941,6 +1949,12 @@ body {
   max-width: 440px;
   box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
   text-align: center;
+}
+
+.welcome-logo-img {
+  width: 240px;
+  height: auto;
+  margin-bottom: 12px;
 }
 
 .welcome-logo {

@@ -28,6 +28,7 @@ export default function WelcomeDialog() {
     <Show when={currentProjectPath() === null}>
       <div class="welcome-overlay">
         <div class="welcome-dialog">
+          <img src="/logo.png" class="welcome-logo-img" alt="ClearWave Systems" />
           <div class="welcome-logo">PhaseForge</div>
           <div class="welcome-subtitle">DSP Room & Speaker Correction</div>
 
