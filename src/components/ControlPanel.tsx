@@ -1177,7 +1177,36 @@ function ExportTab() {
 
   const sampleRates = [44100, 48000, 88200, 96000, 176400, 192000];
   const tapOptions = [4096, 8192, 16384, 32768, 65536, 131072, 262144];
-  const windowOptions: WindowType[] = ["Blackman", "Kaiser", "Tukey", "Hann"];
+  const windowGroups: { label: string; options: { value: WindowType; label: string }[] }[] = [
+    { label: "Basic", options: [
+      { value: "Rectangular", label: "Rectangular" },
+      { value: "Bartlett", label: "Bartlett" },
+      { value: "Hann", label: "Hann" },
+      { value: "Hamming", label: "Hamming" },
+      { value: "Blackman", label: "Blackman" },
+    ]},
+    { label: "Blackman-Harris", options: [
+      { value: "ExactBlackman", label: "Exact Blackman" },
+      { value: "BlackmanHarris", label: "Blackman-Harris" },
+      { value: "Nuttall3", label: "Nuttall 3-term" },
+      { value: "Nuttall4", label: "Nuttall 4-term" },
+      { value: "FlatTop", label: "Flat Top" },
+    ]},
+    { label: "Parametric", options: [
+      { value: "Kaiser", label: "Kaiser (\u03B2=10)" },
+      { value: "DolphChebyshev", label: "Dolph-Chebyshev" },
+      { value: "Gaussian", label: "Gaussian (\u03C3=2.5)" },
+      { value: "Tukey", label: "Tukey (\u03B1=0.5)" },
+    ]},
+    { label: "Special", options: [
+      { value: "Lanczos", label: "Lanczos" },
+      { value: "Poisson", label: "Poisson" },
+      { value: "HannPoisson", label: "Hann-Poisson" },
+      { value: "Bohman", label: "Bohman" },
+      { value: "Cauchy", label: "Cauchy" },
+      { value: "Riesz", label: "Riesz" },
+    ]},
+  ];
 
   // Determine phase mode from target filters (HP/LP linear_phase flags)
   const isFilterLinear = (f: import("../lib/types").FilterConfig | null | undefined) =>
@@ -1349,8 +1378,12 @@ function ExportTab() {
           value={exportWindow()}
           onChange={(e) => setExportWindow(e.currentTarget.value as WindowType)}
         >
-          {windowOptions.map((w) => (
-            <option value={w}>{w}</option>
+          {windowGroups.map((g) => (
+            <optgroup label={g.label}>
+              {g.options.map((w) => (
+                <option value={w.value}>{w.label}</option>
+              ))}
+            </optgroup>
           ))}
         </select>
 

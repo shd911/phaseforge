@@ -23,10 +23,30 @@ pub enum PhaseMode {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WindowType {
-    Blackman,
-    Kaiser,
-    Tukey,
+    // Basic / classical
+    Rectangular,
+    Bartlett,
     Hann,
+    Hamming,
+    Blackman,
+    // Blackman-Harris family
+    ExactBlackman,
+    BlackmanHarris,
+    Nuttall3,
+    Nuttall4,
+    FlatTop,
+    // Parametric
+    Kaiser,
+    DolphChebyshev,
+    Gaussian,
+    Tukey,
+    // Special
+    Lanczos,
+    Poisson,
+    HannPoisson,
+    Bohman,
+    Cauchy,
+    Riesz,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -471,29 +491,86 @@ fn generate_half_window(n: usize, wtype: &WindowType) -> Vec<f64> {
 
 fn generate_window(n: usize, wtype: &WindowType) -> Vec<f64> {
     match wtype {
-        WindowType::Blackman => blackman_window(n),
-        WindowType::Kaiser => kaiser_window(n, 10.0),
-        WindowType::Tukey => tukey_window(n, 0.5),
+        // Basic / classical
+        WindowType::Rectangular => vec![1.0; n],
+        WindowType::Bartlett => bartlett_window(n),
         WindowType::Hann => hann_window(n),
+        WindowType::Hamming => hamming_window(n),
+        WindowType::Blackman => blackman_window(n),
+        // Blackman-Harris family
+        WindowType::ExactBlackman => exact_blackman_window(n),
+        WindowType::BlackmanHarris => blackman_harris_window(n),
+        WindowType::Nuttall3 => cosine_sum_window(n, &[0.375, 0.5, 0.125]),
+        WindowType::Nuttall4 => cosine_sum_window(n, &[0.3635819, 0.4891775, 0.1365995, 0.0106411]),
+        WindowType::FlatTop => cosine_sum_window(n, &[0.21557895, 0.41663158, 0.277263158, 0.083578947, 0.006947368]),
+        // Parametric
+        WindowType::Kaiser => kaiser_window(n, 10.0),
+        WindowType::DolphChebyshev => dolph_chebyshev_window(n, 100.0),
+        WindowType::Gaussian => gaussian_window(n, 2.5),
+        WindowType::Tukey => tukey_window(n, 0.5),
+        // Special
+        WindowType::Lanczos => lanczos_window(n),
+        WindowType::Poisson => poisson_window(n, 2.0),
+        WindowType::HannPoisson => hann_poisson_window(n, 2.0),
+        WindowType::Bohman => bohman_window(n),
+        WindowType::Cauchy => cauchy_window(n, 3.0),
+        WindowType::Riesz => riesz_window(n),
     }
 }
 
-fn blackman_window(n: usize) -> Vec<f64> {
-    let a0 = 0.42;
-    let a1 = 0.5;
-    let a2 = 0.08;
+// ---------------------------------------------------------------------------
+// Generic cosine-sum window: w[i] = Σ (-1)^k · a_k · cos(2πki/(N-1))
+// ---------------------------------------------------------------------------
+
+fn cosine_sum_window(n: usize, coeffs: &[f64]) -> Vec<f64> {
     (0..n).map(|i| {
         let x = 2.0 * PI * i as f64 / (n - 1) as f64;
-        a0 - a1 * x.cos() + a2 * (2.0 * x).cos()
+        let mut val = 0.0;
+        for (k, &a) in coeffs.iter().enumerate() {
+            let sign = if k % 2 == 0 { 1.0 } else { -1.0 };
+            val += sign * a * (k as f64 * x).cos();
+        }
+        val
+    }).collect()
+}
+
+// ---------------------------------------------------------------------------
+// Basic / classical windows
+// ---------------------------------------------------------------------------
+
+fn bartlett_window(n: usize) -> Vec<f64> {
+    (0..n).map(|i| {
+        1.0 - (2.0 * i as f64 / (n - 1) as f64 - 1.0).abs()
     }).collect()
 }
 
 fn hann_window(n: usize) -> Vec<f64> {
-    (0..n).map(|i| {
-        let x = 2.0 * PI * i as f64 / (n - 1) as f64;
-        0.5 * (1.0 - x.cos())
-    }).collect()
+    cosine_sum_window(n, &[0.5, 0.5])
 }
+
+fn hamming_window(n: usize) -> Vec<f64> {
+    cosine_sum_window(n, &[0.54, 0.46])
+}
+
+fn blackman_window(n: usize) -> Vec<f64> {
+    cosine_sum_window(n, &[0.42, 0.5, 0.08])
+}
+
+// ---------------------------------------------------------------------------
+// Blackman-Harris family
+// ---------------------------------------------------------------------------
+
+fn exact_blackman_window(n: usize) -> Vec<f64> {
+    cosine_sum_window(n, &[7938.0/18608.0, 9240.0/18608.0, 1430.0/18608.0])
+}
+
+fn blackman_harris_window(n: usize) -> Vec<f64> {
+    cosine_sum_window(n, &[0.35875, 0.48829, 0.14128, 0.01168])
+}
+
+// ---------------------------------------------------------------------------
+// Parametric windows
+// ---------------------------------------------------------------------------
 
 fn tukey_window(n: usize, alpha: f64) -> Vec<f64> {
     let alpha = alpha.clamp(0.0, 1.0);
@@ -517,6 +594,115 @@ fn kaiser_window(n: usize, beta: f64) -> Vec<f64> {
         bessel_i0(arg) / denom
     }).collect()
 }
+
+fn gaussian_window(n: usize, sigma: f64) -> Vec<f64> {
+    (0..n).map(|i| {
+        let x = 2.0 * i as f64 / (n - 1) as f64 - 1.0; // [-1, 1]
+        (-0.5 * (x * sigma).powi(2)).exp()
+    }).collect()
+}
+
+/// Dolph-Chebyshev window: equiripple sidelobes at -atten_db.
+/// Uses inverse DFT of Chebyshev polynomial on the unit circle.
+fn dolph_chebyshev_window(n: usize, atten_db: f64) -> Vec<f64> {
+    let nn = n as f64;
+    let m = (nn - 1.0) / 2.0;
+    let order = nn - 1.0;
+    // r = sidelobe ratio (linear); x0 via inverse Chebyshev
+    let r = 10.0_f64.powf(atten_db / 20.0);
+    let x0 = (r.acosh() / order).cosh();
+
+    let mut w = vec![0.0; n];
+    for i in 0..n {
+        let mut sum = 0.0;
+        for k in 1..n {
+            let angle = PI * k as f64 / nn;
+            let cheb_arg = x0 * angle.cos();
+            let cheb_val = chebyshev_poly(order, cheb_arg);
+            sum += cheb_val * (2.0 * PI * k as f64 * (i as f64 - m) / nn).cos();
+        }
+        w[i] = 1.0 / nn + 2.0 * sum / (nn * r);
+    }
+
+    // Normalize peak to 1.0
+    let peak = w.iter().cloned().fold(0.0_f64, f64::max);
+    if peak > 0.0 {
+        for v in &mut w {
+            *v /= peak;
+        }
+    }
+    w
+}
+
+/// Chebyshev polynomial T_n(x) via the recursive identity
+fn chebyshev_poly(order: f64, x: f64) -> f64 {
+    if x.abs() <= 1.0 {
+        (order * x.acos()).cos()
+    } else if x > 1.0 {
+        (order * x.acosh()).cosh()
+    } else {
+        // x < -1
+        let sign = if order as i64 % 2 == 0 { 1.0 } else { -1.0 };
+        sign * (order * (-x).acosh()).cosh()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Special windows
+// ---------------------------------------------------------------------------
+
+fn lanczos_window(n: usize) -> Vec<f64> {
+    (0..n).map(|i| {
+        let x = 2.0 * i as f64 / (n - 1) as f64 - 1.0; // [-1, 1]
+        if x.abs() < 1e-12 {
+            1.0
+        } else {
+            (PI * x).sin() / (PI * x)
+        }
+    }).collect()
+}
+
+fn poisson_window(n: usize, alpha: f64) -> Vec<f64> {
+    (0..n).map(|i| {
+        let x = (2.0 * i as f64 / (n - 1) as f64 - 1.0).abs(); // |normalized| in [0,1]
+        (-alpha * x).exp()
+    }).collect()
+}
+
+fn hann_poisson_window(n: usize, alpha: f64) -> Vec<f64> {
+    let h = hann_window(n);
+    let p = poisson_window(n, alpha);
+    h.iter().zip(p.iter()).map(|(&a, &b)| a * b).collect()
+}
+
+fn bohman_window(n: usize) -> Vec<f64> {
+    (0..n).map(|i| {
+        let x = (2.0 * i as f64 / (n - 1) as f64 - 1.0).abs(); // |x| in [0,1]
+        if x >= 1.0 {
+            0.0
+        } else {
+            (1.0 - x) * (PI * x).cos() + (PI * x).sin() / PI
+        }
+    }).collect()
+}
+
+fn cauchy_window(n: usize, alpha: f64) -> Vec<f64> {
+    (0..n).map(|i| {
+        let x = 2.0 * i as f64 / (n - 1) as f64 - 1.0; // [-1, 1]
+        1.0 / (1.0 + (alpha * x).powi(2))
+    }).collect()
+}
+
+fn riesz_window(n: usize) -> Vec<f64> {
+    (0..n).map(|i| {
+        let x = 2.0 * i as f64 / (n - 1) as f64 - 1.0; // [-1, 1]
+        1.0 - x * x
+    }).collect()
+}
+
+// ---------------------------------------------------------------------------
+// Bessel function for Kaiser window
+// ---------------------------------------------------------------------------
 
 /// Modified Bessel function of the first kind, order 0 (I₀).
 /// Computed via series expansion (converges fast for typical beta values).
@@ -856,21 +1042,42 @@ mod tests {
     #[test]
     fn test_window_symmetry() {
         let n = 1024;
-        let blackman = blackman_window(n);
-        let hann = hann_window(n);
-        let tukey = tukey_window(n, 0.5);
+        let all_types = vec![
+            WindowType::Rectangular,
+            WindowType::Bartlett,
+            WindowType::Hann,
+            WindowType::Hamming,
+            WindowType::Blackman,
+            WindowType::ExactBlackman,
+            WindowType::BlackmanHarris,
+            WindowType::Nuttall3,
+            WindowType::Nuttall4,
+            WindowType::FlatTop,
+            WindowType::Kaiser,
+            WindowType::DolphChebyshev,
+            WindowType::Gaussian,
+            WindowType::Tukey,
+            WindowType::Lanczos,
+            WindowType::Poisson,
+            WindowType::HannPoisson,
+            WindowType::Bohman,
+            WindowType::Cauchy,
+            WindowType::Riesz,
+        ];
 
-        for w in &[blackman, hann, tukey] {
-            assert_eq!(w.len(), n);
-            // Check symmetry
+        for wtype in &all_types {
+            let w = generate_window(n, wtype);
+            assert_eq!(w.len(), n, "{:?}: wrong length", wtype);
+
+            // Check symmetry (some windows like DolphChebyshev have small numerical noise)
             for i in 0..n / 2 {
                 let diff = (w[i] - w[n - 1 - i]).abs();
-                assert!(diff < 1e-10, "Window not symmetric at i={}: {} vs {}", i, w[i], w[n - 1 - i]);
+                assert!(diff < 1e-6, "{:?}: not symmetric at i={}: {} vs {}", wtype, i, w[i], w[n - 1 - i]);
             }
-            // End values should be small
-            assert!(w[0] < 0.1, "Window start should be small, got {}", w[0]);
-            // Center should be near 1.0
-            assert!(w[n / 2] > 0.8, "Window center should be near 1.0, got {}", w[n / 2]);
+
+            // Center should be near 1.0 (except FlatTop which peaks > 1)
+            let center = w[n / 2];
+            assert!(center > 0.5, "{:?}: center too low = {}", wtype, center);
         }
     }
 

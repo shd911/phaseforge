@@ -120,7 +120,15 @@ export interface PeqResult {
 // --- Auto Align: FIR ---
 
 export type PhaseMode = "MinimumPhase" | "LinearPhase" | "MixedPhase";
-export type WindowType = "Blackman" | "Kaiser" | "Tukey" | "Hann";
+export type WindowType =
+  // Basic / classical
+  | "Rectangular" | "Bartlett" | "Hann" | "Hamming" | "Blackman"
+  // Blackman-Harris family
+  | "ExactBlackman" | "BlackmanHarris" | "Nuttall3" | "Nuttall4" | "FlatTop"
+  // Parametric
+  | "Kaiser" | "DolphChebyshev" | "Gaussian" | "Tukey"
+  // Special
+  | "Lanczos" | "Poisson" | "HannPoisson" | "Bohman" | "Cauchy" | "Riesz";
 
 export interface FirConfig {
   taps: number;
