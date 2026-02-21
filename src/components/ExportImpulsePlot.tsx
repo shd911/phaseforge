@@ -84,15 +84,15 @@ export default function ExportImpulsePlot() {
     c.setScale("amp", { min: curAmpMin, max: curAmpMax });
   }
 
-  function renderChart(time: number[], impulse: number[], normDb: number, phaseLabel?: string) {
+  function renderChart(time: number[], impulse: number[], normDb: number, phaseLabel?: string, resetScales: boolean = false) {
     if (!containerRef) return;
 
-    // Save current scales
+    // Save current scales (only when not resetting due to config change)
     let savedXMin: number | null = null;
     let savedXMax: number | null = null;
     let savedYMin: number | null = null;
     let savedYMax: number | null = null;
-    if (chartRef.current) {
+    if (chartRef.current && !resetScales) {
       const xs = chartRef.current.scales["x"];
       if (xs?.min != null && xs?.max != null) {
         savedXMin = xs.min;
@@ -103,6 +103,8 @@ export default function ExportImpulsePlot() {
         savedYMin = ys.min;
         savedYMax = ys.max;
       }
+    }
+    if (chartRef.current) {
       chartRef.current.destroy();
       chartRef.current = undefined;
     }
@@ -261,6 +263,11 @@ export default function ExportImpulsePlot() {
     onCleanup(() => observer.disconnect());
   });
 
+  // Track previous FIR params to detect config changes (taps/SR/window)
+  let prevTaps = 0;
+  let prevSR = 0;
+  let prevWin = "";
+
   // Main effect: compute target + PEQ + FIR impulse
   createEffect(() => {
     const band = activeBand();
@@ -279,7 +286,13 @@ export default function ExportImpulsePlot() {
     const target = { ...band.target };
     const peqBands = band.peqBands?.filter((b: PeqBand) => b.enabled) ?? [];
 
-    computeAndRender(target, peqBands, sr, taps, win);
+    // Reset scales when FIR config changes (taps, SR, window)
+    const configChanged = taps !== prevTaps || sr !== prevSR || win !== prevWin;
+    prevTaps = taps;
+    prevSR = sr;
+    prevWin = win;
+
+    computeAndRender(target, peqBands, sr, taps, win, configChanged);
   });
 
   async function computeAndRender(
@@ -288,6 +301,7 @@ export default function ExportImpulsePlot() {
     sampleRate: number,
     taps: number,
     window: string,
+    resetScales: boolean = false,
   ) {
     try {
       // 1. Evaluate pure target
@@ -335,7 +349,7 @@ export default function ExportImpulsePlot() {
       setHasData(true);
       const phaseLabel = allLinear ? "Linear-Phase" : "Min-Phase";
       requestAnimationFrame(() =>
-        renderChart(firResult.time_ms, firResult.impulse, firResult.norm_db, phaseLabel),
+        renderChart(firResult.time_ms, firResult.impulse, firResult.norm_db, phaseLabel, resetScales),
       );
     } catch (e) {
       console.error("ExportImpulsePlot compute failed:", e);
