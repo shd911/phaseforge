@@ -980,9 +980,9 @@ function AutoAlignTab() {
     if (!fir) return;
     try {
       const dir = projectDir();
-      const measName = b?.measurement?.name ?? b?.name ?? "correction";
+      const name = b ? driverName(b) : "correction";
       const win = firWindow();
-      let defPath = `${sanitize(measName)}_${fir.sample_rate}_${fir.taps}_${win}.wav`;
+      let defPath = `${sanitize(name)}_${fir.sample_rate}_${fir.taps}_${win}.wav`;
       if (dir) defPath = `${dir}/${defPath}`;
       const filePath = await save({
         filters: [{ name: "WAV Audio", extensions: ["wav"] }],
@@ -1164,6 +1164,18 @@ function FirMiniPreview(props: { result: FirResult }) {
 }
 
 // ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+/** Extract driver/band label from measurement name, stripping REW "Band N · " prefix */
+function driverName(b: BandState): string {
+  let name = b.measurement?.name ?? b.name;
+  const dotIdx = name.indexOf("·");
+  if (dotIdx >= 0) name = name.substring(dotIdx + 1).trim();
+  return name;
+}
+
+// ---------------------------------------------------------------------------
 // Export Tab — placeholder
 // ---------------------------------------------------------------------------
 
@@ -1296,11 +1308,10 @@ function ExportTab() {
   }
 
   function bandFileName(b: BandState): string {
-    const measName = b.measurement?.name ?? b.name;
     const sr = exportSampleRate();
     const taps = exportTaps();
     const win = exportWindow();
-    return `${sanitize(measName)}_${sr}_${taps}_${win}.wav`;
+    return `${sanitize(driverName(b))}_${sr}_${taps}_${win}.wav`;
   }
 
   // Export active band with save dialog
