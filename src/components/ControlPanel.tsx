@@ -50,7 +50,7 @@ import type { PresetName, SmoothingMode, MergeSource, BandState } from "../store
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { setNeedAutoFit } from "../App";
-import { projectDir, projectName, copyMeasurementToProject, copyMergeFilesToProject, wavFileName, sanitize } from "../lib/project-io";
+import { projectDir, projectName, copyMeasurementToProject, copyMergeFilesToProject, sanitize } from "../lib/project-io";
 import MergeDialog from "./MergeDialog";
 
 const FILTER_TYPES: FilterType[] = ["Butterworth", "Bessel", "LinkwitzRiley", "Gaussian"];
@@ -979,15 +979,11 @@ function AutoAlignTab() {
     const b = band();
     if (!fir) return;
     try {
-      const pName = projectName();
       const dir = projectDir();
-      let defPath: string;
-      if (pName && b) {
-        defPath = wavFileName(pName, b.name, fir.sample_rate, fir.taps);
-        if (dir) defPath = `${dir}/${defPath}`;
-      } else {
-        defPath = `correction_${fir.taps}taps_${fir.sample_rate}Hz.wav`;
-      }
+      const measName = b?.measurement?.name ?? b?.name ?? "correction";
+      const win = firWindow();
+      let defPath = `${sanitize(measName)}_${fir.sample_rate}_${fir.taps}_${win}.wav`;
+      if (dir) defPath = `${dir}/${defPath}`;
       const filePath = await save({
         filters: [{ name: "WAV Audio", extensions: ["wav"] }],
         defaultPath: defPath,
@@ -1246,10 +1242,6 @@ function ExportTab() {
     return parts.length > 0 ? parts.join(" · ") : "\u2014";
   }
 
-  // sanitizeFilename kept for backward compat; new code uses sanitize() from project-io
-  function sanitizeFilename(name: string): string {
-    return name.replace(/[^a-zA-Z0-9_\-]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
-  }
 
   // Core: generate FIR impulse for a band, return impulse array
   async function generateBandImpulse(b: BandState): Promise<number[]> {
@@ -1304,16 +1296,11 @@ function ExportTab() {
   }
 
   function bandFileName(b: BandState): string {
-    const pName = projectName();
+    const measName = b.measurement?.name ?? b.name;
     const sr = exportSampleRate();
     const taps = exportTaps();
-    if (pName) {
-      // v2: ProjectName-YYMMDD-BandName-SR-Taps.wav
-      return wavFileName(pName, b.name, sr, taps);
-    }
-    // Fallback (no project folder): legacy naming
-    const safeName = sanitizeFilename(b.name);
-    return `phaseforge_${safeName}_${taps}taps_${sr}hz.wav`;
+    const win = exportWindow();
+    return `${sanitize(measName)}_${sr}_${taps}_${win}.wav`;
   }
 
   // Export active band with save dialog
