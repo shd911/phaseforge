@@ -1,4 +1,4 @@
-import { createSignal, onCleanup } from "solid-js";
+import { createSignal, createEffect, onCleanup } from "solid-js";
 
 interface NumberInputProps {
   value: number;
@@ -14,9 +14,14 @@ interface NumberInputProps {
 export default function NumberInput(props: NumberInputProps) {
   const [editing, setEditing] = createSignal(false);
   const [editText, setEditText] = createSignal("");
+  // Local display value — tracks props.value reactively AND updates from wheel
+  const [localVal, setLocalVal] = createSignal(props.value);
   let repeatTimer: number | undefined;
   let repeatInterval: number | undefined;
   let containerRef!: HTMLDivElement;
+
+  // Sync from parent → local (reactive)
+  createEffect(() => setLocalVal(props.value));
 
   const precision = () => {
     if (props.precision !== undefined) return props.precision;
@@ -25,11 +30,11 @@ export default function NumberInput(props: NumberInputProps) {
     return dot >= 0 ? s.length - dot - 1 : 0;
   };
 
-  const displayValue = () => props.value.toFixed(precision());
+  const displayValue = () => localVal().toFixed(precision());
 
   const effectiveStep = (dir: number) => {
     if (props.freqMode) {
-      const v = props.value;
+      const v = localVal();
       if (v < 100) return 1;
       if (v < 1000) return 10;
       return 100;
@@ -39,12 +44,18 @@ export default function NumberInput(props: NumberInputProps) {
 
   const clamp = (v: number) => Math.min(props.max, Math.max(props.min, v));
 
+  const applyValue = (newVal: number) => {
+    const v = parseFloat(newVal.toFixed(precision()));
+    setLocalVal(v);
+    props.onChange(v);
+  };
+
   const adjust = (dir: number) => {
     const step = effectiveStep(dir);
     const newVal = clamp(
-      Math.round((props.value + dir * step) / step) * step
+      Math.round((localVal() + dir * step) / step) * step
     );
-    props.onChange(parseFloat(newVal.toFixed(precision())));
+    applyValue(newVal);
   };
 
   const startRepeat = (dir: number) => {
@@ -70,7 +81,7 @@ export default function NumberInput(props: NumberInputProps) {
   const commitEdit = () => {
     const parsed = parseFloat(editText());
     if (!isNaN(parsed)) {
-      props.onChange(clamp(parseFloat(parsed.toFixed(precision()))));
+      applyValue(clamp(parsed));
     }
     setEditing(false);
   };
@@ -81,8 +92,8 @@ export default function NumberInput(props: NumberInputProps) {
     const dir = e.deltaY < 0 ? 1 : -1;
     const mult = e.shiftKey ? 10 : 1;
     const step = effectiveStep(dir) * mult;
-    const newVal = clamp(props.value + dir * step);
-    props.onChange(parseFloat(newVal.toFixed(precision())));
+    const newVal = clamp(localVal() + dir * step);
+    applyValue(newVal);
   };
 
   // Attach wheel via ref callback with { passive: false }.
