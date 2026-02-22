@@ -1,4 +1,4 @@
-import { createSignal, createEffect, onCleanup } from "solid-js";
+import { createEffect, onCleanup } from "solid-js";
 
 interface NumberInputProps {
   value: number;
@@ -11,100 +11,98 @@ interface NumberInputProps {
   freqMode?: boolean; // adaptive step for frequency values
 }
 
+/**
+ * Imperative number input with ±buttons, wheel, and click-to-edit.
+ *
+ * Uses ONLY direct DOM manipulation (no SolidJS signals for display).
+ * This avoids SolidJS reactive context issues with native event handlers.
+ * Same proven pattern as PeqSidebar wheelNumber.
+ */
 export default function NumberInput(props: NumberInputProps) {
-  const [editing, setEditing] = createSignal(false);
-  const [editText, setEditText] = createSignal("");
-  // Local display value — tracks props.value reactively AND updates from wheel
-  const [localVal, setLocalVal] = createSignal(props.value);
   let repeatTimer: number | undefined;
   let repeatInterval: number | undefined;
-  let containerRef!: HTMLDivElement;
+  let inputEl!: HTMLInputElement;
 
-  // Sync from parent → local (reactive)
-  createEffect(() => setLocalVal(props.value));
+  // Current value — plain mutable variable
+  let val = props.value;
 
-  const precision = () => {
+  const prec = () => {
     if (props.precision !== undefined) return props.precision;
     const s = props.step.toString();
-    const dot = s.indexOf(".");
-    return dot >= 0 ? s.length - dot - 1 : 0;
+    const d = s.indexOf(".");
+    return d >= 0 ? s.length - d - 1 : 0;
   };
 
-  const displayValue = () => localVal().toFixed(precision());
+  const fmt = (v: number) => v.toFixed(prec());
+  const clamp = (v: number) => Math.min(props.max, Math.max(props.min, v));
 
-  const effectiveStep = (dir: number) => {
+  const step = (dir: number) => {
     if (props.freqMode) {
-      const v = localVal();
-      if (v < 100) return 1;
-      if (v < 1000) return 10;
+      if (val < 100) return 1;
+      if (val < 1000) return 10;
       return 100;
     }
     return props.step;
   };
 
-  const clamp = (v: number) => Math.min(props.max, Math.max(props.min, v));
-
-  const applyValue = (newVal: number) => {
-    const v = parseFloat(newVal.toFixed(precision()));
-    setLocalVal(v);
-    props.onChange(v);
+  // Push value to DOM + notify parent
+  const push = (v: number) => {
+    val = parseFloat(v.toFixed(prec()));
+    inputEl.value = fmt(val);
+    props.onChange(val);
   };
 
-  const adjust = (dir: number) => {
-    const step = effectiveStep(dir);
-    const newVal = clamp(
-      Math.round((localVal() + dir * step) / step) * step
-    );
-    applyValue(newVal);
+  const inc = (dir: number) => {
+    const s = step(dir);
+    push(clamp(Math.round((val + dir * s) / s) * s));
   };
 
+  // Sync from parent → local + DOM
+  createEffect(() => {
+    val = props.value;
+    // Don't overwrite while user is typing
+    if (inputEl && inputEl !== document.activeElement) {
+      inputEl.value = fmt(val);
+    }
+  });
+
+  // ± buttons with repeat
+  let repDir = 0;
   const startRepeat = (dir: number) => {
-    adjust(dir);
+    repDir = dir;
+    inc(dir);
     repeatTimer = window.setTimeout(() => {
-      repeatInterval = window.setInterval(() => adjust(dir), 60);
+      repeatInterval = window.setInterval(() => inc(repDir), 60);
     }, 350);
   };
-
   const stopRepeat = () => {
-    if (repeatTimer !== undefined) {
-      clearTimeout(repeatTimer);
-      repeatTimer = undefined;
-    }
-    if (repeatInterval !== undefined) {
-      clearInterval(repeatInterval);
-      repeatInterval = undefined;
-    }
+    clearTimeout(repeatTimer); repeatTimer = undefined;
+    clearInterval(repeatInterval); repeatInterval = undefined;
   };
-
   onCleanup(stopRepeat);
 
-  const commitEdit = () => {
-    const parsed = parseFloat(editText());
-    if (!isNaN(parsed)) {
-      applyValue(clamp(parsed));
-    }
-    setEditing(false);
-  };
-
-  const handleWheel = (e: WheelEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const dir = e.deltaY < 0 ? 1 : -1;
-    const mult = e.shiftKey ? 10 : 1;
-    const step = effectiveStep(dir) * mult;
-    const newVal = clamp(localVal() + dir * step);
-    applyValue(newVal);
-  };
-
-  // Attach wheel via ref callback with { passive: false }.
-  // SolidJS JSX onWheel uses passive listeners → preventDefault() is ignored.
-  const bindWheel = (el: HTMLDivElement) => {
-    containerRef = el;
-    el.addEventListener("wheel", handleWheel, { passive: false });
+  // Commit text edit
+  const commit = () => {
+    const n = parseFloat(inputEl.value);
+    if (!isNaN(n)) push(clamp(n));
+    else inputEl.value = fmt(val);
   };
 
   return (
-    <div class="num-input" ref={bindWheel}>
+    <div
+      class="num-input"
+      ref={(el: HTMLDivElement) => {
+        // Non-passive wheel handler — identical pattern to PeqSidebar wheelNumber
+        el.addEventListener("wheel", (e: WheelEvent) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const dir = e.deltaY < 0 ? 1 : -1;
+          const mult = e.shiftKey ? 10 : 1;
+          const s = step(dir) * mult;
+          push(clamp(val + dir * s));
+        }, { passive: false });
+      }}
+    >
       <button
         class="num-btn num-btn-dec"
         onMouseDown={() => startRepeat(-1)}
@@ -112,31 +110,18 @@ export default function NumberInput(props: NumberInputProps) {
         onMouseLeave={stopRepeat}
         tabIndex={-1}
       >−</button>
-      {editing() ? (
-        <input
-          class="num-field"
-          type="text"
-          value={editText()}
-          onInput={(e) => setEditText(e.currentTarget.value)}
-          onBlur={() => { commitEdit(); }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") { e.preventDefault(); commitEdit(); }
-            if (e.key === "Escape") { setEditing(false); }
-            if (e.key === "Tab") { commitEdit(); }
-          }}
-          ref={(el) => requestAnimationFrame(() => { el.focus(); el.select(); })}
-        />
-      ) : (
-        <span
-          class="num-field num-display"
-          onClick={() => {
-            setEditText(displayValue());
-            setEditing(true);
-          }}
-        >
-          {displayValue()}
-        </span>
-      )}
+      <input
+        class="num-field"
+        type="text"
+        ref={(el: HTMLInputElement) => { inputEl = el; el.value = fmt(val); }}
+        onFocus={(e) => e.currentTarget.select()}
+        onBlur={() => commit()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); commit(); e.currentTarget.blur(); }
+          if (e.key === "Escape") { inputEl.value = fmt(val); e.currentTarget.blur(); }
+        }}
+        tabIndex={0}
+      />
       <button
         class="num-btn num-btn-inc"
         onMouseDown={() => startRepeat(1)}
