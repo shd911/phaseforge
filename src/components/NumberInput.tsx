@@ -1,4 +1,4 @@
-import { createSignal, onCleanup } from "solid-js";
+import { createSignal, onCleanup, onMount } from "solid-js";
 
 interface NumberInputProps {
   value: number;
@@ -16,6 +16,7 @@ export default function NumberInput(props: NumberInputProps) {
   const [editText, setEditText] = createSignal("");
   let repeatTimer: number | undefined;
   let repeatInterval: number | undefined;
+  let containerRef!: HTMLDivElement;
 
   const precision = () => {
     if (props.precision !== undefined) return props.precision;
@@ -76,6 +77,7 @@ export default function NumberInput(props: NumberInputProps) {
 
   const handleWheel = (e: WheelEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     const dir = e.deltaY < 0 ? 1 : -1;
     const mult = e.shiftKey ? 10 : 1;
     const step = effectiveStep(dir) * mult;
@@ -83,8 +85,16 @@ export default function NumberInput(props: NumberInputProps) {
     props.onChange(parseFloat(newVal.toFixed(precision())));
   };
 
+  // Register wheel handler with { passive: false } so preventDefault() works.
+  // SolidJS onWheel in JSX uses passive listeners by default, which
+  // silently ignores preventDefault() → scroll bleeds through to parent.
+  onMount(() => {
+    containerRef.addEventListener("wheel", handleWheel, { passive: false });
+    onCleanup(() => containerRef.removeEventListener("wheel", handleWheel));
+  });
+
   return (
-    <div class="num-input" onWheel={handleWheel}>
+    <div class="num-input" ref={containerRef}>
       <button
         class="num-btn num-btn-dec"
         onMouseDown={() => startRepeat(-1)}
