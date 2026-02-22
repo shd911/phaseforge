@@ -16,6 +16,31 @@ import {
 const CORRECTED_COLOR = "#22C55E";
 const TARGET_COLOR = "#FFD700";
 
+/** Attach non-passive wheel handler to <input type="number"> via ref.
+ *  WebKit/Tauri doesn't natively support wheel on number inputs. */
+function wheelNumber(
+  el: HTMLInputElement,
+  getCurrent: () => number,
+  getStep: () => number,
+  getMin: () => number,
+  getMax: () => number,
+  onValue: (v: number) => void,
+) {
+  el.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const dir = e.deltaY < 0 ? 1 : -1;
+    const mult = e.shiftKey ? 10 : 1;
+    const step = getStep() * mult;
+    const raw = getCurrent() + dir * step;
+    const clamped = Math.min(getMax(), Math.max(getMin(), raw));
+    const prec = step < 1 ? 1 : 0;
+    const v = parseFloat(clamped.toFixed(prec));
+    el.value = v.toFixed(prec);
+    onValue(v);
+  }, { passive: false });
+}
+
 // ────────────────────────────────────────────────────────────────
 // PEQ Sidebar — table + mini corrected impulse plot
 // ────────────────────────────────────────────────────────────────
@@ -115,6 +140,14 @@ export default function PeqSidebar() {
                             if (bd) updatePeqBand(bd.id, i, { freq_hz: v });
                           }
                         }}
+                        ref={(el) => wheelNumber(el,
+                          () => b.freq_hz, () => {
+                            const f = b.freq_hz;
+                            return f < 100 ? 1 : f < 1000 ? 10 : 100;
+                          },
+                          () => 20, () => 20000,
+                          (v) => { const bd = band(); if (bd) updatePeqBand(bd.id, i, { freq_hz: v }); }
+                        )}
                       />
                     </td>
                     <td>
@@ -132,6 +165,10 @@ export default function PeqSidebar() {
                             if (bd) updatePeqBand(bd.id, i, { gain_db: v });
                           }
                         }}
+                        ref={(el) => wheelNumber(el,
+                          () => b.gain_db, () => 0.1, () => -18, () => 6,
+                          (v) => { const bd = band(); if (bd) updatePeqBand(bd.id, i, { gain_db: v }); }
+                        )}
                       />
                     </td>
                     <td>
@@ -149,6 +186,10 @@ export default function PeqSidebar() {
                             if (bd) updatePeqBand(bd.id, i, { q: v });
                           }
                         }}
+                        ref={(el) => wheelNumber(el,
+                          () => b.q, () => 0.1, () => 0.1, () => 20,
+                          (v) => { const bd = band(); if (bd) updatePeqBand(bd.id, i, { q: v }); }
+                        )}
                       />
                     </td>
                     <td>
