@@ -343,18 +343,22 @@ async function confirmIfDirty(): Promise<boolean> {
 
 async function copyPendingMeasurements(): Promise<void> {
   const dir = projectDir();
-  const pName = projectName();
-  if (!dir || !pName) return;
+  if (!dir) return;
 
   for (const band of appState.bands) {
     if (band.measurement && !band.measurementFile) {
       const sourcePath = band.measurement.source_path;
       if (!sourcePath) continue;
-      const ext = fileExt(sourcePath);
-      const fileName = measurementFileName(pName, band.name, ext);
+      // Use original filename (basename) — no renaming
+      const fileName = sourcePath.split("/").pop() ?? sourcePath.split("\\").pop() ?? "measurement.txt";
       const destPath = `${dir}/${fileName}`;
       try {
-        await invoke("copy_file_to_project", { sourcePath, destPath });
+        // Skip if already in project folder
+        const srcNorm = sourcePath.replace(/\\/g, "/");
+        const destNorm = destPath.replace(/\\/g, "/");
+        if (srcNorm !== destNorm) {
+          await invoke("copy_file_to_project", { sourcePath, destPath });
+        }
         setBandMeasurementFile(band.id, fileName);
       } catch (e) {
         console.warn(`Failed to copy measurement for ${band.name}:`, e);
@@ -572,16 +576,20 @@ async function doLoad(path: string): Promise<void> {
  *  Returns null if no project folder is set. */
 export async function copyMeasurementToProject(
   sourcePath: string,
-  bandName: string,
+  _bandName: string,
 ): Promise<string | null> {
   const dir = projectDir();
-  const pName = projectName();
-  if (!dir || !pName) return null;
+  if (!dir) return null;
 
-  const ext = fileExt(sourcePath);
-  const fileName = measurementFileName(pName, bandName, ext);
+  // Use original filename — no renaming
+  const fileName = sourcePath.split("/").pop() ?? sourcePath.split("\\").pop() ?? "measurement.txt";
   const destPath = `${dir}/${fileName}`;
-  await invoke("copy_file_to_project", { sourcePath, destPath });
+  // Skip if already in project folder
+  const srcNorm = sourcePath.replace(/\\/g, "/");
+  const destNorm = destPath.replace(/\\/g, "/");
+  if (srcNorm !== destNorm) {
+    await invoke("copy_file_to_project", { sourcePath, destPath });
+  }
   return fileName;
 }
 

@@ -75,7 +75,6 @@ export default function ExportPlot() {
     if (!c) return;
     const center = (curMagMin + curMagMax) / 2;
     const half = ((curMagMax - curMagMin) / 2) * factor;
-    if (half * 2 < 2 || half * 2 > 400) return;
     curMagMin = center - half;
     curMagMax = center + half;
     c.setScale("mag", { min: curMagMin, max: curMagMax });

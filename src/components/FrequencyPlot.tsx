@@ -134,6 +134,9 @@ export default function FrequencyPlot() {
   const [legendEntries, setLegendEntries] = createStore<LegendEntry[]>([]);
   const [showLegend, setShowLegend] = createSignal(false);
 
+  // Persistent SUM visibility — survives band switches
+  let sumVisMap = new Map<string, boolean>();
+
   // Crossover drag state
   const [hoveredXo, setHoveredXo] = createSignal<number | null>(null); // index in crossovers array
   const [draggingXo, setDraggingXo] = createSignal<number | null>(null);
@@ -200,6 +203,8 @@ export default function FrequencyPlot() {
     const newVis = !entry.visible;
     setLegendEntries(idx, "visible", newVis);
     chart.setSeries(entry.seriesIdx, { show: newVis });
+    // Persist SUM visibility across band switches
+    if (isSum()) sumVisMap.set(entry.label, newVis);
   }
 
   // Toggle all series for a given band column in SUM mode
@@ -221,6 +226,7 @@ export default function FrequencyPlot() {
       if (legendEntries[i].visible !== newVis) {
         setLegendEntries(i, "visible", newVis);
         chart.setSeries(legendEntries[i].seriesIdx, { show: newVis });
+        if (isSum()) sumVisMap.set(legendEntries[i].label, newVis);
       }
     }
   }
@@ -255,6 +261,7 @@ export default function FrequencyPlot() {
       if (legendEntries[i].visible !== newVis) {
         setLegendEntries(i, "visible", newVis);
         chart.setSeries(legendEntries[i].seriesIdx, { show: newVis });
+        if (isSum()) sumVisMap.set(legendEntries[i].label, newVis);
       }
     }
   }
@@ -373,8 +380,15 @@ export default function FrequencyPlot() {
     ];
 
     // Restore previous legend visibility into series before chart creation
+    // In SUM mode, use persistent sumVisMap (survives band switches)
+    // In band mode, use current legendEntries (local to this render cycle)
+    const inSum = isSum();
     const prevVisMap = new Map<string, boolean>();
-    for (const e of legendEntries) prevVisMap.set(e.label, e.visible);
+    if (inSum && sumVisMap.size > 0) {
+      for (const [k, v] of sumVisMap) prevVisMap.set(k, v);
+    } else {
+      for (const e of legendEntries) prevVisMap.set(e.label, e.visible);
+    }
 
     const curIsAlign = activeTab() === "align";
     let mergedLegend: LegendEntry[] | undefined;
