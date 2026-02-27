@@ -19,6 +19,7 @@ pub enum PhaseMode {
     MinimumPhase,
     LinearPhase,
     MixedPhase,
+    HybridPhase, // min-phase correction + linear-phase filter
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -154,6 +155,7 @@ pub fn generate_fir(
         PhaseMode::MinimumPhase => minimum_phase_from_magnitude(&limited, n_fft),
         PhaseMode::LinearPhase => vec![0.0; n_bins], // zero phase → symmetric
         PhaseMode::MixedPhase => minimum_phase_from_magnitude(&limited, n_fft), // same as min for now
+        PhaseMode::HybridPhase => minimum_phase_from_magnitude(&limited, n_fft), // fallback: same as min
     };
 
     // 7. Assemble complex spectrum with conjugate symmetry
@@ -169,7 +171,7 @@ pub fn generate_fir(
 
     // 9. Phase-dependent reordering
     match config.phase_mode {
-        PhaseMode::MinimumPhase => {
+        PhaseMode::MinimumPhase | PhaseMode::HybridPhase => {
             // Minimum phase: impulse is causal, already correct
             // Just truncate to taps length (should already be n_fft)
         }
@@ -186,7 +188,7 @@ pub fn generate_fir(
     // For minimum phase: use half-window (1.0 at start, taper to 0 at end)
     // For linear phase: use full symmetric window (centered peak)
     match config.phase_mode {
-        PhaseMode::MinimumPhase | PhaseMode::MixedPhase => {
+        PhaseMode::MinimumPhase | PhaseMode::MixedPhase | PhaseMode::HybridPhase => {
             let half_win = generate_half_window(n_fft, &config.window);
             for (i, w) in half_win.iter().enumerate() {
                 impulse[i] *= w;
@@ -232,6 +234,185 @@ pub fn generate_fir(
     Ok(FirResult {
         impulse,
         time_ms,
+        taps: n_fft,
+        sample_rate: config.sample_rate,
+        norm_db,
+    })
+}
+
+/// Generate hybrid-phase FIR correction filter.
+///
+/// Strategy: decompose total correction into two components with different phase modes:
+/// 1. **Correction** (measurement → flat): min-phase via Hilbert
+///    → compensates both amplitude AND phase of the min-phase driver system
+/// 2. **Filter** (flat → target shape): linear-phase (zero phase)
+///    → only shapes amplitude, no phase distortion from crossover
+///
+/// Total magnitude = correction + filter = target - measurement (identical to generate_fir)
+/// Total phase = Hilbert(correction) + 0 = Hilbert(correction)
+///
+/// Result: ideal crossover response with minimal phase deviation.
+pub fn generate_hybrid_fir(
+    meas_freq: &[f64],
+    meas_mag: &[f64],
+    target_mag: &[f64],
+    peq_correction: &[f64],
+    config: &FirConfig,
+    crossover_range: (f64, f64),
+) -> Result<FirModelResult, AppError> {
+    let n = meas_freq.len();
+    if n < 2 || meas_mag.len() != n || target_mag.len() != n {
+        return Err(AppError::Config {
+            message: "hybrid FIR: freq/mag/target length mismatch".into(),
+        });
+    }
+
+    let n_fft = config.taps;
+    let n_bins = n_fft / 2 + 1;
+
+    // 1. Current magnitude = measurement + PEQ correction
+    let current_mag: Vec<f64> = if peq_correction.len() == n {
+        meas_mag.iter().zip(peq_correction.iter()).map(|(m, c)| m + c).collect()
+    } else {
+        meas_mag.to_vec()
+    };
+
+    // 2. Compute passband reference level (average in adaptive passband range)
+    let (f_low, f_high) = crossover_range;
+    let pb_lo = f_low.max(200.0);
+    let pb_hi = f_high.min(2000.0).max(pb_lo + 50.0);
+    let mut ref_sum = 0.0_f64;
+    let mut ref_count = 0usize;
+    for i in 0..n {
+        if meas_freq[i] >= pb_lo && meas_freq[i] <= pb_hi {
+            ref_sum += current_mag[i];
+            ref_count += 1;
+        }
+    }
+    let ref_level = if ref_count > 0 { ref_sum / ref_count as f64 } else { 0.0 };
+
+    info!("hybrid_fir: ref_level={:.2} dB (passband {:.0}-{:.0} Hz, {} points)",
+        ref_level, pb_lo, pb_hi, ref_count);
+
+    // 3. Correction magnitude: flatten measurement to ref_level (min-phase component)
+    let correction_log: Vec<f64> = current_mag.iter()
+        .map(|&cur| (ref_level - cur).max(config.noise_floor_db).min(config.max_boost_db))
+        .collect();
+
+    // 4. Filter magnitude: target shape relative to ref_level (linear-phase component)
+    let filter_log: Vec<f64> = target_mag.iter()
+        .map(|&tgt| (tgt - ref_level).max(config.noise_floor_db).min(config.max_boost_db))
+        .collect();
+
+    // 5. Total magnitude = correction + filter (= target - current)
+    let total_log: Vec<f64> = correction_log.iter()
+        .zip(filter_log.iter())
+        .map(|(&c, &f)| c + f)
+        .collect();
+
+    // 6. Interpolate all three to linear FFT grid
+    let (_lin_freq, lin_correction, _) = interpolate_linear_grid(
+        meas_freq, &correction_log, None, n_bins, config.sample_rate,
+    );
+    let (_lin_freq2, lin_total, _) = interpolate_linear_grid(
+        meas_freq, &total_log, None, n_bins, config.sample_rate,
+    );
+
+    // 7. Phase: Hilbert only from correction component (min-phase)
+    // Filter component has zero phase (linear-phase)
+    let correction_phase = minimum_phase_from_magnitude(&lin_correction, n_fft);
+    // total_phase = correction_phase + 0 = correction_phase
+
+    info!("hybrid_fir: correction range [{:.1}, {:.1}] dB, filter range [{:.1}, {:.1}] dB",
+        correction_log.iter().cloned().fold(f64::INFINITY, f64::min),
+        correction_log.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
+        filter_log.iter().cloned().fold(f64::INFINITY, f64::min),
+        filter_log.iter().cloned().fold(f64::NEG_INFINITY, f64::max));
+
+    // 8. Assemble complex spectrum: total magnitude + correction-only phase
+    let mut spectrum = assemble_complex_spectrum(&lin_total, &correction_phase, n_fft);
+
+    // 9. IFFT
+    let mut planner = FftPlanner::<f64>::new();
+    let ifft = planner.plan_fft_inverse(n_fft);
+    ifft.process(&mut spectrum);
+
+    let norm = 1.0 / n_fft as f64;
+    let mut impulse: Vec<f64> = spectrum.iter().map(|c| c.re * norm).collect();
+
+    // 10. Half-window (causal): correction is min-phase → impulse is causal
+    let half_win = generate_half_window(n_fft, &config.window);
+    for (i, w) in half_win.iter().enumerate() {
+        impulse[i] *= w;
+    }
+
+    // 11. Passband normalization: FFT → find peak → normalize to 0 dB
+    let mut check: Vec<Complex64> = impulse.iter().map(|&v| Complex64::new(v, 0.0)).collect();
+    let fft_fwd = planner.plan_fft_forward(n_fft);
+    fft_fwd.process(&mut check);
+
+    let df = config.sample_rate / n_fft as f64;
+    let mut max_db = f64::NEG_INFINITY;
+    for k in 0..n_bins {
+        let f = k as f64 * df;
+        if f >= 20.0 {
+            let amp = check[k].norm();
+            let db = if amp > 1e-20 { 20.0 * amp.log10() } else { -200.0 };
+            if db > max_db { max_db = db; }
+        }
+    }
+    let norm_db = if max_db.is_finite() { max_db } else { 0.0 };
+
+    let norm_linear = 10.0_f64.powf(-norm_db / 20.0);
+    for s in impulse.iter_mut() {
+        *s *= norm_linear;
+    }
+
+    info!("generate_hybrid_fir: norm_db={:.2} → peak normalized to 0 dB", norm_db);
+
+    // 12. Extract realized frequency response from normalized impulse
+    let mut realized_spectrum: Vec<Complex64> = impulse.iter()
+        .map(|&v| Complex64::new(v, 0.0))
+        .collect();
+    fft_fwd.process(&mut realized_spectrum);
+
+    let lin_freq: Vec<f64> = (0..n_bins).map(|i| i as f64 * df).collect();
+
+    let mut realized_mag_lin: Vec<f64> = Vec::with_capacity(n_bins);
+    let mut realized_phase_lin: Vec<f64> = Vec::with_capacity(n_bins);
+
+    for i in 0..n_bins {
+        let c = realized_spectrum[i];
+        let amp = c.norm();
+        let mag_db = if amp > 1e-20 { 20.0 * amp.log10() } else { -400.0 };
+        let phase_deg = c.arg() * 180.0 / PI;
+        realized_mag_lin.push(mag_db);
+        realized_phase_lin.push(phase_deg);
+    }
+
+    // Phase unwrap for smooth interpolation
+    for i in 1..realized_phase_lin.len() {
+        let diff = realized_phase_lin[i] - realized_phase_lin[i - 1];
+        if diff > 180.0 {
+            realized_phase_lin[i] -= 360.0 * ((diff + 180.0) / 360.0).floor();
+        } else if diff < -180.0 {
+            realized_phase_lin[i] += 360.0 * ((-diff + 180.0) / 360.0).floor();
+        }
+    }
+
+    // Interpolate realized curves back to original log-frequency grid
+    let realized_mag = interp_1d_simple(&lin_freq, &realized_mag_lin, meas_freq);
+    let realized_phase = interp_1d_simple(&lin_freq, &realized_phase_lin, meas_freq);
+
+    // Build time axis in ms
+    let dt_ms = 1000.0 / config.sample_rate;
+    let time_ms: Vec<f64> = (0..n_fft).map(|i| i as f64 * dt_ms).collect();
+
+    Ok(FirModelResult {
+        impulse,
+        time_ms,
+        realized_mag,
+        realized_phase,
         taps: n_fft,
         sample_rate: config.sample_rate,
         norm_db,
@@ -830,7 +1011,7 @@ pub fn generate_model_fir(
     let effective_linear = match config.phase_mode {
         PhaseMode::LinearPhase => true,
         PhaseMode::MixedPhase => is_zero_phase,
-        PhaseMode::MinimumPhase => false,
+        PhaseMode::MinimumPhase | PhaseMode::HybridPhase => false,
     };
 
     info!(

@@ -5,7 +5,7 @@ import "uplot/dist/uPlot.min.css";
 import { invoke } from "@tauri-apps/api/core";
 import { MEASUREMENT_COLORS } from "../lib/types";
 import type { Measurement, TargetResponse, FilterType } from "../lib/types";
-import { appState, activeBand, isSum, activeTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand } from "../stores/bands";
+import { appState, activeBand, isSum, activeTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase } from "../stores/bands";
 import type { SmoothingMode, BandState } from "../stores/bands";
 import { needAutoFit, setNeedAutoFit } from "../App";
 import { computeFloorBounce } from "../lib/floor-bounce";
@@ -134,8 +134,18 @@ export default function FrequencyPlot() {
   const [legendEntries, setLegendEntries] = createStore<LegendEntry[]>([]);
   const [showLegend, setShowLegend] = createSignal(false);
 
-  // Persistent SUM visibility — survives band switches
+  // Persistent visibility — two maps for different modes:
+  // SUM mode: by label (each band has its own curves like "Band 1 tgt", "Band 2 tgt")
+  // Band mode: by category key (labels change per band, categories don't)
   let sumVisMap = new Map<string, boolean>();
+  let bandVisMap = new Map<string, boolean>();
+
+  /** Category key for band-mode persistence */
+  function catKey(e: LegendEntry): string {
+    if (e.label.includes("1/1")) return "measurement:1/1";
+    const suffix = e.dash ? "phase" : "mag";
+    return `${e.category}:${suffix}`;
+  }
 
   // Crossover drag state
   const [hoveredXo, setHoveredXo] = createSignal<number | null>(null); // index in crossovers array
@@ -203,8 +213,11 @@ export default function FrequencyPlot() {
     const newVis = !entry.visible;
     setLegendEntries(idx, "visible", newVis);
     chart.setSeries(entry.seriesIdx, { show: newVis });
-    // Persist SUM visibility across band switches
-    if (isSum()) sumVisMap.set(entry.label, newVis);
+    if (isSum()) {
+      sumVisMap.set(entry.label, newVis);
+    } else {
+      bandVisMap.set(catKey(entry), newVis);
+    }
   }
 
   // Toggle all series for a given band column in SUM mode
@@ -226,7 +239,11 @@ export default function FrequencyPlot() {
       if (legendEntries[i].visible !== newVis) {
         setLegendEntries(i, "visible", newVis);
         chart.setSeries(legendEntries[i].seriesIdx, { show: newVis });
-        if (isSum()) sumVisMap.set(legendEntries[i].label, newVis);
+        if (isSum()) {
+          sumVisMap.set(legendEntries[i].label, newVis);
+        } else {
+          bandVisMap.set(catKey(legendEntries[i]), newVis);
+        }
       }
     }
   }
@@ -261,7 +278,11 @@ export default function FrequencyPlot() {
       if (legendEntries[i].visible !== newVis) {
         setLegendEntries(i, "visible", newVis);
         chart.setSeries(legendEntries[i].seriesIdx, { show: newVis });
-        if (isSum()) sumVisMap.set(legendEntries[i].label, newVis);
+        if (isSum()) {
+          sumVisMap.set(legendEntries[i].label, newVis);
+        } else {
+          bandVisMap.set(catKey(legendEntries[i]), newVis);
+        }
       }
     }
   }
@@ -351,7 +372,7 @@ export default function FrequencyPlot() {
     curMagMin = savedMagMin ?? fitMagMin;
     curMagMax = savedMagMax ?? fitMagMax;
 
-    const yLabel = input.hasMeasurements ? "dB SPL" : "dB";
+    const yLabel = input.hasMeasurements ? "dBr" : "dB";
 
     const axes: uPlot.Axis[] = [
       {
@@ -379,26 +400,31 @@ export default function FrequencyPlot() {
       },
     ];
 
-    // Restore previous legend visibility into series before chart creation
-    // In SUM mode, use persistent sumVisMap (survives band switches)
-    // In band mode, use current legendEntries (local to this render cycle)
+    // Restore previous legend visibility:
+    // SUM mode → by label (each band has unique labels like "Band 1 tgt")
+    // Band mode → by category key (labels change per band, categories don't)
     const inSum = isSum();
     const prevVisMap = new Map<string, boolean>();
-    if (inSum && sumVisMap.size > 0) {
-      for (const [k, v] of sumVisMap) prevVisMap.set(k, v);
-    } else {
-      for (const e of legendEntries) prevVisMap.set(e.label, e.visible);
+    if (inSum && sumVisMap.size > 0 && input.legend) {
+      for (const e of input.legend) {
+        if (sumVisMap.has(e.label)) prevVisMap.set(e.label, sumVisMap.get(e.label)!);
+      }
+    } else if (!inSum && bandVisMap.size > 0 && input.legend) {
+      for (const e of input.legend) {
+        const key = catKey(e);
+        if (bandVisMap.has(key)) prevVisMap.set(e.label, bandVisMap.get(key)!);
+      }
     }
 
-    const curIsAlign = activeTab() === "align";
     let mergedLegend: LegendEntry[] | undefined;
     if (input.legend && input.legend.length > 0) {
       mergedLegend = input.legend.map((e) => {
-        // On align tab, don't restore previous visibility for measurement — keep hidden
-        if (curIsAlign && e.category === "measurement" && e.label !== "Meas 1/1 oct") {
-          return e; // use the default (visible: false set in renderBandMode)
+        // If we have a saved visibility state, always use it (user's explicit choice)
+        if (prevVisMap.has(e.label)) {
+          return { ...e, visible: prevVisMap.get(e.label)! };
         }
-        return { ...e, visible: prevVisMap.has(e.label) ? prevVisMap.get(e.label)! : e.visible };
+        // Otherwise use the default from renderBandMode/renderSumMode
+        return e;
       });
       // Apply show to series
       for (const entry of mergedLegend) {
@@ -447,7 +473,7 @@ export default function FrequencyPlot() {
                 break;
               }
             }
-            setCursorSPL(splVal != null ? splVal.toFixed(1) + " dB" : "—");
+            setCursorSPL(splVal != null ? splVal.toFixed(1) + " dBr" : "—");
             // Phase: первая phase-серия
             let phVal: number | null | undefined;
             for (let si = 1; si < allSeries.length; si++) {
@@ -740,6 +766,7 @@ export default function FrequencyPlot() {
   // ----------------------------------------------------------------
   async function renderBandMode(band: BandState, showPhase: boolean, showMag: boolean, showTarget: boolean) {
     const gen = ++renderGen;
+    zoomCenter = 0; // reset before async — will be recalculated from measurement
     try {
       const result = await evaluateBand(band, showPhase);
       if (gen !== renderGen) return; // stale render, discard
@@ -830,7 +857,7 @@ export default function FrequencyPlot() {
             scale: "mag",
           });
           uData.push(smoothedHalf);
-          legend.push({ label: "Meas 1/1 oct", color: SMOOTHED_HALF_OCT_COLOR, dash: false, visible: true, seriesIdx: sIdx, category: "measurement" });
+          legend.push({ label: "Meas 1/1 oct", color: SMOOTHED_HALF_OCT_COLOR, dash: false, visible: false, seriesIdx: sIdx, category: "measurement" });
           sIdx++;
         } catch (e) {
           console.warn("1/2 oct smoothing failed:", e);
@@ -842,6 +869,8 @@ export default function FrequencyPlot() {
       const hasFilters = band.targetEnabled && (band.target.high_pass || band.target.low_pass);
       if (result.measurement && (hasPeq || hasFilters)) {
         try {
+          const isHybrid = exportHybridPhase();
+
           // PEQ correction
           let peqMag: number[] | null = null;
           let peqPhase: number[] | null = null;
@@ -871,38 +900,60 @@ export default function FrequencyPlot() {
             setBandCrossNormDb(band.id, xNorm);
           }
 
-          // Corrected magnitude = measurement + PEQ + cross-section (green, solid)
+          // --- Hybrid mode: 2-stage display ---
+          // Stage 1: "PEQ Corrected" = measurement + PEQ only (green, shows flat curve)
+          if (isHybrid && showMag && peqMag) {
+            const peqCorrected = result.measurement.magnitude.map(
+              (v: number, i: number) => v + peqMag![i]
+            );
+            uSeries.push({
+              label: "PEQ Corrected dB",
+              stroke: CORRECTED_COLOR,
+              width: 2,
+              scale: "mag",
+            });
+            uData.push(peqCorrected);
+            legend.push({ label: "PEQ Corrected", color: CORRECTED_COLOR, dash: false, visible: true, seriesIdx: sIdx, category: "corrected" });
+            sIdx++;
+          }
+
+          // Stage 2: Full corrected = measurement + PEQ + cross-section
+          // Hybrid: amber "Corrected + XO", Standard: green "Corrected"
           if (showMag) {
             const corrected = result.measurement.magnitude.map(
               (v: number, i: number) =>
                 v + (peqMag ? peqMag[i] : 0) + (xsMag ? xsMag[i] : 0)
             );
+            const corrColor = isHybrid ? "#F59E0B" : CORRECTED_COLOR;
+            const corrLabel = isHybrid ? "Corrected + XO" : "Corrected";
             uSeries.push({
-              label: "Corrected dB",
-              stroke: CORRECTED_COLOR,
+              label: corrLabel + " dB",
+              stroke: corrColor,
               width: 2,
               scale: "mag",
             });
             uData.push(corrected);
-            legend.push({ label: "Corrected", color: CORRECTED_COLOR, dash: false, visible: true, seriesIdx: sIdx, category: "corrected" });
+            legend.push({ label: corrLabel, color: corrColor, dash: false, visible: true, seriesIdx: sIdx, category: "corrected" });
             sIdx++;
           }
 
-          // Corrected phase = measurement phase + PEQ phase + cross-section phase (green, dashed)
+          // Corrected phase = measurement phase + PEQ phase + cross-section phase
           if (showPhase && result.measurement.phase) {
             const correctedPhase = result.measurement.phase.map(
               (v: number, i: number) =>
                 v + (peqPhase ? peqPhase[i] : 0) + (xsPhase ? xsPhase[i] : 0)
             );
+            const phaseColor = isHybrid ? "#F59E0B" : CORRECTED_COLOR;
+            const phaseLabel = isHybrid ? "Corrected + XO" : "Corrected";
             uSeries.push({
-              label: "Corrected \u00B0",
-              stroke: CORRECTED_COLOR,
+              label: phaseLabel + " \u00B0",
+              stroke: phaseColor,
               width: 1.5,
               dash: [4, 4],
               scale: "phase",
             });
             uData.push(wrapPhase(correctedPhase));
-            legend.push({ label: "Corrected \u00B0", color: CORRECTED_COLOR, dash: true, visible: true, seriesIdx: sIdx, category: "corrected" });
+            legend.push({ label: phaseLabel + " \u00B0", color: phaseColor, dash: true, visible: true, seriesIdx: sIdx, category: "corrected" });
             sIdx++;
           }
         } catch (e) {
@@ -917,6 +968,16 @@ export default function FrequencyPlot() {
         const fbResult = computeFloorBounce(fb.speakerHeight, fb.micHeight, fb.distance);
         floorBounceNulls = fbResult.nullFreqs;
       }
+
+      // Normalize all mag series to dBr (0 = passband level)
+      if (zoomCenter !== 0) {
+        for (let i = 0; i < uSeries.length; i++) {
+          if ((uSeries[i] as any).scale === "mag") {
+            uData[i] = uData[i].map((v: number) => v - zoomCenter);
+          }
+        }
+      }
+      zoomCenter = 0; // after normalization, center is 0 dBr
 
       if (gen !== renderGen) return; // stale after async work
       requestAnimationFrame(() =>
@@ -939,6 +1000,7 @@ export default function FrequencyPlot() {
   // ----------------------------------------------------------------
   async function renderSumMode(showPhase: boolean, showMag: boolean, showTarget: boolean, _bandsJson: string) {
     const gen = ++renderGen;
+    zoomCenter = 0; // reset before async — will be recalculated from globalRef
     const bands: BandState[] = JSON.parse(JSON.stringify(appState.bands));
 
     try {
@@ -1290,6 +1352,20 @@ export default function FrequencyPlot() {
 
       // Zoom anchor = globalRef (already computed from all measurements)
       zoomCenter = globalRef;
+
+      // Normalize all mag series to dBr (0 = passband level)
+      if (zoomCenter !== 0) {
+        for (let i = 0; i < uSeries.length; i++) {
+          if ((uSeries[i] as any).scale === "mag") {
+            uData[i] = uData[i].map((v: number) => v - zoomCenter);
+          }
+        }
+        // Also normalize crossover dB levels
+        for (const xo of crossovers) {
+          if (xo.dbLevel != null) xo.dbLevel -= zoomCenter;
+        }
+      }
+      zoomCenter = 0; // after normalization, center is 0 dBr
 
       if (gen !== renderGen) return; // stale after async work
       requestAnimationFrame(() =>

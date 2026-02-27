@@ -1699,10 +1699,17 @@ body {
   flex-shrink: 0;
 }
 
+.peq-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 12px;
+}
+
 .peq-buttons-row {
   display: flex;
-  gap: 4px;
-  margin-top: 6px;
+  gap: 6px;
+  margin-top: 4px;
+  align-items: center;
 }
 
 .align-block .tb-btn {

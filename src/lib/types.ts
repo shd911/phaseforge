@@ -109,6 +109,7 @@ export interface PeqConfig {
   max_boost_db: number;
   max_cut_db: number;
   freq_range: [number, number];
+  hybrid?: boolean;
 }
 
 export interface PeqResult {
@@ -119,7 +120,7 @@ export interface PeqResult {
 
 // --- Auto Align: FIR ---
 
-export type PhaseMode = "MinimumPhase" | "LinearPhase" | "MixedPhase";
+export type PhaseMode = "MinimumPhase" | "LinearPhase" | "MixedPhase" | "HybridPhase";
 export type WindowType =
   // Basic / classical
   | "Rectangular" | "Bartlett" | "Hann" | "Hamming" | "Blackman"

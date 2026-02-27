@@ -322,6 +322,23 @@ fn recommend_fir_taps(lowest_freq: f64, sample_rate: f64) -> Result<usize, Strin
 }
 
 #[tauri::command]
+fn generate_hybrid_fir(
+    freq: Vec<f64>,
+    meas_mag: Vec<f64>,
+    target_mag: Vec<f64>,
+    peq_correction: Vec<f64>,
+    config: FirConfig,
+    crossover_range: (f64, f64),
+) -> Result<FirModelResult, String> {
+    info!(
+        "generate_hybrid_fir: {} points, taps={}, sr={}",
+        freq.len(), config.taps, config.sample_rate
+    );
+    fir::generate_hybrid_fir(&freq, &meas_mag, &target_mag, &peq_correction, &config, crossover_range)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn generate_model_fir(
     freq: Vec<f64>,
     target_mag: Vec<f64>,
@@ -353,7 +370,7 @@ pub fn run() {
         )
         .init();
 
-    info!("PhaseForge v0.1.0-b66 starting...");
+    info!("PhaseForge v0.1.0-b78 starting...");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -376,6 +393,7 @@ pub fn run() {
             compute_peq_complex,
             compute_cross_section,
             generate_fir,
+            generate_hybrid_fir,
             generate_model_fir,
             recommend_fir_taps,
             export_fir_wav,
@@ -384,6 +402,8 @@ pub fn run() {
             project::create_project_folder,
             project::copy_file_to_project,
             project::check_path_exists,
+            project::ensure_dir,
+            export::export_target_txt,
             recent::load_recent_projects,
             recent::add_recent_project,
             recent::clear_recent_projects,

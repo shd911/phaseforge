@@ -4,9 +4,12 @@
 // simultaneous optimization of all band parameters [freq, gain, Q].
 //
 // Pipeline:
-//   1. Compute 3-zone target: service curve outside filters, flat at max Target SPL
-//      in-band, peaks clamped above LP — with cosine blends at HP/LP boundaries
-//   2. Compute ERB-inspired frequency weights with null suppression
+//   1. Compute target:
+//      - Standard: 3-zone composite (service curve outside filters, flat in-band)
+//      - Hybrid:   flat at avg measurement level for ALL frequencies
+//   2. Compute weights:
+//      - Standard: ERB-inspired frequency weights with null suppression
+//      - Hybrid:   uniform weights (1.0) with null suppression only
 //   3. Greedy initialization → starting band placement
 //   4. LMA optimization → simultaneous refinement of all parameters
 //   5. Band addition for large residuals → re-optimize
@@ -58,6 +61,11 @@ pub struct PeqConfig {
     /// Smaller values allow denser band placement (useful for HF correction).
     #[serde(default)]
     pub min_band_distance_oct: Option<f64>,
+    /// Hybrid mode: flat target at avg measurement level, uniform weights.
+    /// When true, PEQ optimizes to a straight line across ALL frequencies
+    /// (no 3-zone composite, no ERB weighting). Default: false.
+    #[serde(default)]
+    pub hybrid: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -218,54 +226,16 @@ fn compute_weights(freq: &[f64], meas_mag: &[f64], hp_freq: f64, lp_freq: f64) -
     weights
 }
 
+/// Uniform weights for Hybrid mode: all frequencies equally important.
+/// NO null suppression — hybrid PEQ must flatten everything including deep rolloffs.
+/// Acoustic nulls are not a concern here because hybrid applies unlimited boost.
+fn compute_uniform_weights(freq: &[f64], _meas_mag: &[f64], _hp_freq: f64, _lp_freq: f64) -> Vec<f64> {
+    vec![1.0; freq.len()]
+}
+
 // ---------------------------------------------------------------------------
 // Unified target curve
 // ---------------------------------------------------------------------------
-
-/// Compute a unified target for the entire frequency range.
-///
-/// - Below LP: 1/1-octave smoothed measurement (service curve — keeps broad shape)
-/// - Above LP: flat at median level of HP-LP band
-/// - Transition: cosine blend in LP..LP×2 (one octave)
-fn compute_unified_target(
-    freq: &[f64],
-    meas_mag: &[f64],
-    hp_freq: f64,
-    lp_freq: f64,
-) -> Vec<f64> {
-    let n = freq.len();
-
-    // 1. Service curve: 1/1-octave smoothed measurement
-    let smooth_config = SmoothingConfig {
-        variable: false,
-        fixed_fraction: Some(1.0),
-    };
-    let smoothed = variable_smoothing(freq, meas_mag, &smooth_config);
-
-    // 2. Flat level above LP: median of measurement in HP–LP
-    let flat_level = compute_median_in_range(freq, meas_mag, hp_freq, lp_freq)
-        .unwrap_or(80.0);
-
-    // 3. Cosine blend in LP..LP×2
-    let lp2 = lp_freq * 2.0;
-
-    let mut target = Vec::with_capacity(n);
-    for i in 0..n {
-        let f = freq[i];
-        if f <= lp_freq {
-            target.push(smoothed[i]);
-        } else if f >= lp2 {
-            target.push(flat_level);
-        } else {
-            // Cosine blend: 0 at LP, 1 at LP×2
-            let t = (f / lp_freq).log2(); // 0 at LP, 1 at LP×2
-            let blend = 0.5 * (1.0 - (t * PI).cos()); // smooth 0→1
-            target.push(smoothed[i] * (1.0 - blend) + flat_level * blend);
-        }
-    }
-
-    target
-}
 
 // ---------------------------------------------------------------------------
 // LMA Solver
@@ -560,84 +530,78 @@ pub fn auto_peq_lma(
     }
 
     info!(
-        "auto_peq_lma: {} points, hp={:.0}, lp={:.0}, range=({:.0}, {:.0}), max_bands={}",
-        n, hp_freq, lp_freq, config.freq_range.0, config.freq_range.1, config.max_bands
+        "auto_peq_lma: {} points, hp={:.0}, lp={:.0}, range=({:.0}, {:.0}), max_bands={}, hybrid={}",
+        n, hp_freq, lp_freq, config.freq_range.0, config.freq_range.1, config.max_bands, config.hybrid
     );
 
-    // 1. Target: 3-zone composite
-    //    - Below HP: 1/1-octave smoothed measurement (service curve)
-    //    - HP..LP:   FLAT at max SPL of Target Curve in HP..LP ("прямая" АЧХ,
-    //                не заваливаем к тильту — минфазовый раздел сделает FIR)
-    //    - Above LP: smoothed measurement, peaks clamped to that flat level
-    //    Cosine blends at HP and LP boundaries (1 octave each).
+    // 1. Target construction
     let computed_target;
-    let target = match target_mag {
-        Some(t) => {
-            if t.len() != n {
-                return Err(AppError::Dsp {
-                    message: format!("auto_peq_lma: target length {} != freq length {}", t.len(), n),
-                });
-            }
+    let target = if config.hybrid {
+        // --- Hybrid mode ---
+        // Flat target at avg measurement level in HP..LP for ALL frequencies.
+        // No 3-zone composite, no service curve, no blend zones.
+        // PEQ corrects everything to a straight line; crossover applied later.
+        let (sum, cnt) = freq.iter().zip(meas_mag.iter())
+            .filter(|(&f, _)| f >= hp_freq && f <= lp_freq)
+            .fold((0.0, 0usize), |(s, c), (_, &v)| (s + v, c + 1));
+        let flat_level = if cnt > 0 { sum / cnt as f64 } else { 80.0 };
 
-            // Service curve: 1/1-octave smoothed measurement
-            let smooth_1oct = SmoothingConfig {
-                variable: false,
-                fixed_fraction: Some(1.0),
-            };
-            let service = variable_smoothing(freq, meas_mag, &smooth_1oct);
+        info!(
+            "auto_peq_lma [hybrid]: flat_level = {:.1} dB (avg meas in {:.0}..{:.0} Hz)",
+            flat_level, hp_freq, lp_freq
+        );
 
-            // Flat level = max SPL of Target Curve between HP and LP
-            // This gives us a "straight line" target — PEQ flattens the response,
-            // the actual target slope/tilt is handled by FIR later.
-            let flat_level = freq.iter().zip(t.iter())
-                .filter(|(&f, _)| f >= hp_freq && f <= lp_freq)
-                .map(|(_, &v)| v)
-                .fold(f64::NEG_INFINITY, f64::max);
-            let flat_level = if flat_level.is_finite() { flat_level } else { 80.0 };
-
-            info!(
-                "auto_peq_lma: flat target level = {:.1} dB (max of Target Curve in {:.0}..{:.0} Hz)",
-                flat_level, hp_freq, lp_freq
-            );
-
-            // Blend zones (1 octave each)
-            let hp_lo = hp_freq / 2.0; // blend start below HP
-            let lp_hi = lp_freq * 2.0; // blend end above LP
-
-            computed_target = (0..n).map(|i| {
-                let f = freq[i];
-                if f <= hp_lo {
-                    // Well below HP: pure service curve
-                    service[i]
-                } else if f < hp_freq {
-                    // Blend zone HP/2..HP: service → flat
-                    let blend_t = (f / hp_lo).log2() / (hp_freq / hp_lo).log2(); // 0→1
-                    let blend = 0.5 * (1.0 - (blend_t * PI).cos());
-                    service[i] * (1.0 - blend) + flat_level * blend
-                } else if f <= lp_freq {
-                    // In-band HP..LP: flat at max SPL level
-                    flat_level
-                } else if f < lp_hi {
-                    // Blend zone LP..LP×2: flat → clamped service
-                    let above_target = service[i].min(flat_level);
-                    let blend_t = (f / lp_freq).log2(); // 0→1 over one octave
-                    let blend = 0.5 * (1.0 - (blend_t * PI).cos());
-                    flat_level * (1.0 - blend) + above_target * blend
-                } else {
-                    // Well above LP: smoothed measurement clamped to flat level
-                    service[i].min(flat_level)
+        computed_target = vec![flat_level; n];
+        &computed_target
+    } else {
+        // --- Standard mode ---
+        // Flat target at max SPL of Target Curve in HP..LP for ALL frequencies.
+        // PEQ corrects measurement toward flat line everywhere (including below HP
+        // and above LP) so the exported filter (target + PEQ) properly accounts
+        // for the driver's natural rolloff outside the crossover passband.
+        // The gain limits (6 dB boost / 18 dB cut) and ERB weights naturally
+        // constrain how aggressively the PEQ corrects outside the passband.
+        match target_mag {
+            Some(t) => {
+                if t.len() != n {
+                    return Err(AppError::Dsp {
+                        message: format!("auto_peq_lma: target length {} != freq length {}", t.len(), n),
+                    });
                 }
-            }).collect::<Vec<_>>();
-            &computed_target
-        }
-        None => {
-            computed_target = compute_unified_target(freq, meas_mag, hp_freq, lp_freq);
-            &computed_target
+
+                // Flat level = max SPL of Target Curve between HP and LP
+                let flat_level = freq.iter().zip(t.iter())
+                    .filter(|(&f, _)| f >= hp_freq && f <= lp_freq)
+                    .map(|(_, &v)| v)
+                    .fold(f64::NEG_INFINITY, f64::max);
+                let flat_level = if flat_level.is_finite() { flat_level } else { 80.0 };
+
+                info!(
+                    "auto_peq_lma: flat target level = {:.1} dB (max of Target Curve in {:.0}..{:.0} Hz)",
+                    flat_level, hp_freq, lp_freq
+                );
+
+                computed_target = vec![flat_level; n];
+                &computed_target
+            }
+            None => {
+                // No target_mag provided — use flat at avg measurement level
+                let (sum, cnt) = freq.iter().zip(meas_mag.iter())
+                    .filter(|(&f, _)| f >= hp_freq && f <= lp_freq)
+                    .fold((0.0, 0usize), |(s, c), (_, &v)| (s + v, c + 1));
+                let flat_level = if cnt > 0 { sum / cnt as f64 } else { 80.0 };
+                computed_target = vec![flat_level; n];
+                &computed_target
+            }
         }
     };
 
     // 2. Weights
-    let weights = compute_weights(freq, meas_mag, hp_freq, lp_freq);
+    let weights = if config.hybrid {
+        compute_uniform_weights(freq, meas_mag, hp_freq, lp_freq)
+    } else {
+        compute_weights(freq, meas_mag, hp_freq, lp_freq)
+    };
 
     // 3. Greedy initialization
     let raw_error: Vec<f64> = meas_mag.iter().zip(target.iter()).map(|(m, t)| m - t).collect();
@@ -1282,6 +1246,7 @@ pub fn auto_peq_above_lp(
         freq_range: (lp_freq * 0.85, f_max), // start slightly below LP for wide filter overlap
         smoothing_fraction: Some(1.0 / 3.0), // 1/3 octave smoothing for above-LP
         min_band_distance_oct: config.min_band_distance_oct,
+        hybrid: false,
     };
 
     auto_peq_lma(meas_mag, Some(&target), freq, &above_config, hp_freq, lp_freq)
@@ -1397,6 +1362,7 @@ mod tests {
             freq_range: (80.0, 15000.0),
             smoothing_fraction: None,
             min_band_distance_oct: None,
+            hybrid: false,
         };
         let result = auto_peq(&mag, &mag, &freq, &config).unwrap();
         assert!(
@@ -1426,6 +1392,7 @@ mod tests {
             freq_range: (80.0, 15000.0),
             smoothing_fraction: None,
             min_band_distance_oct: None,
+            hybrid: false,
         };
         let result = auto_peq(&meas, &target, &freq, &config).unwrap();
 
@@ -1491,6 +1458,7 @@ mod tests {
             freq_range: (50.0, 500.0),
             smoothing_fraction: None,
             min_band_distance_oct: None,
+            hybrid: false,
         };
         assert!(auto_peq(&meas, &target, &freq, &config).is_err());
     }
@@ -1508,6 +1476,7 @@ mod tests {
             freq_range: (500.0, 50.0),
             smoothing_fraction: None,
             min_band_distance_oct: None,
+            hybrid: false,
         };
         assert!(auto_peq(&mag, &mag, &freq, &config).is_err());
     }
@@ -1532,6 +1501,7 @@ mod tests {
             freq_range: (80.0, 15000.0),
             smoothing_fraction: None,
             min_band_distance_oct: None,
+            hybrid: false,
         };
         let result = auto_peq(&meas, &target, &freq, &config).unwrap();
 
@@ -1581,6 +1551,7 @@ mod tests {
             freq_range: (80.0, 15000.0),
             smoothing_fraction: None,
             min_band_distance_oct: None,
+            hybrid: false,
         };
         let result = auto_peq(&meas, &target, &freq, &config).unwrap();
 
@@ -1683,6 +1654,7 @@ mod tests {
             freq_range: (80.0, 15000.0), // will be overridden
             smoothing_fraction: None,
             min_band_distance_oct: None,
+            hybrid: false,
         };
         let result = auto_peq_above_lp(&meas, &freq, &config, 3000.0, 80.0).unwrap();
 
@@ -1715,6 +1687,7 @@ mod tests {
             freq_range: (80.0, 15000.0),
             smoothing_fraction: None,
             min_band_distance_oct: None,
+            hybrid: false,
         };
         let result = auto_peq_above_lp(&meas, &freq, &config, 3000.0, 80.0).unwrap();
 
@@ -1806,38 +1779,6 @@ mod tests {
     }
 
     #[test]
-    fn test_unified_target_blend() {
-        let freq = make_log_freq(500, 20.0, 20000.0);
-        let meas = vec![80.0; 500];
-        let lp = 3000.0;
-
-        let target = compute_unified_target(&freq, &meas, 80.0, lp);
-        assert_eq!(target.len(), 500);
-
-        // Below LP: should be close to smoothed measurement (~80)
-        for (i, &f) in freq.iter().enumerate() {
-            if f < lp * 0.5 {
-                assert!(
-                    (target[i] - 80.0).abs() < 2.0,
-                    "Below LP: target should be ~80, got {:.1} at {:.0} Hz",
-                    target[i], f
-                );
-            }
-        }
-
-        // Well above LP×2: should be flat at median
-        for (i, &f) in freq.iter().enumerate() {
-            if f > lp * 2.5 {
-                assert!(
-                    (target[i] - 80.0).abs() < 1.0,
-                    "Above LP×2: target should be flat at ~80, got {:.1} at {:.0} Hz",
-                    target[i], f
-                );
-            }
-        }
-    }
-
-    #[test]
     fn test_lma_single_peak() {
         let freq = make_log_freq(500, 20.0, 20000.0);
         let target = vec![80.0; 500];
@@ -1858,6 +1799,7 @@ mod tests {
             freq_range: (80.0, 15000.0),
             smoothing_fraction: None,
             min_band_distance_oct: None,
+            hybrid: false,
         };
         let result = auto_peq_lma(&meas, Some(&target), &freq, &config, 80.0, 15000.0).unwrap();
 
@@ -1895,6 +1837,7 @@ mod tests {
             freq_range: (80.0, 15000.0),
             smoothing_fraction: None,
             min_band_distance_oct: None,
+            hybrid: false,
         };
         let result = auto_peq_lma(&meas, Some(&meas), &freq, &config, 80.0, 15000.0).unwrap();
 
@@ -1928,6 +1871,7 @@ mod tests {
             freq_range: (2500.0, 20000.0),
             smoothing_fraction: Some(1.0 / 3.0),
             min_band_distance_oct: None,
+            hybrid: false,
         };
 
         let target: Vec<f64> = freq.iter().map(|_| 80.0).collect();

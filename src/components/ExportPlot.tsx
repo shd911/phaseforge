@@ -11,22 +11,72 @@ import {
   exportSampleRate,
   exportTaps,
   exportWindow,
+  exportSnapshots,
+  setExportSnapshots,
+  exportYScale,
+  setExportYScale,
 } from "../stores/bands";
+import type { ExportSnapshot } from "../stores/bands";
 
 const MODEL_MAG_COLOR = "#FF9F43";     // orange — ideal model magnitude
 const MODEL_PHASE_COLOR = "#FFCB80";   // light orange — model phase
 const FIR_MAG_COLOR = "#38BDF8";       // light blue — FIR realized magnitude
 const FIR_PHASE_COLOR = "#7DD3FC";     // lighter blue — FIR realized phase
 
+// Snapshot overlay colors (muted, distinct from active curves)
+const SNAP_COLORS = ["#808080", "#A855F7", "#EC4899", "#14B8A6"];
+
 export default function ExportPlot() {
   let containerRef!: HTMLDivElement;
   const chartRef: { current: uPlot | undefined } = { current: undefined };
 
-  const [cursorFreq, setCursorFreq] = createSignal("—");
-  const [cursorModelMag, setCursorModelMag] = createSignal("—");
-  const [cursorFirMag, setCursorFirMag] = createSignal("—");
+  const [cursorFreq, setCursorFreq] = createSignal("\u2014");
+  const [cursorModelMag, setCursorModelMag] = createSignal("\u2014");
+  const [cursorFirMag, setCursorFirMag] = createSignal("\u2014");
   const [hasData, setHasData] = createSignal(false);
   const [status, setStatus] = createSignal("");
+
+  // Keep last rendered FIR data for snapshot capture
+  const lastFirData: { freq: number[]; mag: number[]; phase: (number | null)[] } = { freq: [], mag: [], phase: [] };
+
+  function takeSnapshot() {
+    if (lastFirData.freq.length === 0) return;
+    const snaps = exportSnapshots();
+    const idx = snaps.length;
+    const color = SNAP_COLORS[idx % SNAP_COLORS.length];
+    const label = `Snap ${idx + 1}`;
+    setExportSnapshots([...snaps, {
+      label,
+      freq: [...lastFirData.freq],
+      mag: [...lastFirData.mag],
+      phase: [...lastFirData.phase],
+      color,
+    }]);
+    // Re-render chart to include new snapshot
+    rerenderWithSnapshots();
+  }
+
+  function clearSnapshots() {
+    setExportSnapshots([]);
+    rerenderWithSnapshots();
+  }
+
+  // Re-render chart with current data + updated snapshots
+  function rerenderWithSnapshots() {
+    const c = chartRef.current;
+    if (!c || !c.data || c.data.length < 5) return;
+    // Extract current base data from chart
+    const freq = c.data[0] as number[];
+    const modelMag = c.data[1] as number[];
+    const modelPhase = c.data[2] as number[];
+    const firMag = c.data[3] as number[];
+    const firPhase = c.data[4] as number[];
+    // Reconstruct unmasked phase from what we have (phase may be nulled)
+    // For re-render we just pass through — renderChart will re-mask
+    requestAnimationFrame(() =>
+      renderChart(freq, modelMag, modelPhase as any, firMag, firPhase as any)
+    );
+  }
 
   // Track data range for anchored zoom
   let fitMagMin = -100;
@@ -68,6 +118,7 @@ export default function ExportPlot() {
     curMagMin += step;
     curMagMax += step;
     c.setScale("mag", { min: curMagMin, max: curMagMax });
+    setExportYScale({ min: curMagMin, max: curMagMax });
   }
 
   function zoomY(factor: number) {
@@ -78,6 +129,7 @@ export default function ExportPlot() {
     curMagMin = center - half;
     curMagMax = center + half;
     c.setScale("mag", { min: curMagMin, max: curMagMax });
+    setExportYScale({ min: curMagMin, max: curMagMax });
   }
 
   function fitData() {
@@ -88,6 +140,7 @@ export default function ExportPlot() {
     curMagMin = fitMagMin - pad;
     curMagMax = fitMagMax + pad;
     c.setScale("mag", { min: curMagMin, max: curMagMax });
+    setExportYScale({ min: curMagMin, max: curMagMax });
   }
 
   function renderChart(
@@ -98,6 +151,10 @@ export default function ExportPlot() {
     firPhase: number[],
   ) {
     if (!containerRef) return;
+
+    // Save last FIR data for snapshot capture (phase saved after masking below)
+    lastFirData.freq = freq;
+    lastFirData.mag = firMag;
 
     // Save current Y scale
     let savedMagMin: number | null = null;
@@ -125,12 +182,13 @@ export default function ExportPlot() {
       firMag[i] >= peakFirMag + PHASE_MASK_THRESHOLD ? p : null
     ) as (number | null)[];
 
+    // Save masked FIR phase for snapshot capture
+    lastFirData.phase = maskedFirPhase;
+
     // Check if model phase is all zero (linear-phase filters) — hide model phase only
-    const modelPhaseIsZero = modelPhase.every(p => Math.abs(p) < 0.5);
+    const modelPhaseIsZero = modelPhase.every(p => p == null || Math.abs(p as number) < 0.5);
 
     // FIR phase is ALWAYS shown — it's the excess phase (deviation from ideal).
-    // For linear-phase FIR, linear delay is already subtracted in Rust,
-    // so what remains is the windowing/truncation error — useful to see.
     const uData: uPlot.AlignedData = [
       freq,
       modelMag,
@@ -142,22 +200,80 @@ export default function ExportPlot() {
     const series: uPlot.Series[] = [
       {},
       { label: "Model dB", stroke: MODEL_MAG_COLOR, width: 2, scale: "mag" },
-      { label: "Model °", stroke: MODEL_PHASE_COLOR, width: 1.5, dash: [6, 3], scale: "phase", show: !modelPhaseIsZero },
+      { label: "Model \u00B0", stroke: MODEL_PHASE_COLOR, width: 1.5, dash: [6, 3], scale: "phase", show: !modelPhaseIsZero },
       { label: "FIR dB", stroke: FIR_MAG_COLOR, width: 2, scale: "mag" },
-      { label: "FIR °", stroke: FIR_PHASE_COLOR, width: 1.5, dash: [6, 3], scale: "phase" },
+      { label: "FIR \u00B0", stroke: FIR_PHASE_COLOR, width: 1.5, dash: [6, 3], scale: "phase" },
     ];
 
-    // Auto Y-range from data — track for anchored zoom
+    // Add snapshot overlay series (magnitude + phase for each)
+    const snaps = exportSnapshots();
+    for (const snap of snaps) {
+      // Interpolate snapshot data to current freq grid if needed
+      const interpolateArr = (srcArr: (number | null)[]): (number | null)[] => {
+        if (snap.freq.length === freq.length && snap.freq[0] === freq[0]) {
+          return srcArr;
+        }
+        return freq.map(f => {
+          let lo = 0, hi = snap.freq.length - 1;
+          if (f <= snap.freq[0]) return srcArr[0];
+          if (f >= snap.freq[hi]) return srcArr[hi];
+          while (hi - lo > 1) {
+            const mid = (lo + hi) >> 1;
+            if (snap.freq[mid] <= f) lo = mid; else hi = mid;
+          }
+          const vLo = srcArr[lo], vHi = srcArr[hi];
+          if (vLo == null || vHi == null) return null;
+          const t = (f - snap.freq[lo]) / (snap.freq[hi] - snap.freq[lo]);
+          return (vLo as number) + t * ((vHi as number) - (vLo as number));
+        });
+      };
+
+      const snapMag = interpolateArr(snap.mag as (number | null)[]) as number[];
+      const snapPhase = interpolateArr(snap.phase);
+
+      // Magnitude series
+      series.push({
+        label: `${snap.label} dB`,
+        stroke: snap.color,
+        width: 1.5,
+        dash: [4, 3],
+        scale: "mag",
+      });
+      (uData as (number | null)[][]).push(snapMag);
+
+      // Phase series (same color, dotted)
+      series.push({
+        label: `${snap.label} °`,
+        stroke: snap.color,
+        width: 1,
+        dash: [2, 2],
+        scale: "phase",
+      });
+      (uData as (number | null)[][]).push(snapPhase);
+    }
+
+    // Auto Y-range from FIR data only (firMag is what actually gets exported)
+    // Clamped to reasonable bounds so extreme model values (-700 dB) don't blow up the view
     let magMin = Infinity, magMax = -Infinity;
-    for (const v of modelMag) { if (v < magMin) magMin = v; if (v > magMax) magMax = v; }
     for (const v of firMag) { if (v < magMin) magMin = v; if (v > magMax) magMax = v; }
+    // Include snapshots in range
+    for (const snap of snaps) {
+      for (const v of snap.mag) { if (v < magMin) magMin = v; if (v > magMax) magMax = v; }
+    }
     if (!isFinite(magMin)) magMin = -100;
     if (!isFinite(magMax)) magMax = 100;
+    // Clamp auto-range to sensible bounds
+    magMin = Math.max(magMin, -80);
+    magMax = Math.min(magMax, 30);
+    if (magMin >= magMax) { magMin = -80; magMax = 30; }
     fitMagMin = magMin;
     fitMagMax = magMax;
     const pad = Math.max(3, (magMax - magMin) * 0.15);
-    const yMin = savedMagMin ?? (magMin - pad);
-    const yMax = savedMagMax ?? (magMax + pad);
+
+    // Y-scale priority: 1) saved from current chart, 2) persisted in store, 3) auto from data
+    const storedY = exportYScale();
+    const yMin = savedMagMin ?? storedY?.min ?? (magMin - pad);
+    const yMax = savedMagMax ?? storedY?.max ?? (magMax + pad);
     curMagMin = yMin;
     curMagMax = yMax;
 
@@ -225,15 +341,15 @@ export default function ExportPlot() {
           (u: uPlot) => {
             const idx = u.cursor.idx;
             if (idx == null || idx < 0 || idx >= u.data[0].length) {
-              setCursorFreq("—"); setCursorModelMag("—"); setCursorFirMag("—");
+              setCursorFreq("\u2014"); setCursorModelMag("\u2014"); setCursorFirMag("\u2014");
               return;
             }
             const f = u.data[0][idx];
-            setCursorFreq(f != null ? (f >= 1000 ? (f / 1000).toFixed(2) + " kHz" : Math.round(f) + " Hz") : "—");
+            setCursorFreq(f != null ? (f >= 1000 ? (f / 1000).toFixed(2) + " kHz" : Math.round(f) + " Hz") : "\u2014");
             const mm = u.data[1]?.[idx];
-            setCursorModelMag(mm != null ? (mm > 0 ? "+" : "") + (mm as number).toFixed(1) + " dB" : "—");
+            setCursorModelMag(mm != null ? (mm > 0 ? "+" : "") + (mm as number).toFixed(1) + " dB" : "\u2014");
             const fm = u.data[3]?.[idx];
-            setCursorFirMag(fm != null ? (fm > 0 ? "+" : "") + (fm as number).toFixed(1) + " dB" : "—");
+            setCursorFirMag(fm != null ? (fm > 0 ? "+" : "") + (fm as number).toFixed(1) + " dB" : "\u2014");
           },
         ],
       },
@@ -289,10 +405,13 @@ export default function ExportPlot() {
     const target = { ...band.target };
     const peqBands = band.peqBands?.filter((b: PeqBand) => b.enabled) ?? [];
 
-    computeAndRender(target, peqBands, sr, taps, win);
+    // Export is ALWAYS target + PEQ (model FIR), regardless of hybrid strategy.
+    // Hybrid only affects PEQ optimization stage, not FIR export.
+    computeModelFir(target, peqBands, sr, taps, win);
   });
 
-  async function computeAndRender(
+  // --- Standard path: pure model FIR (target + PEQ, no measurement) ---
+  async function computeModelFir(
     target: any,
     peqBands: PeqBand[],
     sampleRate: number,
@@ -332,10 +451,7 @@ export default function ExportPlot() {
         });
       }
 
-      // 3. Generate FIR from combined model.
-      //    Target phase: linear or min-phase per HP/LP flags.
-      //    PEQ phase: always min-phase (Hilbert from PEQ magnitude).
-      //    Gaussian filters are inherently linear-phase regardless of the flag.
+      // 3. Generate FIR from combined model
       const isLin = (f: any) => !f || f.linear_phase || f.filter_type === "Gaussian";
       const allLinear = isLin(target.high_pass) && isLin(target.low_pass);
 
@@ -357,16 +473,13 @@ export default function ExportPlot() {
       });
 
       setHasData(true);
-      const peqInfo = peqBands.length > 0 ? ` · ${peqBands.length} PEQ` : "";
+      const peqInfo = peqBands.length > 0 ? ` \u00B7 ${peqBands.length} PEQ` : "";
       const phaseLabel = allLinear ? "Linear-Phase" : "Min-Phase";
       const normLabel = firResult.norm_db !== 0
-        ? ` · Norm: ${firResult.norm_db > 0 ? "−" : "+"}${Math.abs(firResult.norm_db).toFixed(1)} dB`
+        ? ` \u00B7 Norm: ${firResult.norm_db > 0 ? "\u2212" : "+"}${Math.abs(firResult.norm_db).toFixed(1)} dB`
         : "";
-      setStatus(`${taps} taps · ${sampleRate / 1000}k · ${window} · ${phaseLabel}${peqInfo}${normLabel}`);
-      // Shift model curves down by norm_db to match normalized FIR
+      setStatus(`${taps} taps \u00B7 ${sampleRate / 1000}k \u00B7 ${window} \u00B7 ${phaseLabel}${peqInfo}${normLabel}`);
       const normModelMag = modelMag.map(v => v - firResult.norm_db);
-      // Show realized FIR phase (excess phase after delay removal).
-      // For linear-phase: ≈ 0°. For min-phase: actual min-phase response.
       requestAnimationFrame(() =>
         renderChart(freq, normModelMag, modelPhase, firResult.realized_mag, firResult.realized_phase)
       );
@@ -397,6 +510,18 @@ export default function ExportPlot() {
           <span class="readout-value">{cursorFirMag()}</span>
         </span>
         <span class="impulse-sep" />
+        <button class="tb-btn" onClick={takeSnapshot} title="Save current FIR as overlay for comparison">SNAP</button>
+        {exportSnapshots().length > 0 && (
+          <button class="tb-btn" onClick={clearSnapshots} title="Clear all snapshots">CLR</button>
+        )}
+        {exportSnapshots().length > 0 && (
+          <span style={{ "font-size": "9px", "color": "#8b8b96", "margin-left": "4px" }}>
+            {exportSnapshots().map(s => (
+              <span style={{ color: s.color, "margin-right": "6px" }}>{"\u2588"} {s.label}</span>
+            ))}
+          </span>
+        )}
+        <span class="impulse-sep" />
         <span style={{ "font-size": "10px", "color": "#8b8b96" }}>
           {status() || "Filter Model vs FIR Realization"}
         </span>
@@ -404,8 +529,8 @@ export default function ExportPlot() {
       <div class="impulse-body">
         <div class="axis-controls axis-controls-y">
           <button class="axis-btn" onClick={() => zoomY(0.6)} title="Zoom In dB">+</button>
-          <button class="axis-btn" onClick={() => scrollY(1)} title="Scroll Up">▲</button>
-          <button class="axis-btn" onClick={() => scrollY(-1)} title="Scroll Down">▼</button>
+          <button class="axis-btn" onClick={() => scrollY(1)} title="Scroll Up">{"\u25B2"}</button>
+          <button class="axis-btn" onClick={() => scrollY(-1)} title="Scroll Down">{"\u25BC"}</button>
           <button class="axis-btn" onClick={() => zoomY(1.6)} title="Zoom Out dB">-</button>
           <button class="axis-btn fit-btn" onClick={fitData} title="Fit">FIT</button>
         </div>
@@ -418,8 +543,8 @@ export default function ExportPlot() {
           )}
           <div class="axis-controls axis-controls-x">
             <button class="axis-btn" onClick={() => zoomX(0.6)} title="Zoom In Freq">+</button>
-            <button class="axis-btn" onClick={() => scrollX(-1)} title="Scroll Left">◀</button>
-            <button class="axis-btn" onClick={() => scrollX(1)} title="Scroll Right">▶</button>
+            <button class="axis-btn" onClick={() => scrollX(-1)} title="Scroll Left">{"\u25C0"}</button>
+            <button class="axis-btn" onClick={() => scrollX(1)} title="Scroll Right">{"\u25B6"}</button>
             <button class="axis-btn" onClick={() => zoomX(1.6)} title="Zoom Out Freq">-</button>
           </div>
         </div>

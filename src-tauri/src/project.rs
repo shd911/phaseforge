@@ -141,6 +141,11 @@ pub fn create_project_folder(parent_dir: String, project_name: String) -> Result
     }
     std::fs::create_dir_all(&folder)
         .map_err(|e| format!("Cannot create folder: {e}"))?;
+    // Create standard sub-directories
+    for sub in &["inbox", "target", "export"] {
+        std::fs::create_dir_all(folder.join(sub))
+            .map_err(|e| format!("Cannot create {sub}/ folder: {e}"))?;
+    }
     let path = folder.to_string_lossy().to_string();
     info!("create_project_folder: {}", path);
     Ok(path)
@@ -159,4 +164,11 @@ pub fn copy_file_to_project(source_path: String, dest_path: String) -> Result<()
 #[tauri::command]
 pub fn check_path_exists(path: String) -> Result<bool, String> {
     Ok(std::path::Path::new(&path).exists())
+}
+
+/// Ensure a directory exists (create if missing). For backward-compat with old projects.
+#[tauri::command]
+pub fn ensure_dir(path: String) -> Result<(), String> {
+    std::fs::create_dir_all(&path).map_err(|e| format!("{e}"))?;
+    Ok(())
 }

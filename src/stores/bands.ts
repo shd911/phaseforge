@@ -714,6 +714,26 @@ export function suppressXScaleSync(fn: () => void) {
 export const [exportSampleRate, setExportSampleRate] = createSignal(48000);
 export const [exportTaps, setExportTaps] = createSignal(65536);
 export const [exportWindow, setExportWindow] = createSignal<WindowType>("Blackman");
+export const [exportHybridPhase, setExportHybridPhase] = createSignal(false);
+
+// ---------------------------------------------------------------------------
+// Export plot snapshots: frozen FIR curves for visual comparison.
+// Stored at module level so they survive ExportPlot unmount/remount.
+// ---------------------------------------------------------------------------
+
+export interface ExportSnapshot {
+  label: string;
+  freq: number[];
+  mag: number[];
+  phase: (number | null)[];
+  color: string;
+}
+
+export const [exportSnapshots, setExportSnapshots] = createSignal<ExportSnapshot[]>([]);
+
+// Export plot Y-scale: persists across ExportPlot unmount/remount.
+// null = not yet set (use auto-range), {min,max} = user has zoomed/scrolled.
+export const [exportYScale, setExportYScale] = createSignal<{ min: number; max: number } | null>(null);
 
 // ---------------------------------------------------------------------------
 // Dirty state: true when project has unsaved changes

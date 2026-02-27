@@ -279,7 +279,24 @@ async function restoreState(project: ProjectFile, projDir: string | null) {
   if (project.version >= 2 && projDir) {
     for (const band of bands) {
       if (band.measurementFile) {
-        const filePath = `${projDir}/${band.measurementFile}`;
+        // Try the stored path first; if not found, try inbox/ prefix or root fallback
+        let filePath = `${projDir}/${band.measurementFile}`;
+        const exists = await invoke<boolean>("check_path_exists", { path: filePath }).catch(() => false);
+        if (!exists) {
+          // Old project without inbox/: file might be in root
+          const baseName = band.measurementFile.split("/").pop() ?? band.measurementFile;
+          const rootPath = `${projDir}/${baseName}`;
+          const rootExists = await invoke<boolean>("check_path_exists", { path: rootPath }).catch(() => false);
+          if (rootExists) {
+            filePath = rootPath;
+          }
+          // Also try inbox/ in case measurementFile stored without prefix
+          if (!rootExists) {
+            const inboxPath = `${projDir}/inbox/${baseName}`;
+            const inboxExists = await invoke<boolean>("check_path_exists", { path: inboxPath }).catch(() => false);
+            if (inboxExists) filePath = inboxPath;
+          }
+        }
         try {
           const m = await invoke<Measurement>("import_measurement", { path: filePath });
           band.measurement = m;
@@ -345,13 +362,16 @@ async function copyPendingMeasurements(): Promise<void> {
   const dir = projectDir();
   if (!dir) return;
 
+  // Ensure inbox/ exists (backward compat with old projects)
+  await invoke("ensure_dir", { path: `${dir}/inbox` }).catch(() => {});
+
   for (const band of appState.bands) {
     if (band.measurement && !band.measurementFile) {
       const sourcePath = band.measurement.source_path;
       if (!sourcePath) continue;
       // Use original filename (basename) — no renaming
       const fileName = sourcePath.split("/").pop() ?? sourcePath.split("\\").pop() ?? "measurement.txt";
-      const destPath = `${dir}/${fileName}`;
+      const destPath = `${dir}/inbox/${fileName}`;
       try {
         // Skip if already in project folder
         const srcNorm = sourcePath.replace(/\\/g, "/");
@@ -359,7 +379,7 @@ async function copyPendingMeasurements(): Promise<void> {
         if (srcNorm !== destNorm) {
           await invoke("copy_file_to_project", { sourcePath, destPath });
         }
-        setBandMeasurementFile(band.id, fileName);
+        setBandMeasurementFile(band.id, `inbox/${fileName}`);
       } catch (e) {
         console.warn(`Failed to copy measurement for ${band.name}:`, e);
       }
@@ -581,36 +601,39 @@ export async function copyMeasurementToProject(
   const dir = projectDir();
   if (!dir) return null;
 
-  // Use original filename — no renaming
+  // Ensure inbox/ exists (backward compat)
+  await invoke("ensure_dir", { path: `${dir}/inbox` }).catch(() => {});
+
+  // Use original filename — no renaming, copy to inbox/
   const fileName = sourcePath.split("/").pop() ?? sourcePath.split("\\").pop() ?? "measurement.txt";
-  const destPath = `${dir}/${fileName}`;
+  const destPath = `${dir}/inbox/${fileName}`;
   // Skip if already in project folder
   const srcNorm = sourcePath.replace(/\\/g, "/");
   const destNorm = destPath.replace(/\\/g, "/");
   if (srcNorm !== destNorm) {
     await invoke("copy_file_to_project", { sourcePath, destPath });
   }
-  return fileName;
+  return `inbox/${fileName}`;
 }
 
 /** Copy NF/FF merge source files to project folder. Returns new filenames. */
 export async function copyMergeFilesToProject(
   nfPath: string,
   ffPath: string,
-  bandName: string,
+  _bandName: string,
 ): Promise<{ nfFile: string; ffFile: string } | null> {
   const dir = projectDir();
-  const pName = projectName();
-  if (!dir || !pName) return null;
+  if (!dir) return null;
 
-  const nfExt = fileExt(nfPath);
-  const ffExt = fileExt(ffPath);
-  const date = yymmdd();
-  const safeBand = sanitize(bandName);
-  const safeProjName = sanitize(pName);
+  // Ensure inbox/ exists (backward compat)
+  await invoke("ensure_dir", { path: `${dir}/inbox` }).catch(() => {});
 
-  const nfFile = `${safeProjName}-${date}-${safeBand}-NF.${nfExt}`;
-  const ffFile = `${safeProjName}-${date}-${safeBand}-FF.${ffExt}`;
+  // Use original filenames — no renaming, copy to inbox/
+  const nfBaseName = nfPath.split("/").pop() ?? nfPath.split("\\").pop() ?? "nf.txt";
+  const ffBaseName = ffPath.split("/").pop() ?? ffPath.split("\\").pop() ?? "ff.txt";
+
+  const nfFile = `inbox/${nfBaseName}`;
+  const ffFile = `inbox/${ffBaseName}`;
 
   await invoke("copy_file_to_project", { sourcePath: nfPath, destPath: `${dir}/${nfFile}` });
   await invoke("copy_file_to_project", { sourcePath: ffPath, destPath: `${dir}/${ffFile}` });

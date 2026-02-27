@@ -11,6 +11,7 @@ import {
   updatePeqBand,
   commitPeqBand,
   removePeqBand,
+  exportHybridPhase,
 } from "../stores/bands";
 
 const CORRECTED_COLOR = "#22C55E";
@@ -155,18 +156,22 @@ export default function PeqSidebar() {
                         class={`peq-input ${b.gain_db > 0 ? "peq-boost" : "peq-cut"}`}
                         type="number"
                         value={b.gain_db.toFixed(1)}
-                        min={-18}
-                        max={6}
+                        min={exportHybridPhase() ? -60 : -18}
+                        max={exportHybridPhase() ? 60 : 6}
                         step={0.1}
                         onChange={(e) => {
                           const v = parseFloat(e.currentTarget.value);
-                          if (!isNaN(v) && v >= -18 && v <= 6) {
+                          const maxCut = exportHybridPhase() ? 60 : 18;
+                          const maxBoost = exportHybridPhase() ? 60 : 6;
+                          if (!isNaN(v) && v >= -maxCut && v <= maxBoost) {
                             const bd = band();
                             if (bd) updatePeqBand(bd.id, i, { gain_db: v });
                           }
                         }}
                         ref={(el) => wheelNumber(el,
-                          () => b.gain_db, () => 0.1, () => -18, () => 6,
+                          () => b.gain_db, () => 0.1,
+                          () => exportHybridPhase() ? -60 : -18,
+                          () => exportHybridPhase() ? 60 : 6,
                           (v) => { const bd = band(); if (bd) updatePeqBand(bd.id, i, { gain_db: v }); }
                         )}
                       />

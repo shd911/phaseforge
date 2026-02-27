@@ -44,13 +44,15 @@ import {
   setExportTaps,
   exportWindow,
   setExportWindow,
+  exportHybridPhase,
+  setExportHybridPhase,
   setPlotShowOnly,
 } from "../stores/bands";
 import type { PresetName, SmoothingMode, MergeSource, BandState } from "../stores/bands";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { setNeedAutoFit } from "../App";
-import { projectDir, projectName, copyMeasurementToProject, copyMergeFilesToProject, sanitize } from "../lib/project-io";
+import { projectDir, projectName, copyMeasurementToProject, copyMergeFilesToProject, sanitize, yymmdd } from "../lib/project-io";
 import MergeDialog from "./MergeDialog";
 
 const FILTER_TYPES: FilterType[] = ["Butterworth", "Bessel", "LinkwitzRiley", "Gaussian"];
@@ -115,6 +117,29 @@ function FiltersTab() {
   const inverted = () => band()?.inverted ?? false;
   const bandId = () => band()?.id;
 
+  async function handleExportTarget() {
+    const b = band();
+    if (!b) return;
+    try {
+      const [freq, response] = await invoke<[number[], { magnitude: number[] }]>(
+        "evaluate_target_standalone",
+        { target: b.target, nPoints: 512, fMin: 10, fMax: 24000 }
+      );
+      const dir = projectDir();
+      if (dir) await invoke("ensure_dir", { path: `${dir}/target` }).catch(() => {});
+      const defName = `${sanitize(driverName(b))}_target.txt`;
+      const defPath = dir ? `${dir}/target/${defName}` : defName;
+      const filePath = await save({
+        defaultPath: defPath,
+        filters: [{ name: "REW TXT", extensions: ["txt"] }],
+      });
+      if (!filePath) return;
+      await invoke("export_target_txt", { freq, magnitude: response.magnitude, path: filePath });
+    } catch (e) {
+      console.error("Export target failed:", e);
+    }
+  }
+
   // Индекс текущей полосы и кол-во полос (для отображения Link)
   const bandIdx = () => {
     const id = bandId();
@@ -175,6 +200,11 @@ function FiltersTab() {
               class={`fb-toggle invert-toggle ${inverted() ? "on" : ""}`}
               onClick={() => { const id = bandId(); if (id) toggleBandInverted(id); }}
             >{inverted() ? "INV" : "NOR"}</button>
+          </div>
+          <div class="fb-row">
+            <button class="tb-btn" style={{ "font-size": "10px", padding: "2px 8px" }} onClick={handleExportTarget}>
+              Export Target
+            </button>
           </div>
         </div>
 
@@ -838,16 +868,21 @@ function AutoAlignTab() {
       });
 
       // Unified LMA optimizer: covers both in-band and above-LP in one pass.
-      // Range: from 3 octaves below HP to 20 kHz.
-      const peqLow = Math.max(20, fLow / 8);
+      // Hybrid: full 20-20k range (all frequencies equally important)
+      // Standard: from 3 octaves below HP to 20 kHz
+      const isHybrid = exportHybridPhase();
+      const peqLow = isHybrid ? 20 : Math.max(20, fLow / 8);
       const peqHigh = 20000;
       const config: PeqConfig = {
         max_bands: maxBands(),
         tolerance_db: tolerance(),
-        peak_bias: 1.5,
-        max_boost_db: 6.0,
-        max_cut_db: 18.0,
+        peak_bias: isHybrid ? 1.0 : 1.5,
+        // Hybrid: no boost/cut limits — PEQ must flatten measurement completely.
+        // Standard: conservative limits (boost 6 dB, cut 18 dB).
+        max_boost_db: isHybrid ? 60.0 : 6.0,
+        max_cut_db: isHybrid ? 60.0 : 18.0,
         freq_range: [peqLow, peqHigh],
+        hybrid: isHybrid,
       };
 
       const result = await invoke<PeqResult>("auto_peq_lma", {
@@ -956,7 +991,8 @@ function AutoAlignTab() {
         phase_mode: firPhaseMode(),
       };
 
-      const result = await invoke<FirResult>("generate_fir", {
+      const ipcName = firPhaseMode() === "HybridPhase" ? "generate_hybrid_fir" : "generate_fir";
+      const result = await invoke<FirResult>(ipcName, {
         freq: meas.freq,
         measMag: measMag,
         targetMag: targetResp.magnitude,
@@ -983,7 +1019,10 @@ function AutoAlignTab() {
       const name = b ? driverName(b) : "correction";
       const win = firWindow();
       let defPath = `${sanitize(name)}_${fir.sample_rate}_${fir.taps}_${win}.wav`;
-      if (dir) defPath = `${dir}/${defPath}`;
+      if (dir) {
+        await invoke("ensure_dir", { path: `${dir}/export` }).catch(() => {});
+        defPath = `${dir}/export/${defPath}`;
+      }
       const filePath = await save({
         filters: [{ name: "WAV Audio", extensions: ["wav"] }],
         defaultPath: defPath,
@@ -1022,27 +1061,26 @@ function AutoAlignTab() {
               <div class="fb-header">
                 <span class="fb-title">PEQ Auto-Fit</span>
               </div>
-              <div class="fb-row">
-                <label class="fb-label">Tolerance</label>
-                <NumberInput
-                  value={tolerance()}
-                  onChange={setTolerance}
-                  min={0.5} max={3.0} step={0.1} unit="dB"
-                />
-              </div>
-              <div class="fb-row">
-                <label class="fb-label">Max bands</label>
-                <NumberInput
-                  value={maxBands()}
-                  onChange={(v) => setMaxBands(Math.round(v))}
-                  min={1} max={60} step={1} precision={0}
-                />
-              </div>
-              <div class="fb-row">
-                <label class="fb-label">Range</label>
-                <span class="align-range-info">{formatFreq(peqRange()[0])}–{formatFreq(peqRange()[1])} Hz</span>
+              <div class="peq-grid">
+                <div class="fb-row">
+                  <label class="fb-label">Tolerance</label>
+                  <NumberInput
+                    value={tolerance()}
+                    onChange={setTolerance}
+                    min={0.5} max={3.0} step={0.1} unit="dB"
+                  />
+                </div>
+                <div class="fb-row">
+                  <label class="fb-label">Max bands</label>
+                  <NumberInput
+                    value={maxBands()}
+                    onChange={(v) => setMaxBands(Math.round(v))}
+                    min={1} max={60} step={1} precision={0}
+                  />
+                </div>
               </div>
               <div class="peq-buttons-row">
+                <span class="align-range-info">{formatFreq(peqRange()[0])}–{formatFreq(peqRange()[1])} Hz</span>
                 <button
                   class="tb-btn primary"
                   onClick={handleOptimizePeq}
@@ -1050,10 +1088,10 @@ function AutoAlignTab() {
                 >
                   {computing() ? "Optimizing..." : "Optimize PEQ"}
                 </button>
+                <Show when={peqBands().length > 0}>
+                  <button class="tb-btn" onClick={handleClearPeq}>Clear</button>
+                </Show>
               </div>
-              <Show when={peqBands().length > 0}>
-                <button class="tb-btn" onClick={handleClearPeq}>Clear</button>
-              </Show>
               <Show when={peqError()}>
                 <div class="align-error">{peqError()}</div>
               </Show>
@@ -1072,9 +1110,17 @@ function AutoAlignTab() {
             <div class="align-block fir-block">
               <div class="fb-header">
                 <span class="fb-title">Cross Section</span>
-              </div>
-              <div class="align-status" style={{ "font-size": "10px", "color": "var(--text-secondary)" }}>
-                Filters applied to corrected curve. Makeup below target generated automatically.
+                <label class="fb-checkbox" title="Hybrid phase: min-phase correction + linear-phase filter" style={{ "margin-left": "auto" }}>
+                  <input
+                    type="checkbox"
+                    checked={exportHybridPhase()}
+                    onChange={(e) => {
+                      setExportHybridPhase(e.currentTarget.checked);
+                      handleOptimizePeq();
+                    }}
+                  />
+                  Hybrid-&#966;
+                </label>
               </div>
               <Show when={band()?.crossNormDb}>
                 <div class="align-status" style={{ "font-size": "10px", "margin-top": "2px" }}>
@@ -1221,14 +1267,21 @@ function ExportTab() {
     !f || f.linear_phase || f.filter_type === "Gaussian";
 
   const bandPhaseLabel = (b: BandState) => {
+    if (exportHybridPhase() && b.measurement) return "Hybrid-\u03C6";
     if (!b.target) return "Linear";
     const lin = isFilterLinear(b.target.high_pass) && isFilterLinear(b.target.low_pass);
     return lin ? "Linear" : "Min-\u03C6";
   };
 
   const bandPhaseIsLinear = (b: BandState) => {
+    if (exportHybridPhase() && b.measurement) return false; // hybrid: not linear
     if (!b.target) return true;
     return isFilterLinear(b.target.high_pass) && isFilterLinear(b.target.low_pass);
+  };
+
+  const bandPhaseColor = (b: BandState) => {
+    if (exportHybridPhase() && b.measurement) return "#60A5FA"; // blue for hybrid
+    return bandPhaseIsLinear(b) ? "#22C55E" : "#FF9F43";
   };
 
   function formatFilterInfo(b: BandState): string {
@@ -1255,7 +1308,9 @@ function ExportTab() {
   }
 
 
-  // Core: generate FIR impulse for a band, return impulse array
+  // Core: generate FIR impulse for a band, return impulse array.
+  // Export is ALWAYS target + PEQ (model FIR), regardless of hybrid strategy.
+  // Hybrid only affects PEQ optimization stage, not FIR generation.
   async function generateBandImpulse(b: BandState): Promise<number[]> {
     const sr = exportSampleRate();
     const taps = exportTaps();
@@ -1325,7 +1380,8 @@ function ExportTab() {
       const sr = exportSampleRate();
       const fileName = bandFileName(b);
       const dir = projectDir();
-      const defPath = dir ? `${dir}/${fileName}` : fileName;
+      if (dir) await invoke("ensure_dir", { path: `${dir}/export` }).catch(() => {});
+      const defPath = dir ? `${dir}/export/${fileName}` : fileName;
 
       const path = await save({
         defaultPath: defPath,
@@ -1389,7 +1445,7 @@ function ExportTab() {
           <Show when={band()}>
             {(b) => (
               <>
-                <span class="export-phase-badge" style={{ color: bandPhaseIsLinear(b()) ? "#22C55E" : "#FF9F43" }}>
+                <span class="export-phase-badge" style={{ color: bandPhaseColor(b()) }}>
                   {bandPhaseLabel(b())}
                 </span>
                 <span style={{ "font-size": "10px", color: "var(--text-secondary)", "font-family": "var(--mono)" }}>

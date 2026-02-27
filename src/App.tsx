@@ -56,7 +56,7 @@ function App() {
     document.title = `PhaseForge — ${name}${dirty ? " *" : ""}`;
   });
 
-  const [panelHeight, setPanelHeight] = createSignal(220);
+  const [panelHeight, setPanelHeight] = createSignal(150);
   const [impulseRatio, setImpulseRatio] = createSignal(0.35); // 35% для impulse plot
 
   // Auto-height for Export tab:
@@ -83,7 +83,7 @@ function App() {
     const onMove = (ev: MouseEvent) => {
       if (!dragging) return;
       const delta = startY - ev.clientY;
-      setPanelHeight(Math.max(100, Math.min(500, startH + delta)));
+      setPanelHeight(Math.max(80, Math.min(500, startH + delta)));
     };
     const onUp = () => {
       dragging = false;
@@ -138,7 +138,7 @@ function App() {
       <div class="top-bar">
         <img src="/logo-icon.png" class="top-logo-icon" alt="" />
         <span class="top-logo">PhaseForge</span>
-        <span class="top-version">v0.1.0-b66</span>
+        <span class="top-version">v0.1.0-b78</span>
         <div class="top-sep" />
         <FileMenu />
         <span class="top-project-name" title={currentProjectPath() ?? "Untitled"}>
