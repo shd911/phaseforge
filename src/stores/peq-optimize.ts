@@ -1,9 +1,9 @@
 // ---------------------------------------------------------------------------
 // PEQ Auto-Fit shared store — extracted from ControlPanel.tsx (b82.06)
 // ---------------------------------------------------------------------------
-import { createSignal } from "solid-js";
+import { createSignal, batch } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
-import type { PeqConfig, PeqResult } from "../lib/types";
+import type { PeqBand, PeqConfig, PeqResult } from "../lib/types";
 import {
   activeBand,
   appState,
@@ -46,9 +46,14 @@ async function optimizeBand(b: BandState): Promise<PeqResult> {
   const meas = b.measurement!;
   const fLow = b.target?.high_pass?.freq_hz ?? 20;
   const fHigh = b.target?.low_pass?.freq_hz ?? 20000;
+  // adaptive passband for refOffset (matches FrequencyPlot autoRef)
+  const pbLow = Math.max(20, fLow * 1.5);
+  const pbHigh = Math.min(20000, fHigh * 0.7);
+  const refLow = pbLow < pbHigh ? pbLow : 200;
+  const refHigh = pbLow < pbHigh ? pbHigh : 2000;
   let refOffset = 0, count = 0;
   for (let i = 0; i < meas.freq.length; i++) {
-    if (meas.freq[i] >= 200 && meas.freq[i] <= 2000) {
+    if (meas.freq[i] >= refLow && meas.freq[i] <= refHigh) {
       refOffset += meas.magnitude[i]; count++;
     }
   }
@@ -106,18 +111,21 @@ export async function handleOptimizeAll() {
   if (eligible.length === 0) return;
   setComputing(true);
   setPeqError(null);
-  let lastErr: number | null = null;
-  let lastIters: number | null = null;
   try {
+    // 1. Compute ALL results first (no store writes during loop)
+    const results: { id: string; peqBands: PeqBand[]; maxErr: number; iters: number }[] = [];
     for (const b of eligible) {
       const result = await optimizeBand(b);
-      setBandPeqBands(b.id, result.bands);
-      lastErr = result.max_error_db;
-      lastIters = result.iterations;
+      results.push({ id: b.id, peqBands: result.bands, maxErr: result.max_error_db, iters: result.iterations });
     }
-    setMaxErr(lastErr);
-    setIters(lastIters);
-    setSelectedPeqIdx(null);
+    // 2. Apply all at once → single reactive update
+    batch(() => {
+      for (const r of results) setBandPeqBands(r.id, r.peqBands);
+      const last = results[results.length - 1];
+      setMaxErr(last.maxErr);
+      setIters(last.iters);
+      setSelectedPeqIdx(null);
+    });
   } catch (e) {
     setPeqError(String(e));
   } finally {
