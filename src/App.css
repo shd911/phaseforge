@@ -137,6 +137,23 @@ body {
 }
 .tb-btn.primary:hover { background: var(--accent-hover); }
 
+.tb-hybrid {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+.tb-hybrid input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--accent, #4A9EFF);
+}
+.tb-hybrid:hover { color: var(--text-primary); }
+
 .tb-label {
   font-size: 11px;
   color: var(--text-secondary);
@@ -2194,3 +2211,14 @@ body {
 .xo-btn-apply:hover {
   opacity: 0.85;
 }
+
+/* --- Strategy toggle (b82.06) --- */
+.strategy-toggle { display: flex; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+.strategy-btn { padding: 2px 10px; font-size: 11px; font-weight: 500; border: none; background: transparent; color: var(--text-secondary); cursor: pointer; }
+.strategy-btn:first-child { border-right: 1px solid var(--border); }
+.strategy-btn.active { background: var(--accent-dim); color: #fff; }
+
+/* --- PEQ Auto-Fit section in sidebar (b82.06) --- */
+.peq-autofit-section { padding: 6px 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.peq-autofit-section .peq-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 6px; }
+.peq-autofit-section .peq-buttons-row { display: flex; align-items: center; gap: 4px; margin-top: 4px; }

@@ -13,6 +13,14 @@ import {
   removePeqBand,
   exportHybridPhase,
 } from "../stores/bands";
+import NumberInput from "./NumberInput";
+import {
+  tolerance, setTolerance,
+  maxBands, setMaxBands,
+  computing, peqError, maxErr, iters,
+  peqRange, formatFreq,
+  handleOptimizePeq, handleClearPeq,
+} from "../stores/peq-optimize";
 
 const CORRECTED_COLOR = "#22C55E";
 const TARGET_COLOR = "#FFD700";
@@ -89,6 +97,39 @@ export default function PeqSidebar() {
           title="Add PEQ band"
         >+</button>
       </div>
+
+      {/* PEQ Auto-Fit (b82.06) */}
+      <Show when={band()?.measurement}>
+        <div class="peq-autofit-section">
+          <div class="peq-grid">
+            <div class="fb-row">
+              <label class="fb-label">Tolerance</label>
+              <NumberInput value={tolerance()} onChange={setTolerance} min={0.5} max={3.0} step={0.1} unit="dB" />
+            </div>
+            <div class="fb-row">
+              <label class="fb-label">Max bands</label>
+              <NumberInput value={maxBands()} onChange={(v: number) => setMaxBands(Math.round(v))} min={1} max={60} step={1} precision={0} />
+            </div>
+          </div>
+          <div class="peq-buttons-row">
+            <span class="align-range-info">{formatFreq(peqRange()[0])}{"\u2013"}{formatFreq(peqRange()[1])} Hz</span>
+            <button class="tb-btn primary" onClick={handleOptimizePeq} disabled={computing()}>
+              {computing() ? "..." : "Optimize"}
+            </button>
+            <Show when={peqBands().length > 0}>
+              <button class="tb-btn" onClick={handleClearPeq}>Clear</button>
+            </Show>
+          </div>
+          <Show when={peqError()}><div class="align-error">{peqError()}</div></Show>
+          <Show when={peqBands().length > 0}>
+            <div class="align-status">
+              {peqBands().length} band{peqBands().length > 1 ? "s" : ""}
+              {maxErr() != null ? ` \u00B7 max: ${maxErr()!.toFixed(1)}dB` : ""}
+              {iters() != null ? ` \u00B7 ${iters()}it` : ""}
+            </div>
+          </Show>
+        </div>
+      </Show>
 
       {/* PEQ Table */}
       <Show when={peqBands().length > 0}>

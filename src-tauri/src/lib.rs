@@ -244,15 +244,15 @@ fn compute_peq_complex(
 #[tauri::command]
 fn compute_cross_section(
     freq: Vec<f64>,
-    meas_mag: Vec<f64>,
-    target_mag: Vec<f64>,
-    peq_correction: Vec<f64>,
+    _meas_mag: Vec<f64>,
+    _target_mag: Vec<f64>,
+    _peq_correction: Vec<f64>,
     high_pass: Option<target::FilterConfig>,
     low_pass: Option<target::FilterConfig>,
 ) -> Result<(Vec<f64>, Vec<f64>, f64), String> {
     let n = freq.len();
-    if n == 0 || meas_mag.len() != n || target_mag.len() != n {
-        return Err("cross_section: length mismatch".into());
+    if n == 0 {
+        return Err("cross_section: empty freq".into());
     }
 
     // Step 1: compute user-specified filter response (as-is)
@@ -265,34 +265,18 @@ fn compute_cross_section(
         target::apply_filter_public(&mut filt_mag, &mut filt_phase, &freq, lp, true);
     }
 
-    // Step 2: corrected = meas + PEQ + filter
-    // Where corrected < target → apply makeup gain (zero phase here, min-phase in FIR export)
-    let mut makeup_mag = vec![0.0_f64; n];
-    let makeup_phase = vec![0.0_f64; n];
+    // Return filter-only response (no makeup).
+    // Makeup was a preview artifact — FIR export recomputes correction from scratch.
+    // Showing meas + PEQ + filt (without makeup) gives honest preview of what filters do.
 
-    let peq_empty = peq_correction.is_empty();
-    for i in 0..n {
-        let peq_db = if peq_empty { 0.0 } else { peq_correction[i] };
-        let corrected = meas_mag[i] + peq_db + filt_mag[i];
-        let deficit = target_mag[i] - corrected;
-        if deficit > 0.0 {
-            makeup_mag[i] = deficit;
-        }
-    }
-
-    // Total correction = user filter + makeup
-    let total_mag: Vec<f64> = (0..n).map(|i| filt_mag[i] + makeup_mag[i]).collect();
-    let total_phase: Vec<f64> = (0..n).map(|i| filt_phase[i] + makeup_phase[i]).collect();
-
-    // Normalization estimate: peak of total correction = how much FIR will scale down
-    let norm_db = total_mag.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    // Normalization estimate: peak of filter correction
+    let norm_db = filt_mag.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
     let norm_db = if norm_db.is_finite() && norm_db > 0.0 { norm_db } else { 0.0 };
 
-    info!("compute_cross_section: {} points, hp={}, lp={}, makeup_pts={}, norm_db={:.1}",
-        n, high_pass.is_some(), low_pass.is_some(),
-        makeup_mag.iter().filter(|&&v| v > 0.0).count(), norm_db);
+    info!("compute_cross_section: {} points, hp={}, lp={}, norm_db={:.1}",
+        n, high_pass.is_some(), low_pass.is_some(), norm_db);
 
-    Ok((total_mag, total_phase, norm_db))
+    Ok((filt_mag, filt_phase, norm_db))
 }
 
 // ---------------------------------------------------------------------------
@@ -370,7 +354,7 @@ pub fn run() {
         )
         .init();
 
-    info!("PhaseForge v0.1.0-b80 starting...");
+    info!("PhaseForge v0.1.0-b82 starting...");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())

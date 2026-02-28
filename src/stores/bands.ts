@@ -263,20 +263,8 @@ export function moveBand(fromIdx: number, toIdx: number) {
 // Глобальные toggle-и отображения
 // ---------------------------------------------------------------------------
 
-export function togglePhase() {
-  setState("showPhase", !state.showPhase);
-  markDirty();
-}
-
-export function toggleMag() {
-  setState("showMag", !state.showMag);
-  markDirty();
-}
-
-export function toggleTarget() {
-  setState("showTarget", !state.showTarget);
-  markDirty();
-}
+// togglePhase/toggleMag/toggleTarget removed in b82.06
+// showMag, showPhase, showTarget are always true
 
 // ---------------------------------------------------------------------------
 // Per-band: measurement
@@ -673,7 +661,7 @@ export function setBandCrossNormDb(bandId: string, val: number) {
 // Active tab (shared between ControlPanel ↔ App.tsx bottom panel)
 // ---------------------------------------------------------------------------
 
-export type ActiveTab = "measurements" | "target" | "align" | "export";
+export type ActiveTab = "measurements" | "target" | "export";
 export const [activeTab, setActiveTab] = createSignal<ActiveTab>("measurements");
 
 // ---------------------------------------------------------------------------

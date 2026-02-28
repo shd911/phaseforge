@@ -4,11 +4,11 @@ import {
   appState,
   activeBand,
   isSum,
-  togglePhase,
-  toggleMag,
-  toggleTarget,
   isDirty,
+  exportHybridPhase,
+  setExportHybridPhase,
 } from "./stores/bands";
+import { handleOptimizePeq, handleOptimizeAll, computing } from "./stores/peq-optimize";
 import { saveProject, saveProjectAs, loadProject, newProject, currentProjectPath, projectName } from "./lib/project-io";
 import FileMenu from "./components/FileMenu";
 import FrequencyPlot from "./components/FrequencyPlot";
@@ -127,8 +127,8 @@ function App() {
 
   // Показывать ли нижний plot: не SUM и есть активная полоса
   const showBottomPlot = () => !isSum();
-  // На вкладке align — показываем PEQ Response вместо Impulse
-  const showPeqPlot = () => activeTab() === "align";
+  // На вкладке target — показываем PEQ Response вместо Impulse
+  const showPeqPlot = () => activeTab() === "target";
   // На вкладке export — показываем ExportPlot + ExportImpulsePlot
   const showExportPlot = () => activeTab() === "export";
 
@@ -138,7 +138,7 @@ function App() {
       <div class="top-bar">
         <img src="/logo-icon.png" class="top-logo-icon" alt="" />
         <span class="top-logo">PhaseForge</span>
-        <span class="top-version">v0.1.0-b80</span>
+        <span class="top-version">v0.1.0-b82.06</span>
         <div class="top-sep" />
         <FileMenu />
         <span class="top-project-name" title={currentProjectPath() ?? "Untitled"}>
@@ -150,21 +150,22 @@ function App() {
           <span class="top-project-dirty">(modified)</span>
         </Show>
         <div class="top-sep" />
+        <div class="strategy-toggle">
+          <button
+            class={`strategy-btn ${!exportHybridPhase() ? "active" : ""}`}
+            onClick={() => { if (exportHybridPhase()) { setExportHybridPhase(false); handleOptimizeAll(); } }}
+          >Standard</button>
+          <button
+            class={`strategy-btn ${exportHybridPhase() ? "active" : ""}`}
+            onClick={() => { if (!exportHybridPhase()) { setExportHybridPhase(true); handleOptimizeAll(); } }}
+          >Hybrid</button>
+        </div>
         <button
-          class={`tb-btn ${appState.showMag ? "active" : ""}`}
-          onClick={toggleMag}
-          title="Toggle measurement magnitude"
-        >Mag</button>
-        <button
-          class={`tb-btn ${appState.showPhase ? "active" : ""}`}
-          onClick={togglePhase}
-          title="Toggle phase display"
-        >Phase</button>
-        <button
-          class={`tb-btn ${appState.showTarget ? "active" : ""}`}
-          onClick={toggleTarget}
-          title="Toggle target curve"
-        >Target</button>
+          class="tb-btn primary"
+          onClick={handleOptimizeAll}
+          disabled={computing()}
+          title="Optimize PEQ for all bands"
+        >{computing() ? "..." : "Optimize All"}</button>
         <div class="top-sep" />
         <span class="top-info">{infoText()}</span>
       </div>

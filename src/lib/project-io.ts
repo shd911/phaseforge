@@ -338,15 +338,16 @@ async function restoreState(project: ProjectFile, projDir: string | null) {
   const newState: AppState = {
     bands,
     activeBandId: project.active_band_id,
-    showPhase: project.show_phase,
-    showMag: project.show_mag,
-    showTarget: project.show_target,
+    showPhase: true,   // always visible (b82.06)
+    showMag: true,     // always visible (b82.06)
+    showTarget: true,  // always visible (b82.06)
     nextBandNum: project.next_band_num,
   };
   resetAppState(newState);
 
   // Restore signals
-  setActiveTab(project.active_tab as any);
+  const savedTab = project.active_tab === "align" ? "target" : project.active_tab;
+  setActiveTab(savedTab as any);
   setExportSampleRate(project.export_sample_rate);
   setExportTaps(project.export_taps);
   setExportWindow(project.export_window as WindowType);
@@ -567,13 +568,21 @@ export async function saveProjectAs(): Promise<void> {
 
   // 4. Copy files from old project folder (if exists)
   const oldDir = projectDir();
+  console.log("[SaveAs] oldDir:", oldDir, "newDir:", newDir);
   if (oldDir && oldDir !== newDir) {
     for (const sub of ["inbox", "target", "export"]) {
-      await invoke("copy_dir_contents", {
-        sourceDir: `${oldDir}/${sub}`,
-        destDir: `${newDir}/${sub}`,
-      }).catch(() => {}); // ok if source doesn't exist
+      try {
+        const copied = await invoke<number>("copy_dir_contents", {
+          sourceDir: `${oldDir}/${sub}`,
+          destDir: `${newDir}/${sub}`,
+        });
+        if (copied > 0) console.log(`[SaveAs] Copied ${copied} files: ${sub}/`);
+      } catch (e) {
+        console.warn(`[SaveAs] Failed to copy ${sub}/:`, e);
+      }
     }
+  } else if (!oldDir) {
+    console.warn("[SaveAs] No previous projectDir — skipping file copy");
   }
 
   // 5. Update project signals

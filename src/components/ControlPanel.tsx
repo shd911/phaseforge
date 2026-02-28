@@ -1,5 +1,5 @@
 import { createSignal, createEffect, on, Show } from "solid-js";
-import type { FilterType, Measurement, MergeConfig, MergeResult, PeqConfig, PeqResult, PeqBand, FirConfig, FirResult, WindowType, PhaseMode } from "../lib/types";
+import type { FilterType, Measurement, MergeConfig, MergeResult, PeqBand, FirConfig, FirResult, WindowType, PhaseMode } from "../lib/types";
 import NumberInput from "./NumberInput";
 import { MEASUREMENT_COLORS } from "../lib/types";
 import {
@@ -30,14 +30,10 @@ import {
   renameBand,
   toggleBandFloorBounce,
   updateBandFloorBounceField,
-  setBandPeqBands,
-  clearBandPeqBands,
   setBandFirResult,
   setBandMeasurementFile,
   activeTab,
   setActiveTab,
-  selectedPeqIdx,
-  setSelectedPeqIdx,
   exportSampleRate,
   setExportSampleRate,
   exportTaps,
@@ -45,8 +41,6 @@ import {
   exportWindow,
   setExportWindow,
   exportHybridPhase,
-  setExportHybridPhase,
-  setPlotShowOnly,
 } from "../stores/bands";
 import type { PresetName, SmoothingMode, MergeSource, BandState } from "../stores/bands";
 import { invoke } from "@tauri-apps/api/core";
@@ -79,10 +73,6 @@ export default function ControlPanel() {
           onClick={() => setTab("target")}
         >Target</button>
         <button
-          class={`ctrl-tab ${tab() === "align" ? "active" : ""}`}
-          onClick={() => setTab("align")}
-        >Auto Align</button>
-        <button
           class={`ctrl-tab ${tab() === "export" ? "active" : ""}`}
           onClick={() => setTab("export")}
         >Export</button>
@@ -94,9 +84,6 @@ export default function ControlPanel() {
         </Show>
         <Show when={tab() === "target"}>
           <FiltersTab />
-        </Show>
-        <Show when={tab() === "align"}>
-          <AutoAlignTab />
         </Show>
         <Show when={tab() === "export"}>
           <ExportTab />
@@ -116,6 +103,8 @@ function FiltersTab() {
   const enabled = () => band()?.targetEnabled ?? false;
   const inverted = () => band()?.inverted ?? false;
   const bandId = () => band()?.id;
+
+  // PEQ Auto-Fit moved to peq-optimize.ts + PeqSidebar.tsx (b82.06)
 
   async function handleExportTarget() {
     const b = band();
@@ -275,6 +264,8 @@ function FiltersTab() {
           }}
           onChange={(c) => { const id = bandId(); if (id) setBandHighShelf(id, c); }}
         />
+
+        {/* PEQ Auto-Fit + Cross Section moved to PeqSidebar (b82.06) */}
       </div>
     </Show>
   );
@@ -800,412 +791,6 @@ function SpliceSlider() {
       />
       <span class="splice-value">{src()?.config.splice_freq ?? 300}</span>
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Auto Align Tab — PEQ auto-fitting + FIR generation
-// ---------------------------------------------------------------------------
-
-function AutoAlignTab() {
-  const band = () => activeBand();
-  const m = () => band()?.measurement;
-  const target = () => band()?.target;
-  const peqBands = () => band()?.peqBands ?? [];
-  const firResult = () => band()?.firResult ?? null;
-
-  const [tolerance, setTolerance] = createSignal(1.0);
-  const [maxBands, setMaxBands] = createSignal(20);
-  const [computing, setComputing] = createSignal(false);
-  const [peqError, setPeqError] = createSignal<string | null>(null);
-  const [maxErr, setMaxErr] = createSignal<number | null>(null);
-  const [iters, setIters] = createSignal<number | null>(null);
-  // Index of uncommitted (newly added) PEQ band, null = all committed
-  const [pendingPeqIdx, setPendingPeqIdx] = createSignal<number | null>(null);
-
-  // FIR state
-  const [firSampleRate, setFirSampleRate] = createSignal(48000);
-  const [firTaps, setFirTaps] = createSignal(65536);
-  const [firWindow, setFirWindow] = createSignal<WindowType>("Blackman");
-  const [firPhaseMode, setFirPhaseMode] = createSignal<PhaseMode>("MinimumPhase");
-  const [firGenerating, setFirGenerating] = createSignal(false);
-  const [firError, setFirError] = createSignal<string | null>(null);
-  const [recTaps, setRecTaps] = createSignal<number | null>(null);
-
-  // Crossover range from target HP/LP
-  const crossoverRange = (): [number, number] => {
-    const t = target();
-    const fLow = t?.high_pass?.freq_hz ?? 20;
-    const fHigh = t?.low_pass?.freq_hz ?? 20000;
-    return [fLow, fHigh];
-  };
-
-  async function handleOptimizePeq() {
-    const b = band();
-    if (!b || !b.measurement) return;
-
-    setComputing(true);
-    setPeqError(null);
-    try {
-      const meas = b.measurement;
-      const [fLow, fHigh] = crossoverRange();
-
-      // Evaluate the main Target Curve (same as FIR uses)
-      // Auto-reference: mean measurement magnitude 200–2000 Hz
-      let refOffset = 0, count = 0;
-      for (let i = 0; i < meas.freq.length; i++) {
-        if (meas.freq[i] >= 200 && meas.freq[i] <= 2000) {
-          refOffset += meas.magnitude[i]; count++;
-        }
-      }
-      refOffset = count > 0 ? refOffset / count : 0;
-
-      const targetCurve = JSON.parse(JSON.stringify(b.target));
-      targetCurve.reference_level_db += refOffset;
-
-      const targetResp = await invoke<{ magnitude: number[]; phase: number[] }>("evaluate_target", {
-        target: targetCurve, freq: meas.freq,
-      });
-
-      // Unified LMA optimizer: covers both in-band and above-LP in one pass.
-      // Hybrid: full 20-20k range (all frequencies equally important)
-      // Standard: from 3 octaves below HP to 20 kHz
-      const isHybrid = exportHybridPhase();
-      const peqLow = isHybrid ? 20 : Math.max(20, fLow / 8);
-      const peqHigh = 20000;
-      const config: PeqConfig = {
-        max_bands: maxBands(),
-        tolerance_db: tolerance(),
-        peak_bias: isHybrid ? 1.0 : 1.5,
-        // Hybrid: no boost/cut limits — PEQ must flatten measurement completely.
-        // Standard: conservative limits (boost 6 dB, cut 18 dB).
-        max_boost_db: isHybrid ? 60.0 : 6.0,
-        max_cut_db: isHybrid ? 60.0 : 18.0,
-        freq_range: [peqLow, peqHigh],
-        hybrid: isHybrid,
-      };
-
-      const result = await invoke<PeqResult>("auto_peq_lma", {
-        freq: meas.freq,
-        measurementMag: meas.magnitude,
-        targetMag: targetResp.magnitude,  // main Target Curve
-        config,
-        hpFreq: fLow,
-        lpFreq: fHigh,
-      });
-
-      // Replace all bands (single unified result)
-      setBandPeqBands(b.id, result.bands);
-      setMaxErr(result.max_error_db);
-      setIters(result.iterations);
-      setSelectedPeqIdx(null);
-      setPendingPeqIdx(null);
-      // Show only corrected curve on FrequencyPlot after optimization
-      setPlotShowOnly(["corrected"]);
-    } catch (e) {
-      setPeqError(String(e));
-    } finally {
-      setComputing(false);
-    }
-  }
-
-  function handleClearPeq() {
-    const b = band();
-    if (b) clearBandPeqBands(b.id);
-    setMaxErr(null);
-    setSelectedPeqIdx(null);
-    setPendingPeqIdx(null);
-  }
-
-  // FIR: update recommended taps
-  async function updateRecTaps(sr?: number) {
-    const sampleRate = sr ?? firSampleRate();
-    const [fLow] = crossoverRange();
-    try {
-      const rec = await invoke<number>("recommend_fir_taps", {
-        lowestFreq: fLow,
-        sampleRate: sampleRate,
-      });
-      setRecTaps(rec);
-    } catch (_) {
-      setRecTaps(null);
-    }
-  }
-
-  // FIR: generate
-  async function handleGenerateFir() {
-    const b = band();
-    if (!b || !b.measurement) return;
-
-    setFirGenerating(true);
-    setFirError(null);
-    try {
-      const meas = b.measurement;
-      let measMag = meas.magnitude;
-
-      // Apply smoothing if set
-      if (b.settings?.smoothing && b.settings.smoothing !== "off") {
-        const fractionMap: Record<string, number> = {
-          "1/3": 1/3, "1/6": 1/6, "1/12": 1/12, "1/24": 1/24, "var": 0,
-        };
-        const frac = fractionMap[b.settings.smoothing];
-        const smoothConfig = frac === 0
-          ? { variable: true, fixed_fraction: null }
-          : { variable: false, fixed_fraction: frac };
-        measMag = await invoke<number[]>("get_smoothed", {
-          freq: meas.freq, magnitude: meas.magnitude, config: smoothConfig,
-        });
-      }
-
-      // Auto-reference: mean measurement 200-2000 Hz
-      let refOffset = 0, count = 0;
-      for (let i = 0; i < meas.freq.length; i++) {
-        if (meas.freq[i] >= 200 && meas.freq[i] <= 2000) {
-          refOffset += measMag[i]; count++;
-        }
-      }
-      refOffset = count > 0 ? refOffset / count : 0;
-
-      const targetCurve = JSON.parse(JSON.stringify(b.target));
-      targetCurve.reference_level_db += refOffset;
-
-      const targetResp = await invoke<{ magnitude: number[]; phase: number[] }>("evaluate_target", {
-        target: targetCurve, freq: meas.freq,
-      });
-
-      // PEQ correction (if any)
-      let peqCorrection: number[] = [];
-      if (b.peqBands.length > 0) {
-        peqCorrection = await invoke<number[]>("compute_peq_response", {
-          freq: meas.freq, bands: b.peqBands,
-        });
-      }
-
-      const [fLow, fHigh] = crossoverRange();
-      const firConfig: FirConfig = {
-        taps: firTaps(),
-        sample_rate: firSampleRate(),
-        max_boost_db: 18.0,
-        noise_floor_db: -60.0,
-        window: firWindow(),
-        phase_mode: firPhaseMode(),
-      };
-
-      const ipcName = firPhaseMode() === "HybridPhase" ? "generate_hybrid_fir" : "generate_fir";
-      const result = await invoke<FirResult>(ipcName, {
-        freq: meas.freq,
-        measMag: measMag,
-        targetMag: targetResp.magnitude,
-        peqCorrection: peqCorrection,
-        config: firConfig,
-        crossoverRange: [fLow, fHigh],
-      });
-
-      setBandFirResult(b.id, result);
-    } catch (e) {
-      setFirError(String(e));
-    } finally {
-      setFirGenerating(false);
-    }
-  }
-
-  // FIR: save WAV
-  async function handleSaveWav() {
-    const fir = firResult();
-    const b = band();
-    if (!fir) return;
-    try {
-      const dir = projectDir();
-      const name = b ? driverName(b) : "correction";
-      const win = firWindow();
-      let defPath = `${sanitize(name)}_${fir.sample_rate}_${fir.taps}_${win}.wav`;
-      if (dir) {
-        await invoke("ensure_dir", { path: `${dir}/export` }).catch(() => {});
-        defPath = `${dir}/export/${defPath}`;
-      }
-      const filePath = await save({
-        filters: [{ name: "WAV Audio", extensions: ["wav"] }],
-        defaultPath: defPath,
-      });
-      if (!filePath) return;
-      await invoke("export_fir_wav", {
-        impulse: fir.impulse,
-        sampleRate: fir.sample_rate,
-        path: filePath,
-      });
-    } catch (e) {
-      setFirError(String(e));
-    }
-  }
-
-  function formatFreq(hz: number): string {
-    if (hz >= 1000) return (hz / 1000).toFixed(1) + "k";
-    return Math.round(hz).toString();
-  }
-
-  // PEQ effective range (crossover ±3 oct, clamped)
-  const peqRange = (): [number, number] => {
-    const [lo, hi] = crossoverRange();
-    return [Math.max(20, lo / 8), Math.min(20000, hi * 8)];
-  };
-
-  return (
-    <div class="align-tab">
-      <Show
-        when={m()}
-        fallback={<p class="meas-empty">No measurement loaded. Import a measurement first.</p>}
-      >
-          <div class="align-sections">
-            {/* PEQ Config Block */}
-            <div class="align-block">
-              <div class="fb-header">
-                <span class="fb-title">PEQ Auto-Fit</span>
-              </div>
-              <div class="peq-grid">
-                <div class="fb-row">
-                  <label class="fb-label">Tolerance</label>
-                  <NumberInput
-                    value={tolerance()}
-                    onChange={setTolerance}
-                    min={0.5} max={3.0} step={0.1} unit="dB"
-                  />
-                </div>
-                <div class="fb-row">
-                  <label class="fb-label">Max bands</label>
-                  <NumberInput
-                    value={maxBands()}
-                    onChange={(v) => setMaxBands(Math.round(v))}
-                    min={1} max={60} step={1} precision={0}
-                  />
-                </div>
-              </div>
-              <div class="peq-buttons-row">
-                <span class="align-range-info">{formatFreq(peqRange()[0])}–{formatFreq(peqRange()[1])} Hz</span>
-                <button
-                  class="tb-btn primary"
-                  onClick={handleOptimizePeq}
-                  disabled={computing()}
-                >
-                  {computing() ? "Optimizing..." : "Optimize PEQ"}
-                </button>
-                <Show when={peqBands().length > 0}>
-                  <button class="tb-btn" onClick={handleClearPeq}>Clear</button>
-                </Show>
-              </div>
-              <Show when={peqError()}>
-                <div class="align-error">{peqError()}</div>
-              </Show>
-              <Show when={peqBands().length > 0}>
-                <div class="align-status">
-                  {peqBands().length} band{peqBands().length > 1 ? "s" : ""}
-                  {maxErr() != null ? ` · max err: ${maxErr()!.toFixed(1)} dB` : ""}
-                  {iters() != null ? ` · ${iters()} iter` : ""}
-                </div>
-              </Show>
-            </div>
-
-            {/* PEQ Bands Table moved to PeqSidebar (right of FrequencyPlot) */}
-
-            {/* Cross Section — pure mathematical model, no FIR/taps/window here */}
-            <div class="align-block fir-block">
-              <div class="fb-header">
-                <span class="fb-title">Cross Section</span>
-                <label class="fb-checkbox" title="Hybrid phase: min-phase correction + linear-phase filter" style={{ "margin-left": "auto" }}>
-                  <input
-                    type="checkbox"
-                    checked={exportHybridPhase()}
-                    onChange={(e) => {
-                      setExportHybridPhase(e.currentTarget.checked);
-                      handleOptimizePeq();
-                    }}
-                  />
-                  Hybrid-&#966;
-                </label>
-              </div>
-              <Show when={band()?.crossNormDb}>
-                <div class="align-status" style={{ "font-size": "10px", "margin-top": "2px" }}>
-                  <span style={{ color: "var(--text-secondary)" }}>Normalization: </span>
-                  <span style={{ color: "#F87171", "font-weight": "600" }}>
-                    −{band()!.crossNormDb.toFixed(1)} dB
-                  </span>
-                </div>
-              </Show>
-            </div>
-          </div>
-      </Show>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// FIR Mini Preview — canvas-based impulse preview
-// ---------------------------------------------------------------------------
-
-function FirMiniPreview(props: { result: FirResult }) {
-  let canvasRef: HTMLCanvasElement | undefined;
-
-  createEffect(() => {
-    const fir = props.result;
-    if (!canvasRef || !fir) return;
-
-    const ctx = canvasRef.getContext("2d");
-    if (!ctx) return;
-
-    const w = canvasRef.width;
-    const h = canvasRef.height;
-    const dpr = window.devicePixelRatio || 1;
-
-    // Set canvas size for crisp rendering
-    canvasRef.width = w * dpr;
-    canvasRef.height = h * dpr;
-    ctx.scale(dpr, dpr);
-
-    ctx.fillStyle = "#1a1a20";
-    ctx.fillRect(0, 0, w, h);
-
-    const impulse = fir.impulse;
-    const n = impulse.length;
-    if (n === 0) return;
-
-    // Find peak for normalization
-    const peak = Math.max(...impulse.map(Math.abs));
-    if (peak === 0) return;
-
-    // Draw impulse — downsample for display
-    const displayN = Math.min(n, w * 2); // max 2 samples per pixel
-    const step = n / displayN;
-
-    ctx.strokeStyle = "#4A9EFF";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-
-    const midY = h / 2;
-    for (let i = 0; i < displayN; i++) {
-      const idx = Math.floor(i * step);
-      const x = (i / displayN) * w;
-      const y = midY - (impulse[idx] / peak) * (h * 0.45);
-
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-
-    // Zero line
-    ctx.strokeStyle = "rgba(255,255,255,0.15)";
-    ctx.lineWidth = 0.5;
-    ctx.beginPath();
-    ctx.moveTo(0, midY);
-    ctx.lineTo(w, midY);
-    ctx.stroke();
-  });
-
-  return (
-    <canvas
-      ref={canvasRef}
-      width={240}
-      height={60}
-      class="fir-preview-canvas"
-    />
   );
 }
 
