@@ -40,12 +40,13 @@ export default function ExportPlot() {
   const lastFirData: { freq: number[]; mag: number[]; phase: (number | null)[] } = { freq: [], mag: [], phase: [] };
 
   function takeSnapshot() {
-    if (lastFirData.freq.length === 0) return;
-    const snaps = exportSnapshots();
+    const band = activeBand();
+    if (!band || lastFirData.freq.length === 0) return;
+    const snaps = exportSnapshots(band.id);
     const idx = snaps.length;
     const color = SNAP_COLORS[idx % SNAP_COLORS.length];
     const label = `Snap ${idx + 1}`;
-    setExportSnapshots([...snaps, {
+    setExportSnapshots(band.id, [...snaps, {
       label,
       freq: [...lastFirData.freq],
       mag: [...lastFirData.mag],
@@ -57,7 +58,9 @@ export default function ExportPlot() {
   }
 
   function clearSnapshots() {
-    setExportSnapshots([]);
+    const band = activeBand();
+    if (!band) return;
+    setExportSnapshots(band.id, []);
     rerenderWithSnapshots();
   }
 
@@ -206,7 +209,8 @@ export default function ExportPlot() {
     ];
 
     // Add snapshot overlay series (magnitude + phase for each)
-    const snaps = exportSnapshots();
+    const band = activeBand();
+    const snaps = band ? exportSnapshots(band.id) : [];
     for (const snap of snaps) {
       // Interpolate snapshot data to current freq grid if needed
       const interpolateArr = (srcArr: (number | null)[]): (number | null)[] => {
@@ -397,10 +401,11 @@ export default function ExportPlot() {
       return;
     }
 
-    // Track export FIR signals
+    // Track export FIR signals + per-band snapshots for reactivity
     const sr = exportSampleRate();
     const taps = exportTaps();
     const win = exportWindow();
+    const _snaps = exportSnapshots(band.id); // track per-band snapshots
 
     const target = { ...band.target };
     const peqBands = band.peqBands?.filter((b: PeqBand) => b.enabled) ?? [];
@@ -511,16 +516,24 @@ export default function ExportPlot() {
         </span>
         <span class="impulse-sep" />
         <button class="tb-btn" onClick={takeSnapshot} title="Save current FIR as overlay for comparison">SNAP</button>
-        {exportSnapshots().length > 0 && (
-          <button class="tb-btn" onClick={clearSnapshots} title="Clear all snapshots">CLR</button>
-        )}
-        {exportSnapshots().length > 0 && (
-          <span style={{ "font-size": "9px", "color": "#8b8b96", "margin-left": "4px" }}>
-            {exportSnapshots().map(s => (
-              <span style={{ color: s.color, "margin-right": "6px" }}>{"\u2588"} {s.label}</span>
-            ))}
-          </span>
-        )}
+        {(() => {
+          const b = activeBand();
+          const snaps = b ? exportSnapshots(b.id) : [];
+          return (
+            <>
+              {snaps.length > 0 && (
+                <button class="tb-btn" onClick={clearSnapshots} title="Clear all snapshots">CLR</button>
+              )}
+              {snaps.length > 0 && (
+                <span style={{ "font-size": "9px", "color": "#8b8b96", "margin-left": "4px" }}>
+                  {snaps.map(s => (
+                    <span style={{ color: s.color, "margin-right": "6px" }}>{"\u2588"} {s.label}</span>
+                  ))}
+                </span>
+              )}
+            </>
+          );
+        })()}
         <span class="impulse-sep" />
         <span style={{ "font-size": "10px", "color": "#8b8b96" }}>
           {status() || "Filter Model vs FIR Realization"}

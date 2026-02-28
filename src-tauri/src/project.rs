@@ -172,3 +172,28 @@ pub fn ensure_dir(path: String) -> Result<(), String> {
     std::fs::create_dir_all(&path).map_err(|e| format!("{e}"))?;
     Ok(())
 }
+
+/// Copy all top-level files from source_dir into dest_dir (non-recursive).
+/// Skips subdirectories. Creates dest_dir if it doesn't exist.
+#[tauri::command]
+pub fn copy_dir_contents(source_dir: String, dest_dir: String) -> Result<u32, String> {
+    let src = std::path::Path::new(&source_dir);
+    let dst = std::path::Path::new(&dest_dir);
+    if !src.is_dir() {
+        return Ok(0); // source doesn't exist or isn't a dir — nothing to copy
+    }
+    std::fs::create_dir_all(dst).map_err(|e| format!("Cannot create {}: {e}", dst.display()))?;
+    let mut count = 0u32;
+    for entry in std::fs::read_dir(src).map_err(|e| format!("Read dir error: {e}"))? {
+        let entry = entry.map_err(|e| format!("Dir entry error: {e}"))?;
+        let ft = entry.file_type().map_err(|e| format!("File type error: {e}"))?;
+        if ft.is_file() {
+            let dest_file = dst.join(entry.file_name());
+            std::fs::copy(entry.path(), &dest_file)
+                .map_err(|e| format!("Copy error {}: {e}", entry.path().display()))?;
+            count += 1;
+        }
+    }
+    info!("copy_dir_contents: {} -> {} ({} files)", source_dir, dest_dir, count);
+    Ok(count)
+}

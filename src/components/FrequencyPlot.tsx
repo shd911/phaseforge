@@ -5,8 +5,8 @@ import "uplot/dist/uPlot.min.css";
 import { invoke } from "@tauri-apps/api/core";
 import { MEASUREMENT_COLORS } from "../lib/types";
 import type { Measurement, TargetResponse, FilterType } from "../lib/types";
-import { appState, activeBand, isSum, activeTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase } from "../stores/bands";
-import type { SmoothingMode, BandState } from "../stores/bands";
+import { appState, activeBand, isSum, activeTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots } from "../stores/bands";
+import type { SmoothingMode, BandState, FreqSnapshot } from "../stores/bands";
 import { needAutoFit, setNeedAutoFit } from "../App";
 import { computeFloorBounce } from "../lib/floor-bounce";
 import { openCrossoverDialog, type CrossoverDialogData } from "./CrossoverDialog";
@@ -15,6 +15,9 @@ const TARGET_COLOR = "#FFD700";
 const TARGET_PHASE_COLOR = "#FFD700";
 const CORRECTED_COLOR = "#22C55E"; // green — measurement + PEQ correction
 const SMOOTHED_HALF_OCT_COLOR = "#FF6B6B"; // red — 1/2 oct smoothed measurement (PEQ intermediate target)
+
+// Snapshot overlay colors (muted, distinct from active curves)
+const FREQ_SNAP_COLORS = ["#808080", "#A855F7", "#EC4899", "#14B8A6"];
 
 // Цвета per-band таргетов (светлее основных)
 const TARGET_BAND_COLORS = [
@@ -131,6 +134,31 @@ export default function FrequencyPlot() {
   const [cursorFreq, setCursorFreq] = createSignal("—");
   const [cursorSPL, setCursorSPL] = createSignal("—");
   const [cursorPhase, setCursorPhase] = createSignal("—");
+
+  // Snapshot system: keep last corrected curve for snapshot capture
+  const lastCorrData: { freq: number[]; mag: number[]; phase: (number | null)[] } = { freq: [], mag: [], phase: [] };
+
+  function takeFreqSnapshot() {
+    const band = activeBand();
+    if (!band || lastCorrData.freq.length === 0) return;
+    const snaps = freqSnapshots(band.id);
+    const idx = snaps.length;
+    const color = FREQ_SNAP_COLORS[idx % FREQ_SNAP_COLORS.length];
+    const label = `Snap ${idx + 1}`;
+    setFreqSnapshots(band.id, [...snaps, {
+      label,
+      freq: [...lastCorrData.freq],
+      mag: [...lastCorrData.mag],
+      phase: [...lastCorrData.phase],
+      color,
+    }]);
+  }
+
+  function clearFreqSnapshots() {
+    const band = activeBand();
+    if (!band) return;
+    setFreqSnapshots(band.id, []);
+  }
   const [legendEntries, setLegendEntries] = createStore<LegendEntry[]>([]);
   const [showLegend, setShowLegend] = createSignal(false);
 
@@ -749,6 +777,7 @@ export default function FrequencyPlot() {
     const band = activeBand();
     const bandsSnapshot = JSON.stringify(appState.bands);
     const _tab = activeTab(); // track tab changes (align tab shows extra curves)
+    const _fsnaps = band ? freqSnapshots(band.id) : []; // track per-band snapshots
 
     if (sumMode) {
       renderSumMode(showPhase, showMag, showTarget, bandsSnapshot);
@@ -919,11 +948,11 @@ export default function FrequencyPlot() {
 
           // Stage 2: Full corrected = measurement + PEQ + cross-section
           // Hybrid: amber "Corrected + XO", Standard: green "Corrected"
+          const fullCorrected = result.measurement.magnitude.map(
+            (v: number, i: number) =>
+              v + (peqMag ? peqMag[i] : 0) + (xsMag ? xsMag[i] : 0)
+          );
           if (showMag) {
-            const corrected = result.measurement.magnitude.map(
-              (v: number, i: number) =>
-                v + (peqMag ? peqMag[i] : 0) + (xsMag ? xsMag[i] : 0)
-            );
             const corrColor = isHybrid ? "#F59E0B" : CORRECTED_COLOR;
             const corrLabel = isHybrid ? "Corrected + XO" : "Corrected";
             uSeries.push({
@@ -932,33 +961,46 @@ export default function FrequencyPlot() {
               width: 2,
               scale: "mag",
             });
-            uData.push(corrected);
+            uData.push(fullCorrected);
             legend.push({ label: corrLabel, color: corrColor, dash: false, visible: true, seriesIdx: sIdx, category: "corrected" });
             sIdx++;
           }
 
           // Corrected phase = measurement phase + PEQ phase + cross-section phase
-          if (showPhase && result.measurement.phase) {
-            const correctedPhase = result.measurement.phase.map(
+          let fullCorrectedPhase: number[] | null = null;
+          if (result.measurement.phase) {
+            fullCorrectedPhase = result.measurement.phase.map(
               (v: number, i: number) =>
                 v + (peqPhase ? peqPhase[i] : 0) + (xsPhase ? xsPhase[i] : 0)
             );
-            const phaseColor = isHybrid ? "#F59E0B" : CORRECTED_COLOR;
-            const phaseLabel = isHybrid ? "Corrected + XO" : "Corrected";
-            uSeries.push({
-              label: phaseLabel + " \u00B0",
-              stroke: phaseColor,
-              width: 1.5,
-              dash: [4, 4],
-              scale: "phase",
-            });
-            uData.push(wrapPhase(correctedPhase));
-            legend.push({ label: phaseLabel + " \u00B0", color: phaseColor, dash: true, visible: true, seriesIdx: sIdx, category: "corrected" });
-            sIdx++;
+            if (showPhase) {
+              const phaseColor = isHybrid ? "#F59E0B" : CORRECTED_COLOR;
+              const phaseLabel = isHybrid ? "Corrected + XO" : "Corrected";
+              uSeries.push({
+                label: phaseLabel + " \u00B0",
+                stroke: phaseColor,
+                width: 1.5,
+                dash: [4, 4],
+                scale: "phase",
+              });
+              uData.push(wrapPhase(fullCorrectedPhase));
+              legend.push({ label: phaseLabel + " \u00B0", color: phaseColor, dash: true, visible: true, seriesIdx: sIdx, category: "corrected" });
+              sIdx++;
+            }
           }
+
+          // Save corrected data for snapshot capture (raw, pre-normalization)
+          lastCorrData.freq = result.freq!;
+          lastCorrData.mag = [...fullCorrected];
+          lastCorrData.phase = fullCorrectedPhase ? wrapPhase(fullCorrectedPhase) : [];
         } catch (e) {
           console.warn("Correction computation failed:", e);
         }
+      } else {
+        // No corrected curve — clear snapshot capture data
+        lastCorrData.freq = [];
+        lastCorrData.mag = [];
+        lastCorrData.phase = [];
       }
 
       // Floor bounce
@@ -967,6 +1009,58 @@ export default function FrequencyPlot() {
       if (fb && fb.enabled) {
         const fbResult = computeFloorBounce(fb.speakerHeight, fb.micHeight, fb.distance);
         floorBounceNulls = fbResult.nullFreqs;
+      }
+
+      // --- Snapshot overlays (per-band) ---
+      const snaps = freqSnapshots(band.id);
+      for (const snap of snaps) {
+        const interpolateArr = (srcArr: (number | null)[]): (number | null)[] => {
+          if (snap.freq.length === result.freq!.length && snap.freq[0] === result.freq![0]) {
+            return srcArr;
+          }
+          return result.freq!.map(f => {
+            let lo = 0, hi = snap.freq.length - 1;
+            if (f <= snap.freq[0]) return srcArr[0];
+            if (f >= snap.freq[hi]) return srcArr[hi];
+            while (hi - lo > 1) {
+              const mid = (lo + hi) >> 1;
+              if (snap.freq[mid] <= f) lo = mid; else hi = mid;
+            }
+            const vLo = srcArr[lo], vHi = srcArr[hi];
+            if (vLo == null || vHi == null) return null;
+            const t = (f - snap.freq[lo]) / (snap.freq[hi] - snap.freq[lo]);
+            return (vLo as number) + t * ((vHi as number) - (vLo as number));
+          });
+        };
+
+        const snapMag = interpolateArr(snap.mag as (number | null)[]) as number[];
+        const snapPhase = interpolateArr(snap.phase);
+
+        // Magnitude series
+        uSeries.push({
+          label: `${snap.label} dB`,
+          stroke: snap.color,
+          width: 1.5,
+          dash: [4, 3],
+          scale: "mag",
+        });
+        uData.push(snapMag);
+        legend.push({ label: snap.label, color: snap.color, dash: true, visible: true, seriesIdx: sIdx, category: "corrected" });
+        sIdx++;
+
+        // Phase series (same color, dotted)
+        if (snapPhase.some(v => v != null)) {
+          uSeries.push({
+            label: `${snap.label} \u00B0`,
+            stroke: snap.color,
+            width: 1,
+            dash: [2, 2],
+            scale: "phase",
+          });
+          uData.push(snapPhase as number[]);
+          legend.push({ label: `${snap.label} \u00B0`, color: snap.color, dash: true, visible: true, seriesIdx: sIdx, category: "corrected" });
+          sIdx++;
+        }
       }
 
       // Normalize all mag series to dBr (0 = passband level)
@@ -1543,6 +1637,29 @@ export default function FrequencyPlot() {
           <span class="readout-label">Phase:</span>
           <span class="readout-value">{cursorPhase()}</span>
         </span>
+        {/* Snapshot SNAP/CLR buttons (band mode only) */}
+        <Show when={!isSum()}>
+          <span class="readout-sep" />
+          <button class="tb-btn" onClick={takeFreqSnapshot} title="Snapshot corrected curve for comparison">SNAP</button>
+          {(() => {
+            const b = activeBand();
+            const snaps = b ? freqSnapshots(b.id) : [];
+            return (
+              <>
+                {snaps.length > 0 && (
+                  <button class="tb-btn" onClick={clearFreqSnapshots} title="Clear all snapshots">CLR</button>
+                )}
+                {snaps.length > 0 && (
+                  <span style={{ "font-size": "9px", "color": "#8b8b96", "margin-left": "4px" }}>
+                    {snaps.map(s => (
+                      <span style={{ color: s.color, "margin-right": "6px" }}>{"\u2588"} {s.label}</span>
+                    ))}
+                  </span>
+                )}
+              </>
+            );
+          })()}
+        </Show>
         {/* Легенда per-band — плоский список (не в SUM) */}
         <Show when={showLegend() && !isSum() && legendEntries.length > 0}>
           <span class="readout-sep" />

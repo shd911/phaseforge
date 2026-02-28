@@ -160,6 +160,8 @@ function bandIndex(id: string): number {
 
 export function resetAppState(newState: AppState) {
   setState(reconcile(newState));
+  clearAllExportSnapshots();
+  clearAllFreqSnapshots();
 }
 
 export function activeBand(): BandState | null {
@@ -197,6 +199,9 @@ export function removeBand(id: string) {
   if (state.activeBandId === id) {
     setState("activeBandId", state.bands[0]?.id ?? SUM_ID);
   }
+  // Очищаем снэпшоты удалённой полосы
+  setExportSnapshots(id, []);
+  setFreqSnapshots(id, []);
   markDirty();
 }
 
@@ -717,8 +722,9 @@ export const [exportWindow, setExportWindow] = createSignal<WindowType>("Blackma
 export const [exportHybridPhase, setExportHybridPhase] = createSignal(false);
 
 // ---------------------------------------------------------------------------
-// Export plot snapshots: frozen FIR curves for visual comparison.
-// Stored at module level so they survive ExportPlot unmount/remount.
+// Snapshot overlays: frozen curves for visual A/B comparison.
+// Per-band Maps — each band has its own set of snapshots.
+// Stored at module level so they survive component unmount/remount.
 // ---------------------------------------------------------------------------
 
 export interface ExportSnapshot {
@@ -729,7 +735,49 @@ export interface ExportSnapshot {
   color: string;
 }
 
-export const [exportSnapshots, setExportSnapshots] = createSignal<ExportSnapshot[]>([]);
+// --- Export Plot snapshots (per-band) ---
+const [_exportSnapMap, _setExportSnapMap] = createSignal<Map<string, ExportSnapshot[]>>(new Map());
+
+export function exportSnapshots(bandId: string): ExportSnapshot[] {
+  return _exportSnapMap().get(bandId) ?? [];
+}
+
+export function setExportSnapshots(bandId: string, snaps: ExportSnapshot[]) {
+  const m = new Map(_exportSnapMap());
+  if (snaps.length === 0) m.delete(bandId);
+  else m.set(bandId, snaps);
+  _setExportSnapMap(m);
+}
+
+export function clearAllExportSnapshots() {
+  _setExportSnapMap(new Map());
+}
+
+// --- FrequencyPlot snapshots (per-band, corrected curve) ---
+export interface FreqSnapshot {
+  label: string;
+  freq: number[];
+  mag: number[];
+  phase: (number | null)[];
+  color: string;
+}
+
+const [_freqSnapMap, _setFreqSnapMap] = createSignal<Map<string, FreqSnapshot[]>>(new Map());
+
+export function freqSnapshots(bandId: string): FreqSnapshot[] {
+  return _freqSnapMap().get(bandId) ?? [];
+}
+
+export function setFreqSnapshots(bandId: string, snaps: FreqSnapshot[]) {
+  const m = new Map(_freqSnapMap());
+  if (snaps.length === 0) m.delete(bandId);
+  else m.set(bandId, snaps);
+  _setFreqSnapMap(m);
+}
+
+export function clearAllFreqSnapshots() {
+  _setFreqSnapMap(new Map());
+}
 
 // Export plot Y-scale: persists across ExportPlot unmount/remount.
 // null = not yet set (use auto-range), {min,max} = user has zoomed/scrolled.

@@ -41,10 +41,22 @@ export interface ProjectPromptResult {
 
 let _promptResolve: ((val: ProjectPromptResult | null) => void) | null = null;
 export const [promptVisible, setPromptVisible] = createSignal(false);
+/** "new" = New Project (name + band count), "saveAs" = Save As (name only) */
+export const [promptMode, setPromptMode] = createSignal<"new" | "saveAs">("new");
 
 export function showProjectNamePrompt(): Promise<ProjectPromptResult | null> {
+  setPromptMode("new");
   setPromptVisible(true);
   return new Promise((resolve) => { _promptResolve = resolve; });
+}
+
+/** Show prompt for Save As — only asks for project name, no band count. */
+export function showSaveAsPrompt(): Promise<string | null> {
+  setPromptMode("saveAs");
+  setPromptVisible(true);
+  return new Promise((resolve) => {
+    _promptResolve = (val) => resolve(val?.name ?? null);
+  });
 }
 
 export function resolvePrompt(value: ProjectPromptResult | null) {
@@ -515,25 +527,65 @@ export async function saveProject(): Promise<void> {
   await saveProjectAs();
 }
 
-/** Always show Save dialog. */
+/** Save As: ask name → pick parent folder → create project folder tree → copy files → save. */
 export async function saveProjectAs(): Promise<void> {
-  const defName = projectName() ? `${projectName()}.pfproj` : "project.pfproj";
-  const defPath = projectDir() ? `${projectDir()}/${defName}` : defName;
-  const path = await save({
-    title: "Save Project",
-    filters: FILTERS,
-    defaultPath: defPath,
+  // 1. Ask for new project name
+  const newName = await showSaveAsPrompt();
+  if (!newName) return; // cancelled
+
+  // 2. Pick parent folder
+  const parentDir = await open({
+    title: `Select location for "${newName}"`,
+    directory: true,
+    multiple: false,
   });
-  if (!path) return; // cancelled
+  if (!parentDir) return; // cancelled
+  const parentPath = Array.isArray(parentDir) ? parentDir[0] : parentDir;
 
-  // If saving to a new location, update projectDir/projectName
-  const info = deriveProjectInfo(path);
-  setProjectDir(info.dir);
-  setProjectName(info.name);
+  // 3. Create project folder: parentPath/newName/ + inbox/ + target/ + export/
+  let newDir: string;
+  try {
+    newDir = await invoke<string>("create_project_folder", {
+      parentDir: parentPath,
+      projectName: newName,
+    });
+  } catch (_e) {
+    // Folder may already exist — reuse it
+    const existsPath = `${parentPath}/${newName}`;
+    const exists = await invoke<boolean>("check_path_exists", { path: existsPath });
+    if (exists) {
+      newDir = existsPath;
+      // Ensure subdirectories exist
+      for (const sub of ["inbox", "target", "export"]) {
+        await invoke("ensure_dir", { path: `${newDir}/${sub}` }).catch(() => {});
+      }
+    } else {
+      console.error("Cannot create project folder:", _e);
+      return;
+    }
+  }
 
-  // Copy pending measurements to new location
+  // 4. Copy files from old project folder (if exists)
+  const oldDir = projectDir();
+  if (oldDir && oldDir !== newDir) {
+    for (const sub of ["inbox", "target", "export"]) {
+      await invoke("copy_dir_contents", {
+        sourceDir: `${oldDir}/${sub}`,
+        destDir: `${newDir}/${sub}`,
+      }).catch(() => {}); // ok if source doesn't exist
+    }
+  }
+
+  // 5. Update project signals
+  setProjectDir(newDir);
+  setProjectName(newName);
+
+  // 6. Copy any pending measurements (bands with data but no measurementFile)
   await copyPendingMeasurements();
-  await doSave(path);
+
+  // 7. Save .pfproj inside the new folder
+  const pfprojPath = `${newDir}/${newName}.pfproj`;
+  await doSave(pfprojPath);
 }
 
 async function doSave(path: string): Promise<void> {

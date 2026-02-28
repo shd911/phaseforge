@@ -370,7 +370,7 @@ pub fn run() {
         )
         .init();
 
-    info!("PhaseForge v0.1.0-b78 starting...");
+    info!("PhaseForge v0.1.0-b80 starting...");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -403,6 +403,7 @@ pub fn run() {
             project::copy_file_to_project,
             project::check_path_exists,
             project::ensure_dir,
+            project::copy_dir_contents,
             export::export_target_txt,
             recent::load_recent_projects,
             recent::add_recent_project,
