@@ -143,7 +143,7 @@ const firstBand = createBand(1);
 
 const [state, setState] = createStore<AppState>({
   bands: [firstBand],
-  activeBandId: firstBand.id,
+  activeBandId: SUM_ID,
   showPhase: true,
   showMag: true,
   showTarget: true,

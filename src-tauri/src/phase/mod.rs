@@ -1,5 +1,26 @@
 // Phase engine: group delay, distance computation, delay removal
 
+/// Unwrap phase: remove discontinuities greater than 180 degrees.
+///
+/// Input phase is in degrees (wrapped ±180°). Output is continuous (unwrapped).
+pub fn unwrap_phase(phase_deg: &[f64]) -> Vec<f64> {
+    if phase_deg.is_empty() {
+        return vec![];
+    }
+    let mut unwrapped = vec![phase_deg[0]];
+    for i in 1..phase_deg.len() {
+        let mut diff = phase_deg[i] - phase_deg[i - 1];
+        while diff > 180.0 {
+            diff -= 360.0;
+        }
+        while diff <= -180.0 {
+            diff += 360.0;
+        }
+        unwrapped.push(unwrapped[i - 1] + diff);
+    }
+    unwrapped
+}
+
 /// Compute group delay at each frequency point.
 ///
 /// Group delay τ(f) = -(1/360) · dφ/df  (seconds)
@@ -37,38 +58,56 @@ pub fn compute_group_delay(freq: &[f64], phase_deg: &[f64]) -> Vec<f64> {
     gd
 }
 
-/// Compute average group delay over a frequency range [f_low, f_high].
+/// Estimate propagation delay via linear least-squares fit of unwrapped phase.
 ///
-/// Returns delay in seconds. Uses the 1–4 kHz range by default
-/// where group delay is typically most stable in room measurements.
+/// Fits φ(f) = slope × f + intercept over points in [f_low, f_high].
+/// delay = -slope / 360 (seconds).
+///
+/// Linear fit is more robust than average group delay because it is not
+/// biased by local group delay inflation from room modes or crossover resonances.
 pub fn compute_average_delay(
     freq: &[f64],
     phase_deg: &[f64],
     f_low: f64,
     f_high: f64,
 ) -> f64 {
-    let gd = compute_group_delay(freq, phase_deg);
-    let mut sum = 0.0;
-    let mut count = 0usize;
+    let unwrapped = unwrap_phase(phase_deg);
 
+    // Collect points in range
+    let mut ff = Vec::new();
+    let mut pp = Vec::new();
     for i in 0..freq.len() {
         if freq[i] >= f_low && freq[i] <= f_high {
-            sum += gd[i];
-            count += 1;
+            ff.push(freq[i]);
+            pp.push(unwrapped[i]);
         }
+    }
+    // Fallback: use all points if none in range
+    if ff.is_empty() {
+        for i in 0..freq.len() {
+            ff.push(freq[i]);
+            pp.push(unwrapped[i]);
+        }
+    }
+    if ff.len() < 2 {
+        return 0.0;
     }
 
-    if count > 0 {
-        sum / count as f64
-    } else {
-        // Fallback: average over all points
-        let total: f64 = gd.iter().sum();
-        if gd.is_empty() {
-            0.0
-        } else {
-            total / gd.len() as f64
-        }
+    // Linear least-squares: φ = slope × f + intercept
+    // slope = (n Σ(f×φ) - Σf Σφ) / (n Σ(f²) - (Σf)²)
+    let n = ff.len() as f64;
+    let sum_f: f64 = ff.iter().sum();
+    let sum_p: f64 = pp.iter().sum();
+    let sum_ff: f64 = ff.iter().map(|f| f * f).sum();
+    let sum_fp: f64 = ff.iter().zip(pp.iter()).map(|(f, p)| f * p).sum();
+    let denom = n * sum_ff - sum_f * sum_f;
+    if denom.abs() < 1e-30 {
+        return 0.0;
     }
+    let slope = (n * sum_fp - sum_f * sum_p) / denom;
+
+    // delay = -slope / 360 (slope is dφ/df in deg/Hz)
+    -slope / 360.0
 }
 
 /// Convert delay in seconds to distance in meters.
@@ -88,6 +127,109 @@ pub fn remove_delay(freq: &[f64], phase_deg: &[f64], delay_seconds: f64) -> Vec<
         .zip(phase_deg.iter())
         .map(|(&f, &p)| p + 360.0 * f * delay_seconds)
         .collect()
+}
+
+/// Estimate propagation delay via IR peak detection (IFFT method).
+///
+/// This matches REW's "estimated IR delay" method:
+/// 1. Interpolate measurement onto linear frequency grid
+/// 2. Build complex spectrum from magnitude + phase
+/// 3. IFFT → impulse response
+/// 4. Find peak → delay = peak_index × dt
+pub fn compute_ir_delay(
+    freq: &[f64],
+    magnitude: &[f64],
+    phase_deg: &[f64],
+    sample_rate: f64,
+) -> f64 {
+    use num_complex::Complex64;
+    use rustfft::FftPlanner;
+
+    let n = freq.len();
+    if n < 2 {
+        return 0.0;
+    }
+
+    // FFT size: large enough for good time resolution
+    let fft_size = {
+        let desired = (n * 8).max(8192);
+        desired.next_power_of_two()
+    };
+    let n_bins = fft_size / 2 + 1;
+    let nyquist = sample_rate / 2.0;
+    let df = nyquist / (n_bins - 1) as f64;
+
+    // Interpolate onto linear grid
+    let mut grid_mag = Vec::with_capacity(n_bins);
+    let mut grid_phase = Vec::with_capacity(n_bins);
+    for i in 0..n_bins {
+        let f = i as f64 * df;
+        let (m, p) = interp_at(freq, magnitude, phase_deg, f);
+        grid_mag.push(m);
+        grid_phase.push(p);
+    }
+
+    // Build complex spectrum
+    let mut spectrum: Vec<Complex64> = Vec::with_capacity(fft_size);
+    for i in 0..n_bins {
+        let amp = 10.0_f64.powf(grid_mag[i] / 20.0);
+        let ph_rad = grid_phase[i].to_radians();
+        spectrum.push(Complex64::new(amp * ph_rad.cos(), amp * ph_rad.sin()));
+    }
+    // Mirror for conjugate symmetry
+    for i in 1..(fft_size - n_bins + 1) {
+        let idx = n_bins - 1 - i;
+        spectrum.push(spectrum[idx].conj());
+    }
+
+    // IFFT
+    let mut planner = FftPlanner::<f64>::new();
+    let ifft = planner.plan_fft_inverse(fft_size);
+    ifft.process(&mut spectrum);
+
+    let norm = 1.0 / fft_size as f64;
+    let impulse: Vec<f64> = spectrum.iter().map(|c| c.re * norm).collect();
+
+    // Find peak in first half (causal part)
+    let half = fft_size / 2;
+    let peak_idx = impulse[..half]
+        .iter()
+        .enumerate()
+        .max_by(|(_, a), (_, b)| a.abs().partial_cmp(&b.abs()).unwrap())
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+
+    let dt = 1.0 / sample_rate;
+    peak_idx as f64 * dt
+}
+
+/// Simple linear interpolation of magnitude and phase at frequency `f`.
+fn interp_at(freq: &[f64], mag: &[f64], phase: &[f64], f: f64) -> (f64, f64) {
+    if freq.is_empty() {
+        return (0.0, 0.0);
+    }
+    if f <= freq[0] {
+        return (mag[0], phase[0]);
+    }
+    let last = freq.len() - 1;
+    if f >= freq[last] {
+        return (mag[last], phase[last]);
+    }
+    // Binary search
+    let mut lo = 0;
+    let mut hi = last;
+    while hi - lo > 1 {
+        let mid = (lo + hi) / 2;
+        if freq[mid] <= f {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    let t = (f - freq[lo]) / (freq[hi] - freq[lo]);
+    let m = mag[lo] + t * (mag[hi] - mag[lo]);
+    let p = phase[lo] + t * (phase[hi] - phase[lo]);
+    (m, p)
 }
 
 // ---------------------------------------------------------------------------
@@ -165,6 +307,44 @@ mod tests {
                 (restored[i] - original_phase[i]).abs() < 1e-8,
                 "Phase at f={} should be restored: expected {}, got {}",
                 freq[i], original_phase[i], restored[i]
+            );
+        }
+    }
+
+    #[test]
+    fn unwrap_phase_removes_jumps() {
+        // Wrapped: 170 → -170 (jump +200 → should be +20)
+        let wrapped = vec![170.0, -170.0, -10.0, 170.0, -10.0];
+        let unwrapped = unwrap_phase(&wrapped);
+        // 170 → 190 → 350 → 530 → 710
+        assert!((unwrapped[0] - 170.0).abs() < 1e-10);
+        assert!((unwrapped[1] - 190.0).abs() < 1e-10);
+        assert!((unwrapped[2] - 350.0).abs() < 1e-10);
+        assert!((unwrapped[3] - 530.0).abs() < 1e-10);
+        assert!((unwrapped[4] - 710.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn unwrap_phase_with_delay() {
+        // Simulate 2ms delay wrapped phase at log-spaced freqs
+        let tau = 0.002;
+        let freq: Vec<f64> = (0..100).map(|i| 100.0 + i as f64 * 200.0).collect();
+        let unwrapped_original: Vec<f64> = freq.iter().map(|&f| -360.0 * tau * f).collect();
+        // Wrap to ±180
+        let wrapped: Vec<f64> = unwrapped_original.iter().map(|&p| {
+            let mut w = p % 360.0;
+            if w > 180.0 { w -= 360.0; }
+            if w < -180.0 { w += 360.0; }
+            w
+        }).collect();
+        let restored = unwrap_phase(&wrapped);
+        // Group delay from unwrapped should match tau
+        let gd = compute_group_delay(&freq, &restored);
+        for i in 1..gd.len() - 1 {
+            assert!(
+                (gd[i] - tau).abs() < 0.001,
+                "Group delay at f={} should be ~{}, got {}",
+                freq[i], tau, gd[i]
             );
         }
     }

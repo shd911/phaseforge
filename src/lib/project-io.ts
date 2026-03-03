@@ -317,7 +317,7 @@ async function restoreState(project: ProjectFile, projDir: string | null) {
             try {
               const [newPhase, delay, distance] = await invoke<[number[], number, number]>(
                 "remove_measurement_delay",
-                { freq: m.freq, phase: m.phase }
+                { freq: m.freq, magnitude: m.magnitude, phase: m.phase }
               );
               band.settings.originalPhase = [...m.phase];
               band.measurement.phase = newPhase;

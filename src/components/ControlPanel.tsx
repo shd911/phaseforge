@@ -473,7 +473,7 @@ function MeasurementsTab() {
         try {
           const [newPhase, delay, distance] = await invoke<[number[], number, number]>(
             "remove_measurement_delay",
-            { freq: measurement.freq, phase: measurement.phase }
+            { freq: measurement.freq, magnitude: measurement.magnitude, phase: measurement.phase }
           );
           setBandDelayInfo(b.id, delay, distance);
           markBandDelayRemoved(b.id, newPhase);
@@ -517,7 +517,7 @@ function MeasurementsTab() {
       try {
         const [newPhase, delay, distance] = await invoke<[number[], number, number]>(
           "remove_measurement_delay",
-          { freq: measurement.freq, phase: measurement.phase }
+          { freq: measurement.freq, magnitude: measurement.magnitude, phase: measurement.phase }
         );
         setBandDelayInfo(b.id, delay, distance);
         markBandDelayRemoved(b.id, newPhase);
@@ -537,7 +537,7 @@ function MeasurementsTab() {
         const origPhase = b.settings.originalPhase ?? b.measurement.phase;
         const [newPhase, _delay, _distance] = await invoke<[number[], number, number]>(
           "remove_measurement_delay",
-          { freq: b.measurement.freq, phase: origPhase }
+          { freq: b.measurement.freq, magnitude: b.measurement.magnitude, phase: origPhase }
         );
         markBandDelayRemoved(b.id, newPhase);
       } catch (e) {
@@ -755,6 +755,7 @@ function SpliceSlider() {
         try {
           const [delay, distance] = await invoke<[number, number]>("compute_delay_info", {
             freq: result.measurement.freq,
+            magnitude: result.measurement.magnitude,
             phase: result.measurement.phase,
           });
           setBandDelayInfo(band.id, delay, distance);
@@ -765,7 +766,7 @@ function SpliceSlider() {
             resetBandOriginalPhase(band.id);
             const [newPhase] = await invoke<[number[], number, number]>(
               "remove_measurement_delay",
-              { freq: result.measurement.freq, phase: result.measurement.phase }
+              { freq: result.measurement.freq, magnitude: result.measurement.magnitude, phase: result.measurement.phase }
             );
             markBandDelayRemoved(band.id, newPhase);
           }

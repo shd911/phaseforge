@@ -8,6 +8,7 @@ import {
   moveBand,
   isSum,
 } from "../stores/bands";
+import { projectName } from "../lib/project-io";
 
 export default function BandTabs() {
   const [dragIdx, setDragIdx] = createSignal<number | null>(null);
@@ -74,6 +75,11 @@ export default function BandTabs() {
 
   return (
     <div class="band-tabs" ref={containerRef}>
+      <button
+        class={`band-tab band-tab-sum ${isSum() ? "active" : ""}`}
+        onClick={setActiveBandSum}
+        title="Sum of all bands"
+      >{projectName() ?? "SUM"}</button>
       <For each={appState.bands}>
         {(band, idx) => (
           <button
@@ -98,10 +104,6 @@ export default function BandTabs() {
         )}
       </For>
       <button class="band-tab band-tab-add" onClick={addBand} title="Add band">+</button>
-      <button
-        class={`band-tab band-tab-sum ${isSum() ? "active" : ""}`}
-        onClick={setActiveBandSum}
-      >SUM</button>
     </div>
   );
 }

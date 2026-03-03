@@ -88,13 +88,12 @@ fn evaluate_target_standalone(
 #[tauri::command]
 fn compute_delay_info(
     freq: Vec<f64>,
+    magnitude: Vec<f64>,
     phase: Vec<f64>,
-    f_low: Option<f64>,
-    f_high: Option<f64>,
+    sample_rate: Option<f64>,
 ) -> Result<(f64, f64), String> {
-    let fl = f_low.unwrap_or(1000.0);
-    let fh = f_high.unwrap_or(4000.0);
-    let delay = phase::compute_average_delay(&freq, &phase, fl, fh);
+    let sr = sample_rate.unwrap_or(48000.0);
+    let delay = phase::compute_ir_delay(&freq, &magnitude, &phase, sr);
     let distance = phase::compute_distance(delay);
     info!("compute_delay_info: delay={:.4}ms  dist={:.3}m", delay * 1000.0, distance);
     Ok((delay, distance))
@@ -103,13 +102,12 @@ fn compute_delay_info(
 #[tauri::command]
 fn remove_measurement_delay(
     freq: Vec<f64>,
+    magnitude: Vec<f64>,
     phase: Vec<f64>,
-    f_low: Option<f64>,
-    f_high: Option<f64>,
+    sample_rate: Option<f64>,
 ) -> Result<(Vec<f64>, f64, f64), String> {
-    let fl = f_low.unwrap_or(1000.0);
-    let fh = f_high.unwrap_or(4000.0);
-    let delay = phase::compute_average_delay(&freq, &phase, fl, fh);
+    let sr = sample_rate.unwrap_or(48000.0);
+    let delay = phase::compute_ir_delay(&freq, &magnitude, &phase, sr);
     let distance = phase::compute_distance(delay);
     let new_phase = phase::remove_delay(&freq, &phase, delay);
     info!("remove_measurement_delay: removed {:.4}ms ({:.3}m)", delay * 1000.0, distance);
@@ -354,7 +352,7 @@ pub fn run() {
         )
         .init();
 
-    info!("PhaseForge v0.1.0-b83 starting...");
+    info!("PhaseForge v0.1.0-b86 starting...");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())

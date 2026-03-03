@@ -984,16 +984,19 @@ body {
 .band-tab-add:hover { color: var(--accent); }
 
 .band-tab-sum {
-  margin-left: auto;
+  margin-right: 4px;
   font-weight: 600;
   letter-spacing: 0.5px;
   font-size: 10px;
   text-transform: uppercase;
-  color: var(--text-muted);
+  color: var(--warning);
+  background: rgba(255, 159, 67, 0.1);
+  border-radius: 4px 4px 0 0;
 }
 .band-tab-sum.active {
   color: var(--warning);
   border-bottom-color: var(--warning);
+  background: rgba(255, 159, 67, 0.18);
 }
 
 .band-tab.dragging {
