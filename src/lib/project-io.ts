@@ -14,11 +14,14 @@ import {
   setExportTaps,
   exportWindow,
   setExportWindow,
+  exportHybridPhase,
+  setExportHybridPhase,
   isDirty,
   setIsDirty,
   setBandMeasurementFile,
 } from "../stores/bands";
 import type { FilterConfig } from "../lib/types";
+import { tolerance, setTolerance, maxBands, setMaxBands } from "../stores/peq-optimize";
 import type { AppState, BandState, PerMeasurementSettings, FloorBounceConfig, MergeSource } from "../stores/bands";
 import type { Measurement, WindowType } from "../lib/types";
 
@@ -132,6 +135,9 @@ interface ProjectFile {
   export_taps: number;
   export_window: string;
   active_tab: string;
+  export_hybrid_phase?: boolean;
+  peq_tolerance?: number;
+  peq_max_bands?: number;
 }
 
 interface ProjectBand {
@@ -231,6 +237,9 @@ function buildProjectData(): ProjectFile {
     export_taps: exportTaps(),
     export_window: exportWindow(),
     active_tab: activeTab(),
+    export_hybrid_phase: exportHybridPhase(),
+    peq_tolerance: tolerance(),
+    peq_max_bands: maxBands(),
   };
 }
 
@@ -280,6 +289,7 @@ function mapBandFromProject(b: ProjectBand): BandState {
     linkedToNext: b.linked_to_next,
     peqBands: b.peq_bands,
     firResult: null, // FIR not saved — recomputed
+    crossNormDb: 0,
   };
 }
 
@@ -351,6 +361,9 @@ async function restoreState(project: ProjectFile, projDir: string | null) {
   setExportSampleRate(project.export_sample_rate);
   setExportTaps(project.export_taps);
   setExportWindow(project.export_window as WindowType);
+  setExportHybridPhase(project.export_hybrid_phase ?? false);
+  setTolerance(project.peq_tolerance ?? 1.0);
+  setMaxBands(project.peq_max_bands ?? 20);
   setIsDirty(false);
 }
 

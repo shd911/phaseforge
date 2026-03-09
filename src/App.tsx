@@ -56,43 +56,13 @@ function App() {
     document.title = `PhaseForge — ${name}${dirty ? " *" : ""}`;
   });
 
-  const [panelHeight, setPanelHeight] = createSignal(150);
   const [impulseRatio, setImpulseRatio] = createSignal(0.35); // 35% для impulse plot
-
-  // Auto-height for Export tab:
-  // ctrl-tabs(28) + ctrl-body-padding(12) + settings-row(30) + bottom(8)
-  const isExportTab = () => activeTab() === "export";
-  const autoExportH = () => 28 + 12 + 30 + 8;
-  const effectivePanelH = () => isExportTab()
-    ? Math.max(78, autoExportH())
-    : panelHeight();
-  let dragging = false;
-  let startY = 0;
-  let startH = 0;
 
   // Resize для plot split (между freq и impulse)
   let plotDragging = false;
   let plotStartY = 0;
   let plotStartRatio = 0;
   let plotAreaHeight = 0;
-
-  const onResizeStart = (e: MouseEvent) => {
-    dragging = true;
-    startY = e.clientY;
-    startH = panelHeight();
-    const onMove = (ev: MouseEvent) => {
-      if (!dragging) return;
-      const delta = startY - ev.clientY;
-      setPanelHeight(Math.max(80, Math.min(500, startH + delta)));
-    };
-    const onUp = () => {
-      dragging = false;
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  };
 
   const onPlotResizeStart = (e: MouseEvent) => {
     const plotArea = (e.target as HTMLElement).parentElement;
@@ -130,7 +100,7 @@ function App() {
   // На вкладке target — показываем PEQ Response вместо Impulse
   const showPeqPlot = () => activeTab() === "target";
   // На вкладке export — показываем ExportPlot + ExportImpulsePlot
-  const showExportPlot = () => activeTab() === "export";
+  const showExportPlot = () => activeTab() === "export" && !isSum();
 
   return (
     <div class="app">
@@ -138,7 +108,7 @@ function App() {
       <div class="top-bar">
         <img src="/logo-icon.png" class="top-logo-icon" alt="" />
         <span class="top-logo">PhaseForge</span>
-        <span class="top-version">v0.1.0-b86</span>
+        <span class="top-version">v0.1.0-b87</span>
         <div class="top-sep" />
         <FileMenu />
         <span class="top-project-name" title={currentProjectPath() ?? "Untitled"}>
@@ -180,10 +150,17 @@ function App() {
           <main class="plot-area">
             <div
               class="freq-plot-area"
-              style={{ flex: showBottomPlot() ? `${1 - impulseRatio()}` : "1" }}
+              style={{ flex: showBottomPlot() ? `${1 - impulseRatio()}` : "1", position: "relative" }}
             >
-              <Show when={showExportPlot()} fallback={<FrequencyPlot />}>
-                <ExportPlot />
+              {/* FrequencyPlot ALWAYS visible in normal flow.
+                  ExportPlot overlays on top when active (absolute positioned). */}
+              <div style={{ width: "100%", height: "100%" }}>
+                <FrequencyPlot />
+              </div>
+              <Show when={showExportPlot()}>
+                <div style={{ position: "absolute", inset: "0", "z-index": "10", background: "var(--bg-main, #1a1a2e)" }}>
+                  <ExportPlot />
+                </div>
               </Show>
             </div>
             <Show when={showBottomPlot()}>
@@ -204,8 +181,7 @@ function App() {
 
           {/* Resize handle + Control panel — hidden on SUM */}
           <Show when={!isSum()}>
-            <div class="resize-handle" onMouseDown={onResizeStart} />
-            <div class="ctrl-wrap" style={{ height: `${effectivePanelH()}px` }}>
+            <div class="ctrl-wrap">
               <ControlPanel />
             </div>
           </Show>

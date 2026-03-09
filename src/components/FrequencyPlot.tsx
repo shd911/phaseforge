@@ -131,9 +131,43 @@ export default function FrequencyPlot() {
   // Y-zoom anchor: passband reference level (adaptive to HP/LP filters, or 0 dB without measurements)
   let zoomCenter = 0;
 
+  // Phase Y-scale state
+  let curPhaseMin = -190;
+  let curPhaseMax = 190;
+
+  // Zoom history for undo (right-click)
+  const zoomStack: { xMin: number; xMax: number; magMin: number; magMax: number; phaseMin: number; phaseMax: number }[] = [];
+  function pushZoom() {
+    if (!chart) return;
+    const xs = chart.scales["x"];
+    if (xs?.min != null && xs?.max != null) {
+      zoomStack.push({ xMin: xs.min, xMax: xs.max, magMin: curMagMin, magMax: curMagMax, phaseMin: curPhaseMin, phaseMax: curPhaseMax });
+      if (zoomStack.length > 20) zoomStack.shift();
+    }
+  }
+  function popZoom() {
+    if (!chart || zoomStack.length === 0) return;
+    const prev = zoomStack.pop()!;
+    curMagMin = prev.magMin;
+    curMagMax = prev.magMax;
+    curPhaseMin = prev.phaseMin;
+    curPhaseMax = prev.phaseMax;
+    chart.setScale("x", { min: prev.xMin, max: prev.xMax });
+    chart.setScale("mag", { min: curMagMin, max: curMagMax });
+    chart.setScale("phase", { min: curPhaseMin, max: curPhaseMax });
+  }
+
+  // Zoom box state (Ctrl+drag)
+  let zoomBoxActive = false;
+  let zoomBoxStartX = 0;
+  let zoomBoxStartY = 0;
+  let zoomBoxEl: HTMLDivElement | null = null;
+
   const [cursorFreq, setCursorFreq] = createSignal("—");
   const [cursorSPL, setCursorSPL] = createSignal("—");
   const [cursorPhase, setCursorPhase] = createSignal("—");
+  // Per-curve values at cursor position: { label, color, value, unit }
+  const [cursorValues, setCursorValues] = createSignal<{ label: string; color: string; value: string }[]>([]);
 
   // Snapshot system: keep last corrected curve for snapshot capture
   const lastCorrData: { freq: number[]; mag: number[]; phase: (number | null)[] } = { freq: [], mag: [], phase: [] };
@@ -182,8 +216,9 @@ export default function FrequencyPlot() {
 
   function zoomY(factor: number) {
     if (!chart) return;
+    pushZoom();
     const half = ((curMagMax - curMagMin) / 2) * factor;
-    if (half * 2 < 2 || half * 2 > 400) return;
+    if (half * 2 < 2 || half * 2 > 500) { zoomStack.pop(); return; }
     curMagMin = zoomCenter - half;
     curMagMax = zoomCenter + half;
     chart.setScale("mag", { min: curMagMin, max: curMagMax });
@@ -200,8 +235,9 @@ export default function FrequencyPlot() {
 
   function zoomX(factor: number) {
     if (!chart) return;
+    pushZoom();
     const s = chart.scales["x"];
-    if (!s || s.min == null || s.max == null || s.min <= 0) return;
+    if (!s || s.min == null || s.max == null || s.min <= 0) { zoomStack.pop(); return; }
     const logMin = Math.log10(s.min);
     const logMax = Math.log10(s.max);
     const logCenter = (logMin + logMax) / 2;
@@ -226,11 +262,111 @@ export default function FrequencyPlot() {
 
   function fitData() {
     if (!chart) return;
+    pushZoom();
     curMagMin = fitMagMin;
     curMagMax = fitMagMax;
     chart.setScale("mag", { min: curMagMin, max: curMagMax });
-    chart.setScale("phase", { min: -190, max: 190 });
+    curPhaseMin = -190;
+    curPhaseMax = 190;
+    chart.setScale("phase", { min: curPhaseMin, max: curPhaseMax });
     chart.setScale("x", { min: 20, max: 20000 });
+  }
+
+  function zoomPhase(factor: number) {
+    if (!chart) return;
+    pushZoom();
+    const center = (curPhaseMin + curPhaseMax) / 2;
+    const half = ((curPhaseMax - curPhaseMin) / 2) * factor;
+    if (half * 2 < 10 || half * 2 > 720) { zoomStack.pop(); return; }
+    curPhaseMin = center - half;
+    curPhaseMax = center + half;
+    chart.setScale("phase", { min: curPhaseMin, max: curPhaseMax });
+  }
+
+  function scrollPhase(direction: number) {
+    if (!chart) return;
+    const range = curPhaseMax - curPhaseMin;
+    const step = range * 0.2 * direction;
+    curPhaseMin += step;
+    curPhaseMax += step;
+    chart.setScale("phase", { min: curPhaseMin, max: curPhaseMax });
+  }
+
+  // Zoom box handlers (Ctrl+drag)
+  function handleZoomBoxDown(e: MouseEvent) {
+    if (!e.ctrlKey && !e.metaKey) return;
+    if (!chart || !containerRef) return;
+    e.preventDefault();
+    pushZoom();
+    zoomBoxActive = true;
+    const rect = containerRef.getBoundingClientRect();
+    zoomBoxStartX = e.clientX - rect.left;
+    zoomBoxStartY = e.clientY - rect.top;
+    // Create overlay element
+    if (!zoomBoxEl) {
+      zoomBoxEl = document.createElement("div");
+      zoomBoxEl.className = "zoom-box";
+      containerRef.appendChild(zoomBoxEl);
+    }
+    zoomBoxEl.style.display = "block";
+    zoomBoxEl.style.left = zoomBoxStartX + "px";
+    zoomBoxEl.style.top = zoomBoxStartY + "px";
+    zoomBoxEl.style.width = "0";
+    zoomBoxEl.style.height = "0";
+  }
+
+  function handleZoomBoxMove(e: MouseEvent) {
+    if (!zoomBoxActive || !zoomBoxEl || !containerRef) return;
+    const rect = containerRef.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const left = Math.min(zoomBoxStartX, x);
+    const top = Math.min(zoomBoxStartY, y);
+    const w = Math.abs(x - zoomBoxStartX);
+    const h = Math.abs(y - zoomBoxStartY);
+    zoomBoxEl.style.left = left + "px";
+    zoomBoxEl.style.top = top + "px";
+    zoomBoxEl.style.width = w + "px";
+    zoomBoxEl.style.height = h + "px";
+  }
+
+  function handleZoomBoxUp(e: MouseEvent) {
+    if (!zoomBoxActive || !chart || !containerRef) return;
+    zoomBoxActive = false;
+    if (zoomBoxEl) zoomBoxEl.style.display = "none";
+
+    const rect = containerRef.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const x1 = Math.min(zoomBoxStartX, x);
+    const x2 = Math.max(zoomBoxStartX, x);
+    const y1 = Math.min(zoomBoxStartY, y);
+    const y2 = Math.max(zoomBoxStartY, y);
+
+    // Min size threshold (10px)
+    if (x2 - x1 < 10 || y2 - y1 < 10) { zoomStack.pop(); return; }
+
+    // Convert pixel positions to data values via uPlot
+    const fMin = chart.posToVal(x1, "x");
+    const fMax = chart.posToVal(x2, "x");
+    const magMax2 = chart.posToVal(y1, "mag");
+    const magMin2 = chart.posToVal(y2, "mag");
+
+    if (isFinite(fMin) && isFinite(fMax) && fMin > 0 && fMax > fMin) {
+      chart.setScale("x", { min: fMin, max: fMax });
+    }
+    if (isFinite(magMin2) && isFinite(magMax2) && magMax2 > magMin2) {
+      curMagMin = magMin2;
+      curMagMax = magMax2;
+      chart.setScale("mag", { min: curMagMin, max: curMagMax });
+    }
+  }
+
+  // Right-click = undo zoom
+  function handleContextMenu(e: MouseEvent) {
+    if (!chart) return;
+    e.preventDefault();
+    popZoom();
   }
 
   // Переключение видимости серии через легенду
@@ -412,7 +548,11 @@ export default function FrequencyPlot() {
         chart.over.removeEventListener("mousedown", handleXoMouseDown);
         chart.over.removeEventListener("dblclick", handleXoDblClick);
         chart.over.removeEventListener("dblclick", handlePeqDblClick);
+        chart.over.removeEventListener("mousedown", handleZoomBoxDown);
+        chart.over.removeEventListener("contextmenu", handleContextMenu);
       }
+      window.removeEventListener("mousemove", handleZoomBoxMove);
+      window.removeEventListener("mouseup", handleZoomBoxUp);
       chart.destroy();
       chart = undefined;
     }
@@ -533,61 +673,42 @@ export default function FrequencyPlot() {
             const idx = u.cursor.idx;
             if (idx == null || idx < 0 || idx >= u.data[0].length) {
               setCursorFreq("—"); setCursorSPL("—"); setCursorPhase("—");
+              setCursorValues([]);
               return;
             }
             const f = u.data[0][idx];
             setCursorFreq(f != null ? fmtFreq(f) : "—");
 
-            // In SUM mode, prioritize Σ series for readout
-            const inSumMode = isSum();
-            // SPL: Σ corr → Σ dB → first mag series
-            let splVal: number | null | undefined;
-            if (inSumMode) {
-              // Try Σ corrected first, then Σ meas
-              for (const prefix of ["\u03A3 corr", "\u03A3 dB"]) {
-                for (let si = 1; si < allSeries.length; si++) {
-                  const s = allSeries[si] as any;
-                  if (s.scale === "mag" && s.label === prefix) {
-                    splVal = u.data[si]?.[idx];
-                    break;
-                  }
-                }
-                if (splVal != null) break;
-              }
-            }
-            if (splVal == null) {
-              for (let si = 1; si < allSeries.length; si++) {
-                if ((allSeries[si] as any).scale === "mag") {
-                  splVal = u.data[si]?.[idx];
-                  break;
-                }
-              }
-            }
-            setCursorSPL(splVal != null ? splVal.toFixed(1) + " dBr" : "—");
+            // Collect values for all visible series
+            const vals: { label: string; color: string; value: string }[] = [];
+            let firstSPL: string | null = null;
+            let firstPhase: string | null = null;
+            const leg = mergedLegend ?? input.legend ?? [];
 
-            // Phase: Σ corr ° → Σ ° → first phase series
-            let phVal: number | null | undefined;
-            if (inSumMode) {
-              for (const prefix of ["\u03A3 corr \u00B0", "\u03A3 \u00B0"]) {
-                for (let si = 1; si < allSeries.length; si++) {
-                  const s = allSeries[si] as any;
-                  if (s.scale === "phase" && s.label === prefix) {
-                    phVal = u.data[si]?.[idx];
-                    break;
-                  }
-                }
-                if (phVal != null) break;
-              }
+            for (let si = 1; si < u.series.length; si++) {
+              if (!u.series[si].show) continue;
+              const orig = allSeries[si] as any;
+              if (!orig) continue;
+              const v = u.data[si]?.[idx];
+              if (v == null || !isFinite(v)) continue;
+              const isMag = orig.scale === "mag";
+              const isPhase = orig.scale === "phase";
+              const unit = isMag ? " dBr" : isPhase ? "°" : "";
+              const formatted = v.toFixed(1) + unit;
+              const color = orig.stroke ?? "#ccc";
+              const label = orig.label ?? `s${si}`;
+
+              // Find short label from legend
+              const le = leg.find((e: any) => e.seriesIdx === si);
+              vals.push({ label: le?.label ?? label, color, value: formatted });
+
+              if (isMag && !firstSPL) firstSPL = formatted;
+              if (isPhase && !firstPhase) firstPhase = formatted;
             }
-            if (phVal == null) {
-              for (let si = 1; si < allSeries.length; si++) {
-                if ((allSeries[si] as any).scale === "phase") {
-                  phVal = u.data[si]?.[idx];
-                  break;
-                }
-              }
-            }
-            setCursorPhase(phVal != null ? phVal.toFixed(1) + "\u00B0" : "—");
+
+            setCursorSPL(firstSPL ?? "—");
+            setCursorPhase(firstPhase ?? "—");
+            setCursorValues(vals);
           },
         ],
         draw: [
@@ -746,6 +867,14 @@ export default function FrequencyPlot() {
     if (chart && chart.over) {
       chart.over.addEventListener("dblclick", handlePeqDblClick);
     }
+
+    // Zoom box (Ctrl+drag) + right-click undo zoom
+    if (chart && chart.over) {
+      chart.over.addEventListener("mousedown", handleZoomBoxDown);
+      chart.over.addEventListener("contextmenu", handleContextMenu);
+    }
+    window.addEventListener("mousemove", handleZoomBoxMove);
+    window.addEventListener("mouseup", handleZoomBoxUp);
   }
 
   onMount(() => {
@@ -779,6 +908,7 @@ export default function FrequencyPlot() {
     const _sel = selectedPeqIdx(); // track
     if (chart) chart.redraw(false, false);
   });
+
 
   // ----------------------------------------------------------------
   // Helper: apply smoothing
@@ -990,7 +1120,9 @@ export default function FrequencyPlot() {
             });
             xsMag = xm;
             xsPhase = xp;
-            setBandCrossNormDb(band.id, xNorm);
+            // Defer store update to avoid re-triggering the render effect
+            // (setBandCrossNormDb modifies appState.bands which is tracked by bandsSnapshot)
+            queueMicrotask(() => setBandCrossNormDb(band.id, xNorm));
           }
 
           // --- Hybrid mode: 2-stage display ---
@@ -1179,8 +1311,9 @@ export default function FrequencyPlot() {
       }
       zoomCenter = 0; // after normalization, center is 0 dBr
 
-      if (gen !== renderGen) return; // stale after async work
-      requestAnimationFrame(() =>
+      if (gen !== renderGen) return;
+      requestAnimationFrame(() => {
+        if (!containerRef) return;
         renderChart({
           freq: result.freq!,
           uSeries,
@@ -1188,8 +1321,8 @@ export default function FrequencyPlot() {
           hasMeasurements: !!result.measurement,
           legend,
           floorBounceNulls,
-        })
-      );
+        });
+      });
     } catch (e) {
       console.error("Band render failed:", e);
     }
@@ -1444,7 +1577,7 @@ export default function FrequencyPlot() {
             const color = CORRECTED_BAND_COLORS[i % CORRECTED_BAND_COLORS.length];
             uSeries.push({ label: bands[i].name + " corr+XO", stroke: color, width: 1.5, scale: "mag" });
             uData.push(corrected);
-            legend.push({ label: bands[i].name + " corr+XO", color, dash: false, visible: false, seriesIdx: sIdx, category: "corrected" });
+            legend.push({ label: bands[i].name + " corr+XO", color, dash: false, visible: true, seriesIdx: sIdx, category: "corrected" });
             sIdx++;
           } catch (e) {
             console.warn("SUM corrected failed for band", bands[i].name, e);
@@ -1502,7 +1635,7 @@ export default function FrequencyPlot() {
               if (showPhase) {
                 uSeries.push({ label: "\u03A3 tgt \u00B0", stroke: TARGET_PHASE_COLOR, width: 1.5, dash: [4, 4], scale: "phase" });
                 uData.push(wrapPhase(stPhase));
-                legend.push({ label: "\u03A3 target \u00B0", color: TARGET_PHASE_COLOR, dash: true, visible: true, seriesIdx: sIdx, category: "target" });
+                legend.push({ label: "\u03A3 target \u00B0", color: TARGET_PHASE_COLOR, dash: true, visible: false, seriesIdx: sIdx, category: "target" });
                 sIdx++;
               }
             }
@@ -1560,7 +1693,7 @@ export default function FrequencyPlot() {
             if (showPhase) {
               uSeries.push({ label: "\u03A3 corr °", stroke: CORRECTED_COLOR, width: 1.5, dash: [6, 3], scale: "phase" });
               uData.push(wrapPhase(sumCorrPhase));
-              legend.push({ label: "\u03A3 corr °", color: CORRECTED_COLOR, dash: true, visible: true, seriesIdx: sIdx, category: "corrected" });
+              legend.push({ label: "\u03A3 corr °", color: CORRECTED_COLOR, dash: true, visible: false, seriesIdx: sIdx, category: "corrected" });
               sIdx++;
             }
           } else {
@@ -1627,13 +1760,13 @@ export default function FrequencyPlot() {
           }
           uSeries.push({ label: "\u03A3 dB", stroke: "#FFFFFF", width: 2.5, scale: "mag" });
           uData.push(sumMagDb);
-          legend.push({ label: "\u03A3 meas", color: "#FFFFFF", dash: false, visible: true, seriesIdx: sIdx, category: "measurement" });
+          legend.push({ label: "\u03A3 meas", color: "#FFFFFF", dash: false, visible: false, seriesIdx: sIdx, category: "measurement" });
           sIdx++;
           // Σ measurement phase
           if (showPhase) {
             uSeries.push({ label: "\u03A3 °", stroke: "#FFFFFF", width: 1.5, dash: [6, 3], scale: "phase" });
             uData.push(wrapPhase(sumPhase));
-            legend.push({ label: "\u03A3 meas °", color: "#FFFFFF", dash: true, visible: true, seriesIdx: sIdx, category: "measurement" });
+            legend.push({ label: "\u03A3 meas °", color: "#FFFFFF", dash: true, visible: false, seriesIdx: sIdx, category: "measurement" });
             sIdx++;
           }
         } else {
@@ -1650,7 +1783,7 @@ export default function FrequencyPlot() {
           );
           uSeries.push({ label: "\u03A3 dB", stroke: "#FFFFFF", width: 2.5, scale: "mag" });
           uData.push(sumMagDb);
-          legend.push({ label: "\u03A3 meas", color: "#FFFFFF", dash: false, visible: true, seriesIdx: sIdx, category: "measurement" });
+          legend.push({ label: "\u03A3 meas", color: "#FFFFFF", dash: false, visible: false, seriesIdx: sIdx, category: "measurement" });
           sIdx++;
         }
       }
@@ -1853,19 +1986,31 @@ export default function FrequencyPlot() {
   return (
     <div class="plot-wrapper">
       <div class="cursor-readout">
-        <span class="readout-item">
-          <span class="readout-label">Freq:</span>
-          <span class="readout-value">{cursorFreq()}</span>
-        </span>
-        <span class="readout-item">
-          <span class="readout-label">SPL:</span>
-          <span class="readout-value">{cursorSPL()}</span>
-        </span>
-        <span class="readout-item">
-          <span class="readout-label">Phase:</span>
-          <span class="readout-value">{cursorPhase()}</span>
-        </span>
-        {/* Hybrid-φ moved to global strategy toggle (b82.06) */}
+        <div class="readout-curves-area">
+          <span class="readout-item">
+            <span class="readout-label">Freq:</span>
+            <span class="readout-value">{cursorFreq()}</span>
+          </span>
+          {/* Per-curve values at cursor — colored by curve */}
+          <For each={cursorValues()}>
+            {(cv) => (
+              <span class="readout-item readout-curve-val">
+                <span class="readout-curve-dot" style={{ background: cv.color }} />
+                <span class="readout-value" style={{ color: cv.color }}>{cv.value}</span>
+              </span>
+            )}
+          </For>
+          <Show when={cursorValues().length === 0}>
+            <span class="readout-item">
+              <span class="readout-label">SPL:</span>
+              <span class="readout-value">{cursorSPL()}</span>
+            </span>
+            <span class="readout-item">
+              <span class="readout-label">Phase:</span>
+              <span class="readout-value">{cursorPhase()}</span>
+            </span>
+          </Show>
+        </div>
         {/* Snapshot SNAP/CLR buttons (band mode only) */}
         <Show when={!isSum()}>
           <span class="readout-sep" />
@@ -1888,24 +2033,6 @@ export default function FrequencyPlot() {
               </>
             );
           })()}
-        </Show>
-        {/* Легенда per-band — плоский список (не в SUM) */}
-        <Show when={showLegend() && !isSum() && legendEntries.length > 0}>
-          <span class="readout-sep" />
-          <For each={legendEntries}>
-            {(entry, idx) => (
-              <button
-                class={`legend-item ${entry.visible ? "" : "legend-off"}`}
-                onClick={() => toggleLegendEntry(idx())}
-              >
-                <span
-                  class={`legend-swatch ${entry.dash ? "legend-swatch-dash" : ""}`}
-                  style={{ "background-color": entry.dash ? "transparent" : entry.color, "border-color": entry.color }}
-                />
-                <span class="legend-text">{entry.label}</span>
-              </button>
-            )}
-          </For>
         </Show>
       </div>
       {/* SUM visibility matrix table */}
@@ -1985,23 +2112,48 @@ export default function FrequencyPlot() {
         </div>
       </Show>
       <div class="plot-body">
-        <div class="axis-controls axis-controls-y">
-          <button class="axis-btn" onClick={() => zoomY(0.6)} title="Zoom In dB">+</button>
-          <button class="axis-btn" onClick={() => scrollY(1)} title="Scroll Up dB">▲</button>
-          <button class="axis-btn" onClick={() => scrollY(-1)} title="Scroll Down dB">▼</button>
-          <button class="axis-btn" onClick={() => zoomY(1.6)} title="Zoom Out dB">−</button>
-          <button class="axis-btn fit-btn" onClick={fitData} title="Fit data to view">FIT</button>
-        </div>
         <div class="plot-center">
           <div ref={containerRef} class="frequency-plot" />
+          <div class="axis-controls axis-controls-y axis-controls-y-left">
+            <button class="axis-btn" onClick={() => zoomY(0.6)} title="Zoom In dB">+</button>
+            <button class="axis-btn" onClick={() => scrollY(1)} title="Scroll Up dB">▲</button>
+            <button class="axis-btn" onClick={() => scrollY(-1)} title="Scroll Down dB">▼</button>
+            <button class="axis-btn" onClick={() => zoomY(1.6)} title="Zoom Out dB">−</button>
+            <button class="axis-btn fit-btn" onClick={fitData} title="Fit data to view">FIT</button>
+          </div>
+          <div class="axis-controls axis-controls-y axis-controls-y-right">
+            <button class="axis-btn" onClick={() => zoomPhase(0.6)} title="Zoom In Phase">+</button>
+            <button class="axis-btn" onClick={() => scrollPhase(1)} title="Scroll Up Phase">▲</button>
+            <button class="axis-btn" onClick={() => scrollPhase(-1)} title="Scroll Down Phase">▼</button>
+            <button class="axis-btn" onClick={() => zoomPhase(1.6)} title="Zoom Out Phase">−</button>
+          </div>
           <div class="axis-controls axis-controls-x">
-            <button class="axis-btn" onClick={() => zoomX(0.6)} title="Zoom In Freq">+</button>
+            <button class="axis-btn" onClick={() => zoomX(1.6)} title="Zoom Out Freq">−</button>
             <button class="axis-btn" onClick={() => scrollX(-1)} title="Scroll Left">◀</button>
             <button class="axis-btn" onClick={() => scrollX(1)} title="Scroll Right">▶</button>
-            <button class="axis-btn" onClick={() => zoomX(1.6)} title="Zoom Out Freq">−</button>
+            <button class="axis-btn" onClick={() => zoomX(0.6)} title="Zoom In Freq">+</button>
           </div>
         </div>
       </div>
+      {/* Band legend — below plot (not in SUM, SUM uses matrix above) */}
+      <Show when={showLegend() && !isSum() && legendEntries.length > 0}>
+        <div class="band-legend">
+          <For each={legendEntries}>
+            {(entry, idx) => (
+              <button
+                class={`legend-item ${entry.visible ? "" : "legend-off"}`}
+                onClick={() => toggleLegendEntry(idx())}
+              >
+                <span
+                  class={`legend-swatch ${entry.dash ? "legend-swatch-dash" : ""}`}
+                  style={{ "background-color": entry.dash ? "transparent" : entry.color, "border-color": entry.color }}
+                />
+                <span class="legend-text">{entry.label}</span>
+              </button>
+            )}
+          </For>
+        </div>
+      </Show>
     </div>
   );
 }

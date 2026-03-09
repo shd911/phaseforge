@@ -79,6 +79,43 @@ function defaultSettings(): PerMeasurementSettings {
   return { smoothing: "off", delay_seconds: null, distance_meters: null, delay_removed: false, originalPhase: null, floorBounce: null, mergeSource: null };
 }
 
+/** Compute equal-octave crossover frequencies for n bands spanning fMin–fMax.
+ *  Returns n-1 crossover points. E.g. 3 bands → 2 crossovers. */
+function equalOctaveCrossovers(n: number, fMin = 20, fMax = 20000): number[] {
+  if (n <= 1) return [];
+  const logMin = Math.log2(fMin);
+  const logMax = Math.log2(fMax);
+  const step = (logMax - logMin) / n;
+  const xovers: number[] = [];
+  for (let i = 1; i < n; i++) {
+    xovers.push(Math.round(Math.pow(2, logMin + step * i)));
+  }
+  return xovers;
+}
+
+const DEFAULT_FILTER = { filter_type: "LinkwitzRiley" as const, order: 4, shape: null, linear_phase: false };
+
+/** Assign default HP/LP filters to all bands based on equal-octave split.
+ *  Only assigns to bands that have NO measurement (pristine bands). */
+function assignDefaultTargets(bands: BandState[]) {
+  const n = bands.length;
+  if (n <= 0) return;
+  const xovers = equalOctaveCrossovers(n);
+  for (let i = 0; i < n; i++) {
+    // Skip bands that already have a measurement — user configured them
+    if (bands[i].measurement) continue;
+    const hp = i > 0 ? { ...DEFAULT_FILTER, freq_hz: xovers[i - 1] } : null;
+    const lp = i < n - 1 ? { ...DEFAULT_FILTER, freq_hz: xovers[i] } : null;
+    setState("bands", i, "target", "high_pass", hp);
+    setState("bands", i, "target", "low_pass", lp);
+    setState("bands", i, "targetEnabled", true);
+    // Link to next band
+    if (i < n - 1) {
+      setState("bands", i, "linkedToNext", true);
+    }
+  }
+}
+
 export function createBand(num: number): BandState {
   return {
     id: crypto.randomUUID(),
@@ -111,8 +148,8 @@ const PRESETS: Record<PresetName, () => TargetCurve> = {
     tilt_ref_freq: 1000,
     high_pass: null,
     low_pass: null,
-    low_shelf: { freq_hz: 200, gain_db: 4, q: 0.7 },
-    high_shelf: { freq_hz: 8000, gain_db: -2, q: 0.7 },
+    low_shelf: null,
+    high_shelf: null,
   }),
   bk: () => ({
     reference_level_db: 0,
@@ -130,7 +167,7 @@ const PRESETS: Record<PresetName, () => TargetCurve> = {
     high_pass: null,
     low_pass: null,
     low_shelf: null,
-    high_shelf: { freq_hz: 2000, gain_db: -6, q: 0.5 },
+    high_shelf: null,
   }),
   custom: defaultTarget,
 };
@@ -140,6 +177,7 @@ const PRESETS: Record<PresetName, () => TargetCurve> = {
 // ---------------------------------------------------------------------------
 
 const firstBand = createBand(1);
+firstBand.targetEnabled = true; // show target by default
 
 const [state, setState] = createStore<AppState>({
   bands: [firstBand],
@@ -183,6 +221,7 @@ export function addBand() {
   setState("bands", (prev) => [...prev, band]);
   setState("nextBandNum", num + 1);
   setState("activeBandId", band.id);
+  assignDefaultTargets(state.bands as BandState[]);
   markDirty();
 }
 
@@ -202,6 +241,7 @@ export function removeBand(id: string) {
   // Очищаем снэпшоты удалённой полосы
   setExportSnapshots(id, []);
   setFreqSnapshots(id, []);
+  assignDefaultTargets(state.bands as BandState[]);
   markDirty();
 }
 

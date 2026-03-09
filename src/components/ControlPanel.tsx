@@ -15,8 +15,6 @@ import {
   setBandTilt,
   setBandHighPass,
   setBandLowPass,
-  setBandLowShelf,
-  setBandHighShelf,
   setBandSmoothing,
   setBandMeasurement,
   replaceBandMeasurement,
@@ -50,6 +48,10 @@ import { projectDir, projectName, copyMeasurementToProject, copyMergeFilesToProj
 import MergeDialog from "./MergeDialog";
 
 const FILTER_TYPES: FilterType[] = ["Butterworth", "Bessel", "LinkwitzRiley", "Gaussian"];
+
+// Remember last filter config per band so toggle off→on restores settings
+const lastHP = new Map<string, import("../lib/types").FilterConfig>();
+const lastLP = new Map<string, import("../lib/types").FilterConfig>();
 
 export default function ControlPanel() {
   const tab = activeTab;
@@ -190,11 +192,6 @@ function FiltersTab() {
               onClick={() => { const id = bandId(); if (id) toggleBandInverted(id); }}
             >{inverted() ? "INV" : "NOR"}</button>
           </div>
-          <div class="fb-row">
-            <button class="tb-btn" style={{ "font-size": "10px", padding: "2px 8px" }} onClick={handleExportTarget}>
-              Export Target
-            </button>
-          </div>
         </div>
 
         {/* High-Pass (🔗 индикатор, если связан с LP предыдущей) */}
@@ -205,10 +202,12 @@ function FiltersTab() {
           onToggle={() => {
             const id = bandId();
             if (!id) return;
-            if (target()?.high_pass) {
+            const cur = target()?.high_pass;
+            if (cur) {
+              lastHP.set(id, { ...cur });
               setBandHighPass(id, null);
             } else {
-              setBandHighPass(id, { filter_type: "Butterworth", order: 2, freq_hz: 80, shape: null, linear_phase: false });
+              setBandHighPass(id, lastHP.get(id) ?? { filter_type: "Butterworth", order: 2, freq_hz: 80, shape: null, linear_phase: false });
             }
           }}
           onChange={(c) => { const id = bandId(); if (id) setBandHighPass(id, c); }}
@@ -224,48 +223,22 @@ function FiltersTab() {
           onToggle={() => {
             const id = bandId();
             if (!id) return;
-            if (target()?.low_pass) {
+            const cur = target()?.low_pass;
+            if (cur) {
+              lastLP.set(id, { ...cur });
               setBandLowPass(id, null);
             } else {
-              setBandLowPass(id, { filter_type: "Butterworth", order: 2, freq_hz: 15000, shape: null, linear_phase: false });
+              setBandLowPass(id, lastLP.get(id) ?? { filter_type: "Butterworth", order: 2, freq_hz: 15000, shape: null, linear_phase: false });
             }
           }}
           onChange={(c) => { const id = bandId(); if (id) setBandLowPass(id, c); }}
         />
 
-        {/* Low Shelf */}
-        <ShelfBlock
-          title="Low Shelf"
-          config={target()?.low_shelf ?? null}
-          onToggle={() => {
-            const id = bandId();
-            if (!id) return;
-            if (target()?.low_shelf) {
-              setBandLowShelf(id, null);
-            } else {
-              setBandLowShelf(id, { freq_hz: 200, gain_db: 3, q: 0.7 });
-            }
-          }}
-          onChange={(c) => { const id = bandId(); if (id) setBandLowShelf(id, c); }}
-        />
 
-        {/* High Shelf */}
-        <ShelfBlock
-          title="High Shelf"
-          config={target()?.high_shelf ?? null}
-          onToggle={() => {
-            const id = bandId();
-            if (!id) return;
-            if (target()?.high_shelf) {
-              setBandHighShelf(id, null);
-            } else {
-              setBandHighShelf(id, { freq_hz: 8000, gain_db: -2, q: 0.7 });
-            }
-          }}
-          onChange={(c) => { const id = bandId(); if (id) setBandHighShelf(id, c); }}
-        />
-
-        {/* PEQ Auto-Fit + Cross Section moved to PeqSidebar (b82.06) */}
+        {/* Export Target — rightmost in the row */}
+        <button class="tb-btn" style={{ "font-size": "10px", padding: "4px 10px", "align-self": "flex-start", "margin-left": "auto" }} onClick={handleExportTarget}>
+          Export Target
+        </button>
       </div>
     </Show>
   );
@@ -320,7 +293,6 @@ function FilterBlock(props: FilterBlockProps) {
             onChange={(e) => {
               const ft = e.currentTarget.value as FilterType;
               if (ft === "Gaussian") {
-                // Gaussian filters are inherently linear-phase → force linear_phase=true
                 props.onChange({ ...c()!, filter_type: ft, shape: c()!.shape ?? 1.0, linear_phase: true });
               } else {
                 props.onChange({ ...c()!, filter_type: ft, shape: null });
@@ -329,6 +301,9 @@ function FilterBlock(props: FilterBlockProps) {
           >
             {FILTER_TYPES.map((t) => <option value={t}>{t}</option>)}
           </select>
+        </div>
+        <div class="fb-row">
+          <label class="fb-label"></label>
           <label class="fb-checkbox" title={isGaussian() ? "Gaussian is always linear-phase" : "Linear phase (magnitude only, no phase rotation)"}>
             <input
               type="checkbox"
@@ -372,58 +347,6 @@ function FilterBlock(props: FilterBlockProps) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// ShelfBlock
-// ---------------------------------------------------------------------------
-
-interface ShelfBlockProps {
-  title: string;
-  config: import("../lib/types").ShelfConfig | null;
-  onToggle: () => void;
-  onChange: (c: import("../lib/types").ShelfConfig) => void;
-}
-
-function ShelfBlock(props: ShelfBlockProps) {
-  const c = () => props.config;
-
-  return (
-    <div class="filter-block">
-      <div class="fb-header">
-        <span class="fb-title">{props.title}</span>
-        <button
-          class={`fb-toggle ${c() ? "on" : ""}`}
-          onClick={props.onToggle}
-        >{c() ? "ON" : "OFF"}</button>
-      </div>
-      <Show when={c()}>
-        <div class="fb-row">
-          <label class="fb-label">Freq</label>
-          <NumberInput
-            value={c()!.freq_hz}
-            onChange={(v) => props.onChange({ ...c()!, freq_hz: v })}
-            min={10} max={20000} step={1} unit="Hz" freqMode
-          />
-        </div>
-        <div class="fb-row">
-          <label class="fb-label">Gain</label>
-          <NumberInput
-            value={c()!.gain_db}
-            onChange={(v) => props.onChange({ ...c()!, gain_db: v })}
-            min={-20} max={20} step={0.5} unit="dB"
-          />
-        </div>
-        <div class="fb-row">
-          <label class="fb-label">Q</label>
-          <NumberInput
-            value={c()!.q}
-            onChange={(v) => props.onChange({ ...c()!, q: v })}
-            min={0.1} max={10} step={0.1}
-          />
-        </div>
-      </Show>
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Measurements Tab — single measurement per band
