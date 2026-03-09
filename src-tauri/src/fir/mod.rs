@@ -58,7 +58,11 @@ pub struct FirConfig {
     pub noise_floor_db: f64,  // e.g. -60.0
     pub window: WindowType,
     pub phase_mode: PhaseMode,
+    #[serde(default = "default_iterations")]
+    pub iterations: usize,    // iterative WLS refinement passes (0 = off, 1-5 typical)
 }
+
+fn default_iterations() -> usize { 3 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FirResult {
@@ -202,7 +206,18 @@ pub fn generate_fir(
         }
     }
 
-    // Passband normalization: FFT back to get realized spectrum, normalize peak to 0 dB
+    // 11. Iterative weighted refinement (compensates windowing distortion)
+    if config.iterations > 0 {
+        iterative_refine(
+            &mut impulse,
+            &limited,         // target correction on linear grid
+            &phase_rad,       // phase on linear grid
+            config,
+            crossover_range,
+        );
+    }
+
+    // 12. Passband normalization: FFT back to get realized spectrum, normalize peak to 0 dB
     let mut check: Vec<Complex64> = impulse.iter().map(|&v| Complex64::new(v, 0.0)).collect();
     let fft_fwd = planner.plan_fft_forward(n_fft);
     fft_fwd.process(&mut check);
@@ -344,6 +359,17 @@ pub fn generate_hybrid_fir(
     let half_win = generate_half_window(n_fft, &config.window);
     for (i, w) in half_win.iter().enumerate() {
         impulse[i] *= w;
+    }
+
+    // 10b. Iterative weighted refinement
+    if config.iterations > 0 {
+        iterative_refine(
+            &mut impulse,
+            &lin_total,           // target correction on linear grid
+            &correction_phase,    // phase on linear grid
+            config,
+            crossover_range,
+        );
     }
 
     // 11. Passband normalization: FFT → find peak → normalize to 0 dB
@@ -508,6 +534,164 @@ pub fn export_wav_f64(impulse: &[f64], sample_rate: f64, path: &std::path::Path)
     file.write_all(&buf)?;
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Internal: iterative weighted least-squares refinement
+// ---------------------------------------------------------------------------
+
+/// Frequency-dependent weight function for iterative optimization.
+///
+/// Higher weight = tighter correction in that frequency range.
+/// - Crossover transition bands: 3.0 (critical for phase alignment)
+/// - 200-4000 Hz (speech/music): 2.0 (max auditory sensitivity)
+/// - Below 200 Hz: 1.0 (standard)
+/// - Above 8000 Hz: 0.5 (psychoacoustic masking reduces requirements)
+fn frequency_weight(freq_hz: f64, crossover_range: (f64, f64)) -> f64 {
+    let (f_low, f_high) = crossover_range;
+
+    // Crossover transition bands (±0.5 octave around HP and LP)
+    let near_hp: f64 = if f_low > 10.0 {
+        let ratio = (freq_hz / f_low).log2().abs();
+        if ratio < 0.5 { 3.0 } else { 0.0 }
+    } else { 0.0 };
+    let near_lp: f64 = if f_high < 20000.0 {
+        let ratio = (freq_hz / f_high).log2().abs();
+        if ratio < 0.5 { 3.0 } else { 0.0 }
+    } else { 0.0 };
+
+    if near_hp > 0.0 || near_lp > 0.0 {
+        return near_hp.max(near_lp);
+    }
+
+    // Frequency-based weight
+    if freq_hz < 200.0 {
+        1.0
+    } else if freq_hz <= 4000.0 {
+        2.0
+    } else if freq_hz <= 8000.0 {
+        1.5
+    } else {
+        0.5
+    }
+}
+
+/// Iterative weighted refinement of FIR impulse response.
+///
+/// After initial frequency-sampling FIR generation, this function:
+/// 1. FFTs the windowed impulse to get realized spectrum
+/// 2. Computes weighted error vs desired correction
+/// 3. Adds weighted error back to correction spectrum
+/// 4. Regenerates impulse via IFFT + window
+/// 5. Repeats for `iterations` passes
+///
+/// This compensates for windowing distortion and improves accuracy
+/// especially in crossover and speech bands.
+fn iterative_refine(
+    impulse: &mut Vec<f64>,
+    target_correction_db: &[f64],   // desired correction on linear grid (n_bins)
+    phase_rad: &[f64],              // phase on linear grid (n_bins)
+    config: &FirConfig,
+    crossover_range: (f64, f64),
+) {
+    let iterations = config.iterations.min(10);
+    if iterations == 0 {
+        return;
+    }
+
+    let n_fft = config.taps;
+    let n_bins = n_fft / 2 + 1;
+    let df = config.sample_rate / n_fft as f64;
+
+    // Pre-compute weights for each frequency bin
+    let weights: Vec<f64> = (0..n_bins)
+        .map(|k| {
+            let f = k as f64 * df;
+            if f < 10.0 { 0.0 } else { frequency_weight(f, crossover_range) }
+        })
+        .collect();
+
+    // Working copy of correction spectrum (will be refined)
+    let mut refined_db: Vec<f64> = target_correction_db.to_vec();
+
+    let mut planner = FftPlanner::<f64>::new();
+    let fft_fwd = planner.plan_fft_forward(n_fft);
+    let ifft = planner.plan_fft_inverse(n_fft);
+
+    let is_linear_phase = matches!(config.phase_mode, PhaseMode::LinearPhase);
+
+    for iter in 0..iterations {
+        // 1. FFT current impulse → realized spectrum
+        let mut spec: Vec<Complex64> = impulse.iter()
+            .map(|&v| Complex64::new(v, 0.0))
+            .collect();
+        fft_fwd.process(&mut spec);
+
+        // 2. Compute realized magnitude in dB
+        let mut max_err: f64 = 0.0;
+        let mut sum_sq_err: f64 = 0.0;
+        let mut err_count: usize = 0;
+
+        for k in 0..n_bins {
+            let f = k as f64 * df;
+            if f < 10.0 || weights[k] == 0.0 { continue; }
+
+            let realized_db = {
+                let amp = spec[k].norm();
+                if amp > 1e-20 { 20.0 * amp.log10() } else { -200.0 }
+            };
+            let desired_db = target_correction_db[k];
+            let err = desired_db - realized_db;
+
+            // Weighted error correction with damping factor (0.7) for stability
+            let correction = err * weights[k] * 0.7;
+            refined_db[k] = (refined_db[k] + correction)
+                .max(config.noise_floor_db)
+                .min(config.max_boost_db);
+
+            let abs_err = err.abs();
+            if abs_err > max_err { max_err = abs_err; }
+            sum_sq_err += err * err;
+            err_count += 1;
+        }
+
+        let rms_err = if err_count > 0 { (sum_sq_err / err_count as f64).sqrt() } else { 0.0 };
+        info!("iterative_refine: iter={}, max_err={:.3} dB, rms_err={:.3} dB", iter + 1, max_err, rms_err);
+
+        // Early exit if error is already very small
+        if max_err < 0.05 {
+            info!("iterative_refine: converged at iter {} (max_err < 0.05 dB)", iter + 1);
+            break;
+        }
+
+        // 3. Rebuild impulse from refined correction
+        let mut new_spectrum = assemble_complex_spectrum(&refined_db, phase_rad, n_fft);
+        ifft.process(&mut new_spectrum);
+
+        let norm = 1.0 / n_fft as f64;
+        *impulse = new_spectrum.iter().map(|c| c.re * norm).collect();
+
+        // 4. Phase-dependent reordering
+        if is_linear_phase {
+            circular_shift_to_center(impulse);
+        }
+
+        // 5. Apply window
+        match config.phase_mode {
+            PhaseMode::MinimumPhase | PhaseMode::MixedPhase | PhaseMode::HybridPhase => {
+                let half_win = generate_half_window(n_fft, &config.window);
+                for (i, w) in half_win.iter().enumerate() {
+                    impulse[i] *= w;
+                }
+            }
+            PhaseMode::LinearPhase => {
+                let window = generate_window(n_fft, &config.window);
+                for (i, w) in window.iter().enumerate() {
+                    impulse[i] *= w;
+                }
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1064,6 +1248,17 @@ pub fn generate_model_fir(
         for (i, w) in half_win.iter().enumerate() {
             impulse[i] *= w;
         }
+    }
+
+    // 5b. Iterative weighted refinement (compensates windowing distortion)
+    if config.iterations > 0 {
+        iterative_refine(
+            &mut impulse,
+            &lin_mag,         // target magnitude on linear grid
+            &phase_rad,       // phase on linear grid
+            config,
+            (20.0, 20000.0),  // model FIR: full range, no crossover
+        );
     }
 
     // 6. FFT the windowed impulse back to get realized frequency response

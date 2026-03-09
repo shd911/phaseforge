@@ -336,6 +336,7 @@ export default function ExportImpulsePlot() {
         noise_floor_db: -150.0,
         window: window as any,
         phase_mode: allLinear ? "LinearPhase" : "MinimumPhase",
+        iterations: 3,
       };
 
       const firResult = await invoke<FirModelResult>("generate_model_fir", {

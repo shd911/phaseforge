@@ -138,6 +138,7 @@ export interface FirConfig {
   noise_floor_db: number;
   window: WindowType;
   phase_mode: PhaseMode;
+  iterations: number;       // iterative WLS refinement passes (0=off, 1-5 typical)
 }
 
 export interface FirResult {

@@ -865,6 +865,7 @@ function ExportTab() {
         noise_floor_db: -150.0,
         window: win,
         phase_mode: (isLin(b.target.high_pass) && isLin(b.target.low_pass)) ? "LinearPhase" : "MinimumPhase",
+        iterations: 3,
       },
     });
 
