@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { save, open, ask } from "@tauri-apps/plugin-dialog";
-import { createSignal } from "solid-js";
+import { createSignal, batch } from "solid-js";
 import {
   appState,
   resetAppState,
@@ -374,26 +374,29 @@ async function restoreState(project: ProjectFile, projDir: string | null) {
     showTarget: true,  // always visible (b82.06)
     nextBandNum: project.next_band_num,
   };
-  resetAppState(newState);
 
-  // Restore signals
-  const savedTab = project.active_tab === "align" ? "target" : project.active_tab;
-  setActiveTab(savedTab as any);
-  setExportSampleRate(project.export_sample_rate);
-  setExportTaps(project.export_taps);
-  setExportWindow(project.export_window as WindowType);
-  setExportHybridPhase(project.export_hybrid_phase ?? false);
-  setTolerance(project.peq_tolerance ?? 1.0);
-  setMaxBands(project.peq_max_bands ?? 20);
-  // FIR optimization settings
-  setFirIterations(project.fir_iterations ?? 3);
-  setFirFreqWeighting(project.fir_freq_weighting ?? true);
-  setFirNarrowbandLimit(project.fir_narrowband_limit ?? true);
-  setFirNbSmoothingOct(project.fir_nb_smoothing_oct ?? 0.333);
-  setFirNbMaxExcess(project.fir_nb_max_excess_db ?? 6.0);
-  setFirMaxBoost(project.fir_max_boost_db ?? 24.0);
-  setFirNoiseFloor(project.fir_noise_floor_db ?? -150.0);
-  setIsDirty(false);
+  // Batch all state + signal updates to prevent effects from running
+  // with partially restored state (e.g. new bands + old export settings)
+  batch(() => {
+    resetAppState(newState);
+    const savedTab = project.active_tab === "align" ? "target" : project.active_tab;
+    setActiveTab(savedTab as any);
+    setExportSampleRate(project.export_sample_rate);
+    setExportTaps(project.export_taps);
+    setExportWindow(project.export_window as WindowType);
+    setExportHybridPhase(project.export_hybrid_phase ?? false);
+    setTolerance(project.peq_tolerance ?? 1.0);
+    setMaxBands(project.peq_max_bands ?? 20);
+    // FIR optimization settings
+    setFirIterations(project.fir_iterations ?? 3);
+    setFirFreqWeighting(project.fir_freq_weighting ?? true);
+    setFirNarrowbandLimit(project.fir_narrowband_limit ?? true);
+    setFirNbSmoothingOct(project.fir_nb_smoothing_oct ?? 0.333);
+    setFirNbMaxExcess(project.fir_nb_max_excess_db ?? 6.0);
+    setFirMaxBoost(project.fir_max_boost_db ?? 24.0);
+    setFirNoiseFloor(project.fir_noise_floor_db ?? -150.0);
+    setIsDirty(false);
+  });
 }
 
 // ---------------------------------------------------------------------------
