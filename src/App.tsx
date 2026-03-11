@@ -21,6 +21,8 @@ import BandTabs from "./components/BandTabs";
 import ProjectNameDialog from "./components/ProjectNameDialog";
 import WelcomeDialog from "./components/WelcomeDialog";
 import CrossoverDialog from "./components/CrossoverDialog";
+import FirSettingsDialog from "./components/FirSettingsDialog";
+import { openFirSettings } from "./components/FirSettingsDialog";
 import PeqSidebar from "./components/PeqSidebar";
 import { activeTab } from "./stores/bands";
 
@@ -108,7 +110,7 @@ function App() {
       <div class="top-bar">
         <img src="/logo-icon.png" class="top-logo-icon" alt="" />
         <span class="top-logo">PhaseForge</span>
-        <span class="top-version">v0.1.0-b88</span>
+        <span class="top-version">v0.1.0-b89</span>
         <div class="top-sep" />
         <FileMenu />
         <span class="top-project-name" title={currentProjectPath() ?? "Untitled"}>
@@ -130,6 +132,11 @@ function App() {
             onClick={() => { if (!exportHybridPhase()) { setExportHybridPhase(true); handleOptimizeAll(); } }}
           >Hybrid</button>
         </div>
+        <button
+          class="tb-btn"
+          onClick={openFirSettings}
+          title="Optimization settings"
+        >Settings</button>
         <button
           class="tb-btn primary"
           onClick={handleOptimizeAll}
@@ -203,6 +210,7 @@ function App() {
       <WelcomeDialog />
       <ProjectNameDialog />
       <CrossoverDialog />
+      <FirSettingsDialog />
     </div>
   );
 }

@@ -2,7 +2,7 @@ import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { invoke } from "@tauri-apps/api/core";
-import { activeBand, appState, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, addPeqBand, updatePeqBand, commitPeqBand } from "../stores/bands";
+import { activeBand, appState, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, addPeqBand, updatePeqBand, commitPeqBand, setPeqDragging } from "../stores/bands";
 import type { PeqBand } from "../lib/types";
 
 const PEQ_MAG_COLOR = "#38BDF8";   // light blue — PEQ magnitude
@@ -140,6 +140,7 @@ export default function PeqResponsePlot() {
         const dx = ev.clientX - dragStartX;
         const dy = ev.clientY - dragStartY;
         if (!dragMoved && Math.hypot(dx, dy) < 3) return;
+        if (!dragMoved) setPeqDragging(true);
         dragMoved = true;
 
         const freq = c.posToVal(ev.clientX - rect.left - plotLeftCSS, "x");
@@ -158,6 +159,7 @@ export default function PeqResponsePlot() {
         }
         dragPeqIdx = null;
         dragMoved = false;
+        setPeqDragging(false);
         window.removeEventListener("mousemove", onMove);
         window.removeEventListener("mouseup", onUp);
       };

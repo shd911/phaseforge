@@ -709,6 +709,7 @@ export const [activeTab, setActiveTab] = createSignal<ActiveTab>("measurements")
 // ---------------------------------------------------------------------------
 
 export const [selectedPeqIdx, setSelectedPeqIdx] = createSignal<number | null>(null);
+export const [peqDragging, setPeqDragging] = createSignal(false);
 
 // ---------------------------------------------------------------------------
 // One-shot command: FrequencyPlot shows only these categories, then resets to null
@@ -748,6 +749,15 @@ export const [exportSampleRate, setExportSampleRate] = createSignal(48000);
 export const [exportTaps, setExportTaps] = createSignal(65536);
 export const [exportWindow, setExportWindow] = createSignal<WindowType>("Blackman");
 export const [exportHybridPhase, setExportHybridPhase] = createSignal(false);
+
+// FIR optimization settings
+export const [firIterations, setFirIterations] = createSignal(3);
+export const [firFreqWeighting, setFirFreqWeighting] = createSignal(true);
+export const [firNarrowbandLimit, setFirNarrowbandLimit] = createSignal(true);
+export const [firNbSmoothingOct, setFirNbSmoothingOct] = createSignal(0.333);
+export const [firNbMaxExcess, setFirNbMaxExcess] = createSignal(6.0);
+export const [firMaxBoost, setFirMaxBoost] = createSignal(24.0);
+export const [firNoiseFloor, setFirNoiseFloor] = createSignal(-150.0);
 
 // ---------------------------------------------------------------------------
 // Snapshot overlays: frozen curves for visual A/B comparison.

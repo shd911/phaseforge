@@ -5,7 +5,7 @@ import "uplot/dist/uPlot.min.css";
 import { invoke } from "@tauri-apps/api/core";
 import { MEASUREMENT_COLORS } from "../lib/types";
 import type { Measurement, TargetResponse, FilterType } from "../lib/types";
-import { appState, activeBand, isSum, activeTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots } from "../stores/bands";
+import { appState, activeBand, isSum, activeTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging } from "../stores/bands";
 import type { SmoothingMode, BandState, FreqSnapshot } from "../stores/bands";
 import { needAutoFit, setNeedAutoFit } from "../App";
 import { computeFloorBounce } from "../lib/floor-bounce";
@@ -983,8 +983,9 @@ export default function FrequencyPlot() {
   }
 
   // ----------------------------------------------------------------
-  // Main reactive effect
+  // Main reactive effect (debounced during PEQ drag)
   // ----------------------------------------------------------------
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   createEffect(() => {
     const showPhase = appState.showPhase;
     const showMag = appState.showMag;
@@ -994,15 +995,25 @@ export default function FrequencyPlot() {
     const bandsSnapshot = JSON.stringify(appState.bands);
     const _tab = activeTab(); // track tab changes (align tab shows extra curves)
     const _fsnaps = band ? freqSnapshots(band.id) : []; // track per-band snapshots
+    const dragging = peqDragging();
 
-    if (sumMode) {
-      renderSumMode(showPhase, showMag, showTarget, bandsSnapshot);
-    } else if (band) {
-      renderBandMode(band, showPhase, showMag, showTarget);
+    const doRender = () => {
+      if (sumMode) {
+        renderSumMode(showPhase, showMag, showTarget, bandsSnapshot);
+      } else if (band) {
+        renderBandMode(band, showPhase, showMag, showTarget);
+      } else {
+        if (chart) { chart.destroy(); chart = undefined; }
+        setShowLegend(false);
+        setCursorFreq("—"); setCursorSPL("—"); setCursorPhase("—");
+      }
+    };
+
+    if (debounceTimer) clearTimeout(debounceTimer);
+    if (dragging) {
+      debounceTimer = setTimeout(doRender, 150);
     } else {
-      if (chart) { chart.destroy(); chart = undefined; }
-      setShowLegend(false);
-      setCursorFreq("—"); setCursorSPL("—"); setCursorPhase("—");
+      doRender();
     }
   });
 

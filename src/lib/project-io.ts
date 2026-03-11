@@ -19,6 +19,13 @@ import {
   isDirty,
   setIsDirty,
   setBandMeasurementFile,
+  firIterations, setFirIterations,
+  firFreqWeighting, setFirFreqWeighting,
+  firNarrowbandLimit, setFirNarrowbandLimit,
+  firNbSmoothingOct, setFirNbSmoothingOct,
+  firNbMaxExcess, setFirNbMaxExcess,
+  firMaxBoost, setFirMaxBoost,
+  firNoiseFloor, setFirNoiseFloor,
 } from "../stores/bands";
 import type { FilterConfig } from "../lib/types";
 import { tolerance, setTolerance, maxBands, setMaxBands } from "../stores/peq-optimize";
@@ -138,6 +145,13 @@ interface ProjectFile {
   export_hybrid_phase?: boolean;
   peq_tolerance?: number;
   peq_max_bands?: number;
+  fir_iterations?: number;
+  fir_freq_weighting?: boolean;
+  fir_narrowband_limit?: boolean;
+  fir_nb_smoothing_oct?: number;
+  fir_nb_max_excess_db?: number;
+  fir_max_boost_db?: number;
+  fir_noise_floor_db?: number;
 }
 
 interface ProjectBand {
@@ -240,6 +254,13 @@ function buildProjectData(): ProjectFile {
     export_hybrid_phase: exportHybridPhase(),
     peq_tolerance: tolerance(),
     peq_max_bands: maxBands(),
+    fir_iterations: firIterations(),
+    fir_freq_weighting: firFreqWeighting(),
+    fir_narrowband_limit: firNarrowbandLimit(),
+    fir_nb_smoothing_oct: firNbSmoothingOct(),
+    fir_nb_max_excess_db: firNbMaxExcess(),
+    fir_max_boost_db: firMaxBoost(),
+    fir_noise_floor_db: firNoiseFloor(),
   };
 }
 
@@ -364,6 +385,14 @@ async function restoreState(project: ProjectFile, projDir: string | null) {
   setExportHybridPhase(project.export_hybrid_phase ?? false);
   setTolerance(project.peq_tolerance ?? 1.0);
   setMaxBands(project.peq_max_bands ?? 20);
+  // FIR optimization settings
+  setFirIterations(project.fir_iterations ?? 3);
+  setFirFreqWeighting(project.fir_freq_weighting ?? true);
+  setFirNarrowbandLimit(project.fir_narrowband_limit ?? true);
+  setFirNbSmoothingOct(project.fir_nb_smoothing_oct ?? 0.333);
+  setFirNbMaxExcess(project.fir_nb_max_excess_db ?? 6.0);
+  setFirMaxBoost(project.fir_max_boost_db ?? 24.0);
+  setFirNoiseFloor(project.fir_noise_floor_db ?? -150.0);
   setIsDirty(false);
 }
 

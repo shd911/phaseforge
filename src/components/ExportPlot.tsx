@@ -15,6 +15,13 @@ import {
   setExportSnapshots,
   exportYScale,
   setExportYScale,
+  firIterations,
+  firFreqWeighting,
+  firNarrowbandLimit,
+  firNbSmoothingOct,
+  firNbMaxExcess,
+  firMaxBoost,
+  firNoiseFloor,
 } from "../stores/bands";
 import type { ExportSnapshot } from "../stores/bands";
 
@@ -406,13 +413,23 @@ export default function ExportPlot() {
     const taps = exportTaps();
     const win = exportWindow();
     const _snaps = exportSnapshots(band.id); // track per-band snapshots
+    // Track FIR optimization signals (must read synchronously for SolidJS tracking)
+    const firOpts = {
+      maxBoost: firMaxBoost(),
+      noiseFloor: firNoiseFloor(),
+      iterations: firIterations(),
+      freqWeighting: firFreqWeighting(),
+      narrowbandLimit: firNarrowbandLimit(),
+      nbSmoothingOct: firNbSmoothingOct(),
+      nbMaxExcess: firNbMaxExcess(),
+    };
 
     const target = { ...band.target };
     const peqBands = band.peqBands?.filter((b: PeqBand) => b.enabled) ?? [];
 
     // Export is ALWAYS target + PEQ (model FIR), regardless of hybrid strategy.
     // Hybrid only affects PEQ optimization stage, not FIR export.
-    computeModelFir(target, peqBands, sr, taps, win);
+    computeModelFir(target, peqBands, sr, taps, win, firOpts);
   });
 
   // --- Standard path: pure model FIR (target + PEQ, no measurement) ---
@@ -422,6 +439,7 @@ export default function ExportPlot() {
     sampleRate: number,
     taps: number,
     window: string,
+    firOpts: { maxBoost: number; noiseFloor: number; iterations: number; freqWeighting: boolean; narrowbandLimit: boolean; nbSmoothingOct: number; nbMaxExcess: number },
   ) {
     try {
       setStatus("Computing...");
@@ -463,11 +481,15 @@ export default function ExportPlot() {
       const firConfig: FirConfig = {
         taps,
         sample_rate: sampleRate,
-        max_boost_db: 24.0,
-        noise_floor_db: -150.0,
+        max_boost_db: firOpts.maxBoost,
+        noise_floor_db: firOpts.noiseFloor,
         window: window as any,
         phase_mode: allLinear ? "LinearPhase" : "MinimumPhase",
-        iterations: 3,
+        iterations: firOpts.iterations,
+        freq_weighting: firOpts.freqWeighting,
+        narrowband_limit: firOpts.narrowbandLimit,
+        nb_smoothing_oct: firOpts.nbSmoothingOct,
+        nb_max_excess_db: firOpts.nbMaxExcess,
       };
 
       const firResult = await invoke<FirModelResult>("generate_model_fir", {
@@ -484,7 +506,9 @@ export default function ExportPlot() {
       const normLabel = firResult.norm_db !== 0
         ? ` \u00B7 Norm: ${firResult.norm_db > 0 ? "\u2212" : "+"}${Math.abs(firResult.norm_db).toFixed(1)} dB`
         : "";
-      setStatus(`${taps} taps \u00B7 ${sampleRate / 1000}k \u00B7 ${window} \u00B7 ${phaseLabel}${peqInfo}${normLabel}`);
+      const causalityPct = Math.round(firResult.causality * 100);
+      const causalityLabel = ` \u00B7 Causality: ${causalityPct}%`;
+      setStatus(`${taps} taps \u00B7 ${sampleRate / 1000}k \u00B7 ${window} \u00B7 ${phaseLabel}${peqInfo}${normLabel}${causalityLabel}`);
       const normModelMag = modelMag.map(v => v - firResult.norm_db);
       requestAnimationFrame(() =>
         renderChart(freq, normModelMag, modelPhase, firResult.realized_mag, firResult.realized_phase)

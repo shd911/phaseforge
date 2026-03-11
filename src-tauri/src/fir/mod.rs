@@ -59,10 +59,21 @@ pub struct FirConfig {
     pub window: WindowType,
     pub phase_mode: PhaseMode,
     #[serde(default = "default_iterations")]
-    pub iterations: usize,    // iterative WLS refinement passes (0 = off, 1-5 typical)
+    pub iterations: usize,                    // iterative WLS passes (0=off, 1-10)
+    #[serde(default = "default_true")]
+    pub freq_weighting: bool,                 // frequency-dependent WLS weights
+    #[serde(default = "default_true")]
+    pub narrowband_limit: bool,               // narrowband boost limiting
+    #[serde(default = "default_nb_smoothing")]
+    pub nb_smoothing_oct: f64,                // smoothing width in octaves (e.g. 1/3)
+    #[serde(default = "default_nb_max_excess")]
+    pub nb_max_excess_db: f64,                // max dB above smoothed curve
 }
 
 fn default_iterations() -> usize { 3 }
+fn default_true() -> bool { true }
+fn default_nb_smoothing() -> f64 { 0.333 }
+fn default_nb_max_excess() -> f64 { 6.0 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FirResult {
@@ -71,6 +82,7 @@ pub struct FirResult {
     pub taps: usize,
     pub sample_rate: f64,
     pub norm_db: f64,
+    pub causality: f64,       // 0.0-1.0: ratio of post-peak energy to total (1.0 = perfectly causal)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,6 +92,7 @@ pub struct FirModelResult {
     pub realized_mag: Vec<f64>,
     pub realized_phase: Vec<f64>,
     pub taps: usize,
+    pub causality: f64,
     pub sample_rate: f64,
     pub norm_db: f64,
 }
@@ -149,10 +162,14 @@ pub fn generate_fir(
         meas_freq, &correction_log, None, n_bins, config.sample_rate,
     );
 
-    // 5. Apply boost/cut limiting
-    let limited: Vec<f64> = lin_correction.iter().map(|&v| {
+    // 5. Apply boost/cut limiting + narrowband boost protection
+    let mut limited: Vec<f64> = lin_correction.iter().map(|&v| {
         v.max(config.noise_floor_db).min(config.max_boost_db)
     }).collect();
+    let df = config.sample_rate / n_fft as f64;
+    if config.narrowband_limit {
+        limit_narrowband_boost(&mut limited, df, config.nb_smoothing_oct, config.nb_max_excess_db);
+    }
 
     // 6. Compute minimum phase via Hilbert transform
     let phase_rad = match config.phase_mode {
@@ -246,12 +263,16 @@ pub fn generate_fir(
     let dt_ms = 1000.0 / config.sample_rate;
     let time_ms: Vec<f64> = (0..n_fft).map(|i| i as f64 * dt_ms).collect();
 
+    let causality = compute_causality(&impulse);
+    info!("generate_fir: causality={:.4} ({}% post-peak energy)", causality, (causality * 100.0) as u32);
+
     Ok(FirResult {
         impulse,
         time_ms,
         taps: n_fft,
         sample_rate: config.sample_rate,
         norm_db,
+        causality,
     })
 }
 
@@ -329,9 +350,13 @@ pub fn generate_hybrid_fir(
     let (_lin_freq, lin_correction, _) = interpolate_linear_grid(
         meas_freq, &correction_log, None, n_bins, config.sample_rate,
     );
-    let (_lin_freq2, lin_total, _) = interpolate_linear_grid(
+    let (_lin_freq2, mut lin_total, _) = interpolate_linear_grid(
         meas_freq, &total_log, None, n_bins, config.sample_rate,
     );
+    let df = config.sample_rate / n_fft as f64;
+    if config.narrowband_limit {
+        limit_narrowband_boost(&mut lin_total, df, config.nb_smoothing_oct, config.nb_max_excess_db);
+    }
 
     // 7. Phase: Hilbert only from correction component (min-phase)
     // Filter component has zero phase (linear-phase)
@@ -434,6 +459,9 @@ pub fn generate_hybrid_fir(
     let dt_ms = 1000.0 / config.sample_rate;
     let time_ms: Vec<f64> = (0..n_fft).map(|i| i as f64 * dt_ms).collect();
 
+    let causality = compute_causality(&impulse);
+    info!("generate_hybrid_fir: causality={:.4} ({}%)", causality, (causality * 100.0) as u32);
+
     Ok(FirModelResult {
         impulse,
         time_ms,
@@ -442,6 +470,7 @@ pub fn generate_hybrid_fir(
         taps: n_fft,
         sample_rate: config.sample_rate,
         norm_db,
+        causality,
     })
 }
 
@@ -607,7 +636,7 @@ fn iterative_refine(
     let weights: Vec<f64> = (0..n_bins)
         .map(|k| {
             let f = k as f64 * df;
-            if f < 10.0 { 0.0 } else { frequency_weight(f, crossover_range) }
+            if f < 10.0 { 0.0 } else if config.freq_weighting { frequency_weight(f, crossover_range) } else { 1.0 }
         })
         .collect();
 
@@ -692,6 +721,94 @@ fn iterative_refine(
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Internal: narrowband boost limiting
+// ---------------------------------------------------------------------------
+
+/// Limit narrowband boost peaks in correction spectrum on a linear frequency grid.
+///
+/// Strategy: smooth the correction with a 1/3-octave window, then clamp any bin
+/// that exceeds the smoothed value by more than `max_excess_db` down to that limit.
+/// This prevents the filter from aggressively boosting narrow measurement dips
+/// (caused by diffraction, interference, comb filtering) which are position-dependent
+/// and harmful to amplify.
+fn limit_narrowband_boost(correction_db: &mut [f64], df: f64, smoothing_oct: f64, max_excess_db: f64) {
+    let n = correction_db.len();
+    if n < 4 || df <= 0.0 { return; }
+
+    let fraction = smoothing_oct;
+    let smoothed: Vec<f64> = (0..n).map(|k| {
+        let f_center = k as f64 * df;
+        if f_center < 20.0 { return correction_db[k]; }
+
+        let k_factor = 2.0_f64.powf(fraction / 2.0);
+        let f_lo = f_center / k_factor;
+        let f_hi = f_center * k_factor;
+        let k_lo = (f_lo / df).floor() as usize;
+        let k_hi = ((f_hi / df).ceil() as usize).min(n - 1);
+
+        if k_hi <= k_lo { return correction_db[k]; }
+
+        let mut sum = 0.0;
+        let mut count = 0;
+        for i in k_lo..=k_hi {
+            sum += correction_db[i];
+            count += 1;
+        }
+        sum / count as f64
+    }).collect();
+
+    // Clamp: where correction exceeds smoothed + max_excess, limit it
+    let mut limited_count = 0usize;
+    for k in 0..n {
+        let limit = smoothed[k] + max_excess_db;
+        if correction_db[k] > limit {
+            correction_db[k] = limit;
+            limited_count += 1;
+        }
+    }
+
+    if limited_count > 0 {
+        info!("limit_narrowband_boost: clamped {} bins (max_excess={:.1} dB)", limited_count, max_excess_db);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Internal: causality metric
+// ---------------------------------------------------------------------------
+
+/// Compute causality metric for an impulse response.
+///
+/// Returns ratio of post-peak energy to total energy (0.0-1.0).
+/// 1.0 = perfectly causal (all energy after peak), lower = more pre-ringing.
+///
+/// For minimum-phase: typically >0.99
+/// For linear-phase: ~0.50 (symmetric around center)
+/// For hybrid-phase: between the two
+fn compute_causality(impulse: &[f64]) -> f64 {
+    if impulse.is_empty() { return 1.0; }
+
+    // Find peak position
+    let mut peak_idx = 0;
+    let mut peak_val = 0.0_f64;
+    for (i, &v) in impulse.iter().enumerate() {
+        let abs = v.abs();
+        if abs > peak_val {
+            peak_val = abs;
+            peak_idx = i;
+        }
+    }
+
+    // Total energy
+    let total: f64 = impulse.iter().map(|v| v * v).sum();
+    if total < 1e-30 { return 1.0; }
+
+    // Post-peak energy (including peak sample)
+    let post: f64 = impulse[peak_idx..].iter().map(|v| v * v).sum();
+
+    post / total
 }
 
 // ---------------------------------------------------------------------------
@@ -1335,6 +1452,9 @@ pub fn generate_model_fir(
     let dt_ms = 1000.0 / config.sample_rate;
     let time_ms: Vec<f64> = (0..n_fft).map(|i| i as f64 * dt_ms).collect();
 
+    let causality = compute_causality(&impulse);
+    info!("generate_model_fir: causality={:.4} ({}%)", causality, (causality * 100.0) as u32);
+
     Ok(FirModelResult {
         impulse,
         time_ms,
@@ -1343,6 +1463,7 @@ pub fn generate_model_fir(
         taps: n_fft,
         sample_rate: config.sample_rate,
         norm_db,
+        causality,
     })
 }
 

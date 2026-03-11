@@ -8,6 +8,13 @@ import {
   exportSampleRate,
   exportTaps,
   exportWindow,
+  firIterations,
+  firFreqWeighting,
+  firNarrowbandLimit,
+  firNbSmoothingOct,
+  firNbMaxExcess,
+  firMaxBoost,
+  firNoiseFloor,
 } from "../stores/bands";
 
 const FIR_IMPULSE_COLOR = "#38BDF8"; // light blue
@@ -283,6 +290,16 @@ export default function ExportImpulsePlot() {
     const sr = exportSampleRate();
     const taps = exportTaps();
     const win = exportWindow();
+    // Track FIR optimization signals synchronously
+    const firOpts = {
+      maxBoost: firMaxBoost(),
+      noiseFloor: firNoiseFloor(),
+      iterations: firIterations(),
+      freqWeighting: firFreqWeighting(),
+      narrowbandLimit: firNarrowbandLimit(),
+      nbSmoothingOct: firNbSmoothingOct(),
+      nbMaxExcess: firNbMaxExcess(),
+    };
     const target = { ...band.target };
     const peqBands = band.peqBands?.filter((b: PeqBand) => b.enabled) ?? [];
 
@@ -292,7 +309,7 @@ export default function ExportImpulsePlot() {
     prevSR = sr;
     prevWin = win;
 
-    computeAndRender(target, peqBands, sr, taps, win, configChanged);
+    computeAndRender(target, peqBands, sr, taps, win, configChanged, firOpts);
   });
 
   async function computeAndRender(
@@ -302,6 +319,7 @@ export default function ExportImpulsePlot() {
     taps: number,
     window: string,
     resetScales: boolean = false,
+    firOpts: { maxBoost: number; noiseFloor: number; iterations: number; freqWeighting: boolean; narrowbandLimit: boolean; nbSmoothingOct: number; nbMaxExcess: number } = { maxBoost: 24, noiseFloor: -150, iterations: 3, freqWeighting: true, narrowbandLimit: true, nbSmoothingOct: 0.333, nbMaxExcess: 6 },
   ) {
     try {
       // 1. Evaluate pure target
@@ -332,11 +350,15 @@ export default function ExportImpulsePlot() {
       const firConfig: FirConfig = {
         taps,
         sample_rate: sampleRate,
-        max_boost_db: 24.0,
-        noise_floor_db: -150.0,
+        max_boost_db: firOpts.maxBoost,
+        noise_floor_db: firOpts.noiseFloor,
         window: window as any,
         phase_mode: allLinear ? "LinearPhase" : "MinimumPhase",
-        iterations: 3,
+        iterations: firOpts.iterations,
+        freq_weighting: firOpts.freqWeighting,
+        narrowband_limit: firOpts.narrowbandLimit,
+        nb_smoothing_oct: firOpts.nbSmoothingOct,
+        nb_max_excess_db: firOpts.nbMaxExcess,
       };
 
       const firResult = await invoke<FirModelResult>("generate_model_fir", {

@@ -138,7 +138,11 @@ export interface FirConfig {
   noise_floor_db: number;
   window: WindowType;
   phase_mode: PhaseMode;
-  iterations: number;       // iterative WLS refinement passes (0=off, 1-5 typical)
+  iterations: number;          // iterative WLS passes (0=off, 1-10)
+  freq_weighting: boolean;     // frequency-dependent WLS weights
+  narrowband_limit: boolean;   // narrowband boost limiting
+  nb_smoothing_oct: number;    // smoothing width in octaves
+  nb_max_excess_db: number;    // max dB above smoothed curve
 }
 
 export interface FirResult {
@@ -147,6 +151,7 @@ export interface FirResult {
   taps: number;
   sample_rate: number;
   norm_db: number;
+  causality: number;
 }
 
 export interface FirModelResult {
@@ -157,6 +162,7 @@ export interface FirModelResult {
   taps: number;
   sample_rate: number;
   norm_db: number;
+  causality: number;
 }
 
 // Colors for multi-measurement overlay
