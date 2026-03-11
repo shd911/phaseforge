@@ -221,10 +221,14 @@ function mapSettingsToProject(s: PerMeasurementSettings): ProjectSettings {
 
 function mapBandToProject(b: BandState): ProjectBand {
   const isV2 = projectDir() !== null;
+  if (isV2 && b.measurement && !b.measurementFile) {
+    console.warn(`[Save] Band "${b.name}": measurement present but no measurementFile — embedding data as fallback`);
+  }
   return {
     id: b.id,
     name: b.name,
-    measurement: isV2 ? null : b.measurement, // v2: don't embed data
+    // v2: only omit embedded data if measurementFile is set (fallback: embed data)
+    measurement: isV2 && b.measurementFile ? null : b.measurement,
     measurement_file: isV2 ? b.measurementFile : null,
     settings: b.settings ? mapSettingsToProject(b.settings) : null,
     target: b.target, // already snake_case
@@ -413,6 +417,22 @@ async function confirmIfDirty(): Promise<boolean> {
 }
 
 // ---------------------------------------------------------------------------
+// Migrate v1 project to v2 folder structure
+// ---------------------------------------------------------------------------
+
+async function migrateToV2(pfprojPath: string): Promise<void> {
+  const info = deriveProjectInfo(pfprojPath);
+  const dir = info.dir;
+  // Create standard sub-directories alongside the .pfproj file
+  for (const sub of ["inbox", "target", "export"]) {
+    await invoke("ensure_dir", { path: `${dir}/${sub}` }).catch(() => {});
+  }
+  setProjectDir(dir);
+  setProjectName(info.name);
+  console.log(`[Migrate] v1 → v2: created folder structure in ${dir}`);
+}
+
+// ---------------------------------------------------------------------------
 // Copy pending measurements (bands with measurement data but no measurementFile)
 // ---------------------------------------------------------------------------
 
@@ -426,7 +446,10 @@ async function copyPendingMeasurements(): Promise<void> {
   for (const band of appState.bands) {
     if (band.measurement && !band.measurementFile) {
       const sourcePath = band.measurement.source_path;
-      if (!sourcePath) continue;
+      if (!sourcePath) {
+        console.warn(`[Save] Band "${band.name}": measurement has no source_path — data will be embedded in project`);
+        continue;
+      }
       // Use original filename (basename) — no renaming
       const fileName = sourcePath.split("/").pop() ?? sourcePath.split("\\").pop() ?? "measurement.txt";
       const destPath = `${dir}/inbox/${fileName}`;
@@ -565,6 +588,10 @@ export async function newProject(): Promise<void> {
 export async function saveProject(): Promise<void> {
   const existing = currentProjectPath();
   if (existing) {
+    // Migrate v1 → v2: create project folder structure if missing
+    if (!projectDir()) {
+      await migrateToV2(existing);
+    }
     // Copy any pending measurements before saving
     await copyPendingMeasurements();
     await doSave(existing);
