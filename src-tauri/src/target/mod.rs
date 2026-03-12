@@ -315,7 +315,7 @@ fn filter_hp_response(f: f64, fc: f64, cfg: &FilterConfig) -> (f64, f64) {
 /// Custom low-pass: cascades order/2 second-order LP biquad sections, each with the given Q.
 /// Odd orders add a 1st-order section (Q irrelevant for 1st order).
 fn custom_lp_complex(f: f64, fc: f64, q: f64, order: u8) -> (f64, f64) {
-    let w = 2.0 * PI * f / fc; // normalized frequency
+    let w = f / fc; // normalized frequency (ratio, same as Butterworth)
     let n_second_order = order / 2;
     let has_first_order = order % 2 == 1;
 
@@ -348,7 +348,7 @@ fn custom_lp_complex(f: f64, fc: f64, q: f64, order: u8) -> (f64, f64) {
 
 /// Custom high-pass: transform s → fc/s gives HP from LP sections.
 fn custom_hp_complex(f: f64, fc: f64, q: f64, order: u8) -> (f64, f64) {
-    let w = 2.0 * PI * f / fc;
+    let w = f / fc;
     if w.abs() < 1e-15 {
         return (-600.0, 0.0);
     }
