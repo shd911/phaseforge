@@ -30,6 +30,25 @@ fn default_true() -> bool {
     true
 }
 
+fn default_peaking() -> PeqFilterType {
+    PeqFilterType::Peaking
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExclusionZone {
+    #[serde(alias = "startHz")]
+    pub start_hz: f64,
+    #[serde(alias = "endHz")]
+    pub end_hz: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum PeqFilterType {
+    Peaking,
+    LowShelf,
+    HighShelf,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeqBand {
     pub freq_hz: f64,
@@ -37,6 +56,8 @@ pub struct PeqBand {
     pub q: f64,
     #[serde(default = "default_true")]
     pub enabled: bool,
+    #[serde(default = "default_peaking")]
+    pub filter_type: PeqFilterType,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -233,6 +254,17 @@ fn compute_uniform_weights(freq: &[f64], _meas_mag: &[f64], _hp_freq: f64, _lp_f
     vec![1.0; freq.len()]
 }
 
+/// Zero out weights for frequencies inside exclusion zones.
+fn apply_exclusion_zones(weights: &mut [f64], freq: &[f64], zones: &[ExclusionZone]) {
+    for zone in zones {
+        for (i, &f) in freq.iter().enumerate() {
+            if f >= zone.start_hz && f <= zone.end_hz {
+                weights[i] = 0.0;
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Unified target curve
 // ---------------------------------------------------------------------------
@@ -296,6 +328,7 @@ impl<'a> LmaSolver<'a> {
                 gain_db: params[i * 3 + 1],
                 q: params[i * 3 + 2],
                 enabled: true,
+                filter_type: PeqFilterType::Peaking,
             });
         }
         bands
@@ -510,6 +543,7 @@ pub fn auto_peq_lma(
     config: &PeqConfig,
     hp_freq: f64,
     lp_freq: f64,
+    exclusion_zones: &[ExclusionZone],
 ) -> Result<PeqResult, AppError> {
     let n = freq.len();
     if n == 0 || meas_mag.len() != n {
@@ -597,11 +631,17 @@ pub fn auto_peq_lma(
     };
 
     // 2. Weights
-    let weights = if config.hybrid {
+    let mut weights = if config.hybrid {
         compute_uniform_weights(freq, meas_mag, hp_freq, lp_freq)
     } else {
         compute_weights(freq, meas_mag, hp_freq, lp_freq)
     };
+
+    // 2b. Exclusion zones: zero out weights for excluded frequency ranges
+    if !exclusion_zones.is_empty() {
+        apply_exclusion_zones(&mut weights, freq, exclusion_zones);
+        info!("auto_peq_lma: applied {} exclusion zone(s)", exclusion_zones.len());
+    }
 
     // 3. Greedy initialization
     let raw_error: Vec<f64> = meas_mag.iter().zip(target.iter()).map(|(m, t)| m - t).collect();
@@ -701,6 +741,7 @@ pub fn auto_peq_lma(
             gain_db: new_gain,
             q: new_q,
             enabled: true,
+            filter_type: PeqFilterType::Peaking,
         });
 
         info!(
@@ -733,6 +774,9 @@ pub fn auto_peq_lma(
         }
     }
 
+    // 8. Shelf promotion: try converting edge bands to LowShelf / HighShelf
+    try_promote_to_shelves(&mut bands, freq, meas_mag, target, config);
+
     // Compute final max error
     let correction = apply_peq(freq, &bands, SAMPLE_RATE);
     let max_err = compute_max_error_in_range(freq, meas_mag, target, &correction, config.freq_range);
@@ -755,6 +799,60 @@ pub fn auto_peq_lma(
     })
 }
 
+/// Try promoting the lowest/highest frequency bands to LowShelf/HighShelf.
+/// If the shelf version produces equal or lower weighted error, keep it.
+fn try_promote_to_shelves(
+    bands: &mut Vec<PeqBand>,
+    freq: &[f64],
+    meas_mag: &[f64],
+    target: &[f64],
+    config: &PeqConfig,
+) {
+    if bands.is_empty() { return; }
+
+    // Helper: weighted SSE in freq_range
+    let compute_sse = |bs: &[PeqBand]| -> f64 {
+        let corr = apply_peq(freq, bs, SAMPLE_RATE);
+        freq.iter().enumerate()
+            .filter(|(_, &f)| f >= config.freq_range.0 && f <= config.freq_range.1)
+            .map(|(i, _)| {
+                let e = meas_mag[i] + corr[i] - target[i];
+                e * e
+            })
+            .sum::<f64>()
+    };
+
+    let baseline = compute_sse(bands);
+
+    // Try lowest band → LowShelf
+    if bands[0].filter_type == PeqFilterType::Peaking {
+        let mut trial = bands.clone();
+        trial[0].filter_type = PeqFilterType::LowShelf;
+        // Shelf with lower Q for broader effect
+        trial[0].q = (trial[0].q * 0.7).max(Q_MIN);
+        let trial_sse = compute_sse(&trial);
+        if trial_sse <= baseline * 1.05 {
+            bands[0].filter_type = PeqFilterType::LowShelf;
+            bands[0].q = trial[0].q;
+            info!("try_promote_to_shelves: band[0] at {:.0} Hz → LowShelf", bands[0].freq_hz);
+        }
+    }
+
+    // Try highest band → HighShelf
+    let last = bands.len() - 1;
+    if bands[last].filter_type == PeqFilterType::Peaking {
+        let mut trial = bands.clone();
+        trial[last].filter_type = PeqFilterType::HighShelf;
+        trial[last].q = (trial[last].q * 0.7).max(Q_MIN);
+        let trial_sse = compute_sse(&trial);
+        if trial_sse <= baseline * 1.05 {
+            bands[last].filter_type = PeqFilterType::HighShelf;
+            bands[last].q = trial[last].q;
+            info!("try_promote_to_shelves: band[{}] at {:.0} Hz → HighShelf", last, bands[last].freq_hz);
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Public API (backward-compatible wrappers + direct functions)
 // ---------------------------------------------------------------------------
@@ -775,6 +873,7 @@ pub fn auto_peq(
         config,
         config.freq_range.0,
         config.freq_range.1,
+        &[],
     )
 }
 
@@ -798,7 +897,7 @@ pub fn apply_peq(freq: &[f64], bands: &[PeqBand], sample_rate: f64) -> Vec<f64> 
 /// Compute the magnitude response (dB) of a single PEQ band at each frequency point.
 pub fn peq_band_response(freq: &[f64], band: &PeqBand, sample_rate: f64) -> Vec<f64> {
     freq.iter()
-        .map(|&f| biquad_peaking_mag_db(f, band.freq_hz, band.gain_db, band.q, sample_rate))
+        .map(|&f| peq_band_mag_db(f, band, sample_rate))
         .collect()
 }
 
@@ -813,7 +912,7 @@ pub fn apply_peq_complex(freq: &[f64], bands: &[PeqBand], sample_rate: f64) -> (
             continue;
         }
         for (i, &f) in freq.iter().enumerate() {
-            let (mag_db, phase_deg) = biquad_peaking_complex(f, band.freq_hz, band.gain_db, band.q, sample_rate);
+            let (mag_db, phase_deg) = peq_band_complex(f, band, sample_rate);
             total_mag[i] += mag_db;
             total_phase[i] += phase_deg;
         }
@@ -873,6 +972,90 @@ fn biquad_peaking_complex(f: f64, fc: f64, gain_db: f64, q: f64, sample_rate: f6
     (mag_db, phase_deg)
 }
 
+/// Low shelf biquad (RBJ Audio EQ Cookbook) — returns (mag_db, phase_deg).
+fn biquad_lowshelf_complex(f: f64, fc: f64, gain_db: f64, q: f64, sample_rate: f64) -> (f64, f64) {
+    if gain_db.abs() < 1e-10 || q <= 0.0 || fc <= 0.0 || sample_rate <= 0.0 {
+        return (0.0, 0.0);
+    }
+    let a_lin = 10.0_f64.powf(gain_db / 40.0); // sqrt of linear gain
+    let w0 = 2.0 * PI * fc / sample_rate;
+    let cos_w0 = w0.cos();
+    let alpha = w0.sin() / (2.0 * q);
+    let two_sqrt_a_alpha = 2.0 * a_lin.sqrt() * alpha;
+
+    let b0 = a_lin * ((a_lin + 1.0) - (a_lin - 1.0) * cos_w0 + two_sqrt_a_alpha);
+    let b1 = 2.0 * a_lin * ((a_lin - 1.0) - (a_lin + 1.0) * cos_w0);
+    let b2 = a_lin * ((a_lin + 1.0) - (a_lin - 1.0) * cos_w0 - two_sqrt_a_alpha);
+    let a0 = (a_lin + 1.0) + (a_lin - 1.0) * cos_w0 + two_sqrt_a_alpha;
+    let a1 = -2.0 * ((a_lin - 1.0) + (a_lin + 1.0) * cos_w0);
+    let a2 = (a_lin + 1.0) + (a_lin - 1.0) * cos_w0 - two_sqrt_a_alpha;
+
+    biquad_eval_complex(f, sample_rate, b0, b1, b2, a0, a1, a2)
+}
+
+/// High shelf biquad (RBJ Audio EQ Cookbook) — returns (mag_db, phase_deg).
+fn biquad_highshelf_complex(f: f64, fc: f64, gain_db: f64, q: f64, sample_rate: f64) -> (f64, f64) {
+    if gain_db.abs() < 1e-10 || q <= 0.0 || fc <= 0.0 || sample_rate <= 0.0 {
+        return (0.0, 0.0);
+    }
+    let a_lin = 10.0_f64.powf(gain_db / 40.0);
+    let w0 = 2.0 * PI * fc / sample_rate;
+    let cos_w0 = w0.cos();
+    let alpha = w0.sin() / (2.0 * q);
+    let two_sqrt_a_alpha = 2.0 * a_lin.sqrt() * alpha;
+
+    let b0 = a_lin * ((a_lin + 1.0) + (a_lin - 1.0) * cos_w0 + two_sqrt_a_alpha);
+    let b1 = -2.0 * a_lin * ((a_lin - 1.0) + (a_lin + 1.0) * cos_w0);
+    let b2 = a_lin * ((a_lin + 1.0) + (a_lin - 1.0) * cos_w0 - two_sqrt_a_alpha);
+    let a0 = (a_lin + 1.0) - (a_lin - 1.0) * cos_w0 + two_sqrt_a_alpha;
+    let a1 = 2.0 * ((a_lin - 1.0) - (a_lin + 1.0) * cos_w0);
+    let a2 = (a_lin + 1.0) - (a_lin - 1.0) * cos_w0 - two_sqrt_a_alpha;
+
+    biquad_eval_complex(f, sample_rate, b0, b1, b2, a0, a1, a2)
+}
+
+/// Evaluate biquad transfer function H(z) at frequency f — shared helper.
+fn biquad_eval_complex(f: f64, sample_rate: f64, b0: f64, b1: f64, b2: f64, a0: f64, a1: f64, a2: f64) -> (f64, f64) {
+    let w = 2.0 * PI * f / sample_rate;
+    let cos_w = w.cos();
+    let cos_2w = (2.0 * w).cos();
+    let sin_w = w.sin();
+    let sin_2w = (2.0 * w).sin();
+
+    let num_re = b0 + b1 * cos_w + b2 * cos_2w;
+    let num_im = -b1 * sin_w - b2 * sin_2w;
+    let den_re = a0 + a1 * cos_w + a2 * cos_2w;
+    let den_im = -a1 * sin_w - a2 * sin_2w;
+
+    let num_mag_sq = num_re * num_re + num_im * num_im;
+    let den_mag_sq = den_re * den_re + den_im * den_im;
+
+    let mag_db = if den_mag_sq < 1e-30 { 0.0 } else { 10.0 * (num_mag_sq / den_mag_sq).log10() };
+    let phase_deg = (num_im.atan2(num_re) - den_im.atan2(den_re)) * 180.0 / PI;
+
+    (mag_db, phase_deg)
+}
+
+/// Dispatch to the correct biquad function based on PeqFilterType.
+fn peq_band_complex(f: f64, band: &PeqBand, sample_rate: f64) -> (f64, f64) {
+    match band.filter_type {
+        PeqFilterType::Peaking => biquad_peaking_complex(f, band.freq_hz, band.gain_db, band.q, sample_rate),
+        PeqFilterType::LowShelf => biquad_lowshelf_complex(f, band.freq_hz, band.gain_db, band.q, sample_rate),
+        PeqFilterType::HighShelf => biquad_highshelf_complex(f, band.freq_hz, band.gain_db, band.q, sample_rate),
+    }
+}
+
+/// Dispatch magnitude-only version.
+fn peq_band_mag_db(f: f64, band: &PeqBand, sample_rate: f64) -> f64 {
+    match band.filter_type {
+        PeqFilterType::Peaking => biquad_peaking_mag_db(f, band.freq_hz, band.gain_db, band.q, sample_rate),
+        PeqFilterType::LowShelf | PeqFilterType::HighShelf => {
+            let (mag, _) = peq_band_complex(f, band, sample_rate);
+            mag
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Internal: Greedy Fitting with Adaptive Q
 // ---------------------------------------------------------------------------
@@ -918,6 +1101,7 @@ fn greedy_fit_adaptive(freq: &[f64], smoothed_error: &[f64], config: &PeqConfig)
             gain_db: gain,
             q,
             enabled: true,
+            filter_type: PeqFilterType::Peaking,
         };
 
         // Apply this band's response to the working error
@@ -1095,6 +1279,7 @@ fn merge_nearby_bands(bands: &mut Vec<PeqBand>, merge_distance_oct: f64) {
             gain_db: group_gain,
             q: group_q_min.clamp(Q_MIN, Q_MAX),
             enabled: true,
+            filter_type: PeqFilterType::Peaking,
         });
 
         i = j;
@@ -1249,7 +1434,7 @@ pub fn auto_peq_above_lp(
         hybrid: false,
     };
 
-    auto_peq_lma(meas_mag, Some(&target), freq, &above_config, hp_freq, lp_freq)
+    auto_peq_lma(meas_mag, Some(&target), freq, &above_config, hp_freq, lp_freq, &[])
 }
 
 // ---------------------------------------------------------------------------
@@ -1330,6 +1515,7 @@ mod tests {
             gain_db: -6.0,
             q: 4.0,
             enabled: true,
+            filter_type: PeqFilterType::Peaking,
         };
         let result = apply_peq(&freq, &[band], 48000.0);
         let idx = freq
@@ -1515,9 +1701,9 @@ mod tests {
     #[test]
     fn test_merge_nearby_bands() {
         let mut bands = vec![
-            PeqBand { freq_hz: 100.0, gain_db: -3.0, q: 2.0, enabled: true },
-            PeqBand { freq_hz: 105.0, gain_db: -2.0, q: 3.0, enabled: true },
-            PeqBand { freq_hz: 1000.0, gain_db: 4.0, q: 5.0, enabled: true },
+            PeqBand { freq_hz: 100.0, gain_db: -3.0, q: 2.0, enabled: true, filter_type: PeqFilterType::Peaking },
+            PeqBand { freq_hz: 105.0, gain_db: -2.0, q: 3.0, enabled: true, filter_type: PeqFilterType::Peaking },
+            PeqBand { freq_hz: 1000.0, gain_db: 4.0, q: 5.0, enabled: true, filter_type: PeqFilterType::Peaking },
         ];
         merge_nearby_bands(&mut bands, MIN_BAND_DISTANCE_OCT);
         // 100 and 105 should merge (within 1/3 octave)
@@ -1801,7 +1987,7 @@ mod tests {
             min_band_distance_oct: None,
             hybrid: false,
         };
-        let result = auto_peq_lma(&meas, Some(&target), &freq, &config, 80.0, 15000.0).unwrap();
+        let result = auto_peq_lma(&meas, Some(&target), &freq, &config, 80.0, 15000.0, &[]).unwrap();
 
         assert!(
             !result.bands.is_empty(),
@@ -1839,7 +2025,7 @@ mod tests {
             min_band_distance_oct: None,
             hybrid: false,
         };
-        let result = auto_peq_lma(&meas, Some(&meas), &freq, &config, 80.0, 15000.0).unwrap();
+        let result = auto_peq_lma(&meas, Some(&meas), &freq, &config, 80.0, 15000.0, &[]).unwrap();
 
         assert!(
             result.bands.is_empty(),
@@ -1875,7 +2061,7 @@ mod tests {
         };
 
         let target: Vec<f64> = freq.iter().map(|_| 80.0).collect();
-        let result = auto_peq_lma(&meas, Some(&target), &freq, &config, 80.0, 3000.0).unwrap();
+        let result = auto_peq_lma(&meas, Some(&target), &freq, &config, 80.0, 3000.0, &[]).unwrap();
 
         // All bands above LP should have Q ≤ 2.5
         for b in &result.bands {

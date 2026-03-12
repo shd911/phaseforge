@@ -12,6 +12,7 @@ export interface CrossoverDialogData {
   order: number;
   linearPhase: boolean;
   shape: number | null;  // Gaussian M coefficient
+  q: number | null;      // Custom Q factor
 }
 
 const [dialogData, setDialogData] = createSignal<CrossoverDialogData | null>(null);
@@ -30,8 +31,10 @@ export default function CrossoverDialog() {
   const [order, setOrder] = createSignal(4);
   const [linearPhase, setLinearPhase] = createSignal(true);
   const [shape, setShape] = createSignal(1.0);
+  const [customQ, setCustomQ] = createSignal(0.707);
 
   const isGaussian = () => filterType() === "Gaussian";
+  const isCustom = () => filterType() === "Custom";
 
   // Sync local state when dialog opens
   function initFromData(data: CrossoverDialogData) {
@@ -40,6 +43,7 @@ export default function CrossoverDialog() {
     setOrder(data.order);
     setLinearPhase(data.linearPhase);
     setShape(data.shape ?? 1.0);
+    setCustomQ(data.q ?? 0.707);
   }
 
   function handleApply() {
@@ -52,6 +56,7 @@ export default function CrossoverDialog() {
       freq_hz: Math.round(freq()),
       shape: isGaussian() ? shape() : null,
       linear_phase: isGaussian() ? true : linearPhase(),
+      q: isCustom() ? customQ() : null,
     };
 
     // Set LP on the band — propagation handles the HP on the next band
@@ -77,6 +82,7 @@ export default function CrossoverDialog() {
   function availableOrders(): number[] {
     const ft = filterType();
     if (ft === "LinkwitzRiley") return [2, 4, 8];
+    if (ft === "Custom") return [1, 2, 3, 4, 5, 6, 7, 8];
     return [1, 2, 3, 4, 5, 6, 7, 8]; // Butterworth, Bessel
   }
 
@@ -118,11 +124,11 @@ export default function CrossoverDialog() {
                   const ft = e.currentTarget.value as FilterType;
                   setFilterType(ft);
                   if (ft === "Gaussian") {
-                    // Gaussian is always linear-phase
                     setLinearPhase(true);
                     setShape(shape() || 1.0);
+                  } else if (ft === "Custom") {
+                    setCustomQ(customQ() || 0.707);
                   } else {
-                    // Ensure order is valid for new type
                     const avail = ft === "LinkwitzRiley" ? [2, 4, 8] :
                                   [1, 2, 3, 4, 5, 6, 7, 8];
                     if (!avail.includes(order())) {
@@ -135,10 +141,11 @@ export default function CrossoverDialog() {
                 <option value="Butterworth">Butterworth</option>
                 <option value="Bessel">Bessel</option>
                 <option value="Gaussian">Gaussian</option>
+                <option value="Custom">Custom Q</option>
               </select>
             </div>
 
-            {/* Order — only for non-Gaussian */}
+            {/* Order — for non-Gaussian types */}
             <Show when={!isGaussian()}>
               <div class="xo-row">
                 <span class="xo-label">Order</span>
@@ -168,6 +175,26 @@ export default function CrossoverDialog() {
                   onInput={(e) => setShape(parseFloat(e.currentTarget.value) || 1.0)}
                   onKeyDown={handleKeyDown}
                 />
+              </div>
+            </Show>
+
+            {/* Q — only for Custom */}
+            <Show when={isCustom()}>
+              <div class="xo-row">
+                <span class="xo-label">Q</span>
+                <input
+                  class="xo-input"
+                  type="number"
+                  min="0.1"
+                  max="20"
+                  step="0.01"
+                  value={customQ().toFixed(3)}
+                  onInput={(e) => setCustomQ(parseFloat(e.currentTarget.value) || 0.707)}
+                  onKeyDown={handleKeyDown}
+                />
+              </div>
+              <div class="xo-hint">
+                0.500 = LR · 0.577 = Bessel · 0.707 = BW · &gt;0.707 = resonant
               </div>
             </Show>
 

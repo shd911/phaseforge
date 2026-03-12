@@ -47,7 +47,7 @@ import { setNeedAutoFit } from "../App";
 import { projectDir, projectName, copyMeasurementToProject, copyMergeFilesToProject, sanitize, yymmdd } from "../lib/project-io";
 import MergeDialog from "./MergeDialog";
 
-const FILTER_TYPES: FilterType[] = ["Butterworth", "Bessel", "LinkwitzRiley", "Gaussian"];
+const FILTER_TYPES: FilterType[] = ["Butterworth", "Bessel", "LinkwitzRiley", "Gaussian", "Custom"];
 
 // Remember last filter config per band so toggle off→on restores settings
 const lastHP = new Map<string, import("../lib/types").FilterConfig>();
@@ -207,7 +207,7 @@ function FiltersTab() {
               lastHP.set(id, { ...cur });
               setBandHighPass(id, null);
             } else {
-              setBandHighPass(id, lastHP.get(id) ?? { filter_type: "Butterworth", order: 2, freq_hz: 80, shape: null, linear_phase: false });
+              setBandHighPass(id, lastHP.get(id) ?? { filter_type: "Butterworth", order: 2, freq_hz: 80, shape: null, linear_phase: false, q: null });
             }
           }}
           onChange={(c) => { const id = bandId(); if (id) setBandHighPass(id, c); }}
@@ -228,7 +228,7 @@ function FiltersTab() {
               lastLP.set(id, { ...cur });
               setBandLowPass(id, null);
             } else {
-              setBandLowPass(id, lastLP.get(id) ?? { filter_type: "Butterworth", order: 2, freq_hz: 15000, shape: null, linear_phase: false });
+              setBandLowPass(id, lastLP.get(id) ?? { filter_type: "Butterworth", order: 2, freq_hz: 15000, shape: null, linear_phase: false, q: null });
             }
           }}
           onChange={(c) => { const id = bandId(); if (id) setBandLowPass(id, c); }}
@@ -261,6 +261,7 @@ interface FilterBlockProps {
 function FilterBlock(props: FilterBlockProps) {
   const c = () => props.config;
   const isGaussian = () => c()?.filter_type === "Gaussian";
+  const isCustom = () => c()?.filter_type === "Custom";
 
   return (
     <div class={`filter-block ${props.linked ? "fb-linked" : ""}`}>
@@ -285,62 +286,79 @@ function FilterBlock(props: FilterBlockProps) {
         >{c() ? "ON" : "OFF"}</button>
       </div>
       <Show when={c()}>
-        <div class="fb-row">
-          <label class="fb-label">Type</label>
-          <select
-            class="fb-select"
-            value={c()!.filter_type}
-            onChange={(e) => {
-              const ft = e.currentTarget.value as FilterType;
-              if (ft === "Gaussian") {
-                props.onChange({ ...c()!, filter_type: ft, shape: c()!.shape ?? 1.0, linear_phase: true });
-              } else {
-                props.onChange({ ...c()!, filter_type: ft, shape: null });
-              }
-            }}
-          >
-            {FILTER_TYPES.map((t) => <option value={t}>{t}</option>)}
-          </select>
-        </div>
-        <div class="fb-row">
-          <label class="fb-label"></label>
-          <label class="fb-checkbox" title={isGaussian() ? "Gaussian is always linear-phase" : "Linear phase (magnitude only, no phase rotation)"}>
-            <input
-              type="checkbox"
-              checked={isGaussian() ? true : c()!.linear_phase}
-              disabled={isGaussian()}
-              onChange={(e) => props.onChange({ ...c()!, linear_phase: e.currentTarget.checked })}
-            />
-            <span class="fb-check-label">Lin-φ</span>
-          </label>
-        </div>
-        <div class="fb-row">
-          <label class="fb-label">Freq</label>
-          <NumberInput
-            value={c()!.freq_hz}
-            onChange={(v) => props.onChange({ ...c()!, freq_hz: v })}
-            min={10} max={20000} step={1} unit="Hz" freqMode
-          />
-        </div>
-        <Show when={!isGaussian()}>
+        <div class="fb-grid">
           <div class="fb-row">
-            <label class="fb-label">Order</label>
+            <label class="fb-label">Type</label>
+            <select
+              class="fb-select"
+              value={c()!.filter_type}
+              onChange={(e) => {
+                const ft = e.currentTarget.value as FilterType;
+                if (ft === "Gaussian") {
+                  props.onChange({ ...c()!, filter_type: ft, shape: c()!.shape ?? 1.0, linear_phase: true, q: null });
+                } else if (ft === "Custom") {
+                  props.onChange({ ...c()!, filter_type: ft, shape: null, q: c()!.q ?? 0.707 });
+                } else {
+                  props.onChange({ ...c()!, filter_type: ft, shape: null, q: null });
+                }
+              }}
+            >
+              {FILTER_TYPES.map((t) => <option value={t}>{t}</option>)}
+            </select>
+          </div>
+          <div class="fb-row">
+            <label class="fb-label">Freq</label>
             <NumberInput
-              value={c()!.order}
-              onChange={(v) => props.onChange({ ...c()!, order: v })}
-              min={1} max={8} step={1} precision={0}
+              value={c()!.freq_hz}
+              onChange={(v) => props.onChange({ ...c()!, freq_hz: v })}
+              min={10} max={20000} step={1} unit="Hz" freqMode
             />
           </div>
-        </Show>
-        <Show when={isGaussian()}>
+          <Show when={!isGaussian()}>
+            <div class="fb-row">
+              <label class="fb-label">Order</label>
+              <NumberInput
+                value={c()!.order}
+                onChange={(v) => props.onChange({ ...c()!, order: v })}
+                min={1} max={8} step={1} precision={0}
+              />
+            </div>
+          </Show>
+          <Show when={isGaussian()}>
+            <div class="fb-row">
+              <label class="fb-label">M</label>
+              <NumberInput
+                value={c()!.shape ?? 1.0}
+                onChange={(v) => props.onChange({ ...c()!, shape: v })}
+                min={0.5} max={10} step={0.1}
+              />
+            </div>
+          </Show>
+          <Show when={isCustom()}>
+            <div class="fb-row">
+              <label class="fb-label">Q</label>
+              <NumberInput
+                value={c()!.q ?? 0.707}
+                onChange={(v) => props.onChange({ ...c()!, q: v })}
+                min={0.1} max={5.0} step={0.01}
+              />
+            </div>
+          </Show>
           <div class="fb-row">
-            <label class="fb-label">M</label>
-            <NumberInput
-              value={c()!.shape ?? 1.0}
-              onChange={(v) => props.onChange({ ...c()!, shape: v })}
-              min={0.5} max={10} step={0.1}
-            />
+            <label class="fb-label"></label>
+            <label class="fb-checkbox" title={isGaussian() ? "Gaussian is always linear-phase" : "Linear phase (magnitude only, no phase rotation)"}>
+              <input
+                type="checkbox"
+                checked={isGaussian() ? true : c()!.linear_phase}
+                disabled={isGaussian()}
+                onChange={(e) => props.onChange({ ...c()!, linear_phase: e.currentTarget.checked })}
+              />
+              <span class="fb-check-label">Lin-φ</span>
+            </label>
           </div>
+        </div>
+        <Show when={isCustom()}>
+          <div class="fb-hint">0.50=LR · 0.58=Bsl · 0.71=BW</div>
         </Show>
       </Show>
     </div>

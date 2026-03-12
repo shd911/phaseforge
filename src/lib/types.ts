@@ -22,7 +22,7 @@ export interface SmoothingConfig {
 
 // --- Target Curve ---
 
-export type FilterType = "Butterworth" | "Bessel" | "LinkwitzRiley" | "Gaussian";
+export type FilterType = "Butterworth" | "Bessel" | "LinkwitzRiley" | "Gaussian" | "Custom";
 
 export interface FilterConfig {
   filter_type: FilterType;
@@ -30,6 +30,7 @@ export interface FilterConfig {
   freq_hz: number;
   shape: number | null; // M coefficient (Gaussian only)
   linear_phase: boolean;
+  q: number | null;  // Q factor (Custom only, default 0.707)
 }
 
 export interface TargetResponse {
@@ -95,11 +96,19 @@ export interface MergeResult {
 
 // --- Auto Align: PEQ ---
 
+export type PeqFilterType = "Peaking" | "LowShelf" | "HighShelf";
+
 export interface PeqBand {
   freq_hz: number;
   gain_db: number;
   q: number;
   enabled: boolean;
+  filter_type: PeqFilterType;
+}
+
+export interface ExclusionZone {
+  startHz: number;
+  endHz: number;
 }
 
 export interface PeqConfig {

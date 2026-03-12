@@ -165,6 +165,7 @@ interface ProjectBand {
   inverted: boolean;
   linked_to_next: boolean;
   peq_bands: any[]; // PeqBand already snake_case
+  exclusion_zones?: any[]; // ExclusionZone { startHz, endHz }
 }
 
 interface ProjectSettings {
@@ -236,6 +237,7 @@ function mapBandToProject(b: BandState): ProjectBand {
     inverted: b.inverted,
     linked_to_next: b.linkedToNext,
     peq_bands: b.peqBands, // PeqBand fields already snake_case
+    exclusion_zones: b.exclusionZones.length > 0 ? b.exclusionZones : undefined,
   };
 }
 
@@ -313,6 +315,7 @@ function mapBandFromProject(b: ProjectBand): BandState {
     inverted: b.inverted,
     linkedToNext: b.linked_to_next,
     peqBands: b.peq_bands,
+    exclusionZones: b.exclusion_zones ?? [],
     firResult: null, // FIR not saved — recomputed
     crossNormDb: 0,
   };
@@ -534,6 +537,7 @@ export async function newProject(): Promise<void> {
     freq_hz: freq,
     shape: null,
     linear_phase: true,
+    q: null,
   });
 
   const bands: BandState[] = [];

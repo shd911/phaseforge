@@ -42,7 +42,9 @@ export function peqRange(): [number, number] {
 }
 
 // --- Internal: optimize a specific band ---
-async function optimizeBand(b: BandState): Promise<PeqResult> {
+// If some PEQ bands are disabled, they are "frozen": their correction is baked
+// into the measurement and the optimizer re-fits only the remaining enabled slots.
+async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBands: PeqBand[] }> {
   const meas = b.measurement!;
   const fLow = b.target?.high_pass?.freq_hz ?? 20;
   const fHigh = b.target?.low_pass?.freq_hz ?? 20000;
@@ -63,11 +65,25 @@ async function optimizeBand(b: BandState): Promise<PeqResult> {
   const targetResp = await invoke<{ magnitude: number[]; phase: number[] }>("evaluate_target", {
     target: targetCurve, freq: meas.freq,
   });
+
+  // Separate frozen (disabled) bands from active ones
+  const frozenBands = (b.peqBands ?? []).filter((p) => !p.enabled);
+  let measMag = meas.magnitude;
+
+  // If there are frozen bands, bake their correction into measurement
+  if (frozenBands.length > 0) {
+    const frozenCorrection = await invoke<number[]>("compute_peq_response", {
+      freq: meas.freq, bands: frozenBands.map((fb) => ({ ...fb, enabled: true })),
+    });
+    measMag = meas.magnitude.map((v, i) => v + frozenCorrection[i]);
+  }
+
   const isHybrid = exportHybridPhase();
   const peqLow = isHybrid ? 20 : Math.max(20, fLow / 8);
   const peqHigh = 20000;
+  const activeBandBudget = Math.max(1, maxBands() - frozenBands.length);
   const config: PeqConfig = {
-    max_bands: maxBands(),
+    max_bands: activeBandBudget,
     tolerance_db: tolerance(),
     peak_bias: isHybrid ? 1.0 : 1.5,
     max_boost_db: isHybrid ? 60.0 : 6.0,
@@ -75,14 +91,23 @@ async function optimizeBand(b: BandState): Promise<PeqResult> {
     freq_range: [peqLow, peqHigh],
     hybrid: isHybrid,
   };
-  return invoke<PeqResult>("auto_peq_lma", {
+  const result = await invoke<PeqResult>("auto_peq_lma", {
     freq: meas.freq,
-    measurementMag: meas.magnitude,
+    measurementMag: measMag,
     targetMag: targetResp.magnitude,
     config,
     hpFreq: fLow,
     lpFreq: fHigh,
+    exclusionZones: b.exclusionZones.length > 0 ? b.exclusionZones : null,
   });
+  return { result, frozenBands };
+}
+
+/** Merge frozen (disabled) bands with newly optimized bands, sorted by freq */
+function mergeBands(frozen: PeqBand[], optimized: PeqBand[]): PeqBand[] {
+  const all = [...frozen, ...optimized];
+  all.sort((a, b) => a.freq_hz - b.freq_hz);
+  return all;
 }
 
 // --- Main actions ---
@@ -92,8 +117,8 @@ export async function handleOptimizePeq() {
   setComputing(true);
   setPeqError(null);
   try {
-    const result = await optimizeBand(b);
-    setBandPeqBands(b.id, result.bands);
+    const { result, frozenBands } = await optimizeBand(b);
+    setBandPeqBands(b.id, mergeBands(frozenBands, result.bands));
     setMaxErr(result.max_error_db);
     setIters(result.iterations);
     setSelectedPeqIdx(null);
@@ -115,8 +140,8 @@ export async function handleOptimizeAll() {
     // 1. Compute ALL results first (no store writes during loop)
     const results: { id: string; peqBands: PeqBand[]; maxErr: number; iters: number }[] = [];
     for (const b of eligible) {
-      const result = await optimizeBand(b);
-      results.push({ id: b.id, peqBands: result.bands, maxErr: result.max_error_db, iters: result.iterations });
+      const { result, frozenBands } = await optimizeBand(b);
+      results.push({ id: b.id, peqBands: mergeBands(frozenBands, result.bands), maxErr: result.max_error_db, iters: result.iterations });
     }
     // 2. Apply all at once → single reactive update
     batch(() => {

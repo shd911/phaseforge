@@ -1,6 +1,6 @@
 import { createStore, reconcile } from "solid-js/store";
 import { createSignal } from "solid-js";
-import type { Measurement, TargetCurve, MergeConfig, PeqBand, FirResult, WindowType } from "../lib/types";
+import type { Measurement, TargetCurve, MergeConfig, PeqBand, FirResult, WindowType, ExclusionZone } from "../lib/types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -42,6 +42,7 @@ export interface BandState {
   inverted: boolean; // инвертирование полярности (фаза +180°)
   linkedToNext: boolean; // связь LP этой полосы ↔ HP следующей
   peqBands: PeqBand[]; // авто-подобранные PEQ полосы
+  exclusionZones: ExclusionZone[]; // частотные зоны исключённые из оптимизации
   firResult: FirResult | null; // результат генерации FIR
   crossNormDb: number; // normalization estimate from cross-section peak (dB)
 }
@@ -93,7 +94,7 @@ function equalOctaveCrossovers(n: number, fMin = 20, fMax = 20000): number[] {
   return xovers;
 }
 
-const DEFAULT_FILTER = { filter_type: "LinkwitzRiley" as const, order: 4, shape: null, linear_phase: false };
+const DEFAULT_FILTER = { filter_type: "LinkwitzRiley" as const, order: 4, shape: null, linear_phase: false, q: null };
 
 /** Assign default HP/LP filters to all bands based on equal-octave split.
  *  Only assigns to bands that have NO measurement (pristine bands). */
@@ -128,6 +129,7 @@ export function createBand(num: number): BandState {
     inverted: false,
     linkedToNext: false,
     peqBands: [],
+    exclusionZones: [],
     firResult: null,
     crossNormDb: 0,
   };
@@ -444,6 +446,7 @@ export function toggleBandLinked(bandId: string) {
         order: lp.order,
         shape: lp.shape,
         linear_phase: lp.linear_phase,
+        q: lp.q,
       });
     }
   }
@@ -505,6 +508,7 @@ export function setBandHighPass(bandId: string, config: import("../lib/types").F
         order: config.order,
         shape: config.shape,
         linear_phase: config.linear_phase,
+        q: config.q,
       });
       _propagating = false;
     }
@@ -538,6 +542,7 @@ export function setBandLowPass(bandId: string, config: import("../lib/types").Fi
         order: config.order,
         shape: config.shape,
         linear_phase: config.linear_phase,
+        q: config.q,
       });
       _propagating = false;
     }
@@ -678,6 +683,31 @@ export function commitPeqBand(bandId: string, peqIdx: number): number {
   setState("bands", idx, "peqBands", arr);
   markDirty();
   return arr.indexOf(band);
+}
+
+// ---------------------------------------------------------------------------
+// Per-band: Exclusion Zones
+// ---------------------------------------------------------------------------
+
+export function addExclusionZone(bandId: string, zone: ExclusionZone) {
+  const idx = bandIndex(bandId);
+  if (idx < 0) return;
+  setState("bands", idx, "exclusionZones", (prev) => [...prev, zone]);
+  markDirty();
+}
+
+export function removeExclusionZone(bandId: string, zoneIdx: number) {
+  const idx = bandIndex(bandId);
+  if (idx < 0) return;
+  setState("bands", idx, "exclusionZones", (prev) => prev.filter((_, i) => i !== zoneIdx));
+  markDirty();
+}
+
+export function updateExclusionZone(bandId: string, zoneIdx: number, patch: Partial<ExclusionZone>) {
+  const idx = bandIndex(bandId);
+  if (idx < 0) return;
+  setState("bands", idx, "exclusionZones", zoneIdx, (prev) => ({ ...prev, ...patch }));
+  markDirty();
 }
 
 // ---------------------------------------------------------------------------

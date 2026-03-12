@@ -76,6 +76,7 @@ interface CrossoverPoint {
   order: number;
   linearPhase: boolean;
   shape: number | null; // Gaussian M coefficient
+  q: number | null;    // Custom Q factor
   dbLevel: number;     // dB at crossover freq (for Y position on chart)
 }
 
@@ -95,6 +96,7 @@ function getCrossovers(): CrossoverPoint[] {
         order: b.target.low_pass.order,
         linearPhase: b.target.low_pass.linear_phase,
         shape: b.target.low_pass.shape ?? null,
+        q: b.target.low_pass.q ?? null,
         dbLevel: 0, // enriched later in renderSumMode
       });
     }
@@ -731,6 +733,30 @@ export default function FrequencyPlot() {
               // Ширина полосы: ~2% от plot width, min 2px
               const bandWidth = Math.max(2, plotWidth * 0.015);
               ctx.fillRect(xPos - bandWidth / 2, plotTop, bandWidth, plotHeight);
+            }
+
+            ctx.restore();
+          },
+          // Exclusion zones — semi-transparent gray bands
+          (u: uPlot) => {
+            const bd = activeBand();
+            if (!bd?.exclusionZones?.length) return;
+            const ctx = u.ctx;
+            const plotLeft = u.bbox.left / devicePixelRatio;
+            const plotTop = u.bbox.top / devicePixelRatio;
+            const plotHeight = u.bbox.height / devicePixelRatio;
+
+            ctx.save();
+            ctx.fillStyle = "rgba(128, 128, 128, 0.18)";
+
+            for (const zone of bd.exclusionZones) {
+              const x1 = u.valToPos(zone.startHz, "x", false);
+              const x2 = u.valToPos(zone.endHz, "x", false);
+              const left = Math.max(x1, plotLeft);
+              const right = Math.min(x2, plotLeft + u.bbox.width / devicePixelRatio);
+              if (right > left) {
+                ctx.fillRect(left, plotTop, right - left, plotHeight);
+              }
             }
 
             ctx.restore();
@@ -1940,6 +1966,7 @@ export default function FrequencyPlot() {
             freq_hz: finalFreq,
             shape: xo.shape,
             linear_phase: xo.linearPhase,
+            q: xo.q,
           });
         }
       }
@@ -1969,6 +1996,7 @@ export default function FrequencyPlot() {
       order: xo.order,
       linearPhase: xo.linearPhase,
       shape: xo.shape,
+      q: xo.q,
     });
   }
 
@@ -1988,7 +2016,7 @@ export default function FrequencyPlot() {
     if (!isFinite(freq) || freq < 20) freq = 20;
     if (freq > 20000) freq = 20000;
 
-    addPeqBand(bd.id, { freq_hz: Math.round(freq), gain_db: 0, q: 4.32, enabled: true });
+    addPeqBand(bd.id, { freq_hz: Math.round(freq), gain_db: 0, q: 4.32, enabled: true, filter_type: "Peaking" });
     setSelectedPeqIdx(0); // new band is added at index 0
   }
 

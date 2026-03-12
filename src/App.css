@@ -653,8 +653,19 @@ body {
   border: 1px solid var(--border);
   border-radius: 2px;
   padding: 6px 8px;
-  width: 180px;
+  width: 280px;
   flex-shrink: 0;
+}
+.fb-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 6px;
+}
+.fb-grid .fb-label {
+  min-width: 28px;
+}
+.fb-grid .fb-row {
+  gap: 4px;
 }
 
 .fb-header {
@@ -1907,6 +1918,32 @@ body {
 .peq-input[type="number"] {
   -moz-appearance: textfield;
 }
+.peq-type-select {
+  width: 36px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--text-primary);
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 1px 0;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  text-align: center;
+}
+
+.peq-excl-table th,
+.peq-excl-table td {
+  padding: 2px 4px;
+}
+.peq-excl-table .peq-input {
+  width: 56px;
+}
+.peq-exclusion-section {
+  border-top: 1px solid var(--border);
+  padding-top: 4px;
+}
 
 .peq-add-btn {
   border: 1px solid var(--border);
@@ -2293,5 +2330,6 @@ body {
 
 /* --- PEQ Auto-Fit section in sidebar (b82.06) --- */
 .peq-autofit-section { padding: 6px 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
-.peq-autofit-section .peq-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 6px; }
+.peq-autofit-section .peq-grid { display: grid; grid-template-columns: 1fr; gap: 2px; }
 .peq-autofit-section .peq-buttons-row { display: flex; align-items: center; gap: 4px; margin-top: 4px; }
+.fb-hint { font-size: 9px; color: var(--text-secondary); padding: 2px 0 0; text-align: center; opacity: 0.7; }

@@ -184,7 +184,7 @@ export default function PeqResponsePlot() {
 
     const clampedFreq = Math.max(20, Math.min(20000, freq));
     const clampedGain = Math.round(gain * 10) / 10;
-    const newBand: PeqBand = { freq_hz: Math.round(clampedFreq), gain_db: clampedGain, q: 2.0, enabled: true };
+    const newBand: PeqBand = { freq_hz: Math.round(clampedFreq), gain_db: clampedGain, q: 2.0, enabled: true, filter_type: "Peaking" };
     addPeqBand(band.id, newBand);
     const newIdx = commitPeqBand(band.id, 0); // addPeqBand prepends, so idx=0
     setSelectedPeqIdx(newIdx);

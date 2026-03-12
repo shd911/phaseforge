@@ -11,6 +11,7 @@ pub enum FilterType {
     Bessel,
     LinkwitzRiley,
     Gaussian,
+    Custom,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,6 +22,8 @@ pub struct FilterConfig {
     pub shape: Option<f64>, // M coefficient (Gaussian only)
     #[serde(default)]
     pub linear_phase: bool, // true → magnitude-only (zero phase)
+    #[serde(default)]
+    pub q: Option<f64>,     // Q factor (Custom only, default 0.707 = Butterworth)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -264,17 +267,17 @@ fn filter_lp_response(f: f64, fc: f64, cfg: &FilterConfig) -> (f64, f64) {
             (2.0 * m, 2.0 * p)
         }
         FilterType::Bessel => {
-            // Use Butterworth approximation for phase (Bessel has same magnitude formula
-            // in our implementation). True Bessel phase is flatter in passband but
-            // the magnitude model already uses the BW formula.
             butterworth_lp_complex(f, fc, cfg.order)
         }
         FilterType::Gaussian => {
             let m = cfg.shape.unwrap_or(1.0);
             let g = gaussian_lp_linear(f, fc, m);
             let mag_db = if g <= 1e-30 { -600.0 } else { 20.0 * g.log10() };
-            // Gaussian filter is linear-phase (symmetric impulse response) → zero phase
             (mag_db, 0.0)
+        }
+        FilterType::Custom => {
+            let q = cfg.q.unwrap_or(0.707);
+            custom_lp_complex(f, fc, q, cfg.order)
         }
     }
 }
@@ -296,10 +299,96 @@ fn filter_hp_response(f: f64, fc: f64, cfg: &FilterConfig) -> (f64, f64) {
             let lp = gaussian_lp_linear(f, fc, m);
             let hp = 1.0 - lp;
             let mag_db = if hp <= 1e-30 { -600.0 } else { 20.0 * hp.log10() };
-            // Gaussian HP is also linear-phase (complementary to zero-phase LP) → zero phase
             (mag_db, 0.0)
         }
+        FilterType::Custom => {
+            let q = cfg.q.unwrap_or(0.707);
+            custom_hp_complex(f, fc, q, cfg.order)
+        }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Custom LP / HP (2nd-order biquad sections with user Q, cascaded for higher orders)
+// ---------------------------------------------------------------------------
+
+/// Custom low-pass: cascades order/2 second-order LP biquad sections, each with the given Q.
+/// Odd orders add a 1st-order section (Q irrelevant for 1st order).
+fn custom_lp_complex(f: f64, fc: f64, q: f64, order: u8) -> (f64, f64) {
+    let w = 2.0 * PI * f / fc; // normalized frequency
+    let n_second_order = order / 2;
+    let has_first_order = order % 2 == 1;
+
+    let mut total_mag_db = 0.0;
+    let mut total_phase_deg = 0.0;
+
+    // 1st-order section: H(s) = 1/(s+1), |H(jw)| = 1/√(1+w²)
+    if has_first_order {
+        let mag_sq = 1.0 / (1.0 + w * w);
+        total_mag_db += 10.0 * mag_sq.log10();
+        total_phase_deg += -(w.atan()) * 180.0 / PI;
+    }
+
+    // 2nd-order sections: H(s) = 1/(s² + s/Q + 1)
+    for _ in 0..n_second_order {
+        let w2 = w * w;
+        let denom_re = 1.0 - w2;
+        let denom_im = w / q;
+        let denom_sq = denom_re * denom_re + denom_im * denom_im;
+        if denom_sq < 1e-30 {
+            total_mag_db += -300.0;
+        } else {
+            total_mag_db += -10.0 * denom_sq.log10();
+            total_phase_deg += -(denom_im.atan2(denom_re)) * 180.0 / PI;
+        }
+    }
+
+    (total_mag_db, total_phase_deg)
+}
+
+/// Custom high-pass: transform s → fc/s gives HP from LP sections.
+fn custom_hp_complex(f: f64, fc: f64, q: f64, order: u8) -> (f64, f64) {
+    let w = 2.0 * PI * f / fc;
+    if w.abs() < 1e-15 {
+        return (-600.0, 0.0);
+    }
+    // HP: each section uses the same w but with s²/(s²+s/Q+1) transfer function
+    let n_second_order = order / 2;
+    let has_first_order = order % 2 == 1;
+
+    let mut total_mag_db = 0.0;
+    let mut total_phase_deg = 0.0;
+
+    // Each section contributes: H_hp = (jw)^n * H_lp(1/jw)
+    // For 1st order: H_hp(jw) = jw/(jw+1) → |H| = w/√(1+w²), phase = 90° - atan(w)
+    if has_first_order {
+        let w2 = w * w;
+        let mag_sq = w2 / (1.0 + w2);
+        total_mag_db += 10.0 * mag_sq.log10();
+        total_phase_deg += (PI / 2.0 - w.atan()) * 180.0 / PI;
+    }
+
+    // 2nd-order HP: H(s) = s²/(s² + s/Q + 1)
+    for _ in 0..n_second_order {
+        let w2 = w * w;
+        let w4 = w2 * w2;
+        // Numerator: (jw)² = -w² → |num|² = w⁴
+        // Denominator: (jw)² + jw/Q + 1 = (1-w²) + j·w/Q
+        let denom_re = 1.0 - w2;
+        let denom_im = w / q;
+        let denom_sq = denom_re * denom_re + denom_im * denom_im;
+        if denom_sq < 1e-30 {
+            total_mag_db += -300.0;
+        } else {
+            total_mag_db += 10.0 * (w4 / denom_sq).log10();
+            // Phase: angle(num) - angle(denom)
+            // num phase = angle(-w²) = π (for w>0)
+            let denom_phase = denom_im.atan2(denom_re);
+            total_phase_deg += (PI - denom_phase) * 180.0 / PI;
+        }
+    }
+
+    (total_mag_db, total_phase_deg)
 }
 
 // ---------------------------------------------------------------------------
@@ -415,6 +504,7 @@ mod tests {
                 freq_hz: 100.0,
                 shape: None,
                 linear_phase: false,
+                q: None,
             }),
             low_pass: None,
             low_shelf: None,
@@ -454,6 +544,7 @@ mod tests {
                 freq_hz: 5000.0,
                 shape: None,
                 linear_phase: false,
+                q: None,
             }),
             low_shelf: None,
             high_shelf: None,
@@ -478,6 +569,7 @@ mod tests {
             freq_hz: 100.0,
             shape: None,
             linear_phase: false,
+            q: None,
         };
         let lr = FilterConfig {
             filter_type: FilterType::LinkwitzRiley,
@@ -485,6 +577,7 @@ mod tests {
             freq_hz: 100.0,
             shape: None,
             linear_phase: false,
+            q: None,
         };
         let (bw_db, _) = filter_hp_response(100.0, 100.0, &bw);
         let (lr_db, _) = filter_hp_response(100.0, 100.0, &lr);
@@ -564,6 +657,7 @@ mod tests {
                 freq_hz: 1000.0,
                 shape: None,
                 linear_phase: false,
+                q: None,
             }),
             low_shelf: None,
             high_shelf: None,
@@ -611,7 +705,7 @@ mod tests {
                 high_pass: None,
                 low_pass: Some(FilterConfig {
                     filter_type: filter_type.clone(),
-                    order, freq_hz: xo_freqs[0], shape, linear_phase,
+                    order, freq_hz: xo_freqs[0], shape, linear_phase, q: None,
                 }),
                 low_shelf: None, high_shelf: None,
             },
@@ -621,11 +715,11 @@ mod tests {
                 tilt_ref_freq: 1000.0,
                 high_pass: Some(FilterConfig {
                     filter_type: filter_type.clone(),
-                    order, freq_hz: xo_freqs[0], shape, linear_phase,
+                    order, freq_hz: xo_freqs[0], shape, linear_phase, q: None,
                 }),
                 low_pass: Some(FilterConfig {
                     filter_type: filter_type.clone(),
-                    order, freq_hz: xo_freqs[1], shape, linear_phase,
+                    order, freq_hz: xo_freqs[1], shape, linear_phase, q: None,
                 }),
                 low_shelf: None, high_shelf: None,
             },
@@ -635,11 +729,11 @@ mod tests {
                 tilt_ref_freq: 1000.0,
                 high_pass: Some(FilterConfig {
                     filter_type: filter_type.clone(),
-                    order, freq_hz: xo_freqs[1], shape, linear_phase,
+                    order, freq_hz: xo_freqs[1], shape, linear_phase, q: None,
                 }),
                 low_pass: Some(FilterConfig {
                     filter_type: filter_type.clone(),
-                    order, freq_hz: xo_freqs[2], shape, linear_phase,
+                    order, freq_hz: xo_freqs[2], shape, linear_phase, q: None,
                 }),
                 low_shelf: None, high_shelf: None,
             },
@@ -649,7 +743,7 @@ mod tests {
                 tilt_ref_freq: 1000.0,
                 high_pass: Some(FilterConfig {
                     filter_type: filter_type.clone(),
-                    order, freq_hz: xo_freqs[2], shape, linear_phase,
+                    order, freq_hz: xo_freqs[2], shape, linear_phase, q: None,
                 }),
                 low_pass: None,
                 low_shelf: None, high_shelf: None,

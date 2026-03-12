@@ -17,7 +17,7 @@ use dsp::baffle::{BaffleConfig, BaffleStepPreview};
 use dsp::merge::{MergeConfig, MergeResult};
 use io::Measurement;
 use fir::{FirConfig, FirResult, FirModelResult};
-use peq::{PeqBand, PeqConfig, PeqResult};
+use peq::{ExclusionZone, PeqBand, PeqConfig, PeqResult};
 use target::{TargetCurve, TargetResponse};
 use tracing::info;
 
@@ -190,10 +190,12 @@ fn auto_peq_lma(
     config: PeqConfig,
     hp_freq: f64,
     lp_freq: f64,
+    exclusion_zones: Option<Vec<ExclusionZone>>,
 ) -> Result<PeqResult, String> {
+    let zones = exclusion_zones.unwrap_or_default();
     info!(
-        "auto_peq_lma: {} points, hp={}, lp={}, range={:?}",
-        freq.len(), hp_freq, lp_freq, config.freq_range
+        "auto_peq_lma: {} points, hp={}, lp={}, range={:?}, exclusions={}",
+        freq.len(), hp_freq, lp_freq, config.freq_range, zones.len()
     );
     peq::auto_peq_lma(
         &measurement_mag,
@@ -202,6 +204,7 @@ fn auto_peq_lma(
         &config,
         hp_freq,
         lp_freq,
+        &zones,
     )
     .map_err(|e| e.to_string())
 }
@@ -352,7 +355,7 @@ pub fn run() {
         )
         .init();
 
-    info!("PhaseForge v0.1.0-b90 starting...");
+    info!("PhaseForge v0.1.0-b91 starting...");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())

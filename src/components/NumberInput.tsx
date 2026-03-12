@@ -92,8 +92,9 @@ export default function NumberInput(props: NumberInputProps) {
     <div
       class="num-input"
       ref={(el: HTMLDivElement) => {
-        // Non-passive wheel handler — identical pattern to PeqSidebar wheelNumber
+        // Non-passive wheel handler — only when input inside is focused
         el.addEventListener("wheel", (e: WheelEvent) => {
+          if (!el.contains(document.activeElement)) return;
           e.preventDefault();
           e.stopPropagation();
           const dir = e.deltaY < 0 ? 1 : -1;

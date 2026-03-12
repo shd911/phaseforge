@@ -12,6 +12,9 @@ import {
   commitPeqBand,
   removePeqBand,
   exportHybridPhase,
+  addExclusionZone,
+  removeExclusionZone,
+  updateExclusionZone,
 } from "../stores/bands";
 import NumberInput from "./NumberInput";
 import {
@@ -36,6 +39,7 @@ function wheelNumber(
   onValue: (v: number) => void,
 ) {
   el.addEventListener("wheel", (e) => {
+    if (document.activeElement !== el) return;
     e.preventDefault();
     e.stopPropagation();
     const dir = e.deltaY < 0 ? 1 : -1;
@@ -89,7 +93,7 @@ export default function PeqSidebar() {
               if (pendingPeqIdx() != null) {
                 commitPeqBand(b.id, pendingPeqIdx()!);
               }
-              addPeqBand(b.id, { freq_hz: 1000, gain_db: 0, q: 2.0, enabled: true });
+              addPeqBand(b.id, { freq_hz: 1000, gain_db: 0, q: 2.0, enabled: true, filter_type: "Peaking" });
               setPendingPeqIdx(0);
               setSelectedPeqIdx(0);
             }
@@ -131,6 +135,66 @@ export default function PeqSidebar() {
         </div>
       </Show>
 
+      {/* Exclusion Zones */}
+      <Show when={band()?.measurement}>
+        <div class="peq-exclusion-section">
+          <div class="peq-sidebar-header" style={{ "margin-top": "6px" }}>
+            <span class="fb-title" style={{ "font-size": "11px" }}>Exclude</span>
+            <button
+              class="peq-add-btn"
+              onClick={() => {
+                const b = band();
+                if (b) addExclusionZone(b.id, { startHz: 100, endHz: 200 });
+              }}
+              title="Add exclusion zone"
+            >+</button>
+          </div>
+          <Show when={(band()?.exclusionZones?.length ?? 0) > 0}>
+            <table class="peq-table peq-excl-table">
+              <thead>
+                <tr><th>From</th><th>To</th><th></th></tr>
+              </thead>
+              <tbody>
+                {(band()?.exclusionZones ?? []).map((z, i) => (
+                  <tr>
+                    <td>
+                      <input class="peq-input" type="number" value={Math.round(z.startHz)}
+                        min={20} max={20000} step={1}
+                        onChange={(e) => {
+                          const v = parseFloat(e.currentTarget.value);
+                          if (!isNaN(v) && v >= 20) {
+                            const b = band();
+                            if (b) updateExclusionZone(b.id, i, { startHz: v });
+                          }
+                        }}
+                      />
+                    </td>
+                    <td>
+                      <input class="peq-input" type="number" value={Math.round(z.endHz)}
+                        min={20} max={20000} step={1}
+                        onChange={(e) => {
+                          const v = parseFloat(e.currentTarget.value);
+                          if (!isNaN(v) && v >= 20) {
+                            const b = band();
+                            if (b) updateExclusionZone(b.id, i, { endHz: v });
+                          }
+                        }}
+                      />
+                    </td>
+                    <td>
+                      <button class="peq-remove" onClick={() => {
+                        const b = band();
+                        if (b) removeExclusionZone(b.id, i);
+                      }}>×</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Show>
+        </div>
+      </Show>
+
       {/* PEQ Table */}
       <Show when={peqBands().length > 0}>
         <div class="peq-sidebar-table-scroll">
@@ -138,7 +202,7 @@ export default function PeqSidebar() {
             <thead>
               <tr>
                 <th></th>
-                <th>#</th>
+                <th>Type</th>
                 <th>Freq</th>
                 <th>Gain</th>
                 <th>Q</th>
@@ -166,7 +230,22 @@ export default function PeqSidebar() {
                         onClick={(e) => e.stopPropagation()}
                       />
                     </td>
-                    <td>{i + 1}</td>
+                    <td>
+                      <select
+                        class="peq-type-select"
+                        value={b.filter_type ?? "Peaking"}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          const bd = band();
+                          if (bd) updatePeqBand(bd.id, i, { filter_type: e.currentTarget.value as any });
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <option value="Peaking">PK</option>
+                        <option value="LowShelf">LS</option>
+                        <option value="HighShelf">HS</option>
+                      </select>
+                    </td>
                     <td>
                       <input
                         class="peq-input"

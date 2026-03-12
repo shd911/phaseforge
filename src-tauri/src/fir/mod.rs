@@ -1502,6 +1502,8 @@ mod tests {
             noise_floor_db: -60.0,
             window: WindowType::Blackman,
             phase_mode: PhaseMode::MinimumPhase,
+            iterations: 0, freq_weighting: false, narrowband_limit: false,
+            nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0,
         };
 
         let result = generate_fir(&freq, &mag, &target, &peq, &config, (20.0, 20000.0)).unwrap();
@@ -1528,6 +1530,8 @@ mod tests {
             noise_floor_db: -60.0,
             window: WindowType::Blackman,
             phase_mode: PhaseMode::MinimumPhase,
+            iterations: 0, freq_weighting: false, narrowband_limit: false,
+            nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0,
         };
 
         let result = generate_fir(&freq, &mag, &target, &peq, &config, (20.0, 20000.0)).unwrap();
@@ -1677,6 +1681,8 @@ mod tests {
             noise_floor_db: -60.0,
             window: WindowType::Blackman,
             phase_mode: PhaseMode::MinimumPhase,
+            iterations: 0, freq_weighting: false, narrowband_limit: false,
+            nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0,
         };
 
         let result = generate_model_fir(&freq, &mag, &[], &phase, &config).unwrap();
@@ -1719,6 +1725,11 @@ mod tests {
             noise_floor_db: -60.0,
             window: WindowType::Hann,
             phase_mode: PhaseMode::LinearPhase,
+            iterations: 0,
+            freq_weighting: false,
+            narrowband_limit: false,
+            nb_smoothing_oct: 0.333,
+            nb_max_excess_db: 6.0,
         };
 
         let result = generate_model_fir(&freq, &mag, &[], &phase, &config).unwrap();
@@ -1765,6 +1776,11 @@ mod tests {
             noise_floor_db: -60.0,
             window: WindowType::Blackman,
             phase_mode: PhaseMode::LinearPhase,
+            iterations: 0,
+            freq_weighting: false,
+            narrowband_limit: false,
+            nb_smoothing_oct: 0.333,
+            nb_max_excess_db: 6.0,
         };
 
         let result = generate_model_fir(&freq, &mag, &[], &phase, &config).unwrap();
@@ -1844,6 +1860,11 @@ mod tests {
             noise_floor_db: -150.0,
             window: WindowType::Blackman,
             phase_mode: PhaseMode::MinimumPhase,
+            iterations: 0,
+            freq_weighting: false,
+            narrowband_limit: false,
+            nb_smoothing_oct: 0.333,
+            nb_max_excess_db: 6.0,
         };
 
         fn make_filter(
@@ -1856,6 +1877,7 @@ mod tests {
                 freq_hz,
                 shape,
                 linear_phase,
+                q: None,
             }
         }
 
