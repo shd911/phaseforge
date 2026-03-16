@@ -738,12 +738,17 @@ fn limit_narrowband_boost(correction_db: &mut [f64], df: f64, smoothing_oct: f64
     let n = correction_db.len();
     if n < 4 || df <= 0.0 { return; }
 
-    let fraction = smoothing_oct;
+    // Prefix sum for O(n) windowed average instead of O(n × window_width)
+    let mut prefix = vec![0.0_f64; n + 1];
+    for i in 0..n {
+        prefix[i + 1] = prefix[i] + correction_db[i];
+    }
+
+    let k_factor = 2.0_f64.powf(smoothing_oct / 2.0);
     let smoothed: Vec<f64> = (0..n).map(|k| {
         let f_center = k as f64 * df;
         if f_center < 20.0 { return correction_db[k]; }
 
-        let k_factor = 2.0_f64.powf(fraction / 2.0);
         let f_lo = f_center / k_factor;
         let f_hi = f_center * k_factor;
         let k_lo = (f_lo / df).floor() as usize;
@@ -751,13 +756,8 @@ fn limit_narrowband_boost(correction_db: &mut [f64], df: f64, smoothing_oct: f64
 
         if k_hi <= k_lo { return correction_db[k]; }
 
-        let mut sum = 0.0;
-        let mut count = 0;
-        for i in k_lo..=k_hi {
-            sum += correction_db[i];
-            count += 1;
-        }
-        sum / count as f64
+        let count = k_hi - k_lo + 1;
+        (prefix[k_hi + 1] - prefix[k_lo]) / count as f64
     }).collect();
 
     // Clamp: where correction exceeds smoothed + max_excess, limit it
