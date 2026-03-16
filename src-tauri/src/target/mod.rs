@@ -100,9 +100,7 @@ pub fn evaluate(target: &TargetCurve, freq: &[f64]) -> TargetResponse {
 
     // Wrap phase to [-180°, 180°] (REW convention)
     for p in phase.iter_mut() {
-        *p = *p % 360.0;
-        if *p > 180.0 { *p -= 360.0; }
-        else if *p < -180.0 { *p += 360.0; }
+        *p = (*p + 180.0).rem_euclid(360.0) - 180.0;
     }
 
     TargetResponse { magnitude, phase }

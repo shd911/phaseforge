@@ -405,9 +405,9 @@ impl<'a> LmaSolver<'a> {
         for p in 0..n_params {
             // Step size: relative for freq, absolute for gain and Q
             let h = match p % 3 {
-                0 => params[p] * 1e-3,    // freq: relative
-                1 => 0.01,                 // gain: 0.01 dB
-                2 => 0.01,                 // Q: 0.01
+                0 => (params[p] * 1e-3).max(0.1), // freq: relative, min 0.1 Hz
+                1 => 0.01,                          // gain: 0.01 dB
+                2 => 0.01,                          // Q: 0.01
                 _ => unreachable!(),
             };
             if h.abs() < 1e-12 {
@@ -919,9 +919,7 @@ pub fn apply_peq_complex(freq: &[f64], bands: &[PeqBand], sample_rate: f64) -> (
     }
     // Wrap phase to [-180°, 180°] (REW convention)
     for p in total_phase.iter_mut() {
-        *p = *p % 360.0;
-        if *p > 180.0 { *p -= 360.0; }
-        else if *p < -180.0 { *p += 360.0; }
+        *p = (*p + 180.0).rem_euclid(360.0) - 180.0;
     }
 
     (total_mag, total_phase)

@@ -332,10 +332,7 @@ mod tests {
         let unwrapped_original: Vec<f64> = freq.iter().map(|&f| -360.0 * tau * f).collect();
         // Wrap to ±180
         let wrapped: Vec<f64> = unwrapped_original.iter().map(|&p| {
-            let mut w = p % 360.0;
-            if w > 180.0 { w -= 360.0; }
-            if w < -180.0 { w += 360.0; }
-            w
+            (p + 180.0).rem_euclid(360.0) - 180.0
         }).collect();
         let restored = unwrap_phase(&wrapped);
         // Group delay from unwrapped should match tau
