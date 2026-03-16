@@ -143,7 +143,7 @@ pub fn compute_ir_delay(
     sample_rate: f64,
 ) -> f64 {
     use num_complex::Complex64;
-    use rustfft::FftPlanner;
+    use crate::dsp::fft::FftEngine;
 
     let n = freq.len();
     if n < 2 {
@@ -183,9 +183,8 @@ pub fn compute_ir_delay(
     }
 
     // IFFT
-    let mut planner = FftPlanner::<f64>::new();
-    let ifft = planner.plan_fft_inverse(fft_size);
-    ifft.process(&mut spectrum);
+    let mut engine = FftEngine::new();
+    engine.fft_inverse(&mut spectrum);
 
     let norm = 1.0 / fft_size as f64;
     let impulse: Vec<f64> = spectrum.iter().map(|c| c.re * norm).collect();

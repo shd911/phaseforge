@@ -1,12 +1,12 @@
 // FIR correction engine: correction spectrum, minimum-phase via Hilbert, IFFT, windowing, WAV export
 
 use num_complex::Complex64;
-use rustfft::FftPlanner;
 use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
 
 use tracing::info;
 
+use crate::dsp::fft::FftEngine;
 use crate::dsp::{fractional_octave_smooth, interpolate_linear_grid};
 use crate::error::AppError;
 
@@ -183,9 +183,8 @@ pub fn generate_fir(
     let mut spectrum = assemble_complex_spectrum(&limited, &phase_rad, n_fft);
 
     // 8. IFFT
-    let mut planner = FftPlanner::<f64>::new();
-    let ifft = planner.plan_fft_inverse(n_fft);
-    ifft.process(&mut spectrum);
+    let mut engine = FftEngine::new();
+    engine.fft_inverse(&mut spectrum);
 
     let norm = 1.0 / n_fft as f64;
     let mut impulse: Vec<f64> = spectrum.iter().map(|c| c.re * norm).collect();
@@ -236,8 +235,7 @@ pub fn generate_fir(
 
     // 12. Passband normalization: FFT back to get realized spectrum, normalize peak to 0 dB
     let mut check: Vec<Complex64> = impulse.iter().map(|&v| Complex64::new(v, 0.0)).collect();
-    let fft_fwd = planner.plan_fft_forward(n_fft);
-    fft_fwd.process(&mut check);
+    engine.fft_forward(&mut check);
 
     // Find peak magnitude across all positive frequencies (20 Hz .. Nyquist)
     let df = config.sample_rate / n_fft as f64;
@@ -373,9 +371,8 @@ pub fn generate_hybrid_fir(
     let mut spectrum = assemble_complex_spectrum(&lin_total, &correction_phase, n_fft);
 
     // 9. IFFT
-    let mut planner = FftPlanner::<f64>::new();
-    let ifft = planner.plan_fft_inverse(n_fft);
-    ifft.process(&mut spectrum);
+    let mut engine = FftEngine::new();
+    engine.fft_inverse(&mut spectrum);
 
     let norm = 1.0 / n_fft as f64;
     let mut impulse: Vec<f64> = spectrum.iter().map(|c| c.re * norm).collect();
@@ -399,8 +396,7 @@ pub fn generate_hybrid_fir(
 
     // 11. Passband normalization: FFT → find peak → normalize to 0 dB
     let mut check: Vec<Complex64> = impulse.iter().map(|&v| Complex64::new(v, 0.0)).collect();
-    let fft_fwd = planner.plan_fft_forward(n_fft);
-    fft_fwd.process(&mut check);
+    engine.fft_forward(&mut check);
 
     let df = config.sample_rate / n_fft as f64;
     let mut max_db = f64::NEG_INFINITY;
@@ -425,7 +421,7 @@ pub fn generate_hybrid_fir(
     let mut realized_spectrum: Vec<Complex64> = impulse.iter()
         .map(|&v| Complex64::new(v, 0.0))
         .collect();
-    fft_fwd.process(&mut realized_spectrum);
+    engine.fft_forward(&mut realized_spectrum);
 
     let lin_freq: Vec<f64> = (0..n_bins).map(|i| i as f64 * df).collect();
 
@@ -643,9 +639,7 @@ fn iterative_refine(
     // Working copy of correction spectrum (will be refined)
     let mut refined_db: Vec<f64> = target_correction_db.to_vec();
 
-    let mut planner = FftPlanner::<f64>::new();
-    let fft_fwd = planner.plan_fft_forward(n_fft);
-    let ifft = planner.plan_fft_inverse(n_fft);
+    let mut engine = FftEngine::new();
 
     let is_linear_phase = matches!(config.phase_mode, PhaseMode::LinearPhase);
 
@@ -654,7 +648,7 @@ fn iterative_refine(
         let mut spec: Vec<Complex64> = impulse.iter()
             .map(|&v| Complex64::new(v, 0.0))
             .collect();
-        fft_fwd.process(&mut spec);
+        engine.fft_forward(&mut spec);
 
         // 2. Compute realized magnitude in dB
         let mut max_err: f64 = 0.0;
@@ -695,7 +689,7 @@ fn iterative_refine(
 
         // 3. Rebuild impulse from refined correction
         let mut new_spectrum = assemble_complex_spectrum(&refined_db, phase_rad, n_fft);
-        ifft.process(&mut new_spectrum);
+        engine.fft_inverse(&mut new_spectrum);
 
         let norm = 1.0 / n_fft as f64;
         *impulse = new_spectrum.iter().map(|c| c.re * norm).collect();
@@ -899,9 +893,8 @@ fn minimum_phase_from_magnitude(correction_db: &[f64], n_fft: usize) -> Vec<f64>
     }
 
     // FFT
-    let mut planner = FftPlanner::<f64>::new();
-    let fft = planner.plan_fft_forward(n_fft);
-    fft.process(&mut ln_mag_signal);
+    let mut engine = FftEngine::new();
+    engine.fft_forward(&mut ln_mag_signal);
 
     // Apply Hilbert window: multiply positive freqs by 2, negative by 0
     // DC (bin 0) and Nyquist (bin n_fft/2) stay at 1
@@ -917,8 +910,7 @@ fn minimum_phase_from_magnitude(correction_db: &[f64], n_fft: usize) -> Vec<f64>
     }
 
     // IFFT
-    let ifft = planner.plan_fft_inverse(n_fft);
-    ifft.process(&mut ln_mag_signal);
+    engine.fft_inverse(&mut ln_mag_signal);
 
     let norm = 1.0 / n_fft as f64;
 
@@ -1344,9 +1336,8 @@ pub fn generate_model_fir(
     // 6. Assemble complex spectrum and IFFT
     let mut spectrum = assemble_complex_spectrum(&lin_mag, &phase_rad, n_fft);
 
-    let mut planner = FftPlanner::<f64>::new();
-    let ifft = planner.plan_fft_inverse(n_fft);
-    ifft.process(&mut spectrum);
+    let mut engine = FftEngine::new();
+    engine.fft_inverse(&mut spectrum);
 
     let norm = 1.0 / n_fft as f64;
     let mut impulse: Vec<f64> = spectrum.iter().map(|c| c.re * norm).collect();
@@ -1382,8 +1373,7 @@ pub fn generate_model_fir(
     let mut realized_spectrum: Vec<Complex64> = impulse.iter()
         .map(|&v| Complex64::new(v, 0.0))
         .collect();
-    let fft = planner.plan_fft_forward(n_fft);
-    fft.process(&mut realized_spectrum);
+    engine.fft_forward(&mut realized_spectrum);
 
     // Extract magnitude (dB) and excess phase (degrees) for positive frequencies.
     //

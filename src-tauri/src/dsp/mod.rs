@@ -1,4 +1,5 @@
 pub mod baffle;
+pub mod fft;
 pub mod impulse;
 pub mod merge;
 mod interpolation;

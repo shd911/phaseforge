@@ -1,6 +1,6 @@
 use num_complex::Complex64;
-use rustfft::FftPlanner;
 
+use super::fft::FftEngine;
 use super::interpolation::interpolate_linear_grid;
 
 /// Result of impulse response computation
@@ -57,9 +57,8 @@ pub fn compute_impulse_response(
     }
 
     // IFFT
-    let mut planner = FftPlanner::<f64>::new();
-    let ifft = planner.plan_fft_inverse(fft_size);
-    ifft.process(&mut spectrum);
+    let mut engine = FftEngine::new();
+    engine.fft_inverse(&mut spectrum);
 
     // Normalize IFFT output (rustfft does not normalize)
     let norm = 1.0 / fft_size as f64;
