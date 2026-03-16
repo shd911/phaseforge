@@ -866,7 +866,11 @@ export const [exportYScale, setExportYScale] = createSignal<{ min: number; max: 
 // ---------------------------------------------------------------------------
 
 export const [isDirty, setIsDirty] = createSignal(false);
-export function markDirty() { if (!isDirty()) setIsDirty(true); }
+export const [bandsVersion, setBandsVersion] = createSignal(0);
+export function markDirty() {
+  if (!isDirty()) setIsDirty(true);
+  setBandsVersion(v => v + 1);
+}
 
 // ---------------------------------------------------------------------------
 // Export

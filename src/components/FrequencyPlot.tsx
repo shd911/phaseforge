@@ -4,7 +4,7 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { invoke } from "@tauri-apps/api/core";
 import type { Measurement, TargetResponse, FilterType } from "../lib/types";
-import { appState, activeBand, isSum, activeTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging } from "../stores/bands";
+import { appState, activeBand, isSum, activeTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, bandsVersion } from "../stores/bands";
 import type { SmoothingMode, BandState, FreqSnapshot } from "../stores/bands";
 import { needAutoFit, setNeedAutoFit } from "../App";
 import { computeFloorBounce } from "../lib/floor-bounce";
@@ -49,12 +49,13 @@ function smoothingConfig(mode: SmoothingMode): { variable: boolean; fixed_fracti
 }
 
 function wrapPhase(phase: number[]): number[] {
-  return phase.map((v) => {
-    let w = v % 360;
+  for (let i = 0; i < phase.length; i++) {
+    let w = phase[i] % 360;
     if (w > 180) w -= 360;
-    if (w < -180) w += 360;
-    return w;
-  });
+    else if (w < -180) w += 360;
+    phase[i] = w;
+  }
+  return phase;
 }
 
 function fmtFreq(v: number): string {
@@ -1017,14 +1018,14 @@ export default function FrequencyPlot() {
     const showTarget = appState.showTarget;
     const sumMode = isSum();
     const band = activeBand();
-    const bandsSnapshot = JSON.stringify(appState.bands);
+    const _bv = bandsVersion(); // lightweight reactive trigger for band changes
     const _tab = activeTab(); // track tab changes (align tab shows extra curves)
     const _fsnaps = band ? freqSnapshots(band.id) : []; // track per-band snapshots
     const dragging = peqDragging();
 
     const doRender = () => {
       if (sumMode) {
-        renderSumMode(showPhase, showMag, showTarget, bandsSnapshot);
+        renderSumMode(showPhase, showMag, showTarget);
       } else if (band) {
         renderBandMode(band, showPhase, showMag, showTarget);
       } else {
@@ -1367,7 +1368,7 @@ export default function FrequencyPlot() {
   // ----------------------------------------------------------------
   // SUM mode rendering
   // ----------------------------------------------------------------
-  async function renderSumMode(showPhase: boolean, showMag: boolean, showTarget: boolean, _bandsJson: string) {
+  async function renderSumMode(showPhase: boolean, showMag: boolean, showTarget: boolean) {
     const gen = ++renderGen;
     zoomCenter = 0; // reset before async — will be recalculated from globalRef
     const bands: BandState[] = JSON.parse(JSON.stringify(appState.bands));
@@ -1631,7 +1632,7 @@ export default function FrequencyPlot() {
           for (let i = 0; i < bands.length; i++) {
             if (perBandTargetNorm[i]) {
               enabledNorm.push(perBandTargetNorm[i]!);
-              enabledPhase.push(perBandTargetNormPhase[i] ?? new Array(freq.length).fill(0));
+              enabledPhase.push(perBandTargetNormPhase[i] ?? Array.from({ length: freq.length }, () => 0));
               enabledInverted.push(bands[i].inverted);
             }
           }
@@ -1639,8 +1640,8 @@ export default function FrequencyPlot() {
             const avgRef = refLevels.length > 0
               ? refLevels.reduce((a, b) => a + b, 0) / refLevels.length
               : 0;
-            const sumRe = new Array(freq.length).fill(0);
-            const sumIm = new Array(freq.length).fill(0);
+            const sumRe = new Float64Array(freq.length);
+            const sumIm = new Float64Array(freq.length);
             for (let n = 0; n < enabledNorm.length; n++) {
               const mag = enabledNorm[n];
               const ph = enabledPhase[n];
@@ -1685,8 +1686,8 @@ export default function FrequencyPlot() {
             (ci) => perBandCorrPhase[ci] && perBandCorrPhase[ci]!.length === nPts
           );
           if (hasAllPhaseCorr) {
-            const sumRe = new Array(nPts).fill(0);
-            const sumIm = new Array(nPts).fill(0);
+            const sumRe = new Float64Array(nPts);
+            const sumIm = new Float64Array(nPts);
             for (const ci of corrIndices) {
               const corr = perBandCorrected[ci]!;
               const corrPh = perBandCorrPhase[ci]!;
@@ -1734,7 +1735,7 @@ export default function FrequencyPlot() {
             }
           } else {
             // Инкогерентное сложение (без фазы)
-            const sumCorr = new Array(nPts).fill(0);
+            const sumCorr = new Float64Array(nPts);
             for (const ci of corrIndices) {
               const corr = perBandCorrected[ci]!;
               const sign = bands[ci].inverted ? -1 : 1;
@@ -1742,7 +1743,7 @@ export default function FrequencyPlot() {
                 sumCorr[j] += Math.pow(10, corr[j] / 20) * sign;
               }
             }
-            const sumCorrDb = sumCorr.map((v: number) =>
+            const sumCorrDb = Array.from(sumCorr, (v: number) =>
               Math.abs(v) > 0 ? 20 * Math.log10(Math.abs(v)) : -200
             );
             // Normalize incoherent Σ corrected to Σ target in passband (b82.07)
@@ -1773,8 +1774,8 @@ export default function FrequencyPlot() {
           (mi) => resampled[mi]!.phase && resampled[mi]!.phase!.length === nPts
         );
         if (hasAllPhase) {
-          const sumRe = new Array(nPts).fill(0);
-          const sumIm = new Array(nPts).fill(0);
+          const sumRe = new Float64Array(nPts);
+          const sumIm = new Float64Array(nPts);
           for (const mi of measIndices) {
             const rm = resampled[mi]!;
             const sign = bands[mi].inverted ? -1 : 1;
@@ -1806,7 +1807,7 @@ export default function FrequencyPlot() {
             sIdx++;
           }
         } else {
-          const sumMag = new Array(nPts).fill(0);
+          const sumMag = new Float64Array(nPts);
           for (const mi of measIndices) {
             const rm = resampled[mi]!;
             const sign = bands[mi].inverted ? -1 : 1;
@@ -1814,7 +1815,7 @@ export default function FrequencyPlot() {
               sumMag[j] += Math.pow(10, rm.magnitude[j] / 20) * sign;
             }
           }
-          const sumMagDb = sumMag.map((v: number) =>
+          const sumMagDb = Array.from(sumMag, (v: number) =>
             Math.abs(v) > 0 ? 20 * Math.log10(Math.abs(v)) : -200
           );
           uSeries.push({ label: "\u03A3 dB", stroke: "#FFFFFF", width: 2.5, scale: "mag" });
