@@ -3,7 +3,6 @@ import { createStore } from "solid-js/store";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { invoke } from "@tauri-apps/api/core";
-import { MEASUREMENT_COLORS } from "../lib/types";
 import type { Measurement, TargetResponse, FilterType } from "../lib/types";
 import { appState, activeBand, isSum, activeTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging } from "../stores/bands";
 import type { SmoothingMode, BandState, FreqSnapshot } from "../stores/bands";
@@ -1092,7 +1091,7 @@ export default function FrequencyPlot() {
       const measVisible = !isTargetTab; // hide raw measurement on target tab (PEQ curves shown instead)
 
       if (result.measurement && showMag) {
-        const color = MEASUREMENT_COLORS[0];
+        const color = band.color;
         uSeries.push({ label: result.measurement.name + " dB", stroke: color, width: 2, scale: "mag" });
         uData.push(result.measurement.magnitude);
         legend.push({ label: "Measurement", color, dash: false, visible: measVisible, seriesIdx: sIdx, category: "measurement" });
@@ -1509,7 +1508,7 @@ export default function FrequencyPlot() {
       if (showMag) {
         for (const i of measIndices) {
           const rm = resampled[i]!;
-          const color = MEASUREMENT_COLORS[i % MEASUREMENT_COLORS.length];
+          const color = bands[i].color;
           uSeries.push({ label: bands[i].name + " dB", stroke: color, width: 1.5, scale: "mag" });
           uData.push(rm.magnitude);
           legend.push({ label: bands[i].name, color, dash: false, visible: false, seriesIdx: sIdx, category: "measurement" });

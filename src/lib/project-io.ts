@@ -27,6 +27,7 @@ import {
   firMaxBoost, setFirMaxBoost,
   firNoiseFloor, setFirNoiseFloor,
 } from "../stores/bands";
+import { MEASUREMENT_COLORS } from "../lib/types";
 import type { FilterConfig } from "../lib/types";
 import { tolerance, setTolerance, maxBands, setMaxBands } from "../stores/peq-optimize";
 import type { AppState, BandState, PerMeasurementSettings, FloorBounceConfig, MergeSource } from "../stores/bands";
@@ -166,6 +167,7 @@ interface ProjectBand {
   linked_to_next: boolean;
   peq_bands: any[]; // PeqBand already snake_case
   exclusion_zones?: any[]; // ExclusionZone { startHz, endHz }
+  color?: string;
 }
 
 interface ProjectSettings {
@@ -238,6 +240,7 @@ function mapBandToProject(b: BandState): ProjectBand {
     linked_to_next: b.linkedToNext,
     peq_bands: b.peqBands, // PeqBand fields already snake_case
     exclusion_zones: b.exclusionZones.length > 0 ? b.exclusionZones : undefined,
+    color: b.color,
   };
 }
 
@@ -303,7 +306,7 @@ function mapSettingsFromProject(s: ProjectSettings): PerMeasurementSettings {
   };
 }
 
-function mapBandFromProject(b: ProjectBand): BandState {
+function mapBandFromProject(b: ProjectBand, idx: number): BandState {
   return {
     id: b.id,
     name: b.name,
@@ -318,12 +321,13 @@ function mapBandFromProject(b: ProjectBand): BandState {
     exclusionZones: b.exclusion_zones ?? [],
     firResult: null, // FIR not saved — recomputed
     crossNormDb: 0,
+    color: b.color ?? MEASUREMENT_COLORS[idx % MEASUREMENT_COLORS.length],
   };
 }
 
 /** Restore state from a loaded project. For v2, re-import measurements from files. */
 async function restoreState(project: ProjectFile, projDir: string | null) {
-  const bands = project.bands.map(mapBandFromProject);
+  const bands = project.bands.map((b, i) => mapBandFromProject(b, i));
 
   // v2: re-import measurements from files in project folder
   if (project.version >= 2 && projDir) {

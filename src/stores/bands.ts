@@ -1,6 +1,7 @@
 import { createStore, reconcile } from "solid-js/store";
 import { createSignal } from "solid-js";
 import type { Measurement, TargetCurve, MergeConfig, PeqBand, FirResult, WindowType, ExclusionZone } from "../lib/types";
+import { MEASUREMENT_COLORS } from "../lib/types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -45,6 +46,7 @@ export interface BandState {
   exclusionZones: ExclusionZone[]; // частотные зоны исключённые из оптимизации
   firResult: FirResult | null; // результат генерации FIR
   crossNormDb: number; // normalization estimate from cross-section peak (dB)
+  color: string; // user-assigned curve color
 }
 
 export interface AppState {
@@ -132,6 +134,7 @@ export function createBand(num: number): BandState {
     exclusionZones: [],
     firResult: null,
     crossNormDb: 0,
+    color: MEASUREMENT_COLORS[(num - 1) % MEASUREMENT_COLORS.length],
   };
 }
 
@@ -725,6 +728,13 @@ export function setBandCrossNormDb(bandId: string, val: number) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
   setState("bands", idx, "crossNormDb", val);
+}
+
+export function setBandColor(bandId: string, color: string) {
+  const idx = bandIndex(bandId);
+  if (idx < 0) return;
+  setState("bands", idx, "color", color);
+  markDirty();
 }
 
 // ---------------------------------------------------------------------------

@@ -888,10 +888,26 @@ body {
 
 .color-dot {
   display: inline-block;
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   vertical-align: middle;
+  cursor: pointer;
+  border: 1px solid rgba(255,255,255,0.2);
+}
+.color-dot:hover {
+  border-color: rgba(255,255,255,0.5);
+}
+.color-dot-label {
+  display: inline-block;
+  position: relative;
+  cursor: pointer;
+}
+.color-dot-input {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
 }
 
 .meas-name {

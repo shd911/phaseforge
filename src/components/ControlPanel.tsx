@@ -39,6 +39,7 @@ import {
   exportWindow,
   setExportWindow,
   exportHybridPhase,
+  setBandColor,
 } from "../stores/bands";
 import type { PresetName, SmoothingMode, MergeSource, BandState } from "../stores/bands";
 import { invoke } from "@tauri-apps/api/core";
@@ -525,11 +526,22 @@ function MeasurementsTab() {
           </thead>
           <tbody>
             <tr>
-              <td>
-                <span
-                  class="color-dot"
-                  style={{ "background-color": MEASUREMENT_COLORS[0] }}
-                />
+              <td class="color-dot-cell">
+                <label class="color-dot-label">
+                  <span
+                    class="color-dot"
+                    style={{ "background-color": band()?.color ?? MEASUREMENT_COLORS[0] }}
+                  />
+                  <input
+                    type="color"
+                    class="color-dot-input"
+                    value={band()?.color ?? MEASUREMENT_COLORS[0]}
+                    onInput={(e) => {
+                      const b = band();
+                      if (b) setBandColor(b.id, e.currentTarget.value);
+                    }}
+                  />
+                </label>
               </td>
               <td class="meas-name">{m()!.name}</td>
               <td class="meas-pts">{m()!.freq.length}</td>
