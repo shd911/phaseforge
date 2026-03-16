@@ -579,10 +579,10 @@ export default function FrequencyPlot() {
     }
     if (!isFinite(magMin)) { magMin = -100; magMax = 100; }
 
-    // Fixed default range: ±100 dB around passband level
-    const halfFit = 100;
-    fitMagMin = zoomCenter - halfFit;
-    fitMagMax = zoomCenter + halfFit;
+    // Fit range: +10 dBr top, noise floor (data minimum) bottom
+    fitMagMax = zoomCenter + 10;
+    fitMagMin = Math.floor(magMin / 5) * 5; // round down to nearest 5 dB
+    if (fitMagMax - fitMagMin < 20) fitMagMin = fitMagMax - 20;
     curMagMin = savedMagMin ?? fitMagMin;
     curMagMax = savedMagMax ?? fitMagMax;
 
