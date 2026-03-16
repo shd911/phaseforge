@@ -130,34 +130,33 @@ const LMA_ADD_BAND_FACTOR: f64 = 1.5;
 // ---------------------------------------------------------------------------
 
 /// Solve A·x = b via Cholesky decomposition (A must be symmetric positive definite).
-/// Returns None if decomposition fails (matrix not positive definite).
-/// Dense solver — max size ~60×60 for 20 bands × 3 params.
-fn cholesky_solve(a: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {
-    let n = a.len();
-    if n == 0 || b.len() != n {
+/// Flat row-major layout: a[i * n + j]. Returns None if not positive definite.
+fn cholesky_solve_flat(a: &[f64], b: &[f64], n: usize) -> Option<Vec<f64>> {
+    if n == 0 || b.len() != n || a.len() != n * n {
         return None;
     }
 
-    // Cholesky decomposition: A = L·Lᵀ
-    let mut l = vec![vec![0.0_f64; n]; n];
+    // Cholesky decomposition: A = L·Lᵀ (flat row-major)
+    let mut l = vec![0.0_f64; n * n];
 
     for i in 0..n {
         for j in 0..=i {
             let mut sum = 0.0;
             for k in 0..j {
-                sum += l[i][k] * l[j][k];
+                sum += l[i * n + k] * l[j * n + k];
             }
             if i == j {
-                let diag = a[i][i] - sum;
+                let diag = a[i * n + i] - sum;
                 if diag <= 0.0 {
-                    return None; // Not positive definite
-                }
-                l[i][j] = diag.sqrt();
-            } else {
-                if l[j][j].abs() < 1e-30 {
                     return None;
                 }
-                l[i][j] = (a[i][j] - sum) / l[j][j];
+                l[i * n + j] = diag.sqrt();
+            } else {
+                let ljj = l[j * n + j];
+                if ljj.abs() < 1e-30 {
+                    return None;
+                }
+                l[i * n + j] = (a[i * n + j] - sum) / ljj;
             }
         }
     }
@@ -167,12 +166,13 @@ fn cholesky_solve(a: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {
     for i in 0..n {
         let mut sum = 0.0;
         for j in 0..i {
-            sum += l[i][j] * y[j];
+            sum += l[i * n + j] * y[j];
         }
-        if l[i][i].abs() < 1e-30 {
+        let lii = l[i * n + i];
+        if lii.abs() < 1e-30 {
             return None;
         }
-        y[i] = (b[i] - sum) / l[i][i];
+        y[i] = (b[i] - sum) / lii;
     }
 
     // Back substitution: Lᵀ·x = y
@@ -180,15 +180,29 @@ fn cholesky_solve(a: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {
     for i in (0..n).rev() {
         let mut sum = 0.0;
         for j in (i + 1)..n {
-            sum += l[j][i] * x[j];
+            sum += l[j * n + i] * x[j];
         }
-        if l[i][i].abs() < 1e-30 {
+        let lii = l[i * n + i];
+        if lii.abs() < 1e-30 {
             return None;
         }
-        x[i] = (y[i] - sum) / l[i][i];
+        x[i] = (y[i] - sum) / lii;
     }
 
     Some(x)
+}
+
+/// Legacy wrapper for tests — converts Vec<Vec<f64>> to flat layout.
+#[cfg(test)]
+fn cholesky_solve(a: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {
+    let n = a.len();
+    let mut flat = vec![0.0_f64; n * n];
+    for i in 0..n {
+        for j in 0..n {
+            flat[i * n + j] = a[i][j];
+        }
+    }
+    cholesky_solve_flat(&flat, b, n)
 }
 
 // ---------------------------------------------------------------------------
@@ -394,37 +408,47 @@ impl<'a> LmaSolver<'a> {
         cost
     }
 
-    /// Compute Jacobian via numerical finite differences
-    fn compute_jacobian(&self, params: &[f64]) -> (Vec<Vec<f64>>, Vec<f64>) {
+    /// Compute Jacobian via numerical finite differences (parallelized with rayon).
+    /// Returns flat row-major Jacobian (m × n_params) and residuals.
+    fn compute_jacobian(&self, params: &[f64]) -> (Vec<f64>, Vec<f64>, usize, usize) {
+        use rayon::prelude::*;
+
         let n_params = params.len();
         let r0 = self.compute_residuals(params);
         let m = r0.len();
 
-        let mut jacobian = vec![vec![0.0_f64; n_params]; m];
-
-        for p in 0..n_params {
-            // Step size: relative for freq, absolute for gain and Q
-            let h = match p % 3 {
-                0 => (params[p] * 1e-3).max(0.1), // freq: relative, min 0.1 Hz
-                1 => 0.01,                          // gain: 0.01 dB
-                2 => 0.01,                          // Q: 0.01
+        // Compute step sizes
+        let steps: Vec<f64> = (0..n_params).map(|p| {
+            match p % 3 {
+                0 => (params[p] * 1e-3).max(0.1),
+                1 => 0.01,
+                2 => 0.01,
                 _ => unreachable!(),
-            };
-            if h.abs() < 1e-12 {
-                continue; // Skip zero parameters
             }
+        }).collect();
 
-            let mut params_h = params.to_vec();
-            params_h[p] += h;
+        // Parallel: compute perturbed residuals for each parameter
+        let columns: Vec<(usize, Vec<f64>)> = (0..n_params).into_par_iter()
+            .filter_map(|p| {
+                let h = steps[p];
+                if h.abs() < 1e-12 { return None; }
+                let mut params_h = params.to_vec();
+                params_h[p] += h;
+                let r_h = self.compute_residuals(&params_h);
+                Some((p, r_h))
+            })
+            .collect();
 
-            let r_h = self.compute_residuals(&params_h);
-
+        // Assemble flat row-major Jacobian: jacobian[i * n_params + p]
+        let mut jacobian = vec![0.0_f64; m * n_params];
+        for (p, r_h) in columns {
+            let h = steps[p];
             for i in 0..m {
-                jacobian[i][p] = (r_h[i] - r0[i]) / h;
+                jacobian[i * n_params + p] = (r_h[i] - r0[i]) / h;
             }
         }
 
-        (jacobian, r0)
+        (jacobian, r0, m, n_params)
     }
 
     /// Run LMA optimization on the given bands.
@@ -448,29 +472,27 @@ impl<'a> LmaSolver<'a> {
                 break;
             }
 
-            let (jacobian, residuals) = self.compute_jacobian(&params);
-            let n_params = params.len();
-            let m = residuals.len();
+            let (jacobian, residuals, m, n_params) = self.compute_jacobian(&params);
 
-            // H = Jᵀ·J  (approximate Hessian, n_params × n_params)
-            let mut h = vec![vec![0.0_f64; n_params]; n_params];
+            // H = Jᵀ·J  (flat row-major n_params × n_params)
+            let mut h = vec![0.0_f64; n_params * n_params];
             for i in 0..n_params {
                 for j in 0..=i {
                     let mut sum = 0.0;
                     for k in 0..m {
-                        sum += jacobian[k][i] * jacobian[k][j];
+                        sum += jacobian[k * n_params + i] * jacobian[k * n_params + j];
                     }
-                    h[i][j] = sum;
-                    h[j][i] = sum;
+                    h[i * n_params + j] = sum;
+                    h[j * n_params + i] = sum;
                 }
             }
 
-            // g = Jᵀ·r  (gradient, n_params)
+            // g = Jᵀ·r  (gradient)
             let mut g = vec![0.0_f64; n_params];
             for i in 0..n_params {
                 let mut sum = 0.0;
                 for k in 0..m {
-                    sum += jacobian[k][i] * residuals[k];
+                    sum += jacobian[k * n_params + i] * residuals[k];
                 }
                 g[i] = sum;
             }
@@ -478,12 +500,12 @@ impl<'a> LmaSolver<'a> {
             // Damped normal equations: (H + λ·diag(H))·δ = −g
             let mut h_damped = h.clone();
             for i in 0..n_params {
-                h_damped[i][i] += lambda * h[i][i].max(1e-8);
+                h_damped[i * n_params + i] += lambda * h[i * n_params + i].max(1e-8);
             }
 
             let neg_g: Vec<f64> = g.iter().map(|&gi| -gi).collect();
 
-            let delta = match cholesky_solve(&h_damped, &neg_g) {
+            let delta = match cholesky_solve_flat(&h_damped, &neg_g, n_params) {
                 Some(d) => d,
                 None => {
                     // Cholesky failed — increase damping
