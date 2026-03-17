@@ -165,7 +165,7 @@ fn unwrap_phase(wrapped: &[f64]) -> Vec<f64> {
         while diff > 180.0 {
             diff -= 360.0;
         }
-        while diff < -180.0 {
+        while diff <= -180.0 {
             diff += 360.0;
         }
         unwrapped.push(unwrapped[i - 1] + diff);

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use tracing::info;
 
 use crate::error::AppError;
 use crate::io::{Measurement, MeasurementMetadata};
@@ -132,6 +133,9 @@ pub fn merge_nf_ff(
     let ff_delay = phase::compute_average_delay(&grid_freq, &ff_ph, match_lo, match_hi);
     let delay_diff = nf_delay - ff_delay;
 
+    info!("merge: nf_delay={:.4}ms  ff_delay={:.4}ms  diff={:.4}ms",
+        nf_delay * 1000.0, ff_delay * 1000.0, delay_diff * 1000.0);
+
     // Remove delay difference from NF phase
     let nf_ph_aligned = phase::remove_delay(&grid_freq, &nf_ph, delay_diff);
 
@@ -190,6 +194,11 @@ pub fn merge_nf_ff(
             merged_phase.push(phase_deg);
         }
     }
+
+    // --- Unwrap merged phase for continuity ---
+    // The blend zone produces wrapped phase from atan2 [-180°,180°] while
+    // NF/FF regions have unwrapped phase. Re-unwrap to get continuous phase.
+    let merged_phase = phase::unwrap_phase(&merged_phase);
 
     // --- Build output Measurement ---
     let merged = Measurement {
