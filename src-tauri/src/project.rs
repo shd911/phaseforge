@@ -154,6 +154,13 @@ pub fn create_project_folder(parent_dir: String, project_name: String) -> Result
 /// Copy a file into the project folder.
 #[tauri::command]
 pub fn copy_file_to_project(source_path: String, dest_path: String) -> Result<(), String> {
+    // Reject paths containing ".." to prevent path traversal
+    let dest = std::path::Path::new(&dest_path);
+    for component in dest.components() {
+        if matches!(component, std::path::Component::ParentDir) {
+            return Err("Invalid destination path: contains '..'".into());
+        }
+    }
     info!("copy_file_to_project: {} -> {}", source_path, dest_path);
     std::fs::copy(&source_path, &dest_path)
         .map_err(|e| format!("Copy error: {e}"))?;
@@ -187,12 +194,13 @@ pub fn copy_dir_contents(source_dir: String, dest_dir: String) -> Result<u32, St
     for entry in std::fs::read_dir(src).map_err(|e| format!("Read dir error: {e}"))? {
         let entry = entry.map_err(|e| format!("Dir entry error: {e}"))?;
         let ft = entry.file_type().map_err(|e| format!("File type error: {e}"))?;
-        if ft.is_file() {
-            let dest_file = dst.join(entry.file_name());
-            std::fs::copy(entry.path(), &dest_file)
-                .map_err(|e| format!("Copy error {}: {e}", entry.path().display()))?;
-            count += 1;
+        if ft.is_symlink() || !ft.is_file() {
+            continue;
         }
+        let dest_file = dst.join(entry.file_name());
+        std::fs::copy(entry.path(), &dest_file)
+            .map_err(|e| format!("Copy error {}: {e}", entry.path().display()))?;
+        count += 1;
     }
     info!("copy_dir_contents: {} -> {} ({} files)", source_dir, dest_dir, count);
     Ok(count)

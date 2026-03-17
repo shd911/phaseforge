@@ -125,6 +125,13 @@ function fileExt(path: string): string {
   return dot >= 0 ? path.substring(dot + 1) : "txt";
 }
 
+/** Extract a safe filename from a path, stripping directories and rejecting traversal. */
+function sanitizeFileName(raw: string): string {
+  const name = raw.split("/").pop()?.split("\\").pop() ?? "";
+  if (!name || name.includes("..")) return "measurement.txt";
+  return name;
+}
+
 // ---------------------------------------------------------------------------
 // Build project data: AppState (camelCase) → ProjectFile (snake_case)
 // ---------------------------------------------------------------------------
@@ -334,6 +341,11 @@ async function restoreState(project: ProjectFile, projDir: string | null) {
   // v2: re-import measurements from files in project folder
   if (project.version >= 2 && projDir) {
     for (const band of bands) {
+      // Reject paths with traversal components
+      if (band.measurementFile?.includes("..")) {
+        console.warn(`Skipping unsafe measurement path: ${band.measurementFile}`);
+        band.measurementFile = null;
+      }
       if (band.measurementFile) {
         // Try the stored path first; if not found, try inbox/ prefix or root fallback
         let filePath = `${projDir}/${band.measurementFile}`;
@@ -461,7 +473,7 @@ async function copyPendingMeasurements(): Promise<void> {
         continue;
       }
       // Use original filename (basename) — no renaming
-      const fileName = sourcePath.split("/").pop() ?? sourcePath.split("\\").pop() ?? "measurement.txt";
+      const fileName = sanitizeFileName(sourcePath);
       const destPath = `${dir}/inbox/${fileName}`;
       try {
         // Skip if already in project folder
@@ -749,7 +761,7 @@ export async function copyMeasurementToProject(
   await invoke("ensure_dir", { path: `${dir}/inbox` }).catch(() => {});
 
   // Use original filename — no renaming, copy to inbox/
-  const fileName = sourcePath.split("/").pop() ?? sourcePath.split("\\").pop() ?? "measurement.txt";
+  const fileName = sanitizeFileName(sourcePath);
   const destPath = `${dir}/inbox/${fileName}`;
   // Skip if already in project folder
   const srcNorm = sourcePath.replace(/\\/g, "/");
@@ -773,8 +785,8 @@ export async function copyMergeFilesToProject(
   await invoke("ensure_dir", { path: `${dir}/inbox` }).catch(() => {});
 
   // Use original filenames — no renaming, copy to inbox/
-  const nfBaseName = nfPath.split("/").pop() ?? nfPath.split("\\").pop() ?? "nf.txt";
-  const ffBaseName = ffPath.split("/").pop() ?? ffPath.split("\\").pop() ?? "ff.txt";
+  const nfBaseName = sanitizeFileName(nfPath);
+  const ffBaseName = sanitizeFileName(ffPath);
 
   const nfFile = `inbox/${nfBaseName}`;
   const ffFile = `inbox/${ffBaseName}`;
