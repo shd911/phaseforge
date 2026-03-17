@@ -17,6 +17,7 @@ import type { BandState } from "./bands";
 // --- Signals ---
 export const [tolerance, setTolerance] = createSignal(1.0);
 export const [maxBands, setMaxBands] = createSignal(20);
+export const [gainRegularization, setGainRegularization] = createSignal(0.0);
 export const [computing, setComputing] = createSignal(false);
 export const [peqError, setPeqError] = createSignal<string | null>(null);
 export const [maxErr, setMaxErr] = createSignal<number | null>(null);
@@ -90,6 +91,7 @@ async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBa
     max_cut_db: isHybrid ? 60.0 : 18.0,
     freq_range: [peqLow, peqHigh],
     hybrid: isHybrid,
+    gain_regularization: gainRegularization(),
   };
   const result = await invoke<PeqResult>("auto_peq_lma", {
     freq: meas.freq,

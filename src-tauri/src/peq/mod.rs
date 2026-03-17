@@ -87,6 +87,11 @@ pub struct PeqConfig {
     /// (no 3-zone composite, no ERB weighting). Default: false.
     #[serde(default)]
     pub hybrid: bool,
+    /// L2 gain regularization coefficient (0.0 = off, 0.0..1.0).
+    /// Penalizes large filter amplitudes: cost += λ × Σ gain_i².
+    /// Higher values produce more uniform, conservative corrections.
+    #[serde(default)]
+    pub gain_regularization: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -368,7 +373,11 @@ impl<'a> LmaSolver<'a> {
         let bands = Self::params_to_bands(params);
         let correction = apply_peq(self.freq, &bands, SAMPLE_RATE);
 
-        let mut residuals = Vec::with_capacity(self.range_indices.len());
+        let n_bands = params.len() / 3;
+        let n_freq = self.range_indices.len();
+        let extra = if self.config.gain_regularization > 0.0 { n_bands } else { 0 };
+        let mut residuals = Vec::with_capacity(n_freq + extra);
+
         for &i in &self.range_indices {
             let err = self.meas_mag[i] + correction[i] - self.target_mag[i];
             let bias = if err > 0.0 {
@@ -378,6 +387,15 @@ impl<'a> LmaSolver<'a> {
             };
             let w = self.weights[i].sqrt();
             residuals.push(w * bias * err);
+        }
+
+        // L2 gain regularization: virtual residuals √(λ·m) × gain_i
+        // Squaring gives λ·m × gain_i², scaled to match frequency residual magnitude
+        if self.config.gain_regularization > 0.0 {
+            let scale = (self.config.gain_regularization * n_freq as f64).sqrt();
+            for i in 0..n_bands {
+                residuals.push(scale * params[i * 3 + 1]);
+            }
         }
 
         residuals
@@ -1452,6 +1470,7 @@ pub fn auto_peq_above_lp(
         smoothing_fraction: Some(1.0 / 3.0), // 1/3 octave smoothing for above-LP
         min_band_distance_oct: config.min_band_distance_oct,
         hybrid: false,
+        gain_regularization: config.gain_regularization,
     };
 
     auto_peq_lma(meas_mag, Some(&target), freq, &above_config, hp_freq, lp_freq, &[])
@@ -1569,6 +1588,7 @@ mod tests {
             smoothing_fraction: None,
             min_band_distance_oct: None,
             hybrid: false,
+            gain_regularization: 0.0,
         };
         let result = auto_peq(&mag, &mag, &freq, &config).unwrap();
         assert!(
@@ -1599,6 +1619,7 @@ mod tests {
             smoothing_fraction: None,
             min_band_distance_oct: None,
             hybrid: false,
+            gain_regularization: 0.0,
         };
         let result = auto_peq(&meas, &target, &freq, &config).unwrap();
 
@@ -1665,6 +1686,7 @@ mod tests {
             smoothing_fraction: None,
             min_band_distance_oct: None,
             hybrid: false,
+            gain_regularization: 0.0,
         };
         assert!(auto_peq(&meas, &target, &freq, &config).is_err());
     }
@@ -1683,6 +1705,7 @@ mod tests {
             smoothing_fraction: None,
             min_band_distance_oct: None,
             hybrid: false,
+            gain_regularization: 0.0,
         };
         assert!(auto_peq(&mag, &mag, &freq, &config).is_err());
     }
@@ -1708,6 +1731,7 @@ mod tests {
             smoothing_fraction: None,
             min_band_distance_oct: None,
             hybrid: false,
+            gain_regularization: 0.0,
         };
         let result = auto_peq(&meas, &target, &freq, &config).unwrap();
 
@@ -1758,6 +1782,7 @@ mod tests {
             smoothing_fraction: None,
             min_band_distance_oct: None,
             hybrid: false,
+            gain_regularization: 0.0,
         };
         let result = auto_peq(&meas, &target, &freq, &config).unwrap();
 
@@ -1861,6 +1886,7 @@ mod tests {
             smoothing_fraction: None,
             min_band_distance_oct: None,
             hybrid: false,
+            gain_regularization: 0.0,
         };
         let result = auto_peq_above_lp(&meas, &freq, &config, 3000.0, 80.0).unwrap();
 
@@ -1894,6 +1920,7 @@ mod tests {
             smoothing_fraction: None,
             min_band_distance_oct: None,
             hybrid: false,
+            gain_regularization: 0.0,
         };
         let result = auto_peq_above_lp(&meas, &freq, &config, 3000.0, 80.0).unwrap();
 
@@ -2006,6 +2033,7 @@ mod tests {
             smoothing_fraction: None,
             min_band_distance_oct: None,
             hybrid: false,
+            gain_regularization: 0.0,
         };
         let result = auto_peq_lma(&meas, Some(&target), &freq, &config, 80.0, 15000.0, &[]).unwrap();
 
@@ -2044,6 +2072,7 @@ mod tests {
             smoothing_fraction: None,
             min_band_distance_oct: None,
             hybrid: false,
+            gain_regularization: 0.0,
         };
         let result = auto_peq_lma(&meas, Some(&meas), &freq, &config, 80.0, 15000.0, &[]).unwrap();
 
@@ -2078,6 +2107,7 @@ mod tests {
             smoothing_fraction: Some(1.0 / 3.0),
             min_band_distance_oct: None,
             hybrid: false,
+            gain_regularization: 0.0,
         };
 
         let target: Vec<f64> = freq.iter().map(|_| 80.0).collect();

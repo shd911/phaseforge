@@ -119,6 +119,7 @@ export interface PeqConfig {
   max_cut_db: number;
   freq_range: [number, number];
   hybrid?: boolean;
+  gain_regularization?: number;
 }
 
 export interface PeqResult {

@@ -29,7 +29,7 @@ import {
 } from "../stores/bands";
 import { MEASUREMENT_COLORS } from "../lib/types";
 import type { FilterConfig } from "../lib/types";
-import { tolerance, setTolerance, maxBands, setMaxBands } from "../stores/peq-optimize";
+import { tolerance, setTolerance, maxBands, setMaxBands, gainRegularization, setGainRegularization } from "../stores/peq-optimize";
 import type { AppState, BandState, PerMeasurementSettings, FloorBounceConfig, MergeSource } from "../stores/bands";
 import type { Measurement, WindowType } from "../lib/types";
 
@@ -146,6 +146,7 @@ interface ProjectFile {
   export_hybrid_phase?: boolean;
   peq_tolerance?: number;
   peq_max_bands?: number;
+  peq_gain_regularization?: number;
   fir_iterations?: number;
   fir_freq_weighting?: boolean;
   fir_narrowband_limit?: boolean;
@@ -263,6 +264,7 @@ function buildProjectData(): ProjectFile {
     export_hybrid_phase: exportHybridPhase(),
     peq_tolerance: tolerance(),
     peq_max_bands: maxBands(),
+    peq_gain_regularization: gainRegularization(),
     fir_iterations: firIterations(),
     fir_freq_weighting: firFreqWeighting(),
     fir_narrowband_limit: firNarrowbandLimit(),
@@ -398,6 +400,7 @@ async function restoreState(project: ProjectFile, projDir: string | null) {
     setExportHybridPhase(project.export_hybrid_phase ?? false);
     setTolerance(project.peq_tolerance ?? 1.0);
     setMaxBands(project.peq_max_bands ?? 20);
+    setGainRegularization(project.peq_gain_regularization ?? 0.0);
     // FIR optimization settings
     setFirIterations(project.fir_iterations ?? 3);
     setFirFreqWeighting(project.fir_freq_weighting ?? true);

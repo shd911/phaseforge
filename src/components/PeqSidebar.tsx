@@ -20,6 +20,7 @@ import NumberInput from "./NumberInput";
 import {
   tolerance, setTolerance,
   maxBands, setMaxBands,
+  gainRegularization, setGainRegularization,
   computing, peqError, maxErr, iters,
   peqRange, formatFreq,
   handleOptimizePeq, handleClearPeq,
@@ -113,6 +114,10 @@ export default function PeqSidebar() {
             <div class="fb-row">
               <label class="fb-label">Max bands</label>
               <NumberInput value={maxBands()} onChange={(v: number) => setMaxBands(Math.round(v))} min={1} max={60} step={1} precision={0} />
+            </div>
+            <div class="fb-row">
+              <label class="fb-label">Regularization</label>
+              <NumberInput value={gainRegularization()} onChange={setGainRegularization} min={0} max={1} step={0.01} precision={2} />
             </div>
           </div>
           <div class="peq-buttons-row">
