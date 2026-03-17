@@ -89,8 +89,12 @@ fn compute_delay_info(
     let delay = if let Some(sr) = sample_rate {
         phase::compute_ir_delay(&freq, &magnitude, &phase, sr)
     } else {
-        let f_lo = freq.first().copied().unwrap_or(20.0).max(100.0);
-        let f_hi = freq.last().copied().unwrap_or(20000.0).min(4000.0);
+        let f_first = freq.first().copied().unwrap_or(20.0);
+        let f_last = freq.last().copied().unwrap_or(20000.0);
+        let log_lo = f_first.ln();
+        let log_hi = f_last.ln();
+        let f_lo = (log_lo + (log_hi - log_lo) * 0.2).exp();
+        let f_hi = (log_lo + (log_hi - log_lo) * 0.8).exp();
         phase::compute_average_delay(&freq, &phase, f_lo, f_hi)
     };
     let distance = phase::compute_distance(delay);
@@ -112,9 +116,14 @@ fn remove_measurement_delay(
         info!("remove_measurement_delay: IR peak delay={:.4}ms", ir_delay * 1000.0);
         ir_delay
     } else {
-        // Least-squares fit over measurement range (robust for partial-bandwidth)
-        let f_lo = freq.first().copied().unwrap_or(20.0).max(100.0);
-        let f_hi = freq.last().copied().unwrap_or(20000.0).min(4000.0);
+        // Least-squares fit over central 60% of measurement range
+        // (avoids noisy edges, works for any bandwidth — sub, mid, tweeter)
+        let f_first = freq.first().copied().unwrap_or(20.0);
+        let f_last = freq.last().copied().unwrap_or(20000.0);
+        let log_lo = f_first.ln();
+        let log_hi = f_last.ln();
+        let f_lo = (log_lo + (log_hi - log_lo) * 0.2).exp();
+        let f_hi = (log_lo + (log_hi - log_lo) * 0.8).exp();
         let ls_delay = phase::compute_average_delay(&freq, &phase, f_lo, f_hi);
         info!("remove_measurement_delay: LS fit delay={:.4}ms (range {:.0}-{:.0} Hz)",
             ls_delay * 1000.0, f_lo, f_hi);
