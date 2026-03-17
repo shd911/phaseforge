@@ -367,6 +367,7 @@ async function restoreState(project: ProjectFile, projDir: string | null) {
           try {
             const nfPath = await resolveFile(ms.nfPath);
             const ffPath = await resolveFile(ms.ffPath);
+            console.log(`[Restore] Re-merge band "${band.name}": NF=${nfPath}, FF=${ffPath}`);
             const result = await invoke<MergeResult>("merge_measurements", {
               nfPath, ffPath, config: ms.config,
             });
@@ -375,12 +376,16 @@ async function restoreState(project: ProjectFile, projDir: string | null) {
             ms.nfPath = nfPath;
             ms.ffPath = ffPath;
           } catch (e) {
-            console.warn(`Failed to re-merge for band "${band.name}":`, e);
+            console.warn(`[Restore] Re-merge failed for band "${band.name}":`, e);
+            console.warn(`[Restore] mergeSource:`, JSON.stringify(ms));
             // Fallback: try importing the single measurement file
             try {
               const filePath = `${projDir}/${band.measurementFile}`;
+              console.log(`[Restore] Fallback import: ${filePath}`);
               band.measurement = await invoke<Measurement>("import_measurement", { path: filePath });
-            } catch (_) {}
+            } catch (e2) {
+              console.warn(`[Restore] Fallback import also failed:`, e2);
+            }
           }
         } else {
         // Non-merged band: import single measurement file
@@ -414,7 +419,7 @@ async function restoreState(project: ProjectFile, projDir: string | null) {
             const m = band.measurement;
             const [newPhase, delay, distance] = await invoke<[number[], number, number]>(
               "remove_measurement_delay",
-              { freq: m.freq, magnitude: m.magnitude, phase: m.phase }
+              { freq: m.freq, magnitude: m.magnitude, phase: m.phase, sampleRate: m.sample_rate }
             );
             band.settings.originalPhase = [...m.phase];
             band.measurement.phase = newPhase;

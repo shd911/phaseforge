@@ -415,7 +415,7 @@ function MeasurementsTab() {
         try {
           const [newPhase, delay, distance] = await invoke<[number[], number, number]>(
             "remove_measurement_delay",
-            { freq: measurement.freq, magnitude: measurement.magnitude, phase: measurement.phase }
+            { freq: measurement.freq, magnitude: measurement.magnitude, phase: measurement.phase, sampleRate: measurement.sample_rate }
           );
           setBandDelayInfo(b.id, delay, distance);
           markBandDelayRemoved(b.id, newPhase);
@@ -480,7 +480,7 @@ function MeasurementsTab() {
         const origPhase = b.settings.originalPhase ?? b.measurement.phase;
         const [newPhase, _delay, _distance] = await invoke<[number[], number, number]>(
           "remove_measurement_delay",
-          { freq: b.measurement.freq, magnitude: b.measurement.magnitude, phase: origPhase }
+          { freq: b.measurement.freq, magnitude: b.measurement.magnitude, phase: origPhase, sampleRate: b.measurement.sample_rate }
         );
         markBandDelayRemoved(b.id, newPhase);
       } catch (e) {
@@ -721,7 +721,7 @@ function SpliceSlider() {
             resetBandOriginalPhase(band.id);
             const [newPhase] = await invoke<[number[], number, number]>(
               "remove_measurement_delay",
-              { freq: result.measurement.freq, magnitude: result.measurement.magnitude, phase: result.measurement.phase }
+              { freq: result.measurement.freq, magnitude: result.measurement.magnitude, phase: result.measurement.phase, sampleRate: result.measurement.sample_rate }
             );
             markBandDelayRemoved(band.id, newPhase);
           }

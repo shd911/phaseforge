@@ -177,12 +177,12 @@ export interface FirModelResult {
 
 // Colors for multi-measurement overlay
 export const MEASUREMENT_COLORS = [
-  "#4A9EFF", // blue
-  "#FF8C42", // orange
-  "#22C55E", // green
-  "#A855F7", // purple
-  "#EF4444", // red
-  "#06B6D4", // cyan
-  "#F59E0B", // amber
-  "#EC4899", // pink
+  "#7BAFDE", // muted blue
+  "#D4976A", // muted terracotta
+  "#7BC88C", // muted sage
+  "#B088D0", // muted lavender
+  "#D07070", // muted coral
+  "#6AABB8", // muted teal
+  "#C4A855", // muted ochre
+  "#C87EA0", // muted mauve
 ];
