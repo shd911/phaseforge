@@ -148,9 +148,8 @@ export async function handleOptimizeAll() {
     // 2. Apply all at once → single reactive update
     batch(() => {
       for (const r of results) setBandPeqBands(r.id, r.peqBands);
-      const last = results[results.length - 1];
-      setMaxErr(last.maxErr);
-      setIters(last.iters);
+      setMaxErr(Math.max(...results.map(r => r.maxErr)));
+      setIters(results.reduce((sum, r) => sum + r.iters, 0));
       setSelectedPeqIdx(null);
     });
   } catch (e) {
