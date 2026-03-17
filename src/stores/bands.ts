@@ -308,9 +308,6 @@ export function moveBand(fromIdx: number, toIdx: number) {
 // Глобальные toggle-и отображения
 // ---------------------------------------------------------------------------
 
-// togglePhase/toggleMag/toggleTarget removed in b82.06
-// showMag, showPhase, showTarget are always true
-
 // ---------------------------------------------------------------------------
 // Per-band: measurement
 // ---------------------------------------------------------------------------

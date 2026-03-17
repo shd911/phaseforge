@@ -425,8 +425,7 @@ function CorrectedImpulseMiniPlot() {
       const hasFilters = hasTarget && (b.target.high_pass || b.target.low_pass);
       if (hasFilters && targetMag) {
         const [xm, xp] = await invoke<[number[], number[], number]>("compute_cross_section", {
-          freq, measMag, targetMag,
-          peqCorrection: peqMag ?? [],
+          freq,
           highPass: b.target.high_pass,
           lowPass: b.target.low_pass,
         });

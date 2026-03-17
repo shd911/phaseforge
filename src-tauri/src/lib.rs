@@ -22,12 +22,6 @@ use target::{TargetCurve, TargetResponse};
 use tracing::info;
 
 #[tauri::command]
-fn greet(name: String) -> Result<String, String> {
-    info!("greet called with name: {}", name);
-    Ok(format!("Hello from PhaseForge, {}!", name))
-}
-
-#[tauri::command]
 fn import_measurement(path: String) -> Result<Measurement, String> {
     info!("import_measurement: {}", path);
     let p = PathBuf::from(&path);
@@ -245,9 +239,6 @@ fn compute_peq_complex(
 #[tauri::command]
 fn compute_cross_section(
     freq: Vec<f64>,
-    _meas_mag: Vec<f64>,
-    _target_mag: Vec<f64>,
-    _peq_correction: Vec<f64>,
     high_pass: Option<target::FilterConfig>,
     low_pass: Option<target::FilterConfig>,
 ) -> Result<(Vec<f64>, Vec<f64>, f64), String> {
@@ -360,7 +351,6 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            greet,
             import_measurement,
             get_smoothed,
             interpolate_log,

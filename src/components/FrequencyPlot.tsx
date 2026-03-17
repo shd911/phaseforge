@@ -13,7 +13,6 @@ import { openCrossoverDialog, type CrossoverDialogData } from "./CrossoverDialog
 const TARGET_COLOR = "#FFD700";
 const TARGET_PHASE_COLOR = "#FFD700";
 const CORRECTED_COLOR = "#22C55E"; // green — measurement + PEQ correction
-// SMOOTHED_HALF_OCT_COLOR removed in b82.06 (1/1 oct curve removed)
 
 // Snapshot overlay colors (muted, distinct from active curves)
 const FREQ_SNAP_COLORS = ["#808080", "#A855F7", "#EC4899", "#14B8A6"];
@@ -1149,9 +1148,6 @@ export default function FrequencyPlot() {
           if (hasFilters && result.targetMag) {
             const [xm, xp, xNorm] = await invoke<[number[], number[], number]>("compute_cross_section", {
               freq: result.measurement.freq,
-              measMag: result.measurement.magnitude,
-              targetMag: result.targetMag,
-              peqCorrection: peqMag ?? [],
               highPass: band.target.high_pass,
               lowPass: band.target.low_pass,
             });
@@ -1567,8 +1563,7 @@ export default function FrequencyPlot() {
             let xsPhase: number[] | null = null;
             if (hasFilters && tMag) {
               const [xm, xp] = await invoke<[number[], number[], number]>("compute_cross_section", {
-                freq, measMag: rm.magnitude, targetMag: tMag,
-                peqCorrection: peqMag ?? [],
+                freq,
                 highPass: bands[i].target.high_pass,
                 lowPass: bands[i].target.low_pass,
               });

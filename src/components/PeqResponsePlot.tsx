@@ -61,7 +61,7 @@ export default function PeqResponsePlot() {
 
   function peqGainRange(): { top: number; bot: number } {
     const band = activeBand();
-    const peqBands = (band?.peqBands ?? []).filter((b: any) => b.enabled);
+    const peqBands = (band?.peqBands ?? []).filter((b: PeqBand) => b.enabled);
     let gMin = 0, gMax = 0;
     for (const pb of peqBands) {
       if (pb.gain_db < gMin) gMin = pb.gain_db;
