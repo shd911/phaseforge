@@ -1,4 +1,4 @@
-import { createSignal, createEffect, on, Show } from "solid-js";
+import { createSignal, createEffect, on, onCleanup, Show } from "solid-js";
 import type { FilterType, Measurement, MergeConfig, MergeResult, PeqBand, FirConfig, FirResult, WindowType, PhaseMode } from "../lib/types";
 import NumberInput from "./NumberInput";
 import { MEASUREMENT_COLORS } from "../lib/types";
@@ -673,6 +673,7 @@ function SpliceSlider() {
 
   const [remerging, setRemerging] = createSignal(false);
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+  onCleanup(() => clearTimeout(debounceTimer));
 
   function handleSliderInput(v: number) {
     const freq = freqFromSlider(v);
@@ -723,7 +724,7 @@ function SpliceSlider() {
             );
             markBandDelayRemoved(band.id, newPhase);
           }
-        } catch (_) {}
+        } catch (e) { console.warn("Delay recomputation after re-merge failed:", e); }
       }
     } catch (e) {
       console.error("Re-merge failed:", e);

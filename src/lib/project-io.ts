@@ -404,8 +404,9 @@ async function restoreState(project: ProjectFile, projDir: string | null) {
   // with partially restored state (e.g. new bands + old export settings)
   batch(() => {
     resetAppState(newState);
+    const validTabs = ["measurements", "target", "export"];
     const savedTab = project.active_tab === "align" ? "target" : project.active_tab;
-    setActiveTab(savedTab as any);
+    setActiveTab((validTabs.includes(savedTab) ? savedTab : "measurements") as any);
     setExportSampleRate(project.export_sample_rate);
     setExportTaps(project.export_taps);
     setExportWindow(project.export_window as WindowType);
@@ -447,7 +448,7 @@ async function migrateToV2(pfprojPath: string): Promise<void> {
   const dir = info.dir;
   // Create standard sub-directories alongside the .pfproj file
   for (const sub of ["inbox", "target", "export"]) {
-    await invoke("ensure_dir", { path: `${dir}/${sub}` }).catch(() => {});
+    await invoke("ensure_dir", { path: `${dir}/${sub}` }).catch(e => console.debug("ensure_dir:", e));
   }
   setProjectDir(dir);
   setProjectName(info.name);
@@ -463,7 +464,7 @@ async function copyPendingMeasurements(): Promise<void> {
   if (!dir) return;
 
   // Ensure inbox/ exists (backward compat with old projects)
-  await invoke("ensure_dir", { path: `${dir}/inbox` }).catch(() => {});
+  await invoke("ensure_dir", { path: `${dir}/inbox` }).catch(e => console.debug("ensure_dir:", e));
 
   for (const band of appState.bands) {
     if (band.measurement && !band.measurementFile) {
@@ -653,7 +654,7 @@ export async function saveProjectAs(): Promise<void> {
       newDir = existsPath;
       // Ensure subdirectories exist
       for (const sub of ["inbox", "target", "export"]) {
-        await invoke("ensure_dir", { path: `${newDir}/${sub}` }).catch(() => {});
+        await invoke("ensure_dir", { path: `${newDir}/${sub}` }).catch(e => console.debug("ensure_dir:", e));
       }
     } else {
       console.error("Cannot create project folder:", _e);
@@ -758,7 +759,7 @@ export async function copyMeasurementToProject(
   if (!dir) return null;
 
   // Ensure inbox/ exists (backward compat)
-  await invoke("ensure_dir", { path: `${dir}/inbox` }).catch(() => {});
+  await invoke("ensure_dir", { path: `${dir}/inbox` }).catch(e => console.debug("ensure_dir:", e));
 
   // Use original filename — no renaming, copy to inbox/
   const fileName = sanitizeFileName(sourcePath);
@@ -782,7 +783,7 @@ export async function copyMergeFilesToProject(
   if (!dir) return null;
 
   // Ensure inbox/ exists (backward compat)
-  await invoke("ensure_dir", { path: `${dir}/inbox` }).catch(() => {});
+  await invoke("ensure_dir", { path: `${dir}/inbox` }).catch(e => console.debug("ensure_dir:", e));
 
   // Use original filenames — no renaming, copy to inbox/
   const nfBaseName = sanitizeFileName(nfPath);
