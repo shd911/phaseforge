@@ -86,8 +86,13 @@ fn compute_delay_info(
     phase: Vec<f64>,
     sample_rate: Option<f64>,
 ) -> Result<(f64, f64), String> {
-    let sr = sample_rate.unwrap_or(48000.0);
-    let delay = phase::compute_ir_delay(&freq, &magnitude, &phase, sr);
+    let delay = if let Some(sr) = sample_rate {
+        phase::compute_ir_delay(&freq, &magnitude, &phase, sr)
+    } else {
+        let f_lo = freq.first().copied().unwrap_or(20.0).max(100.0);
+        let f_hi = freq.last().copied().unwrap_or(20000.0).min(4000.0);
+        phase::compute_average_delay(&freq, &phase, f_lo, f_hi)
+    };
     let distance = phase::compute_distance(delay);
     info!("compute_delay_info: delay={:.4}ms  dist={:.3}m", delay * 1000.0, distance);
     Ok((delay, distance))
@@ -100,8 +105,21 @@ fn remove_measurement_delay(
     phase: Vec<f64>,
     sample_rate: Option<f64>,
 ) -> Result<(Vec<f64>, f64, f64), String> {
-    let sr = sample_rate.unwrap_or(48000.0);
-    let delay = phase::compute_ir_delay(&freq, &magnitude, &phase, sr);
+    // Use IR peak detection when sample_rate is known (full-bandwidth data),
+    // otherwise fall back to linear least-squares fit (works for limited-bandwidth data)
+    let delay = if let Some(sr) = sample_rate {
+        let ir_delay = phase::compute_ir_delay(&freq, &magnitude, &phase, sr);
+        info!("remove_measurement_delay: IR peak delay={:.4}ms", ir_delay * 1000.0);
+        ir_delay
+    } else {
+        // Least-squares fit over measurement range (robust for partial-bandwidth)
+        let f_lo = freq.first().copied().unwrap_or(20.0).max(100.0);
+        let f_hi = freq.last().copied().unwrap_or(20000.0).min(4000.0);
+        let ls_delay = phase::compute_average_delay(&freq, &phase, f_lo, f_hi);
+        info!("remove_measurement_delay: LS fit delay={:.4}ms (range {:.0}-{:.0} Hz)",
+            ls_delay * 1000.0, f_lo, f_hi);
+        ls_delay
+    };
     let distance = phase::compute_distance(delay);
     let new_phase = phase::remove_delay(&freq, &phase, delay);
     info!("remove_measurement_delay: removed {:.4}ms ({:.3}m)", delay * 1000.0, distance);

@@ -177,12 +177,12 @@ export interface FirModelResult {
 
 // Colors for multi-measurement overlay
 export const MEASUREMENT_COLORS = [
-  "#7BAFDE", // muted blue
-  "#D4976A", // muted terracotta
-  "#7BC88C", // muted sage
-  "#B088D0", // muted lavender
-  "#D07070", // muted coral
-  "#6AABB8", // muted teal
-  "#C4A855", // muted ochre
-  "#C87EA0", // muted mauve
+  "#7B9FCC", // steel blue
+  "#CC8866", // clay
+  "#9B85C0", // dusty purple
+  "#C07070", // dusty rose
+  "#7BAAB0", // grey teal
+  "#BBA050", // dark ochre
+  "#B878A0", // muted plum
+  "#8090B0", // slate
 ];
