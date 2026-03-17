@@ -487,11 +487,11 @@ export function setBandTilt(bandId: string, dbPerOctave: number) {
 export function setBandHighPass(bandId: string, config: import("../lib/types").FilterConfig | null) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
-  // Валидация: HP freq не может быть выше LP freq
+  // Валидация: HP freq не может быть >= LP freq (enforce 5% minimum gap)
   if (config) {
     const lpFreq = state.bands[idx].target.low_pass?.freq_hz;
-    if (lpFreq != null && config.freq_hz > lpFreq) {
-      config = { ...config, freq_hz: lpFreq };
+    if (lpFreq != null && config.freq_hz >= lpFreq) {
+      config = { ...config, freq_hz: Math.round(lpFreq * 0.95) };
     }
   }
   setState("bands", idx, "target", "high_pass", config);
@@ -522,11 +522,11 @@ export function setBandHighPass(bandId: string, config: import("../lib/types").F
 export function setBandLowPass(bandId: string, config: import("../lib/types").FilterConfig | null) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
-  // Валидация: LP freq не может быть ниже HP freq
+  // Валидация: LP freq не может быть <= HP freq (enforce 5% minimum gap)
   if (config) {
     const hpFreq = state.bands[idx].target.high_pass?.freq_hz;
-    if (hpFreq != null && config.freq_hz < hpFreq) {
-      config = { ...config, freq_hz: hpFreq };
+    if (hpFreq != null && config.freq_hz <= hpFreq) {
+      config = { ...config, freq_hz: Math.round(hpFreq * 1.05) };
     }
   }
   setState("bands", idx, "target", "low_pass", config);
