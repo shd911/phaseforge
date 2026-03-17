@@ -11,34 +11,37 @@ import { computeFloorBounce } from "../lib/floor-bounce";
 import { openCrossoverDialog, type CrossoverDialogData } from "./CrossoverDialog";
 
 const TARGET_COLOR = "#FFD700";
-const TARGET_PHASE_COLOR = "#FFD700";
+const TARGET_PHASE_COLOR = "#B8960A"; // muted gold for target phase
 const CORRECTED_COLOR = "#22C55E"; // green — measurement + PEQ correction
+const CORRECTED_PHASE_COLOR = "#16A34A"; // darker green for corrected phase
+const SUM_CORRECTED_COLOR = "#4ADE80"; // bright green for Σ corrected (main result)
+const SUM_MEAS_COLOR = "#94A3B8"; // muted slate for Σ measurement
 
 // Snapshot overlay colors (muted, distinct from active curves)
 const FREQ_SNAP_COLORS = ["#808080", "#A855F7", "#EC4899", "#14B8A6"];
 
-// Цвета per-band таргетов (светлее основных)
+// Per-band target curves — muted pastels (reference, not primary focus)
 const TARGET_BAND_COLORS = [
-  "#7CB3FF", // light blue
-  "#FFB870", // light orange
-  "#6EE89A", // light green
-  "#C98DF7", // light purple
-  "#F77070", // light red
-  "#5CD6E8", // light cyan
-  "#F7C35B", // light amber
-  "#F77DBF", // light pink
+  "#5A8AC0", // muted blue
+  "#C08850", // muted orange
+  "#50A870", // muted green
+  "#9070C0", // muted purple
+  "#C06060", // muted red
+  "#4898A8", // muted cyan
+  "#B09040", // muted amber
+  "#B86898", // muted pink
 ];
 
-// Цвета per-band corrected кривых (оттенки зелёного)
+// Per-band corrected curves — vivid, distinct hues (result, high contrast)
 const CORRECTED_BAND_COLORS = [
+  "#38BDF8", // sky blue
+  "#FB923C", // bright orange
   "#34D399", // emerald
-  "#4ADE80", // green
-  "#2DD4BF", // teal
-  "#A3E635", // lime
-  "#86EFAC", // light green
-  "#5EEAD4", // light teal
-  "#BEF264", // light lime
-  "#6EE7B7", // mint
+  "#C084FC", // vivid purple
+  "#F87171", // bright red
+  "#22D3EE", // vivid cyan
+  "#FACC15", // vivid yellow
+  "#F472B6", // vivid pink
 ];
 
 function smoothingConfig(mode: SmoothingMode): { variable: boolean; fixed_fraction: number | null } {
@@ -1092,15 +1095,18 @@ export default function FrequencyPlot() {
 
       if (result.measurement && showMag) {
         const color = band.color;
-        uSeries.push({ label: result.measurement.name + " dB", stroke: color, width: 2, scale: "mag" });
+        const measAlpha = "B0"; // 69% opacity — measurement is secondary
+        const measColor = color + measAlpha;
+        uSeries.push({ label: result.measurement.name + " dB", stroke: measColor, width: 1.5, scale: "mag" });
         uData.push(result.measurement.magnitude);
-        legend.push({ label: "Measurement", color, dash: false, visible: measVisible, seriesIdx: sIdx, category: "measurement" });
+        legend.push({ label: "Measurement", color: measColor, dash: false, visible: measVisible, seriesIdx: sIdx, category: "measurement" });
         sIdx++;
 
         if (showPhase && result.measurement.phase) {
-          uSeries.push({ label: result.measurement.name + " \u00B0", stroke: color, width: 1, dash: [6, 3], scale: "phase" });
+          const phaseAlpha = "80"; // 50% opacity for measurement phase
+          uSeries.push({ label: result.measurement.name + " \u00B0", stroke: color + phaseAlpha, width: 1, dash: [6, 3], scale: "phase" });
           uData.push(wrapPhase(result.measurement.phase));
-          legend.push({ label: "Meas \u00B0", color, dash: true, visible: measVisible, seriesIdx: sIdx, category: "measurement" });
+          legend.push({ label: "Meas \u00B0", color: color + phaseAlpha, dash: true, visible: measVisible, seriesIdx: sIdx, category: "measurement" });
           sIdx++;
         }
       }
@@ -1245,7 +1251,7 @@ export default function FrequencyPlot() {
                 v + (peqPhase ? peqPhase[i] : 0) + (xsPhase ? xsPhase[i] : 0)
             );
             if (showPhase) {
-              const phaseColor = isHybrid ? "#F59E0B" : CORRECTED_COLOR;
+              const phaseColor = isHybrid ? "#B07308" : CORRECTED_PHASE_COLOR;
               const phaseLabel = isHybrid ? "Corrected + XO" : "Corrected";
               uSeries.push({
                 label: phaseLabel + " \u00B0",
@@ -1505,16 +1511,16 @@ export default function FrequencyPlot() {
       if (showMag) {
         for (const i of measIndices) {
           const rm = resampled[i]!;
-          const color = bands[i].color;
-          uSeries.push({ label: bands[i].name + " dB", stroke: color, width: 1.5, scale: "mag" });
+          const color = bands[i].color + "80"; // 50% opacity — measurements are background
+          uSeries.push({ label: bands[i].name + " dB", stroke: color, width: 1, scale: "mag" });
           uData.push(rm.magnitude);
           legend.push({ label: bands[i].name, color, dash: false, visible: false, seriesIdx: sIdx, category: "measurement" });
           sIdx++;
           // Per-band measurement phase
           if (showPhase && rm.phase) {
-            uSeries.push({ label: bands[i].name + " °", stroke: color, width: 1, dash: [6, 3], scale: "phase" });
+            uSeries.push({ label: bands[i].name + " °", stroke: bands[i].color + "50", width: 1, dash: [6, 3], scale: "phase" });
             uData.push(wrapPhase(rm.phase));
-            legend.push({ label: bands[i].name + " °", color, dash: true, visible: false, seriesIdx: sIdx, category: "measurement" });
+            legend.push({ label: bands[i].name + " °", color: bands[i].color + "50", dash: true, visible: false, seriesIdx: sIdx, category: "measurement" });
             sIdx++;
           }
         }
@@ -1526,7 +1532,7 @@ export default function FrequencyPlot() {
           const tMag = perBandTargetMags[i];
           if (!tMag) continue;
           const color = TARGET_BAND_COLORS[i % TARGET_BAND_COLORS.length];
-          uSeries.push({ label: bands[i].name + " tgt", stroke: color, width: 1.5, dash: [6, 4], scale: "mag" });
+          uSeries.push({ label: bands[i].name + " tgt", stroke: color, width: 1, dash: [6, 4], scale: "mag" });
           uData.push(tMag);
           legend.push({ label: bands[i].name + " tgt", color, dash: true, visible: false, seriesIdx: sIdx, category: "target" });
           sIdx++;
@@ -1607,7 +1613,7 @@ export default function FrequencyPlot() {
             }
 
             const color = CORRECTED_BAND_COLORS[i % CORRECTED_BAND_COLORS.length];
-            uSeries.push({ label: bands[i].name + " corr+XO", stroke: color, width: 1.5, scale: "mag" });
+            uSeries.push({ label: bands[i].name + " corr+XO", stroke: color, width: 2, scale: "mag" });
             uData.push(corrected);
             legend.push({ label: bands[i].name + " corr+XO", color, dash: false, visible: true, seriesIdx: sIdx, category: "corrected" });
             sIdx++;
@@ -1717,15 +1723,15 @@ export default function FrequencyPlot() {
                 for (let j = 0; j < nPts; j++) sumCorrDb[j] += corrOff;
               }
             }
-            uSeries.push({ label: "\u03A3 corr", stroke: CORRECTED_COLOR, width: 2.5, scale: "mag" });
+            uSeries.push({ label: "\u03A3 corr", stroke: SUM_CORRECTED_COLOR, width: 3, scale: "mag" });
             uData.push(sumCorrDb);
-            legend.push({ label: "\u03A3 corrected", color: CORRECTED_COLOR, dash: false, visible: true, seriesIdx: sIdx, category: "corrected" });
+            legend.push({ label: "\u03A3 corrected", color: SUM_CORRECTED_COLOR, dash: false, visible: true, seriesIdx: sIdx, category: "corrected" });
             sIdx++;
             // Σ corrected phase
             if (showPhase) {
-              uSeries.push({ label: "\u03A3 corr °", stroke: CORRECTED_COLOR, width: 1.5, dash: [6, 3], scale: "phase" });
+              uSeries.push({ label: "\u03A3 corr °", stroke: SUM_CORRECTED_COLOR, width: 1.5, dash: [6, 3], scale: "phase" });
               uData.push(wrapPhase(sumCorrPhase));
-              legend.push({ label: "\u03A3 corr °", color: CORRECTED_COLOR, dash: true, visible: false, seriesIdx: sIdx, category: "corrected" });
+              legend.push({ label: "\u03A3 corr °", color: SUM_CORRECTED_COLOR, dash: true, visible: false, seriesIdx: sIdx, category: "corrected" });
               sIdx++;
             }
           } else {
@@ -1755,9 +1761,9 @@ export default function FrequencyPlot() {
                 for (let j = 0; j < nPts; j++) sumCorrDb[j] += corrOff;
               }
             }
-            uSeries.push({ label: "\u03A3 corr", stroke: CORRECTED_COLOR, width: 2.5, scale: "mag" });
+            uSeries.push({ label: "\u03A3 corr", stroke: SUM_CORRECTED_COLOR, width: 3, scale: "mag" });
             uData.push(sumCorrDb);
-            legend.push({ label: "\u03A3 corrected", color: CORRECTED_COLOR, dash: false, visible: true, seriesIdx: sIdx, category: "corrected" });
+            legend.push({ label: "\u03A3 corrected", color: SUM_CORRECTED_COLOR, dash: false, visible: true, seriesIdx: sIdx, category: "corrected" });
             sIdx++;
           }
         }
@@ -1790,15 +1796,15 @@ export default function FrequencyPlot() {
             sumMagDb[j] = amplitude > 0 ? 20 * Math.log10(amplitude) : -200;
             sumPhase[j] = Math.atan2(im, re) * 180 / Math.PI;
           }
-          uSeries.push({ label: "\u03A3 dB", stroke: "#FFFFFF", width: 2.5, scale: "mag" });
+          uSeries.push({ label: "\u03A3 dB", stroke: SUM_MEAS_COLOR, width: 2, scale: "mag" });
           uData.push(sumMagDb);
-          legend.push({ label: "\u03A3 meas", color: "#FFFFFF", dash: false, visible: false, seriesIdx: sIdx, category: "measurement" });
+          legend.push({ label: "\u03A3 meas", color: SUM_MEAS_COLOR, dash: false, visible: false, seriesIdx: sIdx, category: "measurement" });
           sIdx++;
           // Σ measurement phase
           if (showPhase) {
-            uSeries.push({ label: "\u03A3 °", stroke: "#FFFFFF", width: 1.5, dash: [6, 3], scale: "phase" });
+            uSeries.push({ label: "\u03A3 °", stroke: SUM_MEAS_COLOR, width: 1.5, dash: [6, 3], scale: "phase" });
             uData.push(wrapPhase(sumPhase));
-            legend.push({ label: "\u03A3 meas °", color: "#FFFFFF", dash: true, visible: false, seriesIdx: sIdx, category: "measurement" });
+            legend.push({ label: "\u03A3 meas °", color: SUM_MEAS_COLOR, dash: true, visible: false, seriesIdx: sIdx, category: "measurement" });
             sIdx++;
           }
         } else {
@@ -1813,9 +1819,9 @@ export default function FrequencyPlot() {
           const sumMagDb = Array.from(sumMag, (v: number) =>
             Math.abs(v) > 0 ? 20 * Math.log10(Math.abs(v)) : -200
           );
-          uSeries.push({ label: "\u03A3 dB", stroke: "#FFFFFF", width: 2.5, scale: "mag" });
+          uSeries.push({ label: "\u03A3 dB", stroke: SUM_MEAS_COLOR, width: 2, scale: "mag" });
           uData.push(sumMagDb);
-          legend.push({ label: "\u03A3 meas", color: "#FFFFFF", dash: false, visible: false, seriesIdx: sIdx, category: "measurement" });
+          legend.push({ label: "\u03A3 meas", color: SUM_MEAS_COLOR, dash: false, visible: false, seriesIdx: sIdx, category: "measurement" });
           sIdx++;
         }
       }
@@ -2077,7 +2083,7 @@ export default function FrequencyPlot() {
             const cols = () => [...bandNames(), "\u03A3"];
             const categories: ("target" | "measurement" | "corrected")[] = ["target", "measurement", "corrected"];
             const catLabels: Record<string, string> = { target: "TARGETS", measurement: "MEAS", corrected: "CORR+XO" };
-            const catColors: Record<string, string> = { target: TARGET_COLOR, measurement: "#4A9EFF", corrected: CORRECTED_COLOR };
+            const catColors: Record<string, string> = { target: TARGET_COLOR, measurement: "#4A9EFFB0", corrected: CORRECTED_COLOR };
 
             return (
               <table>
