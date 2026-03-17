@@ -31,7 +31,7 @@ import { MEASUREMENT_COLORS } from "../lib/types";
 import type { FilterConfig } from "../lib/types";
 import { tolerance, setTolerance, maxBands, setMaxBands, gainRegularization, setGainRegularization } from "../stores/peq-optimize";
 import type { AppState, BandState, PerMeasurementSettings, FloorBounceConfig, MergeSource } from "../stores/bands";
-import type { Measurement, WindowType } from "../lib/types";
+import type { Measurement, MergeResult, WindowType } from "../lib/types";
 
 // ---------------------------------------------------------------------------
 // Signals: project path, project directory, project name
@@ -347,7 +347,43 @@ async function restoreState(project: ProjectFile, projDir: string | null) {
         band.measurementFile = null;
       }
       if (band.measurementFile) {
-        // Try the stored path first; if not found, try inbox/ prefix or root fallback
+        // If this band has merge_source, re-merge NF+FF from stored config
+        // instead of importing the single file (which may be only one of the sources)
+        const ms = band.settings?.mergeSource;
+        if (ms) {
+          // Resolve NF/FF paths: use project-relative paths if stored in inbox/
+          const resolveFile = async (p: string) => {
+            // Try absolute path first (backward compat)
+            const absExists = await invoke<boolean>("check_path_exists", { path: p }).catch(() => false);
+            if (absExists) return p;
+            // Try project-relative
+            const base = sanitizeFileName(p);
+            for (const candidate of [`${projDir}/inbox/${base}`, `${projDir}/${base}`]) {
+              const exists = await invoke<boolean>("check_path_exists", { path: candidate }).catch(() => false);
+              if (exists) return candidate;
+            }
+            return p; // fallback to original
+          };
+          try {
+            const nfPath = await resolveFile(ms.nfPath);
+            const ffPath = await resolveFile(ms.ffPath);
+            const result = await invoke<MergeResult>("merge_measurements", {
+              nfPath, ffPath, config: ms.config,
+            });
+            band.measurement = result.measurement;
+            // Update merge source with resolved paths
+            ms.nfPath = nfPath;
+            ms.ffPath = ffPath;
+          } catch (e) {
+            console.warn(`Failed to re-merge for band "${band.name}":`, e);
+            // Fallback: try importing the single measurement file
+            try {
+              const filePath = `${projDir}/${band.measurementFile}`;
+              band.measurement = await invoke<Measurement>("import_measurement", { path: filePath });
+            } catch (_) {}
+          }
+        } else {
+        // Non-merged band: import single measurement file
         let filePath = `${projDir}/${band.measurementFile}`;
         const exists = await invoke<boolean>("check_path_exists", { path: filePath }).catch(() => false);
         if (!exists) {
@@ -368,24 +404,25 @@ async function restoreState(project: ProjectFile, projDir: string | null) {
         try {
           const m = await invoke<Measurement>("import_measurement", { path: filePath });
           band.measurement = m;
-          // Re-apply delay compensation if it was enabled when project was saved
-          if (band.settings?.delay_removed && m.phase) {
-            try {
-              const [newPhase, delay, distance] = await invoke<[number[], number, number]>(
-                "remove_measurement_delay",
-                { freq: m.freq, magnitude: m.magnitude, phase: m.phase }
-              );
-              band.settings.originalPhase = [...m.phase];
-              band.measurement.phase = newPhase;
-              band.settings.delay_seconds = delay;
-              band.settings.distance_meters = distance;
-            } catch (_) {
-              // If delay removal fails, mark as not removed
-              band.settings.delay_removed = false;
-            }
-          }
         } catch (e) {
           console.warn(`Failed to re-import measurement ${band.measurementFile}:`, e);
+        }
+        } // end else (non-merged)
+        // Re-apply delay compensation for both merged and non-merged bands
+        if (band.measurement && band.settings?.delay_removed && band.measurement.phase) {
+          try {
+            const m = band.measurement;
+            const [newPhase, delay, distance] = await invoke<[number[], number, number]>(
+              "remove_measurement_delay",
+              { freq: m.freq, magnitude: m.magnitude, phase: m.phase }
+            );
+            band.settings.originalPhase = [...m.phase];
+            band.measurement.phase = newPhase;
+            band.settings.delay_seconds = delay;
+            band.settings.distance_meters = distance;
+          } catch (_) {
+            band.settings.delay_removed = false;
+          }
         }
       }
     }

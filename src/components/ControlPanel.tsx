@@ -441,14 +441,15 @@ function MeasurementsTab() {
     try {
       const files = await copyMergeFilesToProject(source.nfPath, source.ffPath, newName);
       if (files) {
-        // Also copy the merged measurement result
-        const mFileName = await copyMeasurementToProject(
-          measurement.source_path ?? source.nfPath,
-          newName,
-        );
-        if (mFileName) {
-          setBandMeasurementFile(b.id, mFileName);
-        }
+        // For merged bands, set measurementFile to NF as a marker that files are in project.
+        // On load, merge_source triggers re-merge from NF+FF (not single-file import).
+        setBandMeasurementFile(b.id, files.nfFile);
+        // Update merge source paths to project-local copies
+        setBandMergeSource(b.id, {
+          ...source,
+          nfPath: `${projectDir()}/${files.nfFile}`,
+          ffPath: `${projectDir()}/${files.ffFile}`,
+        });
       }
     } catch (e) {
       console.warn("Failed to copy merge files to project folder:", e);
