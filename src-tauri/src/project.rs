@@ -37,6 +37,30 @@ pub struct ProjectFile {
     // UI state
     #[serde(default = "default_tab")]
     pub active_tab: String,
+
+    // PEQ/FIR settings (saved by frontend, passed through for round-trip)
+    #[serde(default)]
+    pub export_hybrid_phase: Option<bool>,
+    #[serde(default)]
+    pub peq_tolerance: Option<f64>,
+    #[serde(default)]
+    pub peq_max_bands: Option<u32>,
+    #[serde(default)]
+    pub peq_gain_regularization: Option<f64>,
+    #[serde(default)]
+    pub fir_iterations: Option<u32>,
+    #[serde(default)]
+    pub fir_freq_weighting: Option<bool>,
+    #[serde(default)]
+    pub fir_narrowband_limit: Option<bool>,
+    #[serde(default)]
+    pub fir_nb_smoothing_oct: Option<f64>,
+    #[serde(default)]
+    pub fir_nb_max_excess_db: Option<f64>,
+    #[serde(default)]
+    pub fir_max_boost_db: Option<f64>,
+    #[serde(default)]
+    pub fir_noise_floor_db: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +80,10 @@ pub struct BandData {
     pub linked_to_next: bool,
     #[serde(default)]
     pub peq_bands: Vec<PeqBand>,
+    #[serde(default)]
+    pub exclusion_zones: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub color: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
