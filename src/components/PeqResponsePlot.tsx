@@ -80,6 +80,31 @@ export default function PeqResponsePlot() {
     c.setScale("mag", { min: curMagMin, max: curMagMax });
   }
 
+  // --- Tooltip state ---
+  const [tooltip, setTooltip] = createSignal<{ x: number; y: number; text: string } | null>(null);
+
+  function handlePlotMouseMove(e: MouseEvent) {
+    if (dragPeqIdx != null) return; // don't show tooltip during drag
+    const c = getChart();
+    const band = activeBand();
+    if (!c || !band?.peqBands) { setTooltip(null); return; }
+    const rect = containerRef.getBoundingClientRect();
+    const cx = (e.clientX - rect.left) * (devicePixelRatio || 1);
+    const cy = (e.clientY - rect.top) * (devicePixelRatio || 1);
+    const hitIdx = findPeqBandAtPixel(cx, cy);
+    if (hitIdx != null) {
+      const pb = band.peqBands[hitIdx];
+      const fLabel = pb.freq_hz >= 1000 ? (pb.freq_hz / 1000).toFixed(1) + "k" : Math.round(pb.freq_hz).toString();
+      setTooltip({
+        x: e.clientX - rect.left + 12,
+        y: e.clientY - rect.top - 8,
+        text: `${fLabel} Hz  ${pb.gain_db > 0 ? "+" : ""}${pb.gain_db.toFixed(1)} dB  Q${pb.q.toFixed(1)}`,
+      });
+    } else {
+      setTooltip(null);
+    }
+  }
+
   // --- PEQ graph interaction: drag bands, double-click to add, wheel to adjust Q ---
   let dragPeqIdx: number | null = null;
   let dragStartX = 0;
@@ -128,6 +153,7 @@ export default function PeqResponsePlot() {
       dragStartY = e.clientY;
       dragMoved = false;
       setSelectedPeqIdx(hitIdx);
+      setTooltip(null);
       e.preventDefault();
       e.stopPropagation();
 
@@ -262,9 +288,9 @@ export default function PeqResponsePlot() {
       },
       axes: [
         {
-          stroke: "#8b8b96",
-          grid: { stroke: "rgba(255,255,255,0.06)" },
-          ticks: { stroke: "rgba(255,255,255,0.12)" },
+          stroke: "#9b9ba6",
+          grid: { stroke: "rgba(255,255,255,0.12)" },
+          ticks: { stroke: "rgba(255,255,255,0.20)" },
           values: (_u: uPlot, vals: number[]) =>
             vals.map((v) =>
               v == null ? "" : v >= 1000 ? (v / 1000).toFixed(v >= 10000 ? 0 : 1) + "k" : v.toString()
@@ -273,9 +299,9 @@ export default function PeqResponsePlot() {
         {
           label: "dB",
           scale: "mag",
-          stroke: "#8b8b96",
-          grid: { stroke: "rgba(255,255,255,0.06)" },
-          ticks: { stroke: "rgba(255,255,255,0.12)" },
+          stroke: "#9b9ba6",
+          grid: { stroke: "rgba(255,255,255,0.12)" },
+          ticks: { stroke: "rgba(255,255,255,0.20)" },
           values: (_u: uPlot, vals: number[]) =>
             vals.map((v) => (v == null ? "" : v.toFixed(1))),
           size: 50,
@@ -286,7 +312,7 @@ export default function PeqResponsePlot() {
           side: 1,
           stroke: PEQ_PHASE_COLOR,
           grid: { show: false },
-          ticks: { stroke: "rgba(245,158,11,0.2)" },
+          ticks: { stroke: "rgba(245,158,11,0.25)" },
           values: (_u: uPlot, vals: number[]) =>
             vals.map((v) => (v == null ? "" : v.toFixed(0) + "\u00B0")),
           size: 45,
@@ -485,10 +511,28 @@ export default function PeqResponsePlot() {
             ref={containerRef}
             class="impulse-plot"
             onMouseDown={handlePlotMouseDown}
+            onMouseMove={handlePlotMouseMove}
+            onMouseLeave={() => setTooltip(null)}
             onDblClick={handlePlotDblClick}
             onWheel={handlePlotWheel}
-            style={{ cursor: "crosshair" }}
+            style={{ cursor: "crosshair", position: "relative" }}
           />
+          {tooltip() && (
+            <div style={{
+              position: "absolute",
+              left: tooltip()!.x + "px",
+              top: tooltip()!.y + "px",
+              background: "rgba(30,30,40,0.92)",
+              color: "#e0e0e0",
+              padding: "3px 8px",
+              "border-radius": "4px",
+              "font-size": "11px",
+              "white-space": "nowrap",
+              "pointer-events": "none",
+              "z-index": "100",
+              border: "1px solid rgba(255,255,255,0.15)",
+            }}>{tooltip()!.text}</div>
+          )}
           {!hasData() && (
             <div class="impulse-empty-overlay">No PEQ filters computed</div>
           )}

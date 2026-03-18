@@ -592,9 +592,9 @@ export default function FrequencyPlot() {
 
     const axes: uPlot.Axis[] = [
       {
-        stroke: "#8b8b96",
-        grid: { stroke: "rgba(255,255,255,0.06)" },
-        ticks: { stroke: "rgba(255,255,255,0.12)" },
+        stroke: "#9b9ba6",
+        grid: { stroke: "rgba(255,255,255,0.12)" },
+        ticks: { stroke: "rgba(255,255,255,0.20)" },
         values: (_u: uPlot, vals: number[]) =>
           vals.map((v) => {
             if (v == null) return "";
@@ -603,16 +603,16 @@ export default function FrequencyPlot() {
           }),
       },
       {
-        label: yLabel, scale: "mag", stroke: "#8b8b96",
-        grid: { stroke: "rgba(255,255,255,0.06)" },
-        ticks: { stroke: "rgba(255,255,255,0.12)" },
+        label: yLabel, scale: "mag", stroke: "#9b9ba6",
+        grid: { stroke: "rgba(255,255,255,0.12)" },
+        ticks: { stroke: "rgba(255,255,255,0.20)" },
         values: (_u: uPlot, vals: number[]) => vals.map((v) => (v == null ? "" : v.toFixed(0))),
         size: 50,
       },
       {
-        label: "Phase (\u00B0)", scale: "phase", side: 1, stroke: "#8b8b96",
+        label: "Phase (\u00B0)", scale: "phase", side: 1, stroke: "#9b9ba6",
         grid: { show: false },
-        ticks: { stroke: "rgba(255,255,255,0.12)" },
+        ticks: { stroke: "rgba(255,255,255,0.20)" },
       },
     ];
 
