@@ -172,14 +172,11 @@ export default function PeqResponsePlot() {
   function handlePlotDblClick(e: MouseEvent) {
     const c = getChart();
     const band = activeBand();
-    if (!c || !band) return;
+    if (!c || !band || !c.over) return;
 
-    const rect = containerRef.getBoundingClientRect();
-    const dpr = devicePixelRatio || 1;
-    const plotLeftCSS = c.bbox.left / dpr;
-    const plotTopCSS = c.bbox.top / dpr;
-    const freq = c.posToVal(e.clientX - rect.left - plotLeftCSS, "x");
-    const gain = c.posToVal(e.clientY - rect.top - plotTopCSS, "mag");
+    const rect = c.over.getBoundingClientRect();
+    const freq = c.posToVal(e.clientX - rect.left, "x");
+    const gain = c.posToVal(e.clientY - rect.top, "mag");
     if (freq == null || gain == null || freq <= 0) return;
 
     const clampedFreq = Math.max(20, Math.min(20000, freq));

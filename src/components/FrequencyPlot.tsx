@@ -721,16 +721,16 @@ export default function FrequencyPlot() {
             const nullFreqs = input.floorBounceNulls;
             if (!nullFreqs || nullFreqs.length === 0) return;
             const ctx = u.ctx;
-            const plotLeft = u.bbox.left / devicePixelRatio;
-            const plotTop = u.bbox.top / devicePixelRatio;
-            const plotWidth = u.bbox.width / devicePixelRatio;
-            const plotHeight = u.bbox.height / devicePixelRatio;
+            const plotLeft = u.bbox.left;
+            const plotTop = u.bbox.top;
+            const plotWidth = u.bbox.width;
+            const plotHeight = u.bbox.height;
 
             ctx.save();
             ctx.fillStyle = "rgba(255, 165, 0, 0.12)";
 
             for (const f of nullFreqs) {
-              const xPos = u.valToPos(f, "x", false);
+              const xPos = u.valToPos(f, "x", true);
               if (xPos < plotLeft || xPos > plotLeft + plotWidth) continue;
               // Ширина полосы: ~2% от plot width, min 2px
               const bandWidth = Math.max(2, plotWidth * 0.015);
@@ -744,18 +744,18 @@ export default function FrequencyPlot() {
             const bd = activeBand();
             if (!bd?.exclusionZones?.length) return;
             const ctx = u.ctx;
-            const plotLeft = u.bbox.left / devicePixelRatio;
-            const plotTop = u.bbox.top / devicePixelRatio;
-            const plotHeight = u.bbox.height / devicePixelRatio;
+            const plotLeft = u.bbox.left;
+            const plotTop = u.bbox.top;
+            const plotHeight = u.bbox.height;
 
             ctx.save();
             ctx.fillStyle = "rgba(128, 128, 128, 0.18)";
 
             for (const zone of bd.exclusionZones) {
-              const x1 = u.valToPos(zone.startHz, "x", false);
-              const x2 = u.valToPos(zone.endHz, "x", false);
+              const x1 = u.valToPos(zone.startHz, "x", true);
+              const x2 = u.valToPos(zone.endHz, "x", true);
               const left = Math.max(x1, plotLeft);
-              const right = Math.min(x2, plotLeft + u.bbox.width / devicePixelRatio);
+              const right = Math.min(x2, plotLeft + u.bbox.width);
               if (right > left) {
                 ctx.fillRect(left, plotTop, right - left, plotHeight);
               }
