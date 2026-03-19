@@ -11,8 +11,8 @@ import { computeFloorBounce } from "../lib/floor-bounce";
 import { openCrossoverDialog, type CrossoverDialogData } from "./CrossoverDialog";
 
 // Σ (sum) curve colors — fixed, not derived from band colors
-const SUM_SUM_TARGET_COLOR = "#FFD700"; // gold
-const SUM_SUM_TARGET_PHASE_COLOR = "#B8960A"; // muted gold
+const SUM_TARGET_COLOR = "#FFD700"; // gold
+const SUM_TARGET_PHASE_COLOR = "#B8960A"; // muted gold
 const SUM_CORRECTED_COLOR = "#4ADE80"; // bright green
 const SUM_MEAS_COLOR = "#94A3B8"; // muted slate
 
