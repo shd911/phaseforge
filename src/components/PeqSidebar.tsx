@@ -117,7 +117,7 @@ export default function PeqSidebar() {
             </div>
             <div class="fb-row">
               <label class="fb-label">Regularization</label>
-              <NumberInput value={gainRegularization()} onChange={setGainRegularization} min={0} max={1} step={0.01} precision={2} />
+              <NumberInput value={gainRegularization()} onChange={setGainRegularization} min={0} max={1} step={0.0001} precision={4} />
             </div>
           </div>
           <div class="peq-buttons-row">
