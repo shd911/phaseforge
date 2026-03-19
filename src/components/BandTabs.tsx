@@ -6,6 +6,7 @@ import {
   setActiveBand,
   setActiveBandSum,
   moveBand,
+  renameBand,
   isSum,
 } from "../stores/bands";
 import { projectName } from "../lib/project-io";
@@ -13,6 +14,7 @@ import { projectName } from "../lib/project-io";
 export default function BandTabs() {
   const [dragIdx, setDragIdx] = createSignal<number | null>(null);
   const [overIdx, setOverIdx] = createSignal<number | null>(null);
+  const [editingId, setEditingId] = createSignal<string | null>(null);
 
   let containerRef!: HTMLDivElement;
   let tabEls: HTMLButtonElement[] = [];
@@ -86,8 +88,33 @@ export default function BandTabs() {
             ref={(el) => { tabEls[idx()] = el; }}
             class={`band-tab ${appState.activeBandId === band.id ? "active" : ""} ${dragIdx() === idx() ? "dragging" : ""} ${overIdx() === idx() && dragIdx() !== null && dragIdx() !== idx() ? "drag-over" : ""}`}
             onPointerDown={(e) => handlePointerDown(e, idx())}
+            onDblClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setActiveBand(band.id);
+              setEditingId(band.id);
+            }}
           >
-            <span class="band-tab-label">{band.name}</span>
+            {editingId() === band.id ? (
+              <input
+                class="band-tab-edit"
+                value={band.name}
+                ref={(el) => { requestAnimationFrame(() => { el.focus(); el.select(); }); }}
+                onBlur={(e) => {
+                  const v = (e.target as HTMLInputElement).value.trim();
+                  if (v && v !== band.name) renameBand(band.id, v);
+                  setEditingId(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                  if (e.key === "Escape") { setEditingId(null); }
+                }}
+                onClick={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <span class="band-tab-label">{band.name}</span>
+            )}
             <Show when={appState.bands.length > 1}>
               <span
                 class="band-tab-close"

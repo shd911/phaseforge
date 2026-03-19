@@ -348,6 +348,28 @@ export default function PeqResponsePlot() {
           },
         ],
         draw: [
+          // Exclusion zones — semi-transparent bands
+          (u: uPlot) => {
+            const bd = activeBand();
+            if (!bd?.exclusionZones?.length) return;
+            const ctx = u.ctx;
+            const plotLeft = u.bbox.left;
+            const plotTop = u.bbox.top;
+            const plotHeight = u.bbox.height;
+
+            ctx.save();
+            ctx.fillStyle = "rgba(128, 128, 128, 0.18)";
+            for (const zone of bd.exclusionZones) {
+              const x1 = u.valToPos(zone.startHz, "x", true);
+              const x2 = u.valToPos(zone.endHz, "x", true);
+              const left = Math.max(x1, plotLeft);
+              const right = Math.min(x2, plotLeft + u.bbox.width);
+              if (right > left) {
+                ctx.fillRect(left, plotTop, right - left, plotHeight);
+              }
+            }
+            ctx.restore();
+          },
           // Draw PEQ band markers (circles) + selected band highlight
           (u: uPlot) => {
             const bd = activeBand();
