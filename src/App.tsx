@@ -99,9 +99,9 @@ function App() {
 
   // Показывать ли нижний plot: не SUM и есть активная полоса
   const showBottomPlot = () => true;
-  // На вкладке target — показываем PEQ Response вместо Impulse
-  const showPeqPlot = () => activeTab() === "target";
-  // На вкладке export — показываем ExportPlot + ExportImpulsePlot
+  // На вкладке target — показываем PEQ Response вместо Impulse (only in band mode)
+  const showPeqPlot = () => activeTab() === "target" && !isSum();
+  // На вкладке export — показываем ExportPlot + ExportImpulsePlot (only in band mode)
   const showExportPlot = () => activeTab() === "export" && !isSum();
 
   return (

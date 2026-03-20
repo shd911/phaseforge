@@ -3,7 +3,7 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { invoke } from "@tauri-apps/api/core";
 import type { ImpulseResult, TargetResponse } from "../lib/types";
-import { activeBand, appState, isSum } from "../stores/bands";
+import { activeBand, appState, isSum, type BandState } from "../stores/bands";
 
 type ViewMode = "impulse" | "step" | "gd";
 
@@ -361,21 +361,14 @@ export default function ImpulseResponsePlot() {
     const mode = viewMode();
 
     if (sumMode) {
-      // SUM mode: use first band with measurement as representative
-      // (GD mode uses phase data, IR/Step use impulse)
+      // SUM mode: coherent sum of all bands with phase data
       const bands = appState.bands.filter(b => b.measurement?.phase);
       if (bands.length === 0) {
         if (chartRef.current) { chartRef.current.destroy(); chartRef.current = undefined; }
         setHasData(false);
         return;
       }
-      // Use the first band with data for now
-      const b = bands[0];
-      const freq = [...b.measurement!.freq];
-      const magnitude = [...b.measurement!.magnitude];
-      const phase = [...b.measurement!.phase!];
-      const sr = b.measurement!.sample_rate ?? 48000;
-      computeAndRender(freq, magnitude, phase, sr, mode, null);
+      computeSumAndRender(bands, mode);
       return;
     }
 
@@ -461,6 +454,91 @@ export default function ImpulseResponsePlot() {
       requestAnimationFrame(doRender);
     } catch (e) {
       console.error("Impulse computation failed:", e);
+      setHasData(false);
+    }
+  }
+
+  async function computeSumAndRender(bands: BandState[], mode: ViewMode) {
+    try {
+      // Build common frequency grid from first band
+      const refBand = bands[0];
+      const freq = [...refBand.measurement!.freq];
+      const n = freq.length;
+
+      // Coherent sum in complex domain
+      const sumRe = new Float64Array(n);
+      const sumIm = new Float64Array(n);
+
+      for (const b of bands) {
+        const m = b.measurement!;
+        // Resample if different frequency grid
+        const bFreq = m.freq;
+        const bMag = m.magnitude;
+        const bPhase = m.phase!;
+        const sign = b.inverted ? -1 : 1;
+
+        for (let j = 0; j < n; j++) {
+          // Simple: assume all bands share freq grid (from merge or same source)
+          // If not, use nearest point
+          let mag = bMag[j] ?? -200;
+          let ph = bPhase[j] ?? 0;
+          if (bFreq.length !== n) {
+            // Find nearest frequency
+            let best = 0;
+            let bestDist = Math.abs(bFreq[0] - freq[j]);
+            for (let k = 1; k < bFreq.length; k++) {
+              const d = Math.abs(bFreq[k] - freq[j]);
+              if (d < bestDist) { bestDist = d; best = k; }
+              if (bFreq[k] > freq[j]) break;
+            }
+            mag = bMag[best];
+            ph = bPhase[best] ?? 0;
+          }
+          const amp = Math.pow(10, mag / 20) * sign;
+          const phRad = ph * Math.PI / 180;
+          sumRe[j] += amp * Math.cos(phRad);
+          sumIm[j] += amp * Math.sin(phRad);
+        }
+      }
+
+      // Convert sum to magnitude + phase
+      const sumMag = new Array(n);
+      const sumPhase = new Array(n);
+      for (let j = 0; j < n; j++) {
+        const amp = Math.sqrt(sumRe[j] * sumRe[j] + sumIm[j] * sumIm[j]);
+        sumMag[j] = amp > 0 ? 20 * Math.log10(amp) : -200;
+        sumPhase[j] = Math.atan2(sumIm[j], sumRe[j]) * 180 / Math.PI;
+      }
+
+      const sr = refBand.measurement!.sample_rate ?? 48000;
+
+      if (mode === "gd") {
+        // Unwrap sum phase for GD
+        const unwrapped: number[] = [sumPhase[0]];
+        for (let i = 1; i < n; i++) {
+          let diff = sumPhase[i] - sumPhase[i - 1];
+          while (diff > 180) diff -= 360;
+          while (diff <= -180) diff += 360;
+          unwrapped.push(unwrapped[i - 1] + diff);
+        }
+        const { freqOut, gdMs } = computeGroupDelay(freq, unwrapped);
+        requestAnimationFrame(() => renderGD(freqOut, gdMs));
+      } else {
+        // IR or Step from sum spectrum
+        const result = await invoke<ImpulseResult>("compute_impulse", {
+          freq, magnitude: sumMag, phase: sumPhase, sampleRate: sr,
+        });
+        setHasData(true);
+        requestAnimationFrame(() => {
+          if (mode === "impulse") {
+            renderChart(result.time, result.impulse, "Σ Impulse", IR_COLOR);
+          } else {
+            renderChart(result.time, result.step, "Σ Step", STEP_COLOR);
+          }
+        });
+      }
+    } catch (e) {
+      console.error("SUM impulse computation failed:", e);
       setHasData(false);
     }
   }
