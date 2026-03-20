@@ -29,7 +29,7 @@ import {
 } from "../stores/bands";
 import { MEASUREMENT_COLORS } from "../lib/types";
 import type { FilterConfig } from "../lib/types";
-import { tolerance, setTolerance, maxBands, setMaxBands, gainRegularization, setGainRegularization, peqFloor, setPeqFloor } from "../stores/peq-optimize";
+import { tolerance, setTolerance, maxBands, setMaxBands, gainRegularization, setGainRegularization, peqFloor, setPeqFloor, peqRangeMode, setPeqRangeMode, peqDirectLow, setPeqDirectLow, peqDirectHigh, setPeqDirectHigh } from "../stores/peq-optimize";
 import type { AppState, BandState, PerMeasurementSettings, FloorBounceConfig, MergeSource } from "../stores/bands";
 import type { Measurement, MergeResult, WindowType } from "../lib/types";
 
