@@ -93,8 +93,8 @@ function App() {
   const infoText = () => {
     const band = activeBand();
     if (!band) return "SUM — all bands";
-    if (band.measurement) return `${band.name} · ${band.measurement.name} · ${band.measurement.freq.length} pts`;
-    return `${band.name} · no measurement`;
+    if (band.measurement) return `${band.measurement.name} · ${band.measurement.freq.length} pts`;
+    return "no measurement";
   };
 
   // Показывать ли нижний plot: не SUM и есть активная полоса
