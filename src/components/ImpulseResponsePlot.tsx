@@ -5,12 +5,32 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ImpulseResult, TargetResponse } from "../lib/types";
 import { activeBand } from "../stores/bands";
 
-type ViewMode = "impulse" | "step";
+type ViewMode = "impulse" | "step" | "gd";
 
 const IR_COLOR = "#4A9EFF";
 const STEP_COLOR = "#22C55E";
-const TARGET_IR_COLOR = "#FFD700";   // Gold — как на freq plot
+const GD_COLOR = "#F59E0B"; // amber
+const TARGET_IR_COLOR = "#FFD700";
 const TARGET_STEP_COLOR = "#FFD700";
+const TARGET_GD_COLOR = "#FFD700";
+
+/** Compute group delay from frequency and phase arrays.
+ *  τ(f) = -(1/360) · dφ/df  (seconds → milliseconds) */
+function computeGroupDelay(freq: number[], phaseDeg: number[]): { freqOut: number[]; gdMs: number[] } {
+  const n = freq.length;
+  if (n < 2) return { freqOut: [], gdMs: [] };
+  const gd: number[] = new Array(n);
+  // Forward diff for first point
+  gd[0] = -(phaseDeg[1] - phaseDeg[0]) / (360 * (freq[1] - freq[0])) * 1000;
+  // Central diff for interior
+  for (let i = 1; i < n - 1; i++) {
+    const df = freq[i + 1] - freq[i - 1];
+    gd[i] = df > 0 ? -(phaseDeg[i + 1] - phaseDeg[i - 1]) / (360 * df) * 1000 : 0;
+  }
+  // Backward diff for last
+  gd[n - 1] = -(phaseDeg[n - 1] - phaseDeg[n - 2]) / (360 * (freq[n - 1] - freq[n - 2])) * 1000;
+  return { freqOut: freq, gdMs: gd };
+}
 
 export default function ImpulseResponsePlot() {
   let containerRef!: HTMLDivElement;
@@ -252,6 +272,77 @@ export default function ImpulseResponsePlot() {
     }
   }
 
+  function renderGD(freq: number[], gdMs: number[]) {
+    if (!containerRef) return;
+    if (chartRef.current) { chartRef.current.destroy(); chartRef.current = undefined; }
+
+    const rect = containerRef.getBoundingClientRect();
+    const w = Math.max(rect.width, 200);
+    const h = Math.max(rect.height, 80);
+
+    // Y range from data
+    let yMin = Infinity, yMax = -Infinity;
+    for (const v of gdMs) {
+      if (isFinite(v)) { if (v < yMin) yMin = v; if (v > yMax) yMax = v; }
+    }
+    const pad = Math.max(0.5, (yMax - yMin) * 0.1);
+    yMin = isFinite(yMin) ? yMin - pad : -5;
+    yMax = isFinite(yMax) ? yMax + pad : 20;
+    curAmpMin = yMin; curAmpMax = yMax;
+    dataAmpMin = yMin; dataAmpMax = yMax;
+
+    const opts: uPlot.Options = {
+      width: w, height: h,
+      series: [
+        {},
+        { label: "GD ms", stroke: GD_COLOR, width: 1.5, scale: "amp" },
+      ],
+      scales: {
+        x: { min: 20, max: 20000, distr: 3 },
+        amp: { auto: false, range: () => [curAmpMin, curAmpMax] as uPlot.Range.MinMax },
+      },
+      axes: [
+        {
+          stroke: "#9b9ba6",
+          grid: { stroke: "rgba(255,255,255,0.12)" },
+          ticks: { stroke: "rgba(255,255,255,0.20)" },
+          values: (_u: uPlot, vals: number[]) =>
+            vals.map(v => v == null ? "" : v >= 1000 ? (v/1000) + "k" : String(Math.round(v))),
+        },
+        {
+          label: "ms", scale: "amp", stroke: "#9b9ba6",
+          grid: { stroke: "rgba(255,255,255,0.12)" },
+          ticks: { stroke: "rgba(255,255,255,0.20)" },
+          values: (_u: uPlot, vals: number[]) => vals.map(v => v == null ? "" : v.toFixed(1)),
+          size: 50,
+        },
+      ],
+      legend: { show: false },
+      cursor: { drag: { x: false, y: false, setScale: false } },
+      hooks: {
+        setCursor: [
+          (u: uPlot) => {
+            const idx = u.cursor.idx;
+            if (idx == null || idx < 0 || idx >= u.data[0].length) {
+              setCursorTime("—"); setCursorAmp("—"); return;
+            }
+            const f = u.data[0][idx];
+            setCursorTime(f != null ? (f >= 1000 ? (f/1000).toFixed(2) + " kHz" : Math.round(f) + " Hz") : "—");
+            const gd = u.data[1]?.[idx];
+            setCursorAmp(gd != null ? (gd as number).toFixed(2) + " ms" : "—");
+          },
+        ],
+      },
+    };
+
+    try {
+      chartRef.current = new uPlot(opts, [freq, gdMs], containerRef);
+      setHasData(true);
+    } catch (e) {
+      console.error("GD uPlot error:", e);
+    }
+  }
+
   onMount(() => {
     const observer = new ResizeObserver(() => {
       if (chartRef.current && containerRef) {
@@ -335,11 +426,15 @@ export default function ImpulseResponsePlot() {
             measResult.time, measResult.impulse, "Impulse", IR_COLOR,
             targetResult?.time, targetResult?.impulse,
           );
-        } else {
+        } else if (mode === "step") {
           renderChart(
             measResult.time, measResult.step, "Step", STEP_COLOR,
             targetResult?.time, targetResult?.step,
           );
+        } else {
+          // Group delay — compute from unwrapped phase
+          const { freqOut, gdMs } = computeGroupDelay(freq, phase);
+          renderGD(freqOut, gdMs);
         }
       };
 
@@ -377,6 +472,12 @@ export default function ImpulseResponsePlot() {
           onClick={() => setViewMode("step")}
         >
           Step
+        </button>
+        <button
+          class={`impulse-mode-btn ${viewMode() === "gd" ? "active" : ""}`}
+          onClick={() => setViewMode("gd")}
+        >
+          GD
         </button>
       </div>
       <div class="impulse-body">
