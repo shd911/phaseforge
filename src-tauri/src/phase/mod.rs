@@ -186,38 +186,54 @@ pub fn compute_excess_phase_delay(
     let n = freq.len();
     if n < 4 { return 0.0; }
 
-    // FFT size for Hilbert transform
+    // Use measurement frequency range for the linear grid (not 0..f_max)
+    // to avoid extrapolation artifacts that corrupt the Hilbert transform
+    let f_min = freq[0];
     let f_max = freq[n - 1];
-    let fft_size = {
-        let desired = (n * 4).max(4096);
-        desired.next_power_of_two()
-    };
-    let n_bins = fft_size / 2 + 1;
-    let df = f_max / (n_bins - 1) as f64;
+    let f_span = f_max - f_min;
+    if f_span <= 0.0 { return 0.0; }
 
-    // Interpolate magnitude onto linear grid
-    let mut grid_mag_db = Vec::with_capacity(n_bins);
-    for i in 0..n_bins {
-        let f = i as f64 * df;
+    let grid_n = n.max(512);
+    let df = f_span / (grid_n - 1) as f64;
+
+    // Interpolate magnitude and phase onto linear grid within measurement range
+    let mut grid_mag_db = Vec::with_capacity(grid_n);
+    let mut grid_phase_deg = Vec::with_capacity(grid_n);
+    for i in 0..grid_n {
+        let f = f_min + i as f64 * df;
         grid_mag_db.push(interp_single_val(freq, magnitude, f));
+        grid_phase_deg.push(interp_single_val(freq, phase_deg, f));
     }
+
+    // FFT size for Hilbert transform
+    let fft_size = (grid_n * 4).next_power_of_two();
+    let n_bins = fft_size / 2 + 1;
 
     // Compute minimum phase via Hilbert transform on ln(magnitude)
     let ln10_over_20 = 10.0_f64.ln() / 20.0;
-    let mut ln_mag: Vec<Complex64> = Vec::with_capacity(fft_size);
-    for i in 0..n_bins {
-        ln_mag.push(Complex64::new(grid_mag_db[i] * ln10_over_20, 0.0));
+    let mut ln_mag: Vec<Complex64> = vec![Complex64::new(0.0, 0.0); fft_size];
+
+    // Fill grid_n bins, zero-pad the rest
+    for i in 0..grid_n.min(n_bins) {
+        ln_mag[i] = Complex64::new(grid_mag_db[i] * ln10_over_20, 0.0);
     }
+    // Mirror for conjugate symmetry
     for i in 1..(fft_size - n_bins + 1) {
-        let idx = n_bins - 1 - i;
-        ln_mag.push(Complex64::new(ln_mag[idx].re, 0.0));
+        let idx = (n_bins - 1 - i).min(grid_n - 1);
+        ln_mag[fft_size - (fft_size - n_bins + 1) + i] = Complex64::new(ln_mag[idx].re, 0.0);
+    }
+    // Fix: proper mirror
+    for i in n_bins..fft_size {
+        let mirror = fft_size - i;
+        if mirror < n_bins {
+            ln_mag[i] = Complex64::new(ln_mag[mirror].re, 0.0);
+        }
     }
 
     let mut engine = FftEngine::new();
     engine.fft_forward(&mut ln_mag);
 
     // Hilbert window
-    // DC stays ×1, positive freqs ×2, Nyquist ×1, negative freqs ×0
     for i in 1..fft_size / 2 {
         ln_mag[i] *= Complex64::new(2.0, 0.0);
     }
@@ -228,17 +244,12 @@ pub fn compute_excess_phase_delay(
     engine.fft_inverse(&mut ln_mag);
     let norm = 1.0 / fft_size as f64;
 
-    // Minimum phase (radians) at each bin
-    let min_phase_rad: Vec<f64> = (0..n_bins)
+    // Minimum phase (radians) at each grid point
+    let min_phase_rad: Vec<f64> = (0..grid_n)
         .map(|i| -ln_mag[i].im * norm)
         .collect();
 
-    // Interpolate measured phase onto same linear grid and unwrap
-    let mut grid_phase_deg = Vec::with_capacity(n_bins);
-    for i in 0..n_bins {
-        let f = i as f64 * df;
-        grid_phase_deg.push(interp_single_val(freq, phase_deg, f));
-    }
+    // Unwrap measured phase
     let grid_phase_unwrapped = unwrap_phase(&grid_phase_deg);
 
     // Excess phase = measured − minimum (both in degrees)
@@ -247,9 +258,9 @@ pub fn compute_excess_phase_delay(
         .map(|(&meas, &min_rad)| meas - min_rad.to_degrees())
         .collect();
 
-    // Linear fit on excess phase in the useful range (skip DC and near-Nyquist)
-    let fit_lo = (n_bins as f64 * 0.05) as usize; // skip lowest 5%
-    let fit_hi = (n_bins as f64 * 0.85) as usize; // skip highest 15%
+    // Linear fit on excess phase — use central 70% of grid
+    let fit_lo = (grid_n as f64 * 0.15) as usize;
+    let fit_hi = (grid_n as f64 * 0.85) as usize;
     if fit_hi <= fit_lo + 2 { return 0.0; }
 
     let mut sum_f = 0.0;
@@ -258,7 +269,7 @@ pub fn compute_excess_phase_delay(
     let mut sum_fp = 0.0;
     let cnt = (fit_hi - fit_lo) as f64;
     for i in fit_lo..fit_hi {
-        let f = i as f64 * df;
+        let f = f_min + i as f64 * df;
         let p = excess_deg[i];
         sum_f += f;
         sum_p += p;

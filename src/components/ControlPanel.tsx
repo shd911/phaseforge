@@ -478,10 +478,11 @@ function MeasurementsTab() {
     } else {
       try {
         const origPhase = b.settings.originalPhase ?? b.measurement.phase;
-        const [newPhase, _delay, _distance] = await invoke<[number[], number, number]>(
+        const [newPhase, delay, distance] = await invoke<[number[], number, number]>(
           "remove_measurement_delay",
           { freq: b.measurement.freq, magnitude: b.measurement.magnitude, phase: origPhase, sampleRate: b.measurement.sample_rate }
         );
+        setBandDelayInfo(b.id, delay, distance);
         markBandDelayRemoved(b.id, newPhase);
       } catch (e) {
         console.error("Remove delay failed:", e);
