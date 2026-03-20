@@ -71,12 +71,12 @@ function bandColorFamily(baseHex: string): {
 } {
   const [h, _s, _l] = hexToHsl(baseHex);
   return {
-    meas:           hslToHex(h, 45, 55) + "B0",  // desaturated, 70% opacity
-    measPhase:      hslToHex(h, 35, 45) + "80",  // darker, 50% opacity
-    target:         hslToHex(h, 30, 72),          // pastel, light
-    targetPhase:    hslToHex(h, 25, 58),          // muted
-    corrected:      hslToHex(h, 85, 62),          // vivid, bright
-    correctedPhase: hslToHex(h, 70, 45),          // vivid but darker
+    meas:           hslToHex(h, 30, 45) + "A0",  // dim, desaturated, 63% opacity
+    measPhase:      hslToHex(h, 20, 35) + "70",  // very dim, 44% opacity
+    target:         hslToHex(h, 25, 78),          // pale pastel — clearly lighter
+    targetPhase:    hslToHex(h, 20, 65),          // lighter muted
+    corrected:      hslToHex(h, 100, 60),         // fully saturated, vivid
+    correctedPhase: hslToHex(h, 80, 42),          // saturated but dark
   };
 }
 
