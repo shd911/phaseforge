@@ -91,10 +91,8 @@ function App() {
   };
 
   const infoText = () => {
-    const band = activeBand();
-    if (!band) return "SUM — all bands";
-    if (band.measurement) return `${band.measurement.name} · ${band.measurement.freq.length} pts`;
-    return "no measurement";
+    if (isSum()) return "";
+    return "";
   };
 
   // Показывать ли нижний plot: не SUM и есть активная полоса
@@ -143,7 +141,6 @@ function App() {
           title="Optimize PEQ for all bands"
         >{computing() ? "..." : "Optimize All"}</button>
         <div class="top-sep" />
-        <span class="top-info">{infoText()}</span>
       </div>
 
       {/* Band Tabs */}
