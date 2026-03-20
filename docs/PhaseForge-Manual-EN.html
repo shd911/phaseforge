@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PhaseForge v0.1.0-b89 — User Manual</title>
+<style>
+  @page { size: A4; margin: 20mm 18mm 20mm 18mm; }
+  body { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; font-size: 11pt; line-height: 1.5; color: #222; max-width: 720px; margin: 0 auto; padding: 20px; }
+  h1 { font-size: 22pt; border-bottom: 3px solid #4A9EFF; padding-bottom: 8px; margin-top: 0; }
+  h2 { font-size: 16pt; color: #4A9EFF; border-bottom: 1px solid #ddd; padding-bottom: 4px; margin-top: 28px; page-break-after: avoid; }
+  h3 { font-size: 13pt; color: #333; margin-top: 18px; page-break-after: avoid; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 10pt; }
+  th, td { border: 1px solid #ccc; padding: 5px 8px; text-align: left; }
+  th { background: #f0f4f8; font-weight: 600; }
+  code { background: #f0f4f8; padding: 1px 4px; border-radius: 3px; font-size: 10pt; }
+  .kbd { display: inline-block; background: #eee; border: 1px solid #ccc; border-radius: 3px; padding: 0 5px; font-size: 9pt; font-family: monospace; }
+  ul { margin: 6px 0; padding-left: 22px; }
+  li { margin: 3px 0; }
+  .note { background: #fff8e1; border-left: 4px solid #ffc107; padding: 8px 12px; margin: 10px 0; font-size: 10pt; }
+  .cover { text-align: center; padding: 60px 0 40px; }
+  .cover h1 { border: none; font-size: 32pt; }
+  .cover p { font-size: 14pt; color: #666; }
+  .toc a { text-decoration: none; color: #4A9EFF; }
+  @media print { .pagebreak { page-break-before: always; } }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <h1>PhaseForge</h1>
+  <p>Loudspeaker Correction & FIR Filter Design</p>
+  <p style="font-size:12pt; color:#999;">Version 0.1.0-b89 &mdash; User Manual</p>
+</div>
+
+<div class="pagebreak"></div>
+
+<h2>Table of Contents</h2>
+<ol class="toc">
+  <li><a href="#overview">Overview</a></li>
+  <li><a href="#getting-started">Getting Started</a></li>
+  <li><a href="#interface">Interface Layout</a></li>
+  <li><a href="#toolbar">Toolbar</a></li>
+  <li><a href="#bands">Band Tabs &amp; SUM View</a></li>
+  <li><a href="#measurement">Measurement Tab</a></li>
+  <li><a href="#target">Target Tab</a></li>
+  <li><a href="#export">Export Tab</a></li>
+  <li><a href="#plots">Plots &amp; Interactions</a></li>
+  <li><a href="#peq-sidebar">PEQ Sidebar</a></li>
+  <li><a href="#dialogs">Dialogs</a></li>
+  <li><a href="#projects">Project Management</a></li>
+  <li><a href="#formats">Supported Formats</a></li>
+  <li><a href="#shortcuts">Keyboard Shortcuts</a></li>
+</ol>
+
+<div class="pagebreak"></div>
+
+<h2 id="overview">1. Overview</h2>
+<p>PhaseForge is a desktop application for loudspeaker measurement analysis, target curve design, parametric EQ optimization, and FIR filter generation. It supports multi-band crossover systems with linked HP/LP filters, interactive PEQ editing, and export of correction filters as WAV impulse responses.</p>
+
+<h3>Key Features</h3>
+<ul>
+  <li>Import REW (.txt) and FRD measurements with magnitude and phase</li>
+  <li>Near-field + far-field measurement merge with baffle step correction</li>
+  <li>Configurable target curves: HP/LP filters (Butterworth, Bessel, LR, Gaussian), tilt, shelving</li>
+  <li>Automatic PEQ optimization (greedy peak-matching + LMA refinement)</li>
+  <li>Interactive PEQ editing: drag bands, scroll for Q, double-click to create</li>
+  <li>Multi-band crossover system with linked filters</li>
+  <li>FIR filter generation with iterative WLS optimization</li>
+  <li>Configurable narrowband boost limiting and frequency weighting</li>
+  <li>Export FIR as WAV (mono, float64)</li>
+  <li>Project save/load with full state preservation</li>
+</ul>
+
+<h2 id="getting-started">2. Getting Started</h2>
+<ol>
+  <li>Launch PhaseForge. The Welcome dialog offers <b>New Project</b> or <b>Open Project</b>.</li>
+  <li>Create a new project: enter name, choose band count (1&ndash;8).</li>
+  <li>On the <b>Measurement</b> tab, click <b>Import</b> to load a .txt or .frd file.</li>
+  <li>Switch to <b>Target</b> tab to configure target response (HP, LP, tilt, shelves).</li>
+  <li>Click <b>Optimize</b> in the PEQ sidebar to auto-generate PEQ correction.</li>
+  <li>Switch to <b>Export</b> tab to preview and export the FIR filter.</li>
+</ol>
+
+<h2 id="interface">3. Interface Layout</h2>
+<p>The interface is divided into:</p>
+<ul>
+  <li><b>Top toolbar</b> &mdash; file menu, project name, strategy toggle, Settings, Optimize All</li>
+  <li><b>Band tabs</b> &mdash; SUM + individual band tabs (draggable to reorder)</li>
+  <li><b>Plot area</b> &mdash; upper: frequency response; lower: impulse / PEQ / export impulse</li>
+  <li><b>Control panel</b> (right) &mdash; measurement, target, or export controls</li>
+  <li><b>PEQ sidebar</b> (right, Target tab only) &mdash; PEQ band table and optimizer</li>
+  <li><b>Status bar</b> (bottom) &mdash; band count, current view</li>
+</ul>
+
+<h2 id="toolbar">4. Toolbar</h2>
+<table>
+  <tr><th>Element</th><th>Description</th></tr>
+  <tr><td>File menu</td><td>New, Open, Save, Save As, Recent Projects</td></tr>
+  <tr><td>Project name</td><td>Current project name. Shows "(modified)" when unsaved</td></tr>
+  <tr><td>Standard / Hybrid</td><td>Strategy toggle. Standard = conventional PEQ. Hybrid = phase-aware correction</td></tr>
+  <tr><td>Settings</td><td>Opens Optimization Settings dialog (FIR parameters)</td></tr>
+  <tr><td>Optimize All</td><td>Run PEQ optimizer for all bands simultaneously</td></tr>
+</table>
+
+<h2 id="bands">5. Band Tabs &amp; SUM View</h2>
+
+<h3>Band Management</h3>
+<ul>
+  <li><b>SUM</b> tab (always first) &mdash; shows combined response of all bands</li>
+  <li><b>Band N</b> tabs &mdash; individual band workspaces</li>
+  <li><b>+</b> button &mdash; add new band</li>
+  <li><b>&times;</b> on tab &mdash; delete band (with confirmation)</li>
+  <li>Drag tabs to reorder bands</li>
+</ul>
+
+<h3>SUM View Features</h3>
+<ul>
+  <li>All band target curves and corrected responses overlaid</li>
+  <li>Crossover markers at band boundaries</li>
+  <li>Drag crossover markers to adjust frequency</li>
+  <li>Double-click crossover to open detailed Crossover Dialog</li>
+</ul>
+
+<h2 id="measurement">6. Measurement Tab</h2>
+<ul>
+  <li><b>Import File</b> &mdash; load .txt (REW) or .frd measurement</li>
+  <li><b>Merge NF+FF</b> &mdash; blend near-field and far-field measurements</li>
+  <li><b>Smoothing</b> &mdash; Off, 1/3, 1/6, 1/12, 1/24 octave, or Variable</li>
+  <li><b>Delay compensation</b> &mdash; auto-detects propagation delay from phase data; toggle to remove</li>
+  <li><b>Polarity invert</b> &mdash; NOR/INV toggle (+180&deg; phase shift)</li>
+  <li><b>Floor bounce</b> &mdash; reflection simulation (speaker height, mic height, distance)</li>
+</ul>
+
+<h2 id="target">7. Target Tab</h2>
+
+<h3>General</h3>
+<ul>
+  <li><b>ON/OFF</b> toggle for target curve</li>
+  <li><b>Level</b> (dB) &mdash; reference level adjustment</li>
+  <li><b>Tilt</b> (dB/octave) &mdash; frequency slope for house curve</li>
+</ul>
+
+<h3>High-Pass / Low-Pass Filters</h3>
+<table>
+  <tr><th>Parameter</th><th>Values</th></tr>
+  <tr><td>Filter type</td><td>Butterworth, Bessel, Linkwitz-Riley, Gaussian</td></tr>
+  <tr><td>Order</td><td>1&ndash;8 (LR: 2, 4, 8 only)</td></tr>
+  <tr><td>Frequency</td><td>10&ndash;20,000 Hz</td></tr>
+  <tr><td>Linear Phase</td><td>Checkbox (always on for Gaussian)</td></tr>
+  <tr><td>M (Gaussian only)</td><td>Shape coefficient, 0.5&ndash;10</td></tr>
+</table>
+
+<h3>Band Linking</h3>
+<p>Click the link button (&link;) on LP to link with the next band's HP. When linked, changing one automatically mirrors the other (same type, order, frequency).</p>
+
+<h3>Low/High Shelf</h3>
+<p>Optional shelf filters with frequency, gain, and Q parameters.</p>
+
+<h2 id="export">8. Export Tab</h2>
+
+<h3>FIR Configuration</h3>
+<table>
+  <tr><th>Parameter</th><th>Options</th></tr>
+  <tr><td>Sample Rate</td><td>44.1k, 48k, 88.2k, 96k, 176.4k, 192k Hz</td></tr>
+  <tr><td>Taps</td><td>4K, 8K, 16K, 32K, 64K, 128K, 256K</td></tr>
+  <tr><td>Window</td><td>20+ types: Hann, Blackman-Harris, Kaiser, Dolph-Chebyshev, etc.</td></tr>
+</table>
+
+<h3>Export Display</h3>
+<ul>
+  <li><b>Upper plot</b>: Model magnitude/phase vs. FIR realized magnitude/phase</li>
+  <li><b>Lower plot</b>: FIR impulse response (time domain)</li>
+  <li><b>Status line</b>: Tap count, sample rate, window, phase mode, normalization, causality %</li>
+  <li><b>SNAP/CLR</b>: Snapshot current curve for comparison overlay</li>
+  <li><b>Export WAV</b>: Save FIR impulse response to file</li>
+</ul>
+
+<h2 id="plots">9. Plots &amp; Interactions</h2>
+
+<h3>Frequency Response Plot (upper)</h3>
+<table>
+  <tr><th>Action</th><th>Result</th></tr>
+  <tr><td>Scroll wheel</td><td>Zoom frequency axis</td></tr>
+  <tr><td>Shift + scroll</td><td>Zoom magnitude axis</td></tr>
+  <tr><td>Click + drag</td><td>Pan</td></tr>
+  <tr><td>Right-click</td><td>Undo last zoom</td></tr>
+  <tr><td><span class="kbd">Ctrl</span> + drag</td><td>Zoom box selection</td></tr>
+  <tr><td>Double-click (Target tab)</td><td>Add PEQ band at cursor frequency</td></tr>
+</table>
+
+<h3>PEQ Response Plot (lower, Target tab)</h3>
+<table>
+  <tr><th>Action</th><th>Result</th></tr>
+  <tr><td>Drag band marker</td><td>Move frequency and gain</td></tr>
+  <tr><td>Shift + scroll on marker</td><td>Adjust Q (bandwidth)</td></tr>
+  <tr><td>Double-click</td><td>Add new PEQ band</td></tr>
+</table>
+
+<h3>Plot Toolbar Buttons</h3>
+<ul>
+  <li><b>SNAP</b> &mdash; capture current curve as snapshot overlay</li>
+  <li><b>CLR</b> &mdash; clear all snapshots</li>
+  <li><b>FIT</b> &mdash; auto-scale axes to data</li>
+  <li><b>+/&minus;</b> &mdash; zoom in/out per axis</li>
+  <li><b>&triangle;/&triangledown;/&triangleleft;/&triangleright;</b> &mdash; pan per axis</li>
+</ul>
+
+<h3>Resize Handle</h3>
+<p>Drag the horizontal bar between upper and lower plots to adjust the split ratio (15%&ndash;65%).</p>
+
+<h2 id="peq-sidebar">10. PEQ Sidebar</h2>
+<p>Visible on the Target tab (non-SUM view).</p>
+
+<h3>Auto-Fit Controls</h3>
+<ul>
+  <li><b>Tolerance</b> (dB) &mdash; error margin for optimization (0.5&ndash;3.0)</li>
+  <li><b>Max bands</b> &mdash; limit number of PEQ bands (1&ndash;60)</li>
+  <li><b>Optimize</b> &mdash; run auto-optimizer for current band</li>
+  <li><b>Clear</b> &mdash; remove all PEQ bands</li>
+</ul>
+
+<h3>Band Table</h3>
+<table>
+  <tr><th>Column</th><th>Description</th></tr>
+  <tr><td>Checkbox</td><td>Enable/disable band</td></tr>
+  <tr><td>Freq (Hz)</td><td>Center frequency, 20&ndash;20,000. Scroll wheel to adjust</td></tr>
+  <tr><td>Gain (dB)</td><td>&plusmn;18 dB (Standard) or &plusmn;60 dB (Hybrid). Color-coded</td></tr>
+  <tr><td>Q</td><td>Quality factor, 0.1&ndash;20. Scroll wheel to adjust</td></tr>
+  <tr><td>&times;</td><td>Remove band</td></tr>
+</table>
+
+<h2 id="dialogs">11. Dialogs</h2>
+
+<h3>Optimization Settings</h3>
+<p>Opened via the <b>Settings</b> button in the toolbar.</p>
+<table>
+  <tr><th>Parameter</th><th>Range</th><th>Description</th></tr>
+  <tr><td>WLS iterations</td><td>0&ndash;20</td><td>Iterative error correction passes. 0 = off, 3&ndash;5 optimal</td></tr>
+  <tr><td>Frequency weighting</td><td>on/off</td><td>Higher priority for crossover and speech bands (200&ndash;4k Hz)</td></tr>
+  <tr><td>Narrowband limiting</td><td>on/off</td><td>Clamp sharp correction peaks above smoothed curve</td></tr>
+  <tr><td>NB smoothing</td><td>0.05&ndash;2 oct</td><td>Smoothing window. Smaller = more precise</td></tr>
+  <tr><td>NB max excess</td><td>1&ndash;24 dB</td><td>Max allowed boost above smoothed correction</td></tr>
+  <tr><td>Max boost</td><td>0&ndash;60 dB</td><td>Global correction boost limit</td></tr>
+  <tr><td>Noise floor</td><td>&minus;200 to &minus;40 dB</td><td>Ignore correction below this level. Raise for noisy measurements</td></tr>
+</table>
+
+<h3>Crossover Dialog</h3>
+<p>Double-click a crossover marker in SUM view. Configure filter type, order, frequency, and linear phase for the LP/HP pair.</p>
+
+<h3>Merge NF+FF Dialog</h3>
+<p>Blend near-field and far-field measurements:</p>
+<ul>
+  <li>Select NF and FF files</li>
+  <li>Splice frequency (50&ndash;1000 Hz)</li>
+  <li>Blend width (0.5&ndash;3.0 octaves)</li>
+  <li>Auto level offset (or manual override)</li>
+  <li>Optional baffle step correction</li>
+</ul>
+
+<h3>Baffle Step Dialog</h3>
+<p>Configure baffle dimensions and driver position. Live preview shows correction curve with f3 frequency and edge diffraction points.</p>
+
+<h2 id="projects">12. Project Management</h2>
+
+<h3>Project Structure</h3>
+<p>Each project is stored as a folder containing:</p>
+<ul>
+  <li><code>project-name.pfproj</code> &mdash; JSON metadata file</li>
+  <li><code>inbox/</code> &mdash; imported measurement files</li>
+  <li>All band configurations, PEQ bands, target curves, and optimization settings</li>
+</ul>
+
+<h3>Workflow</h3>
+<table>
+  <tr><th>Action</th><th>Shortcut</th></tr>
+  <tr><td>New Project</td><td><span class="kbd">Cmd+N</span></td></tr>
+  <tr><td>Open Project</td><td><span class="kbd">Cmd+O</span></td></tr>
+  <tr><td>Save</td><td><span class="kbd">Cmd+S</span></td></tr>
+  <tr><td>Save As</td><td><span class="kbd">Shift+Cmd+S</span></td></tr>
+</table>
+
+<div class="note">
+  <b>Note:</b> FIR filters are not saved in the project &mdash; they are recomputed on demand. Export via the Export tab to save as WAV.
+</div>
+
+<h2 id="formats">13. Supported Formats</h2>
+
+<h3>Import</h3>
+<table>
+  <tr><th>Format</th><th>Extension</th><th>Columns</th></tr>
+  <tr><td>REW Text</td><td>.txt</td><td>Freq (Hz), SPL (dB), Phase (deg) &mdash; 2 or 3 columns</td></tr>
+  <tr><td>FRD</td><td>.frd</td><td>Same as REW</td></tr>
+</table>
+<p>Lines starting with <code>*</code> or <code>#</code> are treated as comments. Frequency must be monotonically increasing.</p>
+
+<h3>Export</h3>
+<table>
+  <tr><th>Format</th><th>Description</th></tr>
+  <tr><td>FIR WAV</td><td>Mono, 64-bit float, selected sample rate</td></tr>
+  <tr><td>Target TXT</td><td>REW-compatible text file with target curve</td></tr>
+</table>
+
+<h2 id="shortcuts">14. Keyboard Shortcuts</h2>
+<table>
+  <tr><th>Shortcut</th><th>Action</th></tr>
+  <tr><td><span class="kbd">Cmd+N</span></td><td>New Project</td></tr>
+  <tr><td><span class="kbd">Cmd+O</span></td><td>Open Project</td></tr>
+  <tr><td><span class="kbd">Cmd+S</span></td><td>Save Project</td></tr>
+  <tr><td><span class="kbd">Shift+Cmd+S</span></td><td>Save As</td></tr>
+  <tr><td><span class="kbd">Scroll</span></td><td>Zoom frequency axis</td></tr>
+  <tr><td><span class="kbd">Shift+Scroll</span></td><td>Zoom magnitude axis</td></tr>
+  <tr><td><span class="kbd">Right-click</span></td><td>Undo last zoom</td></tr>
+  <tr><td><span class="kbd">Ctrl+Drag</span></td><td>Zoom box</td></tr>
+  <tr><td><span class="kbd">Double-click</span></td><td>Add PEQ band (on chart)</td></tr>
+  <tr><td><span class="kbd">Escape</span></td><td>Close dialog</td></tr>
+  <tr><td><span class="kbd">Enter</span></td><td>Confirm dialog</td></tr>
+</table>
+
+<div style="margin-top: 40px; text-align: center; color: #999; font-size: 10pt;">
+  PhaseForge v0.1.0-b89 &copy; 2024&ndash;2026
+</div>
+
+</body>
+</html>

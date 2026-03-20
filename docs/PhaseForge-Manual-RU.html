@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>PhaseForge v0.1.0-b89 — Руководство пользователя</title>
+<style>
+  @page { size: A4; margin: 20mm 18mm 20mm 18mm; }
+  body { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; font-size: 11pt; line-height: 1.5; color: #222; max-width: 720px; margin: 0 auto; padding: 20px; }
+  h1 { font-size: 22pt; border-bottom: 3px solid #4A9EFF; padding-bottom: 8px; margin-top: 0; }
+  h2 { font-size: 16pt; color: #4A9EFF; border-bottom: 1px solid #ddd; padding-bottom: 4px; margin-top: 28px; page-break-after: avoid; }
+  h3 { font-size: 13pt; color: #333; margin-top: 18px; page-break-after: avoid; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 10pt; }
+  th, td { border: 1px solid #ccc; padding: 5px 8px; text-align: left; }
+  th { background: #f0f4f8; font-weight: 600; }
+  code { background: #f0f4f8; padding: 1px 4px; border-radius: 3px; font-size: 10pt; }
+  .kbd { display: inline-block; background: #eee; border: 1px solid #ccc; border-radius: 3px; padding: 0 5px; font-size: 9pt; font-family: monospace; }
+  ul { margin: 6px 0; padding-left: 22px; }
+  li { margin: 3px 0; }
+  .note { background: #fff8e1; border-left: 4px solid #ffc107; padding: 8px 12px; margin: 10px 0; font-size: 10pt; }
+  .cover { text-align: center; padding: 60px 0 40px; }
+  .cover h1 { border: none; font-size: 32pt; }
+  .cover p { font-size: 14pt; color: #666; }
+  .toc a { text-decoration: none; color: #4A9EFF; }
+  @media print { .pagebreak { page-break-before: always; } }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <h1>PhaseForge</h1>
+  <p>Коррекция акустических систем и проектирование FIR-фильтров</p>
+  <p style="font-size:12pt; color:#999;">Версия 0.1.0-b89 &mdash; Руководство пользователя</p>
+</div>
+
+<div class="pagebreak"></div>
+
+<h2>Содержание</h2>
+<ol class="toc">
+  <li><a href="#overview">Обзор</a></li>
+  <li><a href="#getting-started">Быстрый старт</a></li>
+  <li><a href="#interface">Компоновка интерфейса</a></li>
+  <li><a href="#toolbar">Панель инструментов</a></li>
+  <li><a href="#bands">Вкладки полос и режим SUM</a></li>
+  <li><a href="#measurement">Вкладка &laquo;Measurement&raquo;</a></li>
+  <li><a href="#target">Вкладка &laquo;Target&raquo;</a></li>
+  <li><a href="#export">Вкладка &laquo;Export&raquo;</a></li>
+  <li><a href="#plots">Графики и взаимодействие</a></li>
+  <li><a href="#peq-sidebar">Боковая панель PEQ</a></li>
+  <li><a href="#dialogs">Диалоговые окна</a></li>
+  <li><a href="#projects">Управление проектами</a></li>
+  <li><a href="#formats">Поддерживаемые форматы</a></li>
+  <li><a href="#shortcuts">Горячие клавиши</a></li>
+</ol>
+
+<div class="pagebreak"></div>
+
+<h2 id="overview">1. Обзор</h2>
+<p>PhaseForge &mdash; десктопное приложение для анализа измерений акустических систем, проектирования целевых кривых, автоматической оптимизации параметрического эквалайзера и генерации FIR-фильтров коррекции. Поддерживает многополосные кроссоверные системы со связанными фильтрами HP/LP, интерактивное редактирование PEQ и экспорт импульсных характеристик в формате WAV.</p>
+
+<h3>Ключевые возможности</h3>
+<ul>
+  <li>Импорт измерений REW (.txt) и FRD с амплитудой и фазой</li>
+  <li>Сшивка ближнего и дальнего поля (NF+FF) с коррекцией баффл-степа</li>
+  <li>Настраиваемые целевые кривые: HP/LP фильтры (Butterworth, Bessel, LR, Gaussian), наклон, полки</li>
+  <li>Автоматическая оптимизация PEQ (жадный поиск пиков + LMA-уточнение)</li>
+  <li>Интерактивное редактирование PEQ: перетаскивание полос, прокрутка для Q, двойной клик для создания</li>
+  <li>Многополосная кроссоверная система со связанными фильтрами</li>
+  <li>Генерация FIR с итеративной WLS-оптимизацией</li>
+  <li>Настраиваемое ограничение узкополосного буста и частотное взвешивание</li>
+  <li>Экспорт FIR в WAV (моно, float64)</li>
+  <li>Сохранение/загрузка проектов с полным сохранением состояния</li>
+</ul>
+
+<h2 id="getting-started">2. Быстрый старт</h2>
+<ol>
+  <li>Запустите PhaseForge. Приветственное окно предлагает <b>New Project</b> или <b>Open Project</b>.</li>
+  <li>Создайте проект: введите имя, выберите количество полос (1&ndash;8).</li>
+  <li>На вкладке <b>Measurement</b> нажмите <b>Import</b> для загрузки файла .txt или .frd.</li>
+  <li>Перейдите на вкладку <b>Target</b> для настройки целевой кривой (HP, LP, наклон, полки).</li>
+  <li>Нажмите <b>Optimize</b> в боковой панели PEQ для автоматической генерации коррекции.</li>
+  <li>Перейдите на вкладку <b>Export</b> для просмотра и экспорта FIR-фильтра.</li>
+</ol>
+
+<h2 id="interface">3. Компоновка интерфейса</h2>
+<ul>
+  <li><b>Верхняя панель</b> &mdash; меню файла, имя проекта, переключатель стратегии, Settings, Optimize All</li>
+  <li><b>Вкладки полос</b> &mdash; SUM + вкладки отдельных полос (перетаскиваемые)</li>
+  <li><b>Область графиков</b> &mdash; верхний: АЧХ/ФЧХ; нижний: импульс / PEQ / экспорт</li>
+  <li><b>Панель управления</b> (справа) &mdash; настройки измерения, цели или экспорта</li>
+  <li><b>Панель PEQ</b> (справа, только Target) &mdash; таблица PEQ-полос и оптимизатор</li>
+  <li><b>Строка состояния</b> (внизу) &mdash; количество полос, текущий режим</li>
+</ul>
+
+<h2 id="toolbar">4. Панель инструментов</h2>
+<table>
+  <tr><th>Элемент</th><th>Описание</th></tr>
+  <tr><td>Меню File</td><td>New, Open, Save, Save As, Recent Projects</td></tr>
+  <tr><td>Имя проекта</td><td>Текущий проект. Показывает &laquo;(modified)&raquo; при несохранённых изменениях</td></tr>
+  <tr><td>Standard / Hybrid</td><td>Переключатель стратегии. Standard = обычный PEQ. Hybrid = фазо-ориентированная коррекция</td></tr>
+  <tr><td>Settings</td><td>Открывает диалог настроек оптимизации (параметры FIR)</td></tr>
+  <tr><td>Optimize All</td><td>Запуск PEQ-оптимизатора для всех полос одновременно</td></tr>
+</table>
+
+<h2 id="bands">5. Вкладки полос и режим SUM</h2>
+
+<h3>Управление полосами</h3>
+<ul>
+  <li><b>SUM</b> (всегда первая) &mdash; суммарная характеристика всех полос</li>
+  <li><b>Band N</b> &mdash; рабочие области отдельных полос</li>
+  <li><b>+</b> &mdash; добавить новую полосу</li>
+  <li><b>&times;</b> на вкладке &mdash; удалить полосу (с подтверждением)</li>
+  <li>Перетаскивание вкладок для изменения порядка</li>
+</ul>
+
+<h3>Режим SUM</h3>
+<ul>
+  <li>Наложение целевых и скорректированных кривых всех полос</li>
+  <li>Маркеры кроссоверов на границах полос</li>
+  <li>Перетаскивание маркеров для настройки частоты кроссовера</li>
+  <li>Двойной клик по маркеру &mdash; открытие диалога кроссовера</li>
+</ul>
+
+<h2 id="measurement">6. Вкладка &laquo;Measurement&raquo;</h2>
+<ul>
+  <li><b>Import File</b> &mdash; загрузка измерения .txt (REW) или .frd</li>
+  <li><b>Merge NF+FF</b> &mdash; сшивка ближнего и дальнего поля</li>
+  <li><b>Smoothing</b> &mdash; Off, 1/3, 1/6, 1/12, 1/24 октавы или Variable</li>
+  <li><b>Компенсация задержки</b> &mdash; автоопределение задержки по фазе; переключатель для удаления</li>
+  <li><b>Инверсия полярности</b> &mdash; NOR/INV (+180&deg; сдвиг фазы)</li>
+  <li><b>Floor bounce</b> &mdash; моделирование отражений (высота динамика, микрофона, расстояние)</li>
+</ul>
+
+<h2 id="target">7. Вкладка &laquo;Target&raquo;</h2>
+
+<h3>Общие параметры</h3>
+<ul>
+  <li><b>ON/OFF</b> &mdash; включение/выключение целевой кривой</li>
+  <li><b>Level</b> (дБ) &mdash; опорный уровень</li>
+  <li><b>Tilt</b> (дБ/октава) &mdash; наклон (house curve)</li>
+</ul>
+
+<h3>Фильтры HP / LP</h3>
+<table>
+  <tr><th>Параметр</th><th>Значения</th></tr>
+  <tr><td>Тип фильтра</td><td>Butterworth, Bessel, Linkwitz-Riley, Gaussian</td></tr>
+  <tr><td>Порядок</td><td>1&ndash;8 (LR: только 2, 4, 8)</td></tr>
+  <tr><td>Частота</td><td>10&ndash;20 000 Гц</td></tr>
+  <tr><td>Linear Phase</td><td>Чекбокс (всегда вкл. для Gaussian)</td></tr>
+  <tr><td>M (только Gaussian)</td><td>Коэффициент формы, 0.5&ndash;10</td></tr>
+</table>
+
+<h3>Связка полос</h3>
+<p>Нажмите кнопку связи (&link;) на LP, чтобы связать с HP следующей полосы. При связке изменение одного автоматически зеркалит другой (тип, порядок, частота).</p>
+
+<h3>Полочные фильтры (Shelf)</h3>
+<p>Опциональные low/high shelf с параметрами частоты, усиления и Q.</p>
+
+<h2 id="export">8. Вкладка &laquo;Export&raquo;</h2>
+
+<h3>Конфигурация FIR</h3>
+<table>
+  <tr><th>Параметр</th><th>Варианты</th></tr>
+  <tr><td>Sample Rate</td><td>44.1k, 48k, 88.2k, 96k, 176.4k, 192k Гц</td></tr>
+  <tr><td>Taps</td><td>4K, 8K, 16K, 32K, 64K, 128K, 256K</td></tr>
+  <tr><td>Window</td><td>20+ типов: Hann, Blackman-Harris, Kaiser, Dolph-Chebyshev и др.</td></tr>
+</table>
+
+<h3>Отображение</h3>
+<ul>
+  <li><b>Верхний график</b>: модельная АЧХ/ФЧХ vs. реализованная FIR АЧХ/ФЧХ</li>
+  <li><b>Нижний график</b>: импульсная характеристика FIR (временная область)</li>
+  <li><b>Строка статуса</b>: количество тапов, частота дискретизации, окно, режим фазы, нормализация, каузальность %</li>
+  <li><b>SNAP/CLR</b>: снимок текущей кривой для сравнения</li>
+  <li><b>Export WAV</b>: сохранение импульсной характеристики FIR в файл</li>
+</ul>
+
+<h2 id="plots">9. Графики и взаимодействие</h2>
+
+<h3>График АЧХ (верхний)</h3>
+<table>
+  <tr><th>Действие</th><th>Результат</th></tr>
+  <tr><td>Колесо мыши</td><td>Масштабирование по частоте</td></tr>
+  <tr><td>Shift + колесо</td><td>Масштабирование по амплитуде</td></tr>
+  <tr><td>Клик + перетаскивание</td><td>Панорамирование</td></tr>
+  <tr><td>Правый клик</td><td>Отмена последнего зума</td></tr>
+  <tr><td><span class="kbd">Ctrl</span> + перетаскивание</td><td>Прямоугольное выделение для зума</td></tr>
+  <tr><td>Двойной клик (Target)</td><td>Добавить PEQ-полосу на частоте курсора</td></tr>
+</table>
+
+<h3>График PEQ (нижний, вкладка Target)</h3>
+<table>
+  <tr><th>Действие</th><th>Результат</th></tr>
+  <tr><td>Перетаскивание маркера</td><td>Изменение частоты и усиления</td></tr>
+  <tr><td>Shift + колесо на маркере</td><td>Регулировка Q (ширины полосы)</td></tr>
+  <tr><td>Двойной клик</td><td>Добавление новой PEQ-полосы</td></tr>
+</table>
+
+<h3>Кнопки управления графиками</h3>
+<ul>
+  <li><b>SNAP</b> &mdash; снимок текущей кривой для наложения</li>
+  <li><b>CLR</b> &mdash; очистить все снимки</li>
+  <li><b>FIT</b> &mdash; автомасштабирование по данным</li>
+  <li><b>+/&minus;</b> &mdash; зум по каждой оси</li>
+  <li><b>&triangle;/&triangledown;/&triangleleft;/&triangleright;</b> &mdash; панорамирование</li>
+</ul>
+
+<h3>Разделитель графиков</h3>
+<p>Перетаскивайте горизонтальную полосу между верхним и нижним графиками для изменения пропорций (15%&ndash;65%).</p>
+
+<h2 id="peq-sidebar">10. Боковая панель PEQ</h2>
+<p>Отображается на вкладке Target (не в режиме SUM).</p>
+
+<h3>Авто-подбор</h3>
+<ul>
+  <li><b>Tolerance</b> (дБ) &mdash; допуск ошибки оптимизации (0.5&ndash;3.0)</li>
+  <li><b>Max bands</b> &mdash; лимит количества PEQ-полос (1&ndash;60)</li>
+  <li><b>Optimize</b> &mdash; запуск оптимизатора для текущей полосы</li>
+  <li><b>Clear</b> &mdash; удалить все PEQ-полосы</li>
+</ul>
+
+<h3>Таблица полос</h3>
+<table>
+  <tr><th>Столбец</th><th>Описание</th></tr>
+  <tr><td>Чекбокс</td><td>Включение/выключение полосы</td></tr>
+  <tr><td>Freq (Гц)</td><td>Центральная частота, 20&ndash;20 000. Колесо мыши для настройки</td></tr>
+  <tr><td>Gain (дБ)</td><td>&plusmn;18 дБ (Standard) или &plusmn;60 дБ (Hybrid). Цветовая индикация</td></tr>
+  <tr><td>Q</td><td>Добротность, 0.1&ndash;20. Колесо мыши для настройки</td></tr>
+  <tr><td>&times;</td><td>Удалить полосу</td></tr>
+</table>
+
+<h2 id="dialogs">11. Диалоговые окна</h2>
+
+<h3>Настройки оптимизации (Optimization Settings)</h3>
+<p>Открывается кнопкой <b>Settings</b> на панели инструментов.</p>
+<table>
+  <tr><th>Параметр</th><th>Диапазон</th><th>Описание</th></tr>
+  <tr><td>WLS iterations</td><td>0&ndash;20</td><td>Итеративная коррекция ошибок. 0 = выкл, 3&ndash;5 оптимально</td></tr>
+  <tr><td>Frequency weighting</td><td>вкл/выкл</td><td>Повышенный приоритет кроссоверных и речевых полос (200&ndash;4k Гц)</td></tr>
+  <tr><td>Narrowband limiting</td><td>вкл/выкл</td><td>Ограничение острых пиков коррекции выше сглаженной кривой</td></tr>
+  <tr><td>NB smoothing</td><td>0.05&ndash;2 окт</td><td>Окно сглаживания. Меньше = точнее, больше = агрессивнее</td></tr>
+  <tr><td>NB max excess</td><td>1&ndash;24 дБ</td><td>Макс. допустимый буст над сглаженной коррекцией</td></tr>
+  <tr><td>Max boost</td><td>0&ndash;60 дБ</td><td>Глобальный лимит усиления коррекции</td></tr>
+  <tr><td>Noise floor</td><td>&minus;200..&minus;40 дБ</td><td>Коррекция ниже этого уровня игнорируется. Поднять для шумных замеров</td></tr>
+</table>
+
+<h3>Диалог кроссовера (Crossover)</h3>
+<p>Двойной клик по маркеру кроссовера в SUM. Настройка типа фильтра, порядка, частоты и линейной фазы для пары LP/HP.</p>
+
+<h3>Сшивка NF+FF (Merge)</h3>
+<ul>
+  <li>Выбор файлов NF и FF</li>
+  <li>Частота сплайса (50&ndash;1000 Гц)</li>
+  <li>Ширина бленда (0.5&ndash;3.0 октавы)</li>
+  <li>Автоматический уровень (или ручной)</li>
+  <li>Опциональная коррекция баффл-степа</li>
+</ul>
+
+<h3>Баффл-степ (Baffle Step)</h3>
+<p>Настройка размеров панели и позиции динамика. Предпросмотр кривой коррекции с частотой f3 и точками дифракции.</p>
+
+<h2 id="projects">12. Управление проектами</h2>
+
+<h3>Структура проекта</h3>
+<ul>
+  <li><code>project-name.pfproj</code> &mdash; JSON-файл метаданных</li>
+  <li><code>inbox/</code> &mdash; импортированные файлы измерений</li>
+  <li>Все конфигурации полос, PEQ, целевые кривые и настройки оптимизации</li>
+</ul>
+
+<h3>Рабочий процесс</h3>
+<table>
+  <tr><th>Действие</th><th>Сочетание</th></tr>
+  <tr><td>Новый проект</td><td><span class="kbd">Cmd+N</span></td></tr>
+  <tr><td>Открыть проект</td><td><span class="kbd">Cmd+O</span></td></tr>
+  <tr><td>Сохранить</td><td><span class="kbd">Cmd+S</span></td></tr>
+  <tr><td>Сохранить как</td><td><span class="kbd">Shift+Cmd+S</span></td></tr>
+</table>
+
+<div class="note">
+  <b>Примечание:</b> FIR-фильтры не сохраняются в проекте &mdash; они пересчитываются по запросу. Используйте Export WAV на вкладке Export для сохранения.
+</div>
+
+<h2 id="formats">13. Поддерживаемые форматы</h2>
+
+<h3>Импорт</h3>
+<table>
+  <tr><th>Формат</th><th>Расширение</th><th>Столбцы</th></tr>
+  <tr><td>REW Text</td><td>.txt</td><td>Freq (Гц), SPL (дБ), Phase (град) &mdash; 2 или 3 столбца</td></tr>
+  <tr><td>FRD</td><td>.frd</td><td>Аналогично REW</td></tr>
+</table>
+<p>Строки, начинающиеся с <code>*</code> или <code>#</code>, считаются комментариями. Частота должна возрастать монотонно.</p>
+
+<h3>Экспорт</h3>
+<table>
+  <tr><th>Формат</th><th>Описание</th></tr>
+  <tr><td>FIR WAV</td><td>Моно, 64-бит float, выбранная частота дискретизации</td></tr>
+  <tr><td>Target TXT</td><td>Текстовый файл, совместимый с REW</td></tr>
+</table>
+
+<h2 id="shortcuts">14. Горячие клавиши</h2>
+<table>
+  <tr><th>Клавиша</th><th>Действие</th></tr>
+  <tr><td><span class="kbd">Cmd+N</span></td><td>Новый проект</td></tr>
+  <tr><td><span class="kbd">Cmd+O</span></td><td>Открыть проект</td></tr>
+  <tr><td><span class="kbd">Cmd+S</span></td><td>Сохранить проект</td></tr>
+  <tr><td><span class="kbd">Shift+Cmd+S</span></td><td>Сохранить как</td></tr>
+  <tr><td><span class="kbd">Колесо</span></td><td>Масштаб по частоте</td></tr>
+  <tr><td><span class="kbd">Shift+Колесо</span></td><td>Масштаб по амплитуде</td></tr>
+  <tr><td><span class="kbd">Правый клик</span></td><td>Отмена зума</td></tr>
+  <tr><td><span class="kbd">Ctrl+Drag</span></td><td>Прямоугольный зум</td></tr>
+  <tr><td><span class="kbd">Двойной клик</span></td><td>Добавить PEQ-полосу (на графике)</td></tr>
+  <tr><td><span class="kbd">Escape</span></td><td>Закрыть диалог</td></tr>
+  <tr><td><span class="kbd">Enter</span></td><td>Подтвердить диалог</td></tr>
+</table>
+
+<div style="margin-top: 40px; text-align: center; color: #999; font-size: 10pt;">
+  PhaseForge v0.1.0-b89 &copy; 2024&ndash;2026
+</div>
+
+</body>
+</html>

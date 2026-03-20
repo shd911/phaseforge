@@ -124,29 +124,32 @@ fn apply_manual_delay(
     Ok(new_phase)
 }
 
-/// Shared delay estimation logic — uses excess phase (Hilbert) as primary method.
-///
-/// Excess phase separates propagation delay from filter/resonance phase,
-/// giving correct results for subwoofers, midrange, and tweeters alike.
-fn estimate_delay(freq: &[f64], magnitude: &[f64], phase: &[f64], _sample_rate: Option<f64>) -> f64 {
-    // Primary: excess phase method (Hilbert transform)
-    let excess_delay = phase::compute_excess_phase_delay(freq, magnitude, phase);
-
-    // Sanity check with LS fit
-    let f_first = freq.first().copied().unwrap_or(20.0);
-    let f_last = freq.last().copied().unwrap_or(20000.0);
-    let (f_lo, f_hi) = phase::smart_delay_range(f_first, f_last);
-    let ls_delay = phase::compute_average_delay(freq, phase, f_lo, f_hi);
-
-    info!("estimate_delay: excess_phase={:.4}ms, LS={:.4}ms",
-        excess_delay * 1000.0, ls_delay * 1000.0);
-
-    // Use excess phase if positive (physical delay), otherwise fall back to LS
-    if excess_delay > 0.0 {
-        excess_delay
+/// Shared delay estimation logic
+fn estimate_delay(freq: &[f64], magnitude: &[f64], phase: &[f64], sample_rate: Option<f64>) -> f64 {
+    if let Some(sr) = sample_rate {
+        let ir_delay = phase::compute_ir_delay(freq, magnitude, phase, sr);
+        // Cross-validate with LS fit
+        let f_first = freq.first().copied().unwrap_or(20.0);
+        let f_last = freq.last().copied().unwrap_or(20000.0);
+        let (f_lo, f_hi) = phase::smart_delay_range(f_first, f_last);
+        let ls_delay = phase::compute_average_delay(freq, phase, f_lo, f_hi);
+        // If IR and LS disagree by >50%, prefer LS (more robust for single drivers)
+        let ratio = if ir_delay.abs() > 1e-6 { (ir_delay - ls_delay).abs() / ir_delay.abs() } else { 0.0 };
+        if ratio > 0.5 {
+            info!("estimate_delay: IR={:.4}ms vs LS={:.4}ms — disagree ({:.0}%), using LS",
+                ir_delay * 1000.0, ls_delay * 1000.0, ratio * 100.0);
+            ls_delay
+        } else {
+            info!("estimate_delay: IR={:.4}ms (LS={:.4}ms, agree)", ir_delay * 1000.0, ls_delay * 1000.0);
+            ir_delay
+        }
     } else {
-        info!("estimate_delay: excess_phase negative ({:.4}ms), using LS fallback", excess_delay * 1000.0);
-        ls_delay.max(0.0)
+        let f_first = freq.first().copied().unwrap_or(20.0);
+        let f_last = freq.last().copied().unwrap_or(20000.0);
+        let (f_lo, f_hi) = phase::smart_delay_range(f_first, f_last);
+        let delay = phase::compute_average_delay(freq, phase, f_lo, f_hi);
+        info!("estimate_delay: LS fit {:.4}ms (range {:.0}-{:.0} Hz)", delay * 1000.0, f_lo, f_hi);
+        delay
     }
 }
 
