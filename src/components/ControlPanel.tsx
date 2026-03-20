@@ -583,7 +583,7 @@ function MeasurementsTab() {
                       onChange={handleToggleDelay}
                     />
                   </label>
-                  <Show when={s()?.delay_removed && s()?.delay_seconds != null}>
+                  <span style={{ display: "inline-flex", "align-items": "center", "min-width": "75px", visibility: s()?.delay_removed && s()?.delay_seconds != null ? "visible" : "hidden" }}>
                     <NumberInput
                       value={parseFloat(((s()!.delay_seconds ?? 0) * 1000).toFixed(2))}
                       onChange={async (ms) => {
@@ -602,7 +602,7 @@ function MeasurementsTab() {
                       min={0} max={50} step={0.01} precision={2}
                     />
                     <span style={{ "font-size": "9px", color: "#8b8b96", "margin-left": "2px" }}>ms</span>
-                  </Show>
+                  </span>
                 </Show>
               </td>
               <td>

@@ -160,21 +160,27 @@ export default function ImpulseResponsePlot() {
     }
     peakTimeMs = timeMs.length > 0 ? timeMs[peakIdx] : 0;
 
-    // Вычислить FIT-диапазоны из данных
+    // Подготовить target серию (если есть) — needed before Y range calc
+    const hasTarget = targetTime && targetData && targetTime.length > 0;
+
+    // Вычислить FIT-диапазоны из данных (including target if present)
     let ampMin = Infinity;
     let ampMax = -Infinity;
     for (let i = 0; i < data.length; i++) {
       if (data[i] < ampMin) ampMin = data[i];
       if (data[i] > ampMax) ampMax = data[i];
     }
+    if (hasTarget) {
+      for (let i = 0; i < targetData!.length; i++) {
+        if (targetData![i] < ampMin) ampMin = targetData![i];
+        if (targetData![i] > ampMax) ampMax = targetData![i];
+      }
+    }
     const ampPad = Math.max(5, (ampMax - ampMin) * 0.05);
     dataTimeMin = timeMs.length > 0 ? timeMs[0] : -1;
     dataTimeMax = timeMs.length > 0 ? timeMs[timeMs.length - 1] : 50;
     dataAmpMin = isFinite(ampMin) ? ampMin - ampPad : -110;
     dataAmpMax = isFinite(ampMax) ? ampMax + ampPad : 110;
-
-    // Подготовить target серию (если есть)
-    const hasTarget = targetTime && targetData && targetTime.length > 0;
     let targetAligned: (number | null)[] | undefined;
     if (hasTarget) {
       const targetTimeMs = targetTime!.map((t) => t * 1000);
