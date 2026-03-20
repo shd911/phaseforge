@@ -48,6 +48,8 @@ pub struct ProjectFile {
     #[serde(default)]
     pub peq_gain_regularization: Option<f64>,
     #[serde(default)]
+    pub peq_floor: Option<u32>,
+    #[serde(default)]
     pub fir_iterations: Option<u32>,
     #[serde(default)]
     pub fir_freq_weighting: Option<bool>,

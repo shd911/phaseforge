@@ -18,6 +18,7 @@ import type { BandState } from "./bands";
 export const [tolerance, setTolerance] = createSignal(1.0);
 export const [maxBands, setMaxBands] = createSignal(20);
 export const [gainRegularization, setGainRegularization] = createSignal(0.0);
+export const [peqFloor, setPeqFloor] = createSignal(60); // dB below reference — don't optimize below this
 export const [computing, setComputing] = createSignal(false);
 export const [peqError, setPeqError] = createSignal<string | null>(null);
 export const [maxErr, setMaxErr] = createSignal<number | null>(null);
@@ -80,8 +81,29 @@ async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBa
   }
 
   const isHybrid = exportHybridPhase();
-  const peqLow = isHybrid ? 20 : Math.max(20, fLow / 8);
-  const peqHigh = 20000;
+  let peqLow = isHybrid ? 20 : Math.max(20, fLow / 8);
+  let peqHigh = 20000;
+
+  // Trim PEQ range by target floor: don't optimize where target is below threshold
+  const floorDb = peqFloor();
+  if (floorDb > 0) {
+    const refLevel = targetCurve.reference_level_db;
+    const threshold = refLevel - floorDb;
+    // Scan from low: find first freq where target > threshold
+    for (let i = 0; i < meas.freq.length; i++) {
+      if (targetResp.magnitude[i] > threshold) {
+        peqLow = Math.max(peqLow, meas.freq[i]);
+        break;
+      }
+    }
+    // Scan from high: find last freq where target > threshold
+    for (let i = meas.freq.length - 1; i >= 0; i--) {
+      if (targetResp.magnitude[i] > threshold) {
+        peqHigh = Math.min(peqHigh, meas.freq[i]);
+        break;
+      }
+    }
+  }
   const activeBandBudget = Math.max(1, maxBands() - frozenBands.length);
   const config: PeqConfig = {
     max_bands: activeBandBudget,

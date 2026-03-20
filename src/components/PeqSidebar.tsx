@@ -21,6 +21,7 @@ import {
   tolerance, setTolerance,
   maxBands, setMaxBands,
   gainRegularization, setGainRegularization,
+  peqFloor, setPeqFloor,
   computing, peqError, maxErr, iters,
   peqRange, formatFreq,
   handleOptimizePeq, handleClearPeq,
@@ -118,6 +119,10 @@ export default function PeqSidebar() {
             <div class="fb-row">
               <label class="fb-label">Regularization</label>
               <NumberInput value={gainRegularization()} onChange={setGainRegularization} min={0} max={1} step={0.0001} precision={4} />
+            </div>
+            <div class="fb-row">
+              <label class="fb-label" title="Don't place PEQ where target is this many dB below reference level">Floor dB</label>
+              <NumberInput value={peqFloor()} onChange={setPeqFloor} min={0} max={120} step={1} precision={0} />
             </div>
           </div>
           <div class="peq-buttons-row">
