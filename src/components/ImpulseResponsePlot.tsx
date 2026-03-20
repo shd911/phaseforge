@@ -139,13 +139,7 @@ export default function ImpulseResponsePlot() {
   ) {
     if (!containerRef) return;
 
-    // Сохраняем только Y масштаб
-    let savedYMin: number | null = null;
-    let savedYMax: number | null = null;
-
     if (chartRef.current) {
-      const ys = chartRef.current.scales["amp"];
-      if (ys?.min != null && ys?.max != null) { savedYMin = ys.min; savedYMax = ys.max; }
       chartRef.current.destroy();
       chartRef.current = undefined;
     }
@@ -213,8 +207,8 @@ export default function ImpulseResponsePlot() {
     const fit = computeXWithPeakAt25(totalRange);
     const xMin = fit.min;
     const xMax = fit.max;
-    const yMin = savedYMin ?? dataAmpMin;
-    const yMax = savedYMax ?? dataAmpMax;
+    const yMin = dataAmpMin;
+    const yMax = dataAmpMax;
     curAmpMin = yMin;
     curAmpMax = yMax;
 
@@ -267,6 +261,8 @@ export default function ImpulseResponsePlot() {
 
     try {
       chartRef.current = new uPlot(opts, uData, containerRef);
+      // Auto-fit on new data
+      fitData();
     } catch (e) {
       console.error("Impulse uPlot error:", e);
     }
