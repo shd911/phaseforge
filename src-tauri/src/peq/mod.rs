@@ -698,7 +698,7 @@ pub fn auto_peq_lma(
     };
     let smoothed_error = variable_smoothing(freq, &raw_error, &smooth_config);
 
-    let mut bands = greedy_fit_adaptive(freq, &smoothed_error, config);
+    let mut bands = greedy_fit_adaptive(freq, &smoothed_error, config, exclusion_zones);
 
     // Enforce Q constraints: Q ≤ 2.5 for bands above LP
     for b in &mut bands {
@@ -737,6 +737,14 @@ pub fn auto_peq_lma(
         let mut worst_val = 0.0_f64;
         let mut available = vec![true; n];
 
+        // Apply user-defined exclusion zones
+        for zone in exclusion_zones {
+            for (i, &f) in freq.iter().enumerate() {
+                if f >= zone.start_hz && f <= zone.end_hz {
+                    available[i] = false;
+                }
+            }
+        }
         // Mark zones around existing bands as unavailable
         for b in &bands {
             mark_exclusion_zone(freq, b.freq_hz, merge_dist, &mut available);
@@ -1100,12 +1108,20 @@ fn peq_band_mag_db(f: f64, band: &PeqBand, sample_rate: f64) -> f64 {
 
 /// Greedy fitting with adaptive Q estimated from error curve peak width,
 /// and exclusion zones to prevent duplicate bands.
-fn greedy_fit_adaptive(freq: &[f64], smoothed_error: &[f64], config: &PeqConfig) -> Vec<PeqBand> {
+fn greedy_fit_adaptive(freq: &[f64], smoothed_error: &[f64], config: &PeqConfig, exclusion_zones: &[ExclusionZone]) -> Vec<PeqBand> {
     let n = freq.len();
     let mut bands: Vec<PeqBand> = Vec::new();
     let mut current_error = smoothed_error.to_vec();
     // Exclusion mask: true = available, false = excluded
     let mut available = vec![true; n];
+    // Apply user-defined exclusion zones
+    for zone in exclusion_zones {
+        for (i, &f) in freq.iter().enumerate() {
+            if f >= zone.start_hz && f <= zone.end_hz {
+                available[i] = false;
+            }
+        }
+    }
     let exclusion_oct = config.min_band_distance_oct.unwrap_or(MIN_BAND_DISTANCE_OCT);
 
     for _ in 0..config.max_bands {
