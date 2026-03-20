@@ -166,6 +166,129 @@ pub fn check_overcorrection(freq: &[f64], corrected_phase: &[f64]) -> f64 {
     if count > 0 { sum / count as f64 } else { 0.0 }
 }
 
+/// Estimate propagation delay via excess phase (measured − minimum phase).
+///
+/// 1. Interpolate measurement onto linear frequency grid
+/// 2. Compute minimum phase from magnitude via Hilbert transform
+/// 3. Excess phase = measured_phase − minimum_phase
+/// 4. Fit linear slope to excess phase → delay
+///
+/// This is the most robust method: it separates filter/resonance phase
+/// (captured by minimum phase) from propagation delay (excess phase).
+pub fn compute_excess_phase_delay(
+    freq: &[f64],
+    magnitude: &[f64],
+    phase_deg: &[f64],
+) -> f64 {
+    use num_complex::Complex64;
+    use crate::dsp::fft::FftEngine;
+
+    let n = freq.len();
+    if n < 4 { return 0.0; }
+
+    // FFT size for Hilbert transform
+    let f_max = freq[n - 1];
+    let fft_size = {
+        let desired = (n * 4).max(4096);
+        desired.next_power_of_two()
+    };
+    let n_bins = fft_size / 2 + 1;
+    let df = f_max / (n_bins - 1) as f64;
+
+    // Interpolate magnitude onto linear grid
+    let mut grid_mag_db = Vec::with_capacity(n_bins);
+    for i in 0..n_bins {
+        let f = i as f64 * df;
+        grid_mag_db.push(interp_single_val(freq, magnitude, f));
+    }
+
+    // Compute minimum phase via Hilbert transform on ln(magnitude)
+    let ln10_over_20 = 10.0_f64.ln() / 20.0;
+    let mut ln_mag: Vec<Complex64> = Vec::with_capacity(fft_size);
+    for i in 0..n_bins {
+        ln_mag.push(Complex64::new(grid_mag_db[i] * ln10_over_20, 0.0));
+    }
+    for i in 1..(fft_size - n_bins + 1) {
+        let idx = n_bins - 1 - i;
+        ln_mag.push(Complex64::new(ln_mag[idx].re, 0.0));
+    }
+
+    let mut engine = FftEngine::new();
+    engine.fft_forward(&mut ln_mag);
+
+    // Hilbert window
+    // DC stays ×1, positive freqs ×2, Nyquist ×1, negative freqs ×0
+    for i in 1..fft_size / 2 {
+        ln_mag[i] *= Complex64::new(2.0, 0.0);
+    }
+    for i in (fft_size / 2 + 1)..fft_size {
+        ln_mag[i] = Complex64::new(0.0, 0.0);
+    }
+
+    engine.fft_inverse(&mut ln_mag);
+    let norm = 1.0 / fft_size as f64;
+
+    // Minimum phase (radians) at each bin
+    let min_phase_rad: Vec<f64> = (0..n_bins)
+        .map(|i| -ln_mag[i].im * norm)
+        .collect();
+
+    // Interpolate measured phase onto same linear grid and unwrap
+    let mut grid_phase_deg = Vec::with_capacity(n_bins);
+    for i in 0..n_bins {
+        let f = i as f64 * df;
+        grid_phase_deg.push(interp_single_val(freq, phase_deg, f));
+    }
+    let grid_phase_unwrapped = unwrap_phase(&grid_phase_deg);
+
+    // Excess phase = measured − minimum (both in degrees)
+    let excess_deg: Vec<f64> = grid_phase_unwrapped.iter()
+        .zip(min_phase_rad.iter())
+        .map(|(&meas, &min_rad)| meas - min_rad.to_degrees())
+        .collect();
+
+    // Linear fit on excess phase in the useful range (skip DC and near-Nyquist)
+    let fit_lo = (n_bins as f64 * 0.05) as usize; // skip lowest 5%
+    let fit_hi = (n_bins as f64 * 0.85) as usize; // skip highest 15%
+    if fit_hi <= fit_lo + 2 { return 0.0; }
+
+    let mut sum_f = 0.0;
+    let mut sum_p = 0.0;
+    let mut sum_ff = 0.0;
+    let mut sum_fp = 0.0;
+    let cnt = (fit_hi - fit_lo) as f64;
+    for i in fit_lo..fit_hi {
+        let f = i as f64 * df;
+        let p = excess_deg[i];
+        sum_f += f;
+        sum_p += p;
+        sum_ff += f * f;
+        sum_fp += f * p;
+    }
+    let denom = cnt * sum_ff - sum_f * sum_f;
+    if denom.abs() < 1e-30 { return 0.0; }
+    let slope = (cnt * sum_fp - sum_f * sum_p) / denom;
+
+    // delay = -slope / 360
+    -slope / 360.0
+}
+
+/// Simple linear interpolation of a single value at frequency f.
+fn interp_single_val(freq: &[f64], data: &[f64], f: f64) -> f64 {
+    if freq.is_empty() { return 0.0; }
+    if f <= freq[0] { return data[0]; }
+    let last = freq.len() - 1;
+    if f >= freq[last] { return data[last]; }
+    let mut lo = 0;
+    let mut hi = last;
+    while hi - lo > 1 {
+        let mid = (lo + hi) / 2;
+        if freq[mid] <= f { lo = mid; } else { hi = mid; }
+    }
+    let t = (f - freq[lo]) / (freq[hi] - freq[lo]);
+    data[lo] + t * (data[hi] - data[lo])
+}
+
 /// Convert delay in seconds to distance in meters.
 /// Uses speed of sound at ~20°C: 343 m/s.
 pub fn compute_distance(delay_seconds: f64) -> f64 {
