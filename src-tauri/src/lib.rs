@@ -86,17 +86,7 @@ fn compute_delay_info(
     phase: Vec<f64>,
     sample_rate: Option<f64>,
 ) -> Result<(f64, f64), String> {
-    let delay = if let Some(sr) = sample_rate {
-        phase::compute_ir_delay(&freq, &magnitude, &phase, sr)
-    } else {
-        let f_first = freq.first().copied().unwrap_or(20.0);
-        let f_last = freq.last().copied().unwrap_or(20000.0);
-        let log_lo = f_first.ln();
-        let log_hi = f_last.ln();
-        let f_lo = (log_lo + (log_hi - log_lo) * 0.2).exp();
-        let f_hi = (log_lo + (log_hi - log_lo) * 0.8).exp();
-        phase::compute_average_delay(&freq, &phase, f_lo, f_hi)
-    };
+    let delay = estimate_delay(&freq, &magnitude, &phase, sample_rate);
     let distance = phase::compute_distance(delay);
     info!("compute_delay_info: delay={:.4}ms  dist={:.3}m", delay * 1000.0, distance);
     Ok((delay, distance))
@@ -109,30 +99,58 @@ fn remove_measurement_delay(
     phase: Vec<f64>,
     sample_rate: Option<f64>,
 ) -> Result<(Vec<f64>, f64, f64), String> {
-    // Use IR peak detection when sample_rate is known (full-bandwidth data),
-    // otherwise fall back to linear least-squares fit (works for limited-bandwidth data)
-    let delay = if let Some(sr) = sample_rate {
-        let ir_delay = phase::compute_ir_delay(&freq, &magnitude, &phase, sr);
-        info!("remove_measurement_delay: IR peak delay={:.4}ms", ir_delay * 1000.0);
-        ir_delay
-    } else {
-        // Least-squares fit over central 60% of measurement range
-        // (avoids noisy edges, works for any bandwidth — sub, mid, tweeter)
-        let f_first = freq.first().copied().unwrap_or(20.0);
-        let f_last = freq.last().copied().unwrap_or(20000.0);
-        let log_lo = f_first.ln();
-        let log_hi = f_last.ln();
-        let f_lo = (log_lo + (log_hi - log_lo) * 0.2).exp();
-        let f_hi = (log_lo + (log_hi - log_lo) * 0.8).exp();
-        let ls_delay = phase::compute_average_delay(&freq, &phase, f_lo, f_hi);
-        info!("remove_measurement_delay: LS fit delay={:.4}ms (range {:.0}-{:.0} Hz)",
-            ls_delay * 1000.0, f_lo, f_hi);
-        ls_delay
-    };
+    let delay = estimate_delay(&freq, &magnitude, &phase, sample_rate);
     let distance = phase::compute_distance(delay);
     let new_phase = phase::remove_delay(&freq, &phase, delay);
+    // Check for overcorrection
+    let excess_gd = phase::check_overcorrection(&freq, &new_phase);
+    if excess_gd > 0.0002 {
+        info!("remove_measurement_delay: WARNING overcorrection detected, excess GD={:.3}ms", excess_gd * 1000.0);
+    }
     info!("remove_measurement_delay: removed {:.4}ms ({:.3}m)", delay * 1000.0, distance);
     Ok((new_phase, delay, distance))
+}
+
+/// Apply a user-specified delay (manual override).
+#[tauri::command]
+fn apply_manual_delay(
+    freq: Vec<f64>,
+    phase: Vec<f64>,
+    delay_seconds: f64,
+) -> Result<Vec<f64>, String> {
+    let new_phase = phase::remove_delay(&freq, &phase, delay_seconds);
+    let distance = phase::compute_distance(delay_seconds);
+    info!("apply_manual_delay: {:.4}ms ({:.3}m)", delay_seconds * 1000.0, distance);
+    Ok(new_phase)
+}
+
+/// Shared delay estimation logic
+fn estimate_delay(freq: &[f64], magnitude: &[f64], phase: &[f64], sample_rate: Option<f64>) -> f64 {
+    if let Some(sr) = sample_rate {
+        let ir_delay = phase::compute_ir_delay(freq, magnitude, phase, sr);
+        // Cross-validate with LS fit
+        let f_first = freq.first().copied().unwrap_or(20.0);
+        let f_last = freq.last().copied().unwrap_or(20000.0);
+        let (f_lo, f_hi) = phase::smart_delay_range(f_first, f_last);
+        let ls_delay = phase::compute_average_delay(freq, phase, f_lo, f_hi);
+        // If IR and LS disagree by >50%, prefer LS (more robust for single drivers)
+        let ratio = if ir_delay.abs() > 1e-6 { (ir_delay - ls_delay).abs() / ir_delay.abs() } else { 0.0 };
+        if ratio > 0.5 {
+            info!("estimate_delay: IR={:.4}ms vs LS={:.4}ms — disagree ({:.0}%), using LS",
+                ir_delay * 1000.0, ls_delay * 1000.0, ratio * 100.0);
+            ls_delay
+        } else {
+            info!("estimate_delay: IR={:.4}ms (LS={:.4}ms, agree)", ir_delay * 1000.0, ls_delay * 1000.0);
+            ir_delay
+        }
+    } else {
+        let f_first = freq.first().copied().unwrap_or(20.0);
+        let f_last = freq.last().copied().unwrap_or(20000.0);
+        let (f_lo, f_hi) = phase::smart_delay_range(f_first, f_last);
+        let delay = phase::compute_average_delay(freq, phase, f_lo, f_hi);
+        info!("estimate_delay: LS fit {:.4}ms (range {:.0}-{:.0} Hz)", delay * 1000.0, f_lo, f_hi);
+        delay
+    }
 }
 
 #[tauri::command]
@@ -385,6 +403,7 @@ pub fn run() {
             evaluate_target_standalone,
             compute_delay_info,
             remove_measurement_delay,
+            apply_manual_delay,
             compute_impulse,
             merge_measurements,
             preview_baffle_step,

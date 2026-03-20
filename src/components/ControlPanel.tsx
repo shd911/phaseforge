@@ -582,6 +582,26 @@ function MeasurementsTab() {
                       onChange={handleToggleDelay}
                     />
                   </label>
+                  <Show when={s()?.delay_removed && s()?.delay_seconds != null}>
+                    <NumberInput
+                      value={parseFloat(((s()!.delay_seconds ?? 0) * 1000).toFixed(2))}
+                      onChange={async (ms) => {
+                        const b = band();
+                        if (!b || !b.measurement?.phase || !b.settings) return;
+                        const delaySec = ms / 1000;
+                        const origPhase = b.settings.originalPhase ?? b.measurement.phase;
+                        try {
+                          const newPhase = await invoke<number[]>("apply_manual_delay", {
+                            freq: b.measurement.freq, phase: origPhase, delaySeconds: delaySec,
+                          });
+                          setBandDelayInfo(b.id, delaySec, delaySec * 343);
+                          markBandDelayRemoved(b.id, newPhase);
+                        } catch (e) { console.error("Manual delay failed:", e); }
+                      }}
+                      min={0} max={50} step={0.01} precision={2}
+                    />
+                    <span style={{ "font-size": "9px", color: "#8b8b96", "margin-left": "2px" }}>ms</span>
+                  </Show>
                 </Show>
               </td>
               <td>

@@ -110,6 +110,62 @@ pub fn compute_average_delay(
     -slope / 360.0
 }
 
+/// Select delay estimation range based on measurement bandwidth.
+///
+/// For narrow-band data (sub: <1 decade), fit the lower half to avoid
+/// port resonance. For mid-range, use central 50%. For wide-band, use
+/// central 60%.
+pub fn smart_delay_range(f_first: f64, f_last: f64) -> (f64, f64) {
+    let log_lo = f_first.ln();
+    let log_hi = f_last.ln();
+    let decades = (log_hi - log_lo) / 10.0_f64.ln();
+
+    if decades < 1.2 {
+        // Narrow band (sub ~20-200 Hz): use lower 50% — below port resonance
+        let f_lo = f_first;
+        let f_hi = (log_lo + (log_hi - log_lo) * 0.5).exp();
+        (f_lo, f_hi)
+    } else if decades < 2.0 {
+        // Mid band (~200-3000 Hz): central 50%
+        let f_lo = (log_lo + (log_hi - log_lo) * 0.25).exp();
+        let f_hi = (log_lo + (log_hi - log_lo) * 0.75).exp();
+        (f_lo, f_hi)
+    } else {
+        // Wide band: central 60%
+        let f_lo = (log_lo + (log_hi - log_lo) * 0.2).exp();
+        let f_hi = (log_lo + (log_hi - log_lo) * 0.8).exp();
+        (f_lo, f_hi)
+    }
+}
+
+/// Check if delay removal resulted in overcorrection.
+///
+/// Returns average excess group delay (seconds) in the passband.
+/// Positive value means delay was overestimated (phase slopes upward).
+pub fn check_overcorrection(freq: &[f64], corrected_phase: &[f64]) -> f64 {
+    if freq.len() < 4 { return 0.0; }
+    let f_first = freq[0];
+    let f_last = freq[freq.len() - 1];
+    // Check group delay in central 50% of range
+    let log_lo = f_first.ln();
+    let log_hi = f_last.ln();
+    let f_lo = (log_lo + (log_hi - log_lo) * 0.25).exp();
+    let f_hi = (log_lo + (log_hi - log_lo) * 0.75).exp();
+
+    let unwrapped = unwrap_phase(corrected_phase);
+    let gd = compute_group_delay(freq, &unwrapped);
+
+    let mut sum = 0.0;
+    let mut count = 0;
+    for i in 0..freq.len() {
+        if freq[i] >= f_lo && freq[i] <= f_hi {
+            sum += gd[i];
+            count += 1;
+        }
+    }
+    if count > 0 { sum / count as f64 } else { 0.0 }
+}
+
 /// Convert delay in seconds to distance in meters.
 /// Uses speed of sound at ~20°C: 343 m/s.
 pub fn compute_distance(delay_seconds: f64) -> f64 {
