@@ -3,7 +3,7 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { invoke } from "@tauri-apps/api/core";
 import type { ImpulseResult, TargetResponse } from "../lib/types";
-import { activeBand } from "../stores/bands";
+import { activeBand, appState, isSum } from "../stores/bands";
 
 type ViewMode = "impulse" | "step" | "gd";
 
@@ -356,8 +356,28 @@ export default function ImpulseResponsePlot() {
 
   // Главный реактивный эффект
   createEffect(() => {
+    const sumMode = isSum();
     const band = activeBand();
     const mode = viewMode();
+
+    if (sumMode) {
+      // SUM mode: use first band with measurement as representative
+      // (GD mode uses phase data, IR/Step use impulse)
+      const bands = appState.bands.filter(b => b.measurement?.phase);
+      if (bands.length === 0) {
+        if (chartRef.current) { chartRef.current.destroy(); chartRef.current = undefined; }
+        setHasData(false);
+        return;
+      }
+      // Use the first band with data for now
+      const b = bands[0];
+      const freq = [...b.measurement!.freq];
+      const magnitude = [...b.measurement!.magnitude];
+      const phase = [...b.measurement!.phase!];
+      const sr = b.measurement!.sample_rate ?? 48000;
+      computeAndRender(freq, magnitude, phase, sr, mode, null);
+      return;
+    }
 
     if (!band || !band.measurement || !band.measurement.phase) {
       if (chartRef.current) { chartRef.current.destroy(); chartRef.current = undefined; }
