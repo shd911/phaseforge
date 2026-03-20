@@ -22,6 +22,9 @@ import {
   maxBands, setMaxBands,
   gainRegularization, setGainRegularization,
   peqFloor, setPeqFloor,
+  peqRangeMode, setPeqRangeMode,
+  peqDirectLow, setPeqDirectLow,
+  peqDirectHigh, setPeqDirectHigh,
   computing, peqError, maxErr, iters,
   peqRange, formatFreq,
   handleOptimizePeq, handleClearPeq,
@@ -121,9 +124,29 @@ export default function PeqSidebar() {
               <NumberInput value={gainRegularization()} onChange={setGainRegularization} min={0} max={1} step={0.0001} precision={4} />
             </div>
             <div class="fb-row">
-              <label class="fb-label" title="Don't place PEQ where target is this many dB below reference level">Floor dB</label>
-              <NumberInput value={peqFloor()} onChange={setPeqFloor} min={0} max={120} step={1} precision={0} />
+              <label class="fb-label">Range</label>
+              <select
+                class="peq-range-select"
+                value={peqRangeMode()}
+                onChange={(e) => setPeqRangeMode(e.currentTarget.value as "auto" | "direct")}
+              >
+                <option value="auto">Auto</option>
+                <option value="direct">Direct</option>
+              </select>
             </div>
+            {peqRangeMode() === "auto" ? (
+              <div class="fb-row">
+                <label class="fb-label" title="Don't place PEQ where target is this many dB below reference level">Floor dB</label>
+                <NumberInput value={peqFloor()} onChange={setPeqFloor} min={0} max={120} step={1} precision={0} />
+              </div>
+            ) : (
+              <div class="fb-row">
+                <label class="fb-label">Hz</label>
+                <NumberInput value={peqDirectLow()} onChange={setPeqDirectLow} min={20} max={20000} step={10} precision={0} />
+                <span style={{ margin: "0 2px", color: "#8b8b96" }}>–</span>
+                <NumberInput value={peqDirectHigh()} onChange={setPeqDirectHigh} min={20} max={20000} step={10} precision={0} />
+              </div>
+            )}
           </div>
           <div class="peq-buttons-row">
             <span class="align-range-info">{formatFreq(peqRange()[0])}{"\u2013"}{formatFreq(peqRange()[1])} Hz</span>

@@ -1050,6 +1050,16 @@ body {
   pointer-events: none;
 }
 
+.peq-range-select {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 3px;
+  color: inherit;
+  font-size: 11px;
+  padding: 1px 4px;
+  outline: none;
+}
+
 .band-tab-edit {
   background: rgba(255,255,255,0.1);
   border: 1px solid rgba(255,255,255,0.3);

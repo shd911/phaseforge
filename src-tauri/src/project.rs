@@ -50,6 +50,12 @@ pub struct ProjectFile {
     #[serde(default)]
     pub peq_floor: Option<u32>,
     #[serde(default)]
+    pub peq_range_mode: Option<String>,
+    #[serde(default)]
+    pub peq_direct_low: Option<f64>,
+    #[serde(default)]
+    pub peq_direct_high: Option<f64>,
+    #[serde(default)]
     pub fir_iterations: Option<u32>,
     #[serde(default)]
     pub fir_freq_weighting: Option<bool>,

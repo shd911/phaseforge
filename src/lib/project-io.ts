@@ -155,6 +155,9 @@ interface ProjectFile {
   peq_max_bands?: number;
   peq_gain_regularization?: number;
   peq_floor?: number;
+  peq_range_mode?: string;
+  peq_direct_low?: number;
+  peq_direct_high?: number;
   fir_iterations?: number;
   fir_freq_weighting?: boolean;
   fir_narrowband_limit?: boolean;
@@ -274,6 +277,9 @@ function buildProjectData(): ProjectFile {
     peq_max_bands: maxBands(),
     peq_gain_regularization: gainRegularization(),
     peq_floor: peqFloor(),
+    peq_range_mode: peqRangeMode(),
+    peq_direct_low: peqDirectLow(),
+    peq_direct_high: peqDirectHigh(),
     fir_iterations: firIterations(),
     fir_freq_weighting: firFreqWeighting(),
     fir_narrowband_limit: firNarrowbandLimit(),
@@ -459,6 +465,9 @@ async function restoreState(project: ProjectFile, projDir: string | null) {
     setMaxBands(project.peq_max_bands ?? 20);
     setGainRegularization(project.peq_gain_regularization ?? 0.0);
     setPeqFloor(project.peq_floor ?? 60);
+    setPeqRangeMode((project.peq_range_mode as any) ?? "auto");
+    setPeqDirectLow(project.peq_direct_low ?? 20);
+    setPeqDirectHigh(project.peq_direct_high ?? 20000);
     // FIR optimization settings
     setFirIterations(project.fir_iterations ?? 3);
     setFirFreqWeighting(project.fir_freq_weighting ?? true);
