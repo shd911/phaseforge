@@ -676,13 +676,9 @@ export function updatePeqBand(bandId: string, peqIdx: number, patch: Partial<Peq
 export function commitPeqBand(bandId: string, peqIdx: number): number {
   const idx = bandIndex(bandId);
   if (idx < 0) return peqIdx;
-  const arr = [...state.bands[idx].peqBands];
-  const band = arr[peqIdx];
-  if (!band) return peqIdx;
-  arr.sort((a, b) => a.freq_hz - b.freq_hz);
-  setState("bands", idx, "peqBands", arr);
+  // No sort — manual bands stay at their position (top of list)
   markDirty();
-  return arr.indexOf(band);
+  return peqIdx;
 }
 
 // ---------------------------------------------------------------------------
