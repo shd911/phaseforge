@@ -214,8 +214,9 @@ export default function PeqSidebar() {
       </Show>
 
       {/* Add manual PEQ band — between exclusion zones and PEQ table */}
-      <div class="peq-sidebar-header" style={{ "margin-top": "4px" }}>
-        <span class="fb-title" style={{ "font-size": "10px", color: "#8b8b96" }}>Manual</span>
+      <div class="peq-manual-section">
+      <div class="peq-sidebar-header">
+        <span class="fb-title" style={{ "font-size": "10px" }}>Manual</span>
         <button
           class="peq-add-btn"
           onClick={() => {
@@ -232,9 +233,11 @@ export default function PeqSidebar() {
           title="Add manual PEQ band"
         >+</button>
       </div>
+      </div>
 
-      {/* PEQ Table */}
+      {/* PEQ Table — auto-generated bands */}
       <Show when={peqBands().length > 0}>
+        <div class="peq-auto-section">
         <div class="peq-sidebar-table-scroll">
           <table class="peq-table">
             <thead>
@@ -375,6 +378,7 @@ export default function PeqSidebar() {
               })}
             </tbody>
           </table>
+        </div>
         </div>
       </Show>
 
