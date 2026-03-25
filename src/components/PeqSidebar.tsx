@@ -90,21 +90,6 @@ export default function PeqSidebar() {
       {/* Header */}
       <div class="peq-sidebar-header">
         <span class="fb-title" style={{ "font-size": "11px" }}>PEQ Bands</span>
-        <button
-          class="peq-add-btn"
-          onClick={() => {
-            const b = band();
-            if (b) {
-              if (pendingPeqIdx() != null) {
-                commitPeqBand(b.id, pendingPeqIdx()!);
-              }
-              addPeqBand(b.id, { freq_hz: 1000, gain_db: 0, q: 2.0, enabled: true, filter_type: "Peaking" });
-              setPendingPeqIdx(0);
-              setSelectedPeqIdx(0);
-            }
-          }}
-          title="Add PEQ band"
-        >+</button>
       </div>
 
       {/* PEQ Auto-Fit (b82.06) */}
@@ -227,6 +212,26 @@ export default function PeqSidebar() {
           </Show>
         </div>
       </Show>
+
+      {/* Add manual PEQ band — between exclusion zones and PEQ table */}
+      <div class="peq-sidebar-header" style={{ "margin-top": "4px" }}>
+        <span class="fb-title" style={{ "font-size": "10px", color: "#8b8b96" }}>Manual</span>
+        <button
+          class="peq-add-btn"
+          onClick={() => {
+            const b = band();
+            if (b) {
+              if (pendingPeqIdx() != null) {
+                commitPeqBand(b.id, pendingPeqIdx()!);
+              }
+              addPeqBand(b.id, { freq_hz: 1000, gain_db: 0, q: 2.0, enabled: true, filter_type: "Peaking" });
+              setPendingPeqIdx(0);
+              setSelectedPeqIdx(0);
+            }
+          }}
+          title="Add manual PEQ band"
+        >+</button>
+      </div>
 
       {/* PEQ Table */}
       <Show when={peqBands().length > 0}>

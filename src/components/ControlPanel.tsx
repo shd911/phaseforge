@@ -275,10 +275,11 @@ function FilterBlock(props: FilterBlockProps) {
               class={`fb-link-btn ${props.linked ? "on" : ""}`}
               onClick={(e) => { e.stopPropagation(); props.onLinkToggle!(); }}
               title={props.linked ? "Unlink from next band" : "Link to next band"}
-            ><span class="fb-link-dot" style={{ background: props.linked ? "#4ade80" : "#f87171" }} /></button>
+              style={{ filter: props.linked ? "hue-rotate(90deg) saturate(2) brightness(1.5)" : "hue-rotate(-30deg) saturate(3) brightness(1.2)" }}
+            >🔗</button>
           </Show>
           <Show when={!props.canLink && props.linked}>
-            <span class="fb-link-indicator" title="Linked to adjacent band"><span class="fb-link-dot" style={{ background: "#4ade80" }} /></span>
+            <span class="fb-link-indicator" title="Linked to adjacent band" style={{ filter: "hue-rotate(90deg) saturate(2) brightness(1.5)" }}>🔗</span>
           </Show>
         </span>
         <button

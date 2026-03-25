@@ -525,7 +525,7 @@ export default function ExportPlot() {
   });
 
   return (
-    <div class="impulse-wrapper">
+    <div class="plot-wrapper">
       <div class="impulse-toolbar">
         <span class="readout-item">
           <span class="readout-label">Freq:</span>
@@ -564,26 +564,26 @@ export default function ExportPlot() {
           {status() || "Filter Model vs FIR Realization"}
         </span>
       </div>
-      <div class="impulse-body">
-        <div class="axis-controls axis-controls-y">
-          <button class="axis-btn" onClick={() => zoomY(0.6)} title="Zoom In dB">+</button>
-          <button class="axis-btn" onClick={() => scrollY(1)} title="Scroll Up">{"\u25B2"}</button>
-          <button class="axis-btn" onClick={() => scrollY(-1)} title="Scroll Down">{"\u25BC"}</button>
-          <button class="axis-btn" onClick={() => zoomY(1.6)} title="Zoom Out dB">-</button>
-          <button class="axis-btn fit-btn" onClick={fitData} title="Fit">FIT</button>
-        </div>
-        <div class="impulse-center">
-          <div ref={containerRef} class="impulse-plot" />
+      <div class="plot-body">
+        <div class="plot-center">
+          <div ref={containerRef} class="frequency-plot" />
           {!hasData() && (
             <div class="impulse-empty-overlay">
               {status() || "Configure target filters to see model"}
             </div>
           )}
+          <div class="axis-controls axis-controls-y axis-controls-y-left">
+            <button class="axis-btn" onClick={() => zoomY(0.6)} title="Zoom In dB">+</button>
+            <button class="axis-btn" onClick={() => scrollY(1)} title="Scroll Up">▲</button>
+            <button class="axis-btn" onClick={() => scrollY(-1)} title="Scroll Down">▼</button>
+            <button class="axis-btn" onClick={() => zoomY(1.6)} title="Zoom Out dB">−</button>
+            <button class="axis-btn fit-btn" onClick={fitData} title="Fit">FIT</button>
+          </div>
           <div class="axis-controls axis-controls-x">
+            <button class="axis-btn" onClick={() => zoomX(1.6)} title="Zoom Out Freq">−</button>
+            <button class="axis-btn" onClick={() => scrollX(-1)} title="Scroll Left">◀</button>
+            <button class="axis-btn" onClick={() => scrollX(1)} title="Scroll Right">▶</button>
             <button class="axis-btn" onClick={() => zoomX(0.6)} title="Zoom In Freq">+</button>
-            <button class="axis-btn" onClick={() => scrollX(-1)} title="Scroll Left">{"\u25C0"}</button>
-            <button class="axis-btn" onClick={() => scrollX(1)} title="Scroll Right">{"\u25B6"}</button>
-            <button class="axis-btn" onClick={() => zoomX(1.6)} title="Zoom Out Freq">-</button>
           </div>
         </div>
       </div>
