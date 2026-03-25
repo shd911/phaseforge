@@ -501,15 +501,67 @@ export default function ExportPlot() {
       });
 
       setHasData(true);
+
+      // --- Compute quality metrics ---
+      // Pre-ringing: time before peak where energy exceeds 1% of peak
+      let preRingMs = 0;
+      {
+        const imp = firResult.impulse;
+        const tMs = firResult.time_ms;
+        let peakIdx = 0, peakVal = 0;
+        for (let i = 0; i < imp.length; i++) {
+          if (Math.abs(imp[i]) > peakVal) { peakVal = Math.abs(imp[i]); peakIdx = i; }
+        }
+        const threshold = peakVal * 0.01;
+        let firstIdx = peakIdx;
+        for (let i = 0; i < peakIdx; i++) {
+          if (Math.abs(imp[i]) > threshold) { firstIdx = i; break; }
+        }
+        preRingMs = peakIdx > firstIdx ? tMs[peakIdx] - tMs[firstIdx] : 0;
+      }
+
+      // Max magnitude error in passband (where model > peak - 40 dB)
+      const normModelMag = modelMag.map(v => v - firResult.norm_db);
+      let maxMagErr = 0;
+      {
+        const peakModel = normModelMag.reduce((a, b) => Math.max(a, b), -Infinity);
+        for (let i = 0; i < normModelMag.length; i++) {
+          if (normModelMag[i] > peakModel - 40) {
+            const err = Math.abs(firResult.realized_mag[i] - normModelMag[i]);
+            if (err > maxMagErr) maxMagErr = err;
+          }
+        }
+      }
+
+      // Group delay ripple in passband
+      let gdRippleMs = 0;
+      {
+        const ph = firResult.realized_phase;
+        if (ph.length > 2) {
+          const peakModel = normModelMag.reduce((a, b) => Math.max(a, b), -Infinity);
+          const df = freq.length > 1 ? freq[1] - freq[0] : 1;
+          let gdMin = Infinity, gdMax = -Infinity;
+          for (let i = 1; i < ph.length - 1; i++) {
+            if (normModelMag[i] > peakModel - 40) {
+              const gd = -(ph[i + 1] - ph[i - 1]) / (360 * (freq[i + 1] - freq[i - 1])) * 1000;
+              if (isFinite(gd)) {
+                if (gd < gdMin) gdMin = gd;
+                if (gd > gdMax) gdMax = gd;
+              }
+            }
+          }
+          gdRippleMs = isFinite(gdMax) && isFinite(gdMin) ? gdMax - gdMin : 0;
+        }
+      }
+
       const peqInfo = peqBands.length > 0 ? ` \u00B7 ${peqBands.length} PEQ` : "";
       const phaseLabel = allLinear ? "Linear-Phase" : "Min-Phase";
       const normLabel = firResult.norm_db !== 0
         ? ` \u00B7 Norm: ${firResult.norm_db > 0 ? "\u2212" : "+"}${Math.abs(firResult.norm_db).toFixed(1)} dB`
         : "";
       const causalityPct = Math.round(firResult.causality * 100);
-      const causalityLabel = ` \u00B7 Causality: ${causalityPct}%`;
-      setStatus(`${taps} taps \u00B7 ${sampleRate / 1000}k \u00B7 ${window} \u00B7 ${phaseLabel}${peqInfo}${normLabel}${causalityLabel}`);
-      const normModelMag = modelMag.map(v => v - firResult.norm_db);
+      const metricsLabel = ` \u00B7 Caus: ${causalityPct}% \u00B7 PreR: ${preRingMs.toFixed(1)}ms \u00B7 Err: ${maxMagErr.toFixed(1)}dB \u00B7 GDr: ${gdRippleMs.toFixed(1)}ms`;
+      setStatus(`${taps} taps \u00B7 ${sampleRate / 1000}k \u00B7 ${window} \u00B7 ${phaseLabel}${peqInfo}${normLabel}${metricsLabel}`);
       requestAnimationFrame(() =>
         renderChart(freq, normModelMag, modelPhase, firResult.realized_mag, firResult.realized_phase)
       );
