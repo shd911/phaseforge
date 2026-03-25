@@ -275,11 +275,10 @@ function FilterBlock(props: FilterBlockProps) {
               class={`fb-link-btn ${props.linked ? "on" : ""}`}
               onClick={(e) => { e.stopPropagation(); props.onLinkToggle!(); }}
               title={props.linked ? "Unlink from next band" : "Link to next band"}
-              style={{ filter: props.linked ? "hue-rotate(90deg) saturate(2) brightness(1.5)" : "hue-rotate(-30deg) saturate(3) brightness(1.2)" }}
-            >🔗</button>
+            ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={props.linked ? "#22c55e" : "#ef4444"} stroke-width="2.5" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
           </Show>
           <Show when={!props.canLink && props.linked}>
-            <span class="fb-link-indicator" title="Linked to adjacent band" style={{ filter: "hue-rotate(90deg) saturate(2) brightness(1.5)" }}>🔗</span>
+            <span class="fb-link-indicator" title="Linked to adjacent band"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>
           </Show>
         </span>
         <button
