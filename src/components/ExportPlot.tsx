@@ -42,6 +42,11 @@ export default function ExportPlot() {
   const [cursorFirMag, setCursorFirMag] = createSignal("\u2014");
   const [hasData, setHasData] = createSignal(false);
   const [status, setStatus] = createSignal("");
+  const [metrics, setMetrics] = createSignal<{
+    taps: number; sampleRate: number; window: string; phaseLabel: string;
+    peqCount: number; normDb: number; causality: number;
+    preRingMs: number; maxMagErr: number; gdRippleMs: number;
+  } | null>(null);
 
   // Keep last rendered FIR data for snapshot capture
   const lastFirData: { freq: number[]; mag: number[]; phase: (number | null)[] } = { freq: [], mag: [], phase: [] };
@@ -554,14 +559,15 @@ export default function ExportPlot() {
         }
       }
 
-      const peqInfo = peqBands.length > 0 ? ` \u00B7 ${peqBands.length} PEQ` : "";
       const phaseLabel = allLinear ? "Linear-Phase" : "Min-Phase";
-      const normLabel = firResult.norm_db !== 0
-        ? ` \u00B7 Norm: ${firResult.norm_db > 0 ? "\u2212" : "+"}${Math.abs(firResult.norm_db).toFixed(1)} dB`
-        : "";
-      const causalityPct = Math.round(firResult.causality * 100);
-      const metricsLabel = ` \u00B7 Caus: ${causalityPct}% \u00B7 PreR: ${preRingMs.toFixed(1)}ms \u00B7 Err: ${maxMagErr.toFixed(1)}dB \u00B7 GDr: ${gdRippleMs.toFixed(1)}ms`;
-      setStatus(`${taps} taps \u00B7 ${sampleRate / 1000}k \u00B7 ${window} \u00B7 ${phaseLabel}${peqInfo}${normLabel}${metricsLabel}`);
+      setStatus(`${taps} taps \u00B7 ${sampleRate / 1000}k \u00B7 ${window} \u00B7 ${phaseLabel}`);
+      setMetrics({
+        taps, sampleRate, window, phaseLabel,
+        peqCount: peqBands.length,
+        normDb: firResult.norm_db,
+        causality: Math.round(firResult.causality * 100),
+        preRingMs, maxMagErr, gdRippleMs,
+      });
       requestAnimationFrame(() =>
         renderChart(freq, normModelMag, modelPhase, firResult.realized_mag, firResult.realized_phase)
       );
@@ -577,7 +583,7 @@ export default function ExportPlot() {
   });
 
   return (
-    <div class="plot-wrapper">
+    <div class="plot-wrapper" style={{ display: "flex", "flex-direction": "column", height: "100%" }}>
       <div class="impulse-toolbar">
         <span class="readout-item">
           <span class="readout-label">Freq:</span>
@@ -616,7 +622,8 @@ export default function ExportPlot() {
           {status() || "Filter Model vs FIR Realization"}
         </span>
       </div>
-      <div class="plot-body">
+      <div style={{ display: "flex", flex: "1", "min-height": "0" }}>
+      <div class="plot-body" style={{ flex: "1" }}>
         <div class="plot-center">
           <div ref={containerRef} class="frequency-plot" />
           {!hasData() && (
@@ -638,6 +645,57 @@ export default function ExportPlot() {
             <button class="axis-btn" onClick={() => zoomX(0.6)} title="Zoom In Freq">+</button>
           </div>
         </div>
+      </div>
+      {/* Right sidebar — FIR metrics */}
+      <div class="export-sidebar">
+        <Show when={metrics()} fallback={<div class="export-sidebar-empty">Generate FIR to see metrics</div>}>
+          {(() => {
+            const m = metrics()!;
+            return (
+              <>
+                <div class="export-section">
+                  <div class="export-section-title">Configuration</div>
+                  <div class="export-metric"><span class="export-metric-label">Taps</span><span class="export-metric-value">{m.taps}</span></div>
+                  <div class="export-metric"><span class="export-metric-label">Sample Rate</span><span class="export-metric-value">{m.sampleRate / 1000}k</span></div>
+                  <div class="export-metric"><span class="export-metric-label">Window</span><span class="export-metric-value">{m.window}</span></div>
+                  <div class="export-metric"><span class="export-metric-label">Phase</span><span class="export-metric-value">{m.phaseLabel}</span></div>
+                  <Show when={m.peqCount > 0}>
+                    <div class="export-metric"><span class="export-metric-label">PEQ Bands</span><span class="export-metric-value">{m.peqCount}</span></div>
+                  </Show>
+                </div>
+                <div class="export-section">
+                  <div class="export-section-title">Quality</div>
+                  <div class="export-metric">
+                    <span class="export-metric-label">Causality</span>
+                    <span class="export-metric-value" style={{ color: m.causality >= 80 ? "#4ade80" : m.causality >= 50 ? "#facc15" : "#f87171" }}>{m.causality}%</span>
+                  </div>
+                  <div class="export-metric">
+                    <span class="export-metric-label">Pre-ringing</span>
+                    <span class="export-metric-value" style={{ color: m.preRingMs < 2 ? "#4ade80" : m.preRingMs < 10 ? "#facc15" : "#f87171" }}>{m.preRingMs.toFixed(1)} ms</span>
+                  </div>
+                  <div class="export-metric">
+                    <span class="export-metric-label">Max Error</span>
+                    <span class="export-metric-value" style={{ color: m.maxMagErr < 0.5 ? "#4ade80" : m.maxMagErr < 2 ? "#facc15" : "#f87171" }}>{m.maxMagErr.toFixed(1)} dB</span>
+                  </div>
+                  <div class="export-metric">
+                    <span class="export-metric-label">GD Ripple</span>
+                    <span class="export-metric-value" style={{ color: m.gdRippleMs < 5 ? "#4ade80" : m.gdRippleMs < 20 ? "#facc15" : "#f87171" }}>{m.gdRippleMs.toFixed(1)} ms</span>
+                  </div>
+                </div>
+                <Show when={m.normDb !== 0}>
+                  <div class="export-section">
+                    <div class="export-section-title">Normalization</div>
+                    <div class="export-metric">
+                      <span class="export-metric-label">Gain</span>
+                      <span class="export-metric-value">{m.normDb > 0 ? "−" : "+"}{Math.abs(m.normDb).toFixed(1)} dB</span>
+                    </div>
+                  </div>
+                </Show>
+              </>
+            );
+          })()}
+        </Show>
+      </div>
       </div>
     </div>
   );
