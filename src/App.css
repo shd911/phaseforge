@@ -2406,4 +2406,7 @@ body {
 .peq-autofit-section { padding: 6px 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .peq-autofit-section .peq-grid { display: grid; grid-template-columns: 1fr; gap: 2px; }
 .peq-autofit-section .peq-buttons-row { display: flex; align-items: center; gap: 4px; margin-top: 4px; }
+.peq-auto-section .peq-grid { display: grid; grid-template-columns: 1fr; gap: 2px; }
+.peq-auto-section .peq-buttons-row { display: flex; align-items: center; gap: 4px; margin-top: 4px; }
+.peq-auto-section .peq-sidebar-header { margin-bottom: 4px; }
 .fb-hint { font-size: 9px; color: var(--text-secondary); padding: 2px 0 0; text-align: center; opacity: 0.7; }

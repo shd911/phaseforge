@@ -92,71 +92,10 @@ export default function PeqSidebar() {
         <span class="fb-title" style={{ "font-size": "11px" }}>PEQ Bands</span>
       </div>
 
-      {/* PEQ Auto-Fit (b82.06) */}
-      <Show when={band()?.measurement}>
-        <div class="peq-autofit-section">
-          <div class="peq-grid">
-            <div class="fb-row">
-              <label class="fb-label">Tolerance</label>
-              <NumberInput value={tolerance()} onChange={setTolerance} min={0.5} max={3.0} step={0.1} unit="dB" />
-            </div>
-            <div class="fb-row">
-              <label class="fb-label">Max bands</label>
-              <NumberInput value={maxBands()} onChange={(v: number) => setMaxBands(Math.round(v))} min={1} max={60} step={1} precision={0} />
-            </div>
-            <div class="fb-row">
-              <label class="fb-label">Regularization</label>
-              <NumberInput value={gainRegularization()} onChange={setGainRegularization} min={0} max={1} step={0.0001} precision={4} />
-            </div>
-            <div class="fb-row">
-              <label class="fb-label">Range</label>
-              <select
-                class="peq-range-select"
-                value={peqRangeMode()}
-                onChange={(e) => setPeqRangeMode(e.currentTarget.value as "auto" | "direct")}
-              >
-                <option value="auto">Auto</option>
-                <option value="direct">Direct</option>
-              </select>
-            </div>
-            {peqRangeMode() === "auto" ? (
-              <div class="fb-row">
-                <label class="fb-label" title="Don't place PEQ where target is this many dB below reference level">Floor dB</label>
-                <NumberInput value={peqFloor()} onChange={setPeqFloor} min={0} max={120} step={1} precision={0} />
-              </div>
-            ) : (
-              <div class="fb-row">
-                <label class="fb-label">Hz</label>
-                <NumberInput value={peqDirectLow()} onChange={setPeqDirectLow} min={20} max={20000} step={10} precision={0} />
-                <span style={{ margin: "0 2px", color: "#8b8b96" }}>–</span>
-                <NumberInput value={peqDirectHigh()} onChange={setPeqDirectHigh} min={20} max={20000} step={10} precision={0} />
-              </div>
-            )}
-          </div>
-          <div class="peq-buttons-row">
-            <span class="align-range-info">{formatFreq(peqRange()[0])}{"\u2013"}{formatFreq(peqRange()[1])} Hz</span>
-            <button class="tb-btn primary" onClick={handleOptimizePeq} disabled={computing()}>
-              {computing() ? "..." : "Optimize"}
-            </button>
-            <Show when={peqBands().length > 0}>
-              <button class="tb-btn" onClick={handleClearPeq}>Clear</button>
-            </Show>
-          </div>
-          <Show when={peqError()}><div class="align-error">{peqError()}</div></Show>
-          <Show when={peqBands().length > 0}>
-            <div class="align-status">
-              {peqBands().length} band{peqBands().length > 1 ? "s" : ""}
-              {maxErr() != null ? ` \u00B7 max: ${maxErr()!.toFixed(1)}dB` : ""}
-              {iters() != null ? ` \u00B7 ${iters()}it` : ""}
-            </div>
-          </Show>
-        </div>
-      </Show>
-
-      {/* Exclusion Zones */}
+      {/* Exclusion Zones — yellow */}
       <Show when={band()?.measurement}>
         <div class="peq-exclusion-section">
-          <div class="peq-sidebar-header" style={{ "margin-top": "6px" }}>
+          <div class="peq-sidebar-header">
             <span class="fb-title" style={{ "font-size": "11px" }}>Exclude</span>
             <button
               class="peq-add-btn"
@@ -213,32 +152,111 @@ export default function PeqSidebar() {
         </div>
       </Show>
 
-      {/* Add manual PEQ band — between exclusion zones and PEQ table */}
+      {/* Manual PEQ — blue: add button + pending/manual bands */}
       <div class="peq-manual-section">
-      <div class="peq-sidebar-header">
-        <span class="fb-title" style={{ "font-size": "10px" }}>Manual</span>
-        <button
-          class="peq-add-btn"
-          onClick={() => {
-            const b = band();
-            if (b) {
-              if (pendingPeqIdx() != null) {
-                commitPeqBand(b.id, pendingPeqIdx()!);
+        <div class="peq-sidebar-header">
+          <span class="fb-title" style={{ "font-size": "11px" }}>Manual</span>
+          <button
+            class="peq-add-btn"
+            onClick={() => {
+              const b = band();
+              if (b) {
+                if (pendingPeqIdx() != null) {
+                  commitPeqBand(b.id, pendingPeqIdx()!);
+                }
+                addPeqBand(b.id, { freq_hz: 1000, gain_db: 0, q: 2.0, enabled: true, filter_type: "Peaking" });
+                setPendingPeqIdx(0);
+                setSelectedPeqIdx(0);
               }
-              addPeqBand(b.id, { freq_hz: 1000, gain_db: 0, q: 2.0, enabled: true, filter_type: "Peaking" });
-              setPendingPeqIdx(0);
-              setSelectedPeqIdx(0);
-            }
-          }}
-          title="Add manual PEQ band"
-        >+</button>
-      </div>
+            }}
+            title="Add manual PEQ band"
+          >+</button>
+        </div>
+        <Show when={pendingPeqIdx() != null && peqBands().length > 0}>
+          {(() => {
+            const pi = pendingPeqIdx()!;
+            const pb = peqBands()[pi];
+            if (!pb) return null;
+            return (
+              <table class="peq-table"><tbody>
+                <tr class="peq-row-pending peq-row-selected" onClick={() => setSelectedPeqIdx(pi)}>
+                  <td><input type="checkbox" class="peq-toggle" checked={pb.enabled} onChange={() => { const bd = band(); if (bd) updatePeqBand(bd.id, pi, { enabled: !pb.enabled }); }} /></td>
+                  <td><select class="peq-type-select" value={pb.filter_type} onChange={(e) => { const bd = band(); if (bd) updatePeqBand(bd.id, pi, { filter_type: e.currentTarget.value as any }); }}><option value="Peaking">PK</option><option value="LowShelf">LS</option><option value="HighShelf">HS</option></select></td>
+                  <td><NumberInput value={pb.freq_hz} onChange={(v) => { const bd = band(); if (bd) updatePeqBand(bd.id, pi, { freq_hz: v }); }} min={20} max={20000} step={(d) => d > 0 ? Math.max(1, Math.round(pb.freq_hz * 0.02)) : -Math.max(1, Math.round(pb.freq_hz * 0.02))} precision={0} /></td>
+                  <td><NumberInput value={pb.gain_db} onChange={(v) => { const bd = band(); if (bd) updatePeqBand(bd.id, pi, { gain_db: v }); }} min={-60} max={60} step={0.1} precision={1} /></td>
+                  <td><NumberInput value={pb.q} onChange={(v) => { const bd = band(); if (bd) updatePeqBand(bd.id, pi, { q: v }); }} min={0.1} max={20} step={0.1} precision={1} /></td>
+                  <td><button class="peq-commit" onClick={() => { const bd = band(); if (bd) { const ni = commitPeqBand(bd.id, pi); setPendingPeqIdx(null); setSelectedPeqIdx(ni); } }}>✓</button></td>
+                </tr>
+              </tbody></table>
+            );
+          })()}
+        </Show>
       </div>
 
-      {/* PEQ Table — auto-generated bands */}
-      <Show when={peqBands().length > 0}>
+      {/* Auto Optimizer — green: controls + auto-generated bands */}
+      <Show when={band()?.measurement}>
         <div class="peq-auto-section">
-        <div class="peq-sidebar-table-scroll">
+          <div class="peq-sidebar-header">
+            <span class="fb-title" style={{ "font-size": "11px" }}>Auto Optimizer</span>
+          </div>
+          <div class="peq-grid">
+            <div class="fb-row">
+              <label class="fb-label">Tolerance</label>
+              <NumberInput value={tolerance()} onChange={setTolerance} min={0.5} max={3.0} step={0.1} unit="dB" />
+            </div>
+            <div class="fb-row">
+              <label class="fb-label">Max bands</label>
+              <NumberInput value={maxBands()} onChange={(v: number) => setMaxBands(Math.round(v))} min={1} max={60} step={1} precision={0} />
+            </div>
+            <div class="fb-row">
+              <label class="fb-label">Regularization</label>
+              <NumberInput value={gainRegularization()} onChange={setGainRegularization} min={0} max={1} step={0.0001} precision={4} />
+            </div>
+            <div class="fb-row">
+              <label class="fb-label">Range</label>
+              <select
+                class="peq-range-select"
+                value={peqRangeMode()}
+                onChange={(e) => setPeqRangeMode(e.currentTarget.value as "auto" | "direct")}
+              >
+                <option value="auto">Auto</option>
+                <option value="direct">Direct</option>
+              </select>
+            </div>
+            {peqRangeMode() === "auto" ? (
+              <div class="fb-row">
+                <label class="fb-label" title="Don't place PEQ where target is this many dB below reference level">Floor dB</label>
+                <NumberInput value={peqFloor()} onChange={setPeqFloor} min={0} max={120} step={1} precision={0} />
+              </div>
+            ) : (
+              <div class="fb-row">
+                <label class="fb-label">Hz</label>
+                <NumberInput value={peqDirectLow()} onChange={setPeqDirectLow} min={20} max={20000} step={10} precision={0} />
+                <span style={{ margin: "0 2px", color: "#8b8b96" }}>–</span>
+                <NumberInput value={peqDirectHigh()} onChange={setPeqDirectHigh} min={20} max={20000} step={10} precision={0} />
+              </div>
+            )}
+          </div>
+          <div class="peq-buttons-row">
+            <span class="align-range-info">{formatFreq(peqRange()[0])}{"\u2013"}{formatFreq(peqRange()[1])} Hz</span>
+            <button class="tb-btn primary" onClick={handleOptimizePeq} disabled={computing()}>
+              {computing() ? "..." : "Optimize"}
+            </button>
+            <Show when={peqBands().length > 0}>
+              <button class="tb-btn" onClick={handleClearPeq}>Clear</button>
+            </Show>
+          </div>
+          <Show when={peqError()}><div class="align-error">{peqError()}</div></Show>
+          <Show when={peqBands().length > 0}>
+            <div class="align-status">
+              {peqBands().length} band{peqBands().length > 1 ? "s" : ""}
+              {maxErr() != null ? ` \u00B7 max: ${maxErr()!.toFixed(1)}dB` : ""}
+              {iters() != null ? ` \u00B7 ${iters()}it` : ""}
+            </div>
+          </Show>
+          {/* Auto bands table */}
+          <Show when={peqBands().length > 0}>
+            <div class="peq-sidebar-table-scroll">
           <table class="peq-table">
             <thead>
               <tr>
@@ -378,7 +396,8 @@ export default function PeqSidebar() {
               })}
             </tbody>
           </table>
-        </div>
+            </div>
+          </Show>
         </div>
       </Show>
 
