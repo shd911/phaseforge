@@ -371,13 +371,19 @@ export default function ExportImpulsePlot() {
     };
     const target = { ...band.target };
     const peqBands = band.peqBands?.filter((b: PeqBand) => b.enabled) ?? [];
+    const measSnap = band.measurement?.phase ? {
+      freq: [...band.measurement.freq],
+      magnitude: [...band.measurement.magnitude],
+      phase: [...band.measurement.phase],
+    } : null;
+
     // Reset scales when FIR config changes (taps, SR, window)
     const configChanged = taps !== prevTaps || sr !== prevSR || win !== prevWin;
     prevTaps = taps;
     prevSR = sr;
     prevWin = win;
 
-    computeAndRender(target, peqBands, sr, taps, win, configChanged, firOpts);
+    computeAndRender(target, peqBands, sr, taps, win, configChanged, firOpts, measSnap);
   });
 
   async function computeAndRender(
@@ -388,6 +394,7 @@ export default function ExportImpulsePlot() {
     window: string,
     resetScales: boolean = false,
     firOpts: { maxBoost: number; noiseFloor: number; iterations: number; freqWeighting: boolean; narrowbandLimit: boolean; nbSmoothingOct: number; nbMaxExcess: number } = { maxBoost: 24, noiseFloor: -150, iterations: 3, freqWeighting: true, narrowbandLimit: true, nbSmoothingOct: 0.333, nbMaxExcess: 6 },
+    measSnap: { freq: number[]; magnitude: number[]; phase: number[] } | null = null,
   ) {
     try {
       // 1. Evaluate pure target
@@ -437,8 +444,24 @@ export default function ExportImpulsePlot() {
         config: firConfig,
       });
 
-      const corrTime: number[] | null = null;
-      const corrImpulse: number[] | null = null;
+      // Compute corrected impulse via Rust (full-resolution FFT)
+      let corrTime: number[] | null = null;
+      let corrImpulse: number[] | null = null;
+      if (measSnap) {
+        try {
+          const corrResult = await invoke<{ time: number[]; impulse: number[]; step: number[] }>("compute_corrected_impulse", {
+            measFreq: measSnap.freq,
+            measMag: measSnap.magnitude,
+            measPhase: measSnap.phase,
+            realizedMag: firResult.realized_mag,
+            realizedPhase: firResult.realized_phase,
+            firFreq: freq,
+            sampleRate,
+          });
+          corrTime = corrResult.time.map(t => t * 1000);
+          corrImpulse = corrResult.impulse;
+        } catch (e) { console.warn("Corrected impulse failed:", e); }
+      }
 
       // HP frequency for masking zone
       const hpFreq = target.high_pass?.freq_hz ?? 20;
@@ -477,6 +500,11 @@ export default function ExportImpulsePlot() {
           onClick={() => setShowFir(!showFir())}
           style={{ color: FIR_IMPULSE_COLOR, "font-size": "9px", padding: "1px 4px" }}
         >FIR</button>
+        <button
+          class={`tb-btn ${showCorrected() ? "active" : ""}`}
+          onClick={() => setShowCorrected(!showCorrected())}
+          style={{ color: CORRECTED_IMPULSE_COLOR, "font-size": "9px", padding: "1px 4px" }}
+        >Corr</button>
         <button
           class={`tb-btn ${showMasking() ? "active" : ""}`}
           onClick={() => setShowMasking(!showMasking())}
