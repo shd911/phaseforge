@@ -436,6 +436,7 @@ export default function ExportImpulsePlot() {
       // corrected_phase[i] = interp(meas_phase, freq[i]) + realized_phase[i]
       let corrTime: number[] | null = null;
       let corrImpulse: number[] | null = null;
+      console.log("[ExportImpulse] measSnap:", measSnap ? `${measSnap.freq.length} pts` : "null");
       if (measSnap) {
         try {
           const mFreq = measSnap.freq;
@@ -452,11 +453,12 @@ export default function ExportImpulsePlot() {
           };
           const corrMag = freq.map((f, i) => interpAt(mFreq, mMag, f) + (firResult.realized_mag[i] ?? 0));
           const corrPh = freq.map((f, i) => interpAt(mFreq, mPh, f) + (firResult.realized_phase[i] ?? 0));
-          const corrResult = await invoke<{ time_ms: number[]; impulse: number[] }>("compute_impulse", {
+          const corrResult = await invoke<{ time: number[]; impulse: number[] }>("compute_impulse", {
             freq, magnitude: corrMag, phase: corrPh, sampleRate,
           });
-          corrTime = corrResult.time_ms;
+          corrTime = corrResult.time.map(t => t * 1000); // seconds → ms
           corrImpulse = corrResult.impulse;
+          console.log("[ExportImpulse] corrected impulse computed:", corrImpulse.length, "samples");
         } catch (e) { console.warn("Corrected impulse failed:", e); }
       }
 
