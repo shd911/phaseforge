@@ -131,9 +131,9 @@ export default function ExportImpulsePlot() {
     const normFir = impulse.map(v => v / peak);
     const peakTimeMs = time[peakIdx];
 
-    // Normalize corrected impulse (if present)
+    // Normalize corrected impulse (if present) — always compute, toggle via show flag
     let normCorr: number[] | null = null;
-    if (correctedTime && correctedImpulse && showCorrected()) {
+    if (correctedTime && correctedImpulse) {
       let cPeak = 0;
       for (const v of correctedImpulse) { const a = Math.abs(v); if (a > cPeak) cPeak = a; }
       if (cPeak < 1e-20) cPeak = 1;
@@ -169,23 +169,32 @@ export default function ExportImpulsePlot() {
     });
     uDataArr.push(trimFir);
 
-    // Corrected impulse
+    // Corrected impulse (meas+FIR) — align peaks, then resample onto FIR time grid
     if (normCorr && correctedTime) {
-      // Resample corrected onto same time grid
+      // Find peak of corrected impulse
+      let cPeakIdx = 0, cPeakVal = 0;
+      for (let i = 0; i < normCorr.length; i++) {
+        if (Math.abs(normCorr[i]) > cPeakVal) { cPeakVal = Math.abs(normCorr[i]); cPeakIdx = i; }
+      }
+      const cPeakTime = correctedTime[cPeakIdx];
+      // Shift: align corrected peak to FIR peak
+      const timeShift = peakTimeMs - cPeakTime;
+      const shiftedTime = correctedTime.map(t => t + timeShift);
+
+      // Resample shifted corrected onto FIR time grid
       const trimCorr = trimTime.map(t => {
-        // Find nearest in correctedTime
-        let lo = 0, hi = correctedTime.length - 1;
-        if (t <= correctedTime[0]) return normCorr![0];
-        if (t >= correctedTime[hi]) return normCorr![hi];
+        if (t <= shiftedTime[0]) return 0;
+        if (t >= shiftedTime[shiftedTime.length - 1]) return 0;
+        let lo = 0, hi = shiftedTime.length - 1;
         while (hi - lo > 1) {
           const mid = (lo + hi) >> 1;
-          if (correctedTime[mid] <= t) lo = mid; else hi = mid;
+          if (shiftedTime[mid] <= t) lo = mid; else hi = mid;
         }
-        const frac = (t - correctedTime[lo]) / (correctedTime[hi] - correctedTime[lo]);
+        const frac = (t - shiftedTime[lo]) / (shiftedTime[hi] - shiftedTime[lo]);
         return normCorr![lo] + frac * (normCorr![hi] - normCorr![lo]);
       });
       uSeries.push({
-        label: "Measurement",
+        label: "Corrected",
         stroke: CORRECTED_IMPULSE_COLOR,
         width: 1.5,
         scale: "amp",
@@ -431,20 +440,35 @@ export default function ExportImpulsePlot() {
         config: firConfig,
       });
 
-      // Compute measurement impulse (before correction) for comparison
+      // Compute corrected impulse: measurement convolved with FIR
+      // In frequency domain: corrected = meas_spectrum × FIR_spectrum
+      // mag(dB) = meas_mag + realized_mag,  phase = meas_phase + realized_phase
       let corrTime: number[] | null = null;
       let corrImpulse: number[] | null = null;
       if (measSnap) {
         try {
-          const measResult = await invoke<{ time: number[]; impulse: number[]; step: number[] }>("compute_impulse", {
-            freq: measSnap.freq,
-            magnitude: measSnap.magnitude,
-            phase: measSnap.phase,
-            sampleRate,
+          const mFreq = measSnap.freq;
+          const mMag = measSnap.magnitude;
+          const mPh = measSnap.phase;
+          // Interpolate measurement onto FIR freq grid (512 pts)
+          const interpAt = (srcF: number[], srcD: number[], f: number): number => {
+            if (srcF.length === 0) return 0;
+            if (f <= srcF[0]) return srcD[0];
+            if (f >= srcF[srcF.length - 1]) return srcD[srcF.length - 1];
+            let lo = 0, hi = srcF.length - 1;
+            while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (srcF[mid] <= f) lo = mid; else hi = mid; }
+            const t = (f - srcF[lo]) / (srcF[hi] - srcF[lo]);
+            return srcD[lo] + t * (srcD[hi] - srcD[lo]);
+          };
+          // meas + FIR realized = corrected spectrum
+          const corrMag = freq.map((f, i) => interpAt(mFreq, mMag, f) + firResult.realized_mag[i]);
+          const corrPh = freq.map((f, i) => interpAt(mFreq, mPh, f) + firResult.realized_phase[i]);
+          const corrResult = await invoke<{ time: number[]; impulse: number[]; step: number[] }>("compute_impulse", {
+            freq, magnitude: corrMag, phase: corrPh, sampleRate,
           });
-          corrTime = measResult.time.map(t => t * 1000);
-          corrImpulse = measResult.impulse;
-        } catch (e) { console.warn("Measurement impulse failed:", e); }
+          corrTime = corrResult.time.map(t => t * 1000);
+          corrImpulse = corrResult.impulse;
+        } catch (e) { console.warn("Corrected impulse failed:", e); }
       }
 
       // HP frequency for masking zone
@@ -488,7 +512,7 @@ export default function ExportImpulsePlot() {
           class={`tb-btn ${showCorrected() ? "active" : ""}`}
           onClick={() => setShowCorrected(!showCorrected())}
           style={{ color: CORRECTED_IMPULSE_COLOR, "font-size": "9px", padding: "1px 4px" }}
-        >Meas</button>
+        >Corr</button>
         <button
           class={`tb-btn ${showMasking() ? "active" : ""}`}
           onClick={() => setShowMasking(!showMasking())}
