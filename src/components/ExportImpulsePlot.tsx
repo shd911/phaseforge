@@ -260,21 +260,26 @@ export default function ExportImpulsePlot() {
             const plotLeftEdge = plotLeft;
 
             ctx.save();
-            // Green masking zone (safe pre-ringing)
-            if (maskStartX > plotLeftEdge) {
+            // Clamp masking start to visible area
+            const clampedMaskStart = Math.max(maskStartX, plotLeftEdge);
+
+            // Green masking zone (safe pre-ringing): from maskStart (or left edge) to peak
+            if (peakX > clampedMaskStart) {
               ctx.fillStyle = MASKING_ZONE_COLOR;
-              ctx.fillRect(Math.max(maskStartX, plotLeftEdge), plotTop, peakX - Math.max(maskStartX, plotLeftEdge), plotHeight);
-              // Border
-              ctx.strokeStyle = MASKING_BORDER_COLOR;
-              ctx.lineWidth = 1;
-              ctx.setLineDash([4, 4]);
-              ctx.beginPath();
-              ctx.moveTo(maskStartX, plotTop);
-              ctx.lineTo(maskStartX, plotTop + plotHeight);
-              ctx.stroke();
-              ctx.setLineDash([]);
+              ctx.fillRect(clampedMaskStart, plotTop, peakX - clampedMaskStart, plotHeight);
+              // Border at masking boundary (only if visible)
+              if (maskStartX > plotLeftEdge) {
+                ctx.strokeStyle = MASKING_BORDER_COLOR;
+                ctx.lineWidth = 1;
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath();
+                ctx.moveTo(maskStartX, plotTop);
+                ctx.lineTo(maskStartX, plotTop + plotHeight);
+                ctx.stroke();
+                ctx.setLineDash([]);
+              }
             }
-            // Red danger zone (audible pre-ringing)
+            // Red danger zone (audible pre-ringing): left of masking zone
             if (maskStartX > plotLeftEdge + 2) {
               ctx.fillStyle = PRE_RING_ZONE_COLOR;
               ctx.fillRect(plotLeftEdge, plotTop, maskStartX - plotLeftEdge, plotHeight);
