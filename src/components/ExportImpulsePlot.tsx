@@ -357,6 +357,12 @@ export default function ExportImpulsePlot() {
     };
     const target = { ...band.target };
     const peqBands = band.peqBands?.filter((b: PeqBand) => b.enabled) ?? [];
+    // Snapshot measurement data synchronously (won't be tracked inside async)
+    const measSnap = band.measurement?.phase ? {
+      freq: [...band.measurement.freq],
+      magnitude: [...band.measurement.magnitude],
+      phase: [...band.measurement.phase],
+    } : null;
 
     // Reset scales when FIR config changes (taps, SR, window)
     const configChanged = taps !== prevTaps || sr !== prevSR || win !== prevWin;
@@ -364,7 +370,7 @@ export default function ExportImpulsePlot() {
     prevSR = sr;
     prevWin = win;
 
-    computeAndRender(target, peqBands, sr, taps, win, configChanged, firOpts);
+    computeAndRender(target, peqBands, sr, taps, win, configChanged, firOpts, measSnap);
   });
 
   async function computeAndRender(
@@ -375,6 +381,7 @@ export default function ExportImpulsePlot() {
     window: string,
     resetScales: boolean = false,
     firOpts: { maxBoost: number; noiseFloor: number; iterations: number; freqWeighting: boolean; narrowbandLimit: boolean; nbSmoothingOct: number; nbMaxExcess: number } = { maxBoost: 24, noiseFloor: -150, iterations: 3, freqWeighting: true, narrowbandLimit: true, nbSmoothingOct: 0.333, nbMaxExcess: 6 },
+    measSnap: { freq: number[]; magnitude: number[]; phase: number[] } | null = null,
   ) {
     try {
       // 1. Evaluate pure target
@@ -429,12 +436,11 @@ export default function ExportImpulsePlot() {
       // corrected_phase[i] = interp(meas_phase, freq[i]) + realized_phase[i]
       let corrTime: number[] | null = null;
       let corrImpulse: number[] | null = null;
-      const band = activeBand();
-      if (band?.measurement?.phase) {
+      if (measSnap) {
         try {
-          const mFreq = band.measurement!.freq;
-          const mMag = band.measurement!.magnitude;
-          const mPh = band.measurement!.phase!;
+          const mFreq = measSnap.freq;
+          const mMag = measSnap.magnitude;
+          const mPh = measSnap.phase;
           // Interpolate measurement onto FIR freq grid
           const interpAt = (srcF: number[], srcD: number[], f: number): number => {
             if (f <= srcF[0]) return srcD[0];
