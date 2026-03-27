@@ -18,6 +18,10 @@ import {
 } from "../stores/bands";
 
 const FIR_IMPULSE_COLOR = "#38BDF8"; // light blue
+const CORRECTED_IMPULSE_COLOR = "#4ade80"; // green — measurement + FIR
+const MASKING_ZONE_COLOR = "rgba(34, 197, 94, 0.08)";
+const MASKING_BORDER_COLOR = "rgba(34, 197, 94, 0.25)";
+const PRE_RING_ZONE_COLOR = "rgba(239, 68, 68, 0.08)";
 
 export default function ExportImpulsePlot() {
   let containerRef!: HTMLDivElement;
@@ -27,6 +31,9 @@ export default function ExportImpulsePlot() {
   const [cursorAmp, setCursorAmp] = createSignal("—");
   const [hasData, setHasData] = createSignal(false);
   const [info, setInfo] = createSignal("");
+  const [showFir, setShowFir] = createSignal(true);
+  const [showCorrected, setShowCorrected] = createSignal(true);
+  const [showMasking, setShowMasking] = createSignal(true);
 
   // Track actual data range for fitData
   let dataXMin = -0.5;
@@ -91,26 +98,20 @@ export default function ExportImpulsePlot() {
     c.setScale("amp", { min: curAmpMin, max: curAmpMax });
   }
 
-  function renderChart(time: number[], impulse: number[], normDb: number, phaseLabel?: string, resetScales: boolean = false) {
+  // Masking duration in ms for pre-ringing based on HP frequency
+  let maskingMs = 0;
+
+  function renderChart(
+    time: number[], impulse: number[],
+    correctedTime: number[] | null, correctedImpulse: number[] | null,
+    hpFreq: number,
+    normDb: number, phaseLabel?: string, resetScales: boolean = false,
+  ) {
     if (!containerRef) return;
 
-    // Save current scales (only when not resetting due to config change)
-    let savedXMin: number | null = null;
-    let savedXMax: number | null = null;
-    let savedYMin: number | null = null;
-    let savedYMax: number | null = null;
-    if (chartRef.current && !resetScales) {
-      const xs = chartRef.current.scales["x"];
-      if (xs?.min != null && xs?.max != null) {
-        savedXMin = xs.min;
-        savedXMax = xs.max;
-      }
-      const ys = chartRef.current.scales["amp"];
-      if (ys?.min != null && ys?.max != null) {
-        savedYMin = ys.min;
-        savedYMax = ys.max;
-      }
-    }
+    // Compute masking duration: ~1.5 periods of HP cutoff frequency
+    maskingMs = hpFreq > 0 ? (1.5 / hpFreq) * 1000 : 20;
+
     if (chartRef.current) {
       chartRef.current.destroy();
       chartRef.current = undefined;
@@ -120,121 +121,163 @@ export default function ExportImpulsePlot() {
     const w = Math.max(rect.width, 200);
     const h = Math.max(rect.height, 80);
 
-    // Find peak position and normalize
-    let peak = 0;
-    let peakIdx = 0;
+    // Normalize FIR impulse
+    let peak = 0, peakIdx = 0;
     for (let i = 0; i < impulse.length; i++) {
       const a = Math.abs(impulse[i]);
       if (a > peak) { peak = a; peakIdx = i; }
     }
     if (peak < 1e-20) peak = 1;
-    const norm = impulse.map((v) => v / peak);
+    const normFir = impulse.map(v => v / peak);
+    const peakTimeMs = time[peakIdx];
 
-    // Find significant range: first and last sample above -60dB
-    const threshold = peak * 0.001; // -60dB
-    let firstSig = peakIdx;
-    let lastSig = peakIdx;
-    for (let i = 0; i < impulse.length; i++) {
-      if (Math.abs(impulse[i]) > threshold) {
-        firstSig = i;
-        break;
-      }
-    }
-    for (let i = impulse.length - 1; i >= 0; i--) {
-      if (Math.abs(impulse[i]) > threshold) {
-        lastSig = i;
-        break;
-      }
+    // Normalize corrected impulse (if present)
+    let normCorr: number[] | null = null;
+    if (correctedTime && correctedImpulse && showCorrected()) {
+      let cPeak = 0;
+      for (const v of correctedImpulse) { const a = Math.abs(v); if (a > cPeak) cPeak = a; }
+      if (cPeak < 1e-20) cPeak = 1;
+      normCorr = correctedImpulse.map(v => v / cPeak);
     }
 
-    // Show window: peak at ~25% from left edge, pre-ringing always visible
+    // Find significant range
+    const threshold = peak * 0.001;
+    let firstSig = peakIdx, lastSig = peakIdx;
+    for (let i = 0; i < impulse.length; i++) { if (Math.abs(impulse[i]) > threshold) { firstSig = i; break; } }
+    for (let i = impulse.length - 1; i >= 0; i--) { if (Math.abs(impulse[i]) > threshold) { lastSig = i; break; } }
+
     const sigLen = lastSig - firstSig;
-    const viewLen = Math.max(sigLen * 1.3, 256); // minimum 256 samples
-    const prePeak = Math.ceil(viewLen * 0.25); // 25% before peak
+    const viewLen = Math.max(sigLen * 1.3, 256);
+    const prePeak = Math.ceil(viewLen * 0.25);
     const startIdx = Math.max(0, peakIdx - prePeak);
     const endIdx = Math.min(impulse.length, startIdx + Math.ceil(viewLen));
 
     const trimTime = time.slice(startIdx, endIdx);
-    const trimNorm = norm.slice(startIdx, endIdx);
+    const trimFir = normFir.slice(startIdx, endIdx);
 
-    const uData: uPlot.AlignedData = [trimTime, trimNorm];
+    // Build series & data
+    const uSeries: uPlot.Series[] = [{}];
+    const uDataArr: (number | null)[][] = [trimTime];
 
-    // Compute natural fit ranges from trimmed data
-    const fitXMin = trimTime[0] - 0.5;
-    const fitXMax = trimTime[trimTime.length - 1] + 0.5;
-    let normMin = 0, normMax = 0;
-    for (const v of trimNorm) { if (v < normMin) normMin = v; if (v > normMax) normMax = v; }
-    const fitYPad = Math.max(0.1, (normMax - normMin) * 0.1);
-    const fitYMin = normMin - fitYPad;
-    const fitYMax = normMax + fitYPad;
+    // FIR impulse
+    uSeries.push({
+      label: "FIR",
+      stroke: FIR_IMPULSE_COLOR,
+      width: 1.5,
+      scale: "amp",
+      show: showFir(),
+    });
+    uDataArr.push(trimFir);
 
-    // Store for fitData button
-    dataXMin = fitXMin;
-    dataXMax = fitXMax;
-    dataYMin = fitYMin;
-    dataYMax = fitYMax;
+    // Corrected impulse
+    if (normCorr && correctedTime) {
+      // Resample corrected onto same time grid
+      const trimCorr = trimTime.map(t => {
+        // Find nearest in correctedTime
+        let lo = 0, hi = correctedTime.length - 1;
+        if (t <= correctedTime[0]) return normCorr![0];
+        if (t >= correctedTime[hi]) return normCorr![hi];
+        while (hi - lo > 1) {
+          const mid = (lo + hi) >> 1;
+          if (correctedTime[mid] <= t) lo = mid; else hi = mid;
+        }
+        const frac = (t - correctedTime[lo]) / (correctedTime[hi] - correctedTime[lo]);
+        return normCorr![lo] + frac * (normCorr![hi] - normCorr![lo]);
+      });
+      uSeries.push({
+        label: "Corrected",
+        stroke: CORRECTED_IMPULSE_COLOR,
+        width: 1.5,
+        scale: "amp",
+        show: showCorrected(),
+      });
+      uDataArr.push(trimCorr);
+    }
 
-    // Check if saved scales are within trimmed data range (otherwise discard)
-    const savedXValid = savedXMin != null && savedXMax != null &&
-      savedXMax > fitXMin && savedXMin < fitXMax;
-    const xMin = savedXValid ? savedXMin! : fitXMin;
-    const xMax = savedXValid ? savedXMax! : fitXMax;
-    const yMin = savedYMin ?? fitYMin;
-    const yMax = savedYMax ?? fitYMax;
-    curAmpMin = yMin;
-    curAmpMax = yMax;
+    const uData = uDataArr as uPlot.AlignedData;
+
+    // Fit ranges
+    let yMin = 0, yMax = 0;
+    for (const arr of uDataArr.slice(1)) {
+      for (const v of arr) { if (v != null) { if (v < yMin) yMin = v; if (v > yMax) yMax = v; } }
+    }
+    const fitYPad = Math.max(0.1, (yMax - yMin) * 0.1);
+    dataXMin = trimTime[0] - 0.5;
+    dataXMax = trimTime[trimTime.length - 1] + 0.5;
+    dataYMin = yMin - fitYPad;
+    dataYMax = yMax + fitYPad;
+    curAmpMin = resetScales ? dataYMin : curAmpMin || dataYMin;
+    curAmpMax = resetScales ? dataYMax : curAmpMax || dataYMax;
 
     const opts: uPlot.Options = {
-      width: w,
-      height: h,
-      series: [
-        {},
-        {
-          label: "Impulse",
-          stroke: FIR_IMPULSE_COLOR,
-          width: 1.5,
-          scale: "amp",
-        },
-      ],
+      width: w, height: h,
+      series: uSeries,
       scales: {
-        x: { min: xMin, max: xMax },
-        amp: {
-          auto: false,
-          range: () => [curAmpMin, curAmpMax] as uPlot.Range.MinMax,
-        },
+        x: { min: dataXMin, max: dataXMax },
+        amp: { auto: false, range: () => [curAmpMin, curAmpMax] as uPlot.Range.MinMax },
       },
       axes: [
         {
-          label: "ms",
-          stroke: "#8b8b96",
-          grid: { stroke: "rgba(255,255,255,0.06)" },
-          ticks: { stroke: "rgba(255,255,255,0.12)" },
-          values: (_u: uPlot, vals: number[]) =>
-            vals.map((v) => (v == null ? "" : v.toFixed(1))),
+          label: "ms", stroke: "#9b9ba6",
+          grid: { stroke: "rgba(255,255,255,0.12)" },
+          ticks: { stroke: "rgba(255,255,255,0.20)" },
+          values: (_u: uPlot, vals: number[]) => vals.map(v => v == null ? "" : v.toFixed(1)),
         },
         {
-          label: "Amp",
-          scale: "amp",
-          stroke: "#8b8b96",
-          grid: { stroke: "rgba(255,255,255,0.06)" },
-          ticks: { stroke: "rgba(255,255,255,0.12)" },
-          values: (_u: uPlot, vals: number[]) =>
-            vals.map((v) => (v == null ? "" : v.toFixed(2))),
+          label: "Amp", scale: "amp", stroke: "#9b9ba6",
+          grid: { stroke: "rgba(255,255,255,0.12)" },
+          ticks: { stroke: "rgba(255,255,255,0.20)" },
+          values: (_u: uPlot, vals: number[]) => vals.map(v => v == null ? "" : v.toFixed(2)),
           size: 56,
         },
       ],
       legend: { show: false },
-      cursor: {
-        drag: { x: false, y: false, setScale: false },
-      },
+      cursor: { drag: { x: false, y: false, setScale: false } },
       hooks: {
+        draw: [
+          // Pre-ringing masking zone overlay
+          (u: uPlot) => {
+            if (!showMasking()) return;
+            const ctx = u.ctx;
+            const plotLeft = u.bbox.left;
+            const plotTop = u.bbox.top;
+            const plotHeight = u.bbox.height;
+
+            // Peak position
+            const peakX = u.valToPos(peakTimeMs, "x", true);
+            // Masking zone: peakTime - maskingMs .. peakTime
+            const maskStartX = u.valToPos(peakTimeMs - maskingMs, "x", true);
+            // Pre-ring danger zone: everything before masking zone
+            const plotLeftEdge = plotLeft;
+
+            ctx.save();
+            // Green masking zone (safe pre-ringing)
+            if (maskStartX > plotLeftEdge) {
+              ctx.fillStyle = MASKING_ZONE_COLOR;
+              ctx.fillRect(Math.max(maskStartX, plotLeftEdge), plotTop, peakX - Math.max(maskStartX, plotLeftEdge), plotHeight);
+              // Border
+              ctx.strokeStyle = MASKING_BORDER_COLOR;
+              ctx.lineWidth = 1;
+              ctx.setLineDash([4, 4]);
+              ctx.beginPath();
+              ctx.moveTo(maskStartX, plotTop);
+              ctx.lineTo(maskStartX, plotTop + plotHeight);
+              ctx.stroke();
+              ctx.setLineDash([]);
+            }
+            // Red danger zone (audible pre-ringing)
+            if (maskStartX > plotLeftEdge + 2) {
+              ctx.fillStyle = PRE_RING_ZONE_COLOR;
+              ctx.fillRect(plotLeftEdge, plotTop, maskStartX - plotLeftEdge, plotHeight);
+            }
+            ctx.restore();
+          },
+        ],
         setCursor: [
           (u: uPlot) => {
             const idx = u.cursor.idx;
             if (idx == null || idx < 0 || idx >= u.data[0].length) {
-              setCursorTime("—");
-              setCursorAmp("—");
-              return;
+              setCursorTime("—"); setCursorAmp("—"); return;
             }
             const t = u.data[0][idx];
             setCursorTime(t != null ? t.toFixed(3) + " ms" : "—");
@@ -252,8 +295,8 @@ export default function ExportImpulsePlot() {
     }
 
     const pLabel = phaseLabel ? ` · ${phaseLabel}` : "";
-    const normLabel = normDb !== 0 ? ` · Norm: ${normDb > 0 ? "−" : "+"}${Math.abs(normDb).toFixed(1)} dB` : "";
-    setInfo(`${impulse.length} samples${pLabel}${normLabel}`);
+    const mLabel = ` · Mask: ${maskingMs.toFixed(1)}ms`;
+    setInfo(`${impulse.length} taps${pLabel}${mLabel}`);
   }
 
   onMount(() => {
@@ -369,10 +412,38 @@ export default function ExportImpulsePlot() {
         config: firConfig,
       });
 
+      // Compute corrected impulse: measurement * FIR in frequency domain
+      let corrTime: number[] | null = null;
+      let corrImpulse: number[] | null = null;
+      const band = activeBand();
+      if (band?.measurement?.phase) {
+        try {
+          const corrResult = await invoke<{ time_ms: number[]; impulse: number[] }>("compute_impulse", {
+            freq,
+            magnitude: freq.map((_, i) => {
+              const mMag = band.measurement!.magnitude[i] ?? targetMag[i];
+              const pMag = peqMagArr[i] ?? 0;
+              return mMag + pMag + (firResult.realized_mag[i] ?? 0);
+            }),
+            phase: freq.map((_, i) => {
+              const mPh = band.measurement!.phase![i] ?? 0;
+              const pPh = modelPhase[i] ?? 0;
+              return mPh + (firResult.realized_phase[i] ?? 0);
+            }),
+            sampleRate,
+          });
+          corrTime = corrResult.time_ms;
+          corrImpulse = corrResult.impulse;
+        } catch (_) { /* no corrected impulse available */ }
+      }
+
+      // HP frequency for masking zone
+      const hpFreq = target.high_pass?.freq_hz ?? 20;
+
       setHasData(true);
       const phaseLabel = allLinear ? "Linear-Phase" : "Min-Phase";
       requestAnimationFrame(() =>
-        renderChart(firResult.time_ms, firResult.impulse, firResult.norm_db, phaseLabel, resetScales),
+        renderChart(firResult.time_ms, firResult.impulse, corrTime, corrImpulse, hpFreq, firResult.norm_db, phaseLabel, resetScales),
       );
     } catch (e) {
       console.error("ExportImpulsePlot compute failed:", e);
@@ -398,12 +469,23 @@ export default function ExportImpulsePlot() {
           <span class="readout-value">{cursorAmp()}</span>
         </span>
         <span class="impulse-sep" />
-        <span
-          style={{
-            "font-size": "10px",
-            color: "#8b8b96",
-          }}
-        >
+        <button
+          class={`tb-btn ${showFir() ? "active" : ""}`}
+          onClick={() => setShowFir(!showFir())}
+          style={{ color: FIR_IMPULSE_COLOR, "font-size": "9px", padding: "1px 4px" }}
+        >FIR</button>
+        <button
+          class={`tb-btn ${showCorrected() ? "active" : ""}`}
+          onClick={() => setShowCorrected(!showCorrected())}
+          style={{ color: CORRECTED_IMPULSE_COLOR, "font-size": "9px", padding: "1px 4px" }}
+        >Corr</button>
+        <button
+          class={`tb-btn ${showMasking() ? "active" : ""}`}
+          onClick={() => setShowMasking(!showMasking())}
+          style={{ "font-size": "9px", padding: "1px 4px" }}
+        >Mask</button>
+        <span class="impulse-sep" />
+        <span style={{ "font-size": "10px", color: "#8b8b96" }}>
           {info() || "FIR Impulse Response"}
         </span>
       </div>
