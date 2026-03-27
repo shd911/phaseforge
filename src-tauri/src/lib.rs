@@ -182,10 +182,21 @@ fn compute_corrected_impulse(
         return Err("corrected_impulse: freq/mag/phase length mismatch".into());
     }
     // Interpolate measurement onto FIR freq grid
-    let interp = |f: f64, src_f: &[f64], src_d: &[f64]| -> f64 {
+    // Outside measurement range: decay to -200 dB (for magnitude) or 0 (for phase)
+    let interp_mag = |f: f64, src_f: &[f64], src_d: &[f64]| -> f64 {
+        if src_f.is_empty() { return -200.0; }
+        if f < src_f[0] { return -200.0; }
+        if f > src_f[src_f.len() - 1] { return -200.0; }
+        let idx = src_f.partition_point(|&x| x <= f);
+        if idx == 0 { return src_d[0]; }
+        if idx >= src_f.len() { return src_d[src_f.len() - 1]; }
+        let t = (f - src_f[idx - 1]) / (src_f[idx] - src_f[idx - 1]);
+        src_d[idx - 1] + t * (src_d[idx] - src_d[idx - 1])
+    };
+    let interp_phase = |f: f64, src_f: &[f64], src_d: &[f64]| -> f64 {
         if src_f.is_empty() { return 0.0; }
-        if f <= src_f[0] { return src_d[0]; }
-        if f >= src_f[src_f.len() - 1] { return src_d[src_f.len() - 1]; }
+        if f < src_f[0] { return src_d[0]; }
+        if f > src_f[src_f.len() - 1] { return src_d[src_f.len() - 1]; }
         let idx = src_f.partition_point(|&x| x <= f);
         if idx == 0 { return src_d[0]; }
         if idx >= src_f.len() { return src_d[src_f.len() - 1]; }
@@ -193,10 +204,10 @@ fn compute_corrected_impulse(
         src_d[idx - 1] + t * (src_d[idx] - src_d[idx - 1])
     };
     let corr_mag: Vec<f64> = fir_freq.iter().enumerate()
-        .map(|(i, &f)| interp(f, &meas_freq, &meas_mag) + realized_mag[i])
+        .map(|(i, &f)| interp_mag(f, &meas_freq, &meas_mag) + realized_mag[i])
         .collect();
     let corr_phase: Vec<f64> = fir_freq.iter().enumerate()
-        .map(|(i, &f)| interp(f, &meas_freq, &meas_phase) + realized_phase[i])
+        .map(|(i, &f)| interp_phase(f, &meas_freq, &meas_phase) + realized_phase[i])
         .collect();
     info!("compute_corrected_impulse: {} points, sr={}", n, sample_rate);
     Ok(dsp::impulse::compute_impulse_response(&fir_freq, &corr_mag, &corr_phase, sample_rate))
