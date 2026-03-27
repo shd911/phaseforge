@@ -366,20 +366,13 @@ export default function ExportImpulsePlot() {
     };
     const target = { ...band.target };
     const peqBands = band.peqBands?.filter((b: PeqBand) => b.enabled) ?? [];
-    // Snapshot measurement data synchronously (won't be tracked inside async)
-    const measSnap = band.measurement?.phase ? {
-      freq: [...band.measurement.freq],
-      magnitude: [...band.measurement.magnitude],
-      phase: [...band.measurement.phase],
-    } : null;
-
     // Reset scales when FIR config changes (taps, SR, window)
     const configChanged = taps !== prevTaps || sr !== prevSR || win !== prevWin;
     prevTaps = taps;
     prevSR = sr;
     prevWin = win;
 
-    computeAndRender(target, peqBands, sr, taps, win, configChanged, firOpts, measSnap);
+    computeAndRender(target, peqBands, sr, taps, win, configChanged, firOpts);
   });
 
   async function computeAndRender(
@@ -390,7 +383,6 @@ export default function ExportImpulsePlot() {
     window: string,
     resetScales: boolean = false,
     firOpts: { maxBoost: number; noiseFloor: number; iterations: number; freqWeighting: boolean; narrowbandLimit: boolean; nbSmoothingOct: number; nbMaxExcess: number } = { maxBoost: 24, noiseFloor: -150, iterations: 3, freqWeighting: true, narrowbandLimit: true, nbSmoothingOct: 0.333, nbMaxExcess: 6 },
-    measSnap: { freq: number[]; magnitude: number[]; phase: number[] } | null = null,
   ) {
     try {
       // 1. Evaluate pure target
@@ -440,36 +432,8 @@ export default function ExportImpulsePlot() {
         config: firConfig,
       });
 
-      // Compute corrected impulse: measurement convolved with FIR
-      // In frequency domain: corrected = meas_spectrum × FIR_spectrum
-      // mag(dB) = meas_mag + realized_mag,  phase = meas_phase + realized_phase
-      let corrTime: number[] | null = null;
-      let corrImpulse: number[] | null = null;
-      if (measSnap) {
-        try {
-          const mFreq = measSnap.freq;
-          const mMag = measSnap.magnitude;
-          const mPh = measSnap.phase;
-          // Interpolate measurement onto FIR freq grid (512 pts)
-          const interpAt = (srcF: number[], srcD: number[], f: number): number => {
-            if (srcF.length === 0) return 0;
-            if (f <= srcF[0]) return srcD[0];
-            if (f >= srcF[srcF.length - 1]) return srcD[srcF.length - 1];
-            let lo = 0, hi = srcF.length - 1;
-            while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (srcF[mid] <= f) lo = mid; else hi = mid; }
-            const t = (f - srcF[lo]) / (srcF[hi] - srcF[lo]);
-            return srcD[lo] + t * (srcD[hi] - srcD[lo]);
-          };
-          // meas + FIR realized = corrected spectrum
-          const corrMag = freq.map((f, i) => interpAt(mFreq, mMag, f) + firResult.realized_mag[i]);
-          const corrPh = freq.map((f, i) => interpAt(mFreq, mPh, f) + firResult.realized_phase[i]);
-          const corrResult = await invoke<{ time: number[]; impulse: number[]; step: number[] }>("compute_impulse", {
-            freq, magnitude: corrMag, phase: corrPh, sampleRate,
-          });
-          corrTime = corrResult.time.map(t => t * 1000);
-          corrImpulse = corrResult.impulse;
-        } catch (e) { console.warn("Corrected impulse failed:", e); }
-      }
+      const corrTime: number[] | null = null;
+      const corrImpulse: number[] | null = null;
 
       // HP frequency for masking zone
       const hpFreq = target.high_pass?.freq_hz ?? 20;
@@ -508,11 +472,6 @@ export default function ExportImpulsePlot() {
           onClick={() => setShowFir(!showFir())}
           style={{ color: FIR_IMPULSE_COLOR, "font-size": "9px", padding: "1px 4px" }}
         >FIR</button>
-        <button
-          class={`tb-btn ${showCorrected() ? "active" : ""}`}
-          onClick={() => setShowCorrected(!showCorrected())}
-          style={{ color: CORRECTED_IMPULSE_COLOR, "font-size": "9px", padding: "1px 4px" }}
-        >Corr</button>
         <button
           class={`tb-btn ${showMasking() ? "active" : ""}`}
           onClick={() => setShowMasking(!showMasking())}
