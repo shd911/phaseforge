@@ -313,6 +313,18 @@ export default function ExportImpulsePlot() {
     onCleanup(() => observer.disconnect());
   });
 
+  // Redraw when visibility toggles change
+  createEffect(() => {
+    showFir(); showCorrected(); showMasking(); // track
+    const c = chartRef.current;
+    if (c) {
+      // Toggle series visibility
+      if (c.series[1]) c.setSeries(1, { show: showFir() });
+      if (c.series[2]) c.setSeries(2, { show: showCorrected() });
+      c.redraw(false, false);
+    }
+  });
+
   // Track previous FIR params to detect config changes (taps/SR/window)
   let prevTaps = 0;
   let prevSR = 0;
@@ -412,29 +424,34 @@ export default function ExportImpulsePlot() {
         config: firConfig,
       });
 
-      // Compute corrected impulse: measurement * FIR in frequency domain
+      // Compute corrected impulse: measurement + FIR correction in frequency domain
+      // corrected_mag[i] = interp(meas_mag, freq[i]) + realized_mag[i]
+      // corrected_phase[i] = interp(meas_phase, freq[i]) + realized_phase[i]
       let corrTime: number[] | null = null;
       let corrImpulse: number[] | null = null;
       const band = activeBand();
       if (band?.measurement?.phase) {
         try {
+          const mFreq = band.measurement!.freq;
+          const mMag = band.measurement!.magnitude;
+          const mPh = band.measurement!.phase!;
+          // Interpolate measurement onto FIR freq grid
+          const interpAt = (srcF: number[], srcD: number[], f: number): number => {
+            if (f <= srcF[0]) return srcD[0];
+            if (f >= srcF[srcF.length - 1]) return srcD[srcF.length - 1];
+            let lo = 0, hi = srcF.length - 1;
+            while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (srcF[mid] <= f) lo = mid; else hi = mid; }
+            const t = (f - srcF[lo]) / (srcF[hi] - srcF[lo]);
+            return srcD[lo] + t * (srcD[hi] - srcD[lo]);
+          };
+          const corrMag = freq.map((f, i) => interpAt(mFreq, mMag, f) + (firResult.realized_mag[i] ?? 0));
+          const corrPh = freq.map((f, i) => interpAt(mFreq, mPh, f) + (firResult.realized_phase[i] ?? 0));
           const corrResult = await invoke<{ time_ms: number[]; impulse: number[] }>("compute_impulse", {
-            freq,
-            magnitude: freq.map((_, i) => {
-              const mMag = band.measurement!.magnitude[i] ?? targetMag[i];
-              const pMag = peqMagArr[i] ?? 0;
-              return mMag + pMag + (firResult.realized_mag[i] ?? 0);
-            }),
-            phase: freq.map((_, i) => {
-              const mPh = band.measurement!.phase![i] ?? 0;
-              const pPh = modelPhase[i] ?? 0;
-              return mPh + (firResult.realized_phase[i] ?? 0);
-            }),
-            sampleRate,
+            freq, magnitude: corrMag, phase: corrPh, sampleRate,
           });
           corrTime = corrResult.time_ms;
           corrImpulse = corrResult.impulse;
-        } catch (_) { /* no corrected impulse available */ }
+        } catch (e) { console.warn("Corrected impulse failed:", e); }
       }
 
       // HP frequency for masking zone
