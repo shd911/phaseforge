@@ -226,8 +226,10 @@ export default function ExportImpulsePlot() {
     dataXMax = trimTime[trimTime.length - 1] + 0.5;
     dataYMin = isDb ? Math.max(yMin - fitYPad, -80) : yMin - fitYPad;
     dataYMax = yMax + fitYPad;
-    curAmpMin = dataYMin;
-    curAmpMax = dataYMax;
+    if (resetScales || !chartRef.current) {
+      curAmpMin = dataYMin;
+      curAmpMax = dataYMax;
+    }
 
     const opts: uPlot.Options = {
       width: w, height: h,
