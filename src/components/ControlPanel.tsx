@@ -75,11 +75,28 @@ const FILTER_TYPES: FilterType[] = ["Butterworth", "Bessel", "LinkwitzRiley", "G
 const lastHP = new Map<string, import("../lib/types").FilterConfig>();
 const lastLP = new Map<string, import("../lib/types").FilterConfig>();
 
-export default function ControlPanel() {
+export default function ControlPanel(props: { rightPanel?: boolean }) {
   const tab = activeTab;
   const setTab = setActiveTab;
   const band = () => activeBand();
 
+  if (props.rightPanel) {
+    // Right panel: Target + PEQ — no tabs, always visible, scrollable
+    return (
+      <div class="right-panel-content">
+        <div class="right-panel-section">
+          <div class="right-panel-title">Target</div>
+          <FiltersTab />
+        </div>
+        <div class="right-panel-section">
+          <div class="right-panel-title">PEQ</div>
+          <PeqTab />
+        </div>
+      </div>
+    );
+  }
+
+  // Bottom panel: Measurements + Export tabs
   return (
     <div class="ctrl-panel">
       <div class="ctrl-tabs">
@@ -93,28 +110,14 @@ export default function ControlPanel() {
           </Show>
         </button>
         <button
-          class={`ctrl-tab ${tab() === "target" ? "active" : ""}`}
-          onClick={() => setTab("target")}
-        >Target</button>
-        <button
-          class={`ctrl-tab ${tab() === "peq" ? "active" : ""}`}
-          onClick={() => setTab("peq")}
-        >PEQ</button>
-        <button
           class={`ctrl-tab ${tab() === "export" ? "active" : ""}`}
           onClick={() => setTab("export")}
         >Export</button>
       </div>
 
       <div class="ctrl-body">
-        <Show when={tab() === "measurements"}>
+        <Show when={tab() === "measurements" || tab() === "target" || tab() === "peq"}>
           <MeasurementsTab />
-        </Show>
-        <Show when={tab() === "target"}>
-          <FiltersTab />
-        </Show>
-        <Show when={tab() === "peq"}>
-          <PeqTab />
         </Show>
         <Show when={tab() === "export"}>
           <ExportTab />

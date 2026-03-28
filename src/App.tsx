@@ -125,7 +125,12 @@ function App() {
           </Show>
         </div>
 
-        {/* PEQ controls now in ControlPanel PEQ tab */}
+        {/* Right panel: Target + PEQ — always visible (hidden in SUM) */}
+        <Show when={!isSum()}>
+          <div class="right-panel">
+            <ControlPanel rightPanel={true} />
+          </div>
+        </Show>
       </div>
 
       {/* Status bar */}
