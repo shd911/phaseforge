@@ -4,7 +4,7 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { invoke } from "@tauri-apps/api/core";
 import type { Measurement, TargetResponse, FilterType } from "../lib/types";
-import { appState, activeBand, isSum, activeTab, plotTab, setPlotTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, bandsVersion } from "../stores/bands";
+import { appState, activeBand, isSum, activeTab, plotTab, setPlotTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, bandsVersion, exportSampleRate, exportTaps, exportWindow, firIterations, firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess, firMaxBoost, firNoiseFloor, setExportMetrics } from "../stores/bands";
 import type { SmoothingMode, BandState, FreqSnapshot } from "../stores/bands";
 import { needAutoFit, setNeedAutoFit } from "../App";
 import { computeFloorBounce } from "../lib/floor-bounce";
@@ -1021,11 +1021,9 @@ export default function FrequencyPlot() {
       return;
     }
 
-    // Export tab: placeholder
+    // Export tab: Model vs FIR realization
     if (pTab === "export") {
-      if (chart) { chart.destroy(); chart = undefined; }
-      setShowLegend(false);
-      setCursorFreq("—"); setCursorSPL("—"); setCursorPhase("—");
+      renderExportTab(band);
       return;
     }
 
@@ -1049,6 +1047,115 @@ export default function FrequencyPlot() {
       doRender();
     }
   });
+
+  // ----------------------------------------------------------------
+  // Export tab: Model vs FIR realization
+  // ----------------------------------------------------------------
+  async function renderExportTab(band: BandState | null) {
+    const gen = ++renderGen;
+    if (!band || !band.target) {
+      try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
+      setShowLegend(false);
+      setCursorFreq("—"); setCursorSPL("—"); setCursorPhase("—");
+      return;
+    }
+
+    try {
+      const sr = exportSampleRate();
+      const taps = exportTaps();
+      const win = exportWindow();
+      const target = JSON.parse(JSON.stringify(band.target));
+      const peqBands = band.peqBands?.filter((b: any) => b.enabled) ?? [];
+
+      // Evaluate target
+      const [freq, response] = await invoke<[number[], TargetResponse]>(
+        "evaluate_target_standalone", { target, nPoints: 512, fMin: 5, fMax: 40000 },
+      );
+      if (gen !== renderGen) return;
+
+      const targetMag = response.magnitude;
+      let modelPhase = response.phase;
+
+      // PEQ contribution
+      let peqMagArr: number[] = [];
+      if (peqBands.length > 0) {
+        const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", { freq, bands: peqBands, sampleRate: sr });
+        peqMagArr = pm;
+        modelPhase = modelPhase.map((v: number, i: number) => v + pp[i]);
+      }
+      if (gen !== renderGen) return;
+
+      // Generate FIR
+      const isLin = (f: any) => !f || f.linear_phase || f.filter_type === "Gaussian";
+      const allLinear = isLin(target.high_pass) && isLin(target.low_pass);
+      const firConfig = {
+        taps, sample_rate: sr, max_boost_db: firMaxBoost(), noise_floor_db: firNoiseFloor(),
+        window: win, phase_mode: allLinear ? "LinearPhase" : "MinimumPhase",
+        iterations: firIterations(), freq_weighting: firFreqWeighting(),
+        narrowband_limit: firNarrowbandLimit(), nb_smoothing_oct: firNbSmoothingOct(),
+        nb_max_excess_db: firNbMaxExcess(),
+      };
+      const firResult = await invoke<{ realized_mag: number[]; realized_phase: number[]; impulse: number[]; time_ms: number[]; norm_db: number; causality: number; taps: number; sample_rate: number }>(
+        "generate_model_fir", { freq, targetMag, peqMag: peqMagArr, modelPhase, config: firConfig },
+      );
+      if (gen !== renderGen) return;
+
+      // Normalize model mag
+      const normModelMag = targetMag.map((v: number, i: number) => (v + (peqMagArr[i] ?? 0)) - firResult.norm_db);
+
+      // Set metrics
+      setExportMetrics({
+        taps: firResult.taps, sampleRate: firResult.sample_rate, window: win,
+        phaseLabel: allLinear ? "Linear-Phase" : "Min-Phase",
+        peqCount: peqBands.length, normDb: firResult.norm_db,
+        causality: Math.round(firResult.causality * 100),
+        preRingMs: 0, maxMagErr: 0, gdRippleMs: 0,
+      });
+
+      // Render chart
+      try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
+      if (!containerRef) return;
+      const rect = containerRef.getBoundingClientRect();
+
+      const opts: uPlot.Options = {
+        width: Math.max(rect.width, 400), height: Math.max(rect.height, 200),
+        series: [
+          {},
+          { label: "Model dB", stroke: "#FF9F43", width: 2, scale: "mag" },
+          { label: "FIR dB", stroke: "#38BDF8", width: 2, scale: "mag" },
+        ],
+        scales: {
+          x: { min: 20, max: 20000, distr: 3 },
+          mag: { auto: true },
+        },
+        axes: [
+          { stroke: "#9b9ba6", grid: { stroke: "rgba(255,255,255,0.12)" }, ticks: { stroke: "rgba(255,255,255,0.20)" },
+            values: (_u: uPlot, vals: number[]) => vals.map(v => v == null ? "" : v >= 1000 ? (v/1000)+"k" : String(Math.round(v))) },
+          { label: "dB", scale: "mag", stroke: "#9b9ba6", grid: { stroke: "rgba(255,255,255,0.12)" }, ticks: { stroke: "rgba(255,255,255,0.20)" },
+            values: (_u: uPlot, vals: number[]) => vals.map(v => v == null ? "" : v.toFixed(1)), size: 50 },
+        ],
+        legend: { show: false },
+        cursor: { drag: { x: false, y: false, setScale: false } },
+        hooks: {
+          setCursor: [(u: uPlot) => {
+            const idx = u.cursor.idx;
+            if (idx == null || idx < 0 || idx >= u.data[0].length) { setCursorFreq("—"); setCursorSPL("—"); return; }
+            const f = u.data[0][idx];
+            setCursorFreq(f != null ? (f >= 1000 ? (f/1000).toFixed(2)+" kHz" : Math.round(f)+" Hz") : "—");
+            const m = u.data[1]?.[idx]; const r = u.data[2]?.[idx];
+            setCursorSPL(
+              (m != null ? `Model: ${(m as number).toFixed(1)}` : "") +
+              (r != null ? ` FIR: ${(r as number).toFixed(1)}` : "") + " dB"
+            );
+          }],
+        },
+      };
+      setShowLegend(false);
+      try { chart = new uPlot(opts, [freq, normModelMag, firResult.realized_mag], containerRef); } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error("Export tab render failed:", e);
+    }
+  }
 
   // ----------------------------------------------------------------
   // IR / Step / GD rendering (time-domain tabs)
@@ -1160,7 +1267,7 @@ export default function FrequencyPlot() {
   }
 
   function renderIrStepChart(timeMs: number[], impulse: number[], step: number[]) {
-    if (chart) { chart.destroy(); chart = undefined; }
+    try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
     if (!containerRef) return;
     const rect = containerRef.getBoundingClientRect();
     const w = Math.max(rect.width, 400);
@@ -1224,7 +1331,7 @@ export default function FrequencyPlot() {
   }
 
   function renderGdChart(freq: number[], gdMs: number[]) {
-    if (chart) { chart.destroy(); chart = undefined; }
+    try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
     if (!containerRef) return;
     const rect = containerRef.getBoundingClientRect();
     const w = Math.max(rect.width, 400);
