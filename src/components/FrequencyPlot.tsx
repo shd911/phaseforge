@@ -170,60 +170,98 @@ export default function FrequencyPlot() {
 
   function zoomY(factor: number) {
     if (!chart) return;
+    const pTab = plotTab();
+    const yKey = (pTab === "freq" || pTab === "export") ? "mag" : "y";
+    const s = chart.scales[yKey];
+    if (!s || s.min == null || s.max == null) return;
     pushZoom();
-    const half = ((curMagMax - curMagMin) / 2) * factor;
-    if (half * 2 < 2 || half * 2 > 500) { zoomStack.pop(); return; }
-    curMagMin = zoomCenter - half;
-    curMagMax = zoomCenter + half;
-    chart.setScale("mag", { min: curMagMin, max: curMagMax });
+    const center = (pTab === "freq" || pTab === "export") ? zoomCenter : (s.min + s.max) / 2;
+    const half = ((s.max - s.min) / 2) * factor;
+    if (half * 2 < 0.01 || half * 2 > 500) { zoomStack.pop(); return; }
+    const newMin = center - half;
+    const newMax = center + half;
+    if (pTab === "freq" || pTab === "export") { curMagMin = newMin; curMagMax = newMax; }
+    chart.setScale(yKey, { min: newMin, max: newMax });
   }
 
   function scrollY(direction: number) {
     if (!chart) return;
-    const range = curMagMax - curMagMin;
+    const pTab = plotTab();
+    const yKey = (pTab === "freq" || pTab === "export") ? "mag" : "y";
+    const s = chart.scales[yKey];
+    if (!s || s.min == null || s.max == null) return;
+    const range = s.max - s.min;
     const step = range * 0.2 * direction;
-    curMagMin += step;
-    curMagMax += step;
-    chart.setScale("mag", { min: curMagMin, max: curMagMax });
+    const newMin = s.min + step;
+    const newMax = s.max + step;
+    if (pTab === "freq" || pTab === "export") { curMagMin = newMin; curMagMax = newMax; }
+    chart.setScale(yKey, { min: newMin, max: newMax });
   }
 
   function zoomX(factor: number) {
     if (!chart) return;
     pushZoom();
     const s = chart.scales["x"];
-    if (!s || s.min == null || s.max == null || s.min <= 0) { zoomStack.pop(); return; }
-    const logMin = Math.log10(s.min);
-    const logMax = Math.log10(s.max);
-    const logCenter = (logMin + logMax) / 2;
-    const logHalf = ((logMax - logMin) / 2) * factor;
-    const newMin = Math.max(1, Math.pow(10, logCenter - logHalf));
-    const newMax = Math.min(100000, Math.pow(10, logCenter + logHalf));
-    chart.setScale("x", { min: newMin, max: newMax });
+    if (!s || s.min == null || s.max == null) { zoomStack.pop(); return; }
+    const pTab = plotTab();
+    if (pTab === "freq" || pTab === "gd" || pTab === "export") {
+      // Log scale zoom
+      if (s.min <= 0) { zoomStack.pop(); return; }
+      const logMin = Math.log10(s.min);
+      const logMax = Math.log10(s.max);
+      const logCenter = (logMin + logMax) / 2;
+      const logHalf = ((logMax - logMin) / 2) * factor;
+      chart.setScale("x", { min: Math.max(1, Math.pow(10, logCenter - logHalf)), max: Math.min(100000, Math.pow(10, logCenter + logHalf)) });
+    } else {
+      // Linear scale zoom (IR/Step)
+      const center = (s.min + s.max) / 2;
+      const half = ((s.max - s.min) / 2) * factor;
+      chart.setScale("x", { min: center - half, max: center + half });
+    }
   }
 
   function scrollX(direction: number) {
     if (!chart) return;
     const s = chart.scales["x"];
-    if (!s || s.min == null || s.max == null || s.min <= 0) return;
-    const logMin = Math.log10(s.min);
-    const logMax = Math.log10(s.max);
-    const logRange = logMax - logMin;
-    const step = logRange * 0.15 * direction;
-    const newMin = Math.max(1, Math.pow(10, logMin + step));
-    const newMax = Math.min(100000, Math.pow(10, logMax + step));
-    chart.setScale("x", { min: newMin, max: newMax });
+    if (!s || s.min == null || s.max == null) return;
+    const pTab = plotTab();
+    if (pTab === "freq" || pTab === "gd" || pTab === "export") {
+      if (s.min <= 0) return;
+      const logMin = Math.log10(s.min);
+      const logMax = Math.log10(s.max);
+      const step = (logMax - logMin) * 0.15 * direction;
+      chart.setScale("x", { min: Math.max(1, Math.pow(10, logMin + step)), max: Math.min(100000, Math.pow(10, logMax + step)) });
+    } else {
+      const range = s.max - s.min;
+      const step = range * 0.15 * direction;
+      chart.setScale("x", { min: s.min + step, max: s.max + step });
+    }
   }
 
   function fitData() {
     if (!chart) return;
+    const pTab = plotTab();
     pushZoom();
-    curMagMin = fitMagMin;
-    curMagMax = fitMagMax;
-    chart.setScale("mag", { min: curMagMin, max: curMagMax });
-    curPhaseMin = -190;
-    curPhaseMax = 190;
-    chart.setScale("phase", { min: curPhaseMin, max: curPhaseMax });
-    chart.setScale("x", { min: 20, max: 20000 });
+    if (pTab === "freq" || pTab === "export") {
+      curMagMin = fitMagMin;
+      curMagMax = fitMagMax;
+      chart.setScale("mag", { min: curMagMin, max: curMagMax });
+      curPhaseMin = -190;
+      curPhaseMax = 190;
+      chart.setScale("phase", { min: curPhaseMin, max: curPhaseMax });
+      chart.setScale("x", { min: 20, max: 20000 });
+    } else if (pTab === "gd") {
+      chart.setScale("x", { min: 20, max: 20000 });
+      // Y auto from data
+      const s = chart.scales["y"];
+      if (s) chart.setScale("y", { min: s.min, max: s.max });
+    } else {
+      // IR/Step — auto range from data
+      const d = chart.data[0];
+      if (d && d.length > 0) chart.setScale("x", { min: d[0], max: d[d.length - 1] });
+      const s = chart.scales["y"];
+      if (s) chart.setScale("y", { min: s.min, max: s.max });
+    }
   }
 
   function zoomPhase(factor: number) {
@@ -2295,12 +2333,14 @@ export default function FrequencyPlot() {
             <button class="axis-btn" onClick={() => zoomY(1.6)} title="Zoom Out dB">−</button>
             <button class="axis-btn fit-btn" onClick={fitData} title="Fit data to view">FIT</button>
           </div>
-          <div class="axis-controls axis-controls-y axis-controls-y-right">
-            <button class="axis-btn" onClick={() => zoomPhase(0.6)} title="Zoom In Phase">+</button>
-            <button class="axis-btn" onClick={() => scrollPhase(1)} title="Scroll Up Phase">▲</button>
-            <button class="axis-btn" onClick={() => scrollPhase(-1)} title="Scroll Down Phase">▼</button>
-            <button class="axis-btn" onClick={() => zoomPhase(1.6)} title="Zoom Out Phase">−</button>
-          </div>
+          <Show when={plotTab() === "freq" || plotTab() === "export"}>
+            <div class="axis-controls axis-controls-y axis-controls-y-right">
+              <button class="axis-btn" onClick={() => zoomPhase(0.6)} title="Zoom In Phase">+</button>
+              <button class="axis-btn" onClick={() => scrollPhase(1)} title="Scroll Up Phase">▲</button>
+              <button class="axis-btn" onClick={() => scrollPhase(-1)} title="Scroll Down Phase">▼</button>
+              <button class="axis-btn" onClick={() => zoomPhase(1.6)} title="Zoom Out Phase">−</button>
+            </div>
+          </Show>
           <div class="axis-controls axis-controls-x">
             <button class="axis-btn" onClick={() => zoomX(1.6)} title="Zoom Out Freq">−</button>
             <button class="axis-btn" onClick={() => scrollX(-1)} title="Scroll Left">◀</button>
