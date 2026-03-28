@@ -23,7 +23,7 @@ import WelcomeDialog from "./components/WelcomeDialog";
 import CrossoverDialog from "./components/CrossoverDialog";
 import FirSettingsDialog from "./components/FirSettingsDialog";
 import { openFirSettings } from "./components/FirSettingsDialog";
-import PeqSidebar from "./components/PeqSidebar";
+// PeqSidebar removed — PEQ controls now in ControlPanel PEQ tab
 import { activeTab } from "./stores/bands";
 
 // Глобальный сигнал для авто-FIT при импорте замера
@@ -97,8 +97,7 @@ function App() {
 
   // Показывать ли нижний plot: не SUM и есть активная полоса
   const showBottomPlot = () => true;
-  // На вкладке target — показываем PEQ Response вместо Impulse (only in band mode)
-  const showPeqPlot = () => activeTab() === "target" && !isSum();
+  // PEQ Response now always in bottom panel (no separate sidebar)
   // На вкладке export — показываем ExportPlot + ExportImpulsePlot (only in band mode)
   const showExportPlot = () => activeTab() === "export" && !isSum();
 
@@ -172,10 +171,7 @@ function App() {
                 <Show when={showExportPlot()}>
                   <ExportImpulsePlot />
                 </Show>
-                <Show when={showPeqPlot() && !showExportPlot()}>
-                  <PeqResponsePlot />
-                </Show>
-                <Show when={!showPeqPlot() && !showExportPlot()}>
+                <Show when={!showExportPlot()}>
                   <ImpulseResponsePlot />
                 </Show>
               </div>
@@ -190,10 +186,7 @@ function App() {
           </Show>
         </div>
 
-        {/* PEQ Sidebar — full height, only on align tab */}
-        <Show when={showPeqPlot() && !isSum()}>
-          <PeqSidebar />
-        </Show>
+        {/* PEQ controls now in ControlPanel PEQ tab */}
       </div>
 
       {/* Status bar */}
