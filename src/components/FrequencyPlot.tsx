@@ -154,8 +154,8 @@ export default function FrequencyPlot() {
   const [irDbMode, setIrDbMode] = createSignal(false);
   const [showIr, setShowIr] = createSignal(true);
   const [showStep, setShowStep] = createSignal(true);
-  const [showTarget, setShowTarget] = createSignal(true);
-  const [showMasking, setShowMasking] = createSignal(true);
+  const [irShowTarget, setIrShowTarget] = createSignal(true);
+  const [irShowMasking, setIrShowMasking] = createSignal(true);
 
   // Persistent visibility — two maps for different modes:
   // SUM mode: by label (each band has its own curves like "Band 1 tgt", "Band 2 tgt")
@@ -1025,7 +1025,7 @@ export default function FrequencyPlot() {
     const pTab = plotTab();
     // Track IR/Step toggles so effect re-runs when they change
     const _irDb = irDbMode(); const _showIr = showIr(); const _showSt = showStep();
-    const _showTgt = showTarget(); const _showMask = showMasking();
+    const _showTgt = irShowTarget(); const _showMask = irShowMasking();
 
     // Non-freq tabs: IR/Step (combined) or GD
     if (pTab === "ir" || pTab === "step" || pTab === "gd") {
@@ -1338,7 +1338,7 @@ export default function FrequencyPlot() {
     uDataArr.push(isDb ? normSt.map(toDb) : normSt);
 
     // Target IR (if available, aligned to measurement peak)
-    if (targetTimeMs && targetImpulse && showTarget()) {
+    if (targetTimeMs && targetImpulse && irShowTarget()) {
       let tPeak = 0, tPeakIdx = 0;
       for (let i = 0; i < targetImpulse.length; i++) { if (Math.abs(targetImpulse[i]) > tPeak) { tPeak = Math.abs(targetImpulse[i]); tPeakIdx = i; } }
       if (tPeak < 1e-20) tPeak = 1;
@@ -1383,7 +1383,7 @@ export default function FrequencyPlot() {
       legend: { show: false },
       cursor: { drag: { x: false, y: false, setScale: false } },
       hooks: {
-        draw: showMasking() ? [(u: uPlot) => {
+        draw: irShowMasking() ? [(u: uPlot) => {
           const ctx = u.ctx;
           const plotLeft = u.bbox.left;
           const plotTop = u.bbox.top;
@@ -2500,8 +2500,8 @@ export default function FrequencyPlot() {
           <span class="readout-sep" />
           <button class={`tb-btn ${showIr() ? "active" : ""}`} onClick={() => setShowIr(!showIr())} style={{ color: "#4A9EFF", "font-size": "9px", padding: "1px 4px" }}>IR</button>
           <button class={`tb-btn ${showStep() ? "active" : ""}`} onClick={() => setShowStep(!showStep())} style={{ color: "#22C55E", "font-size": "9px", padding: "1px 4px" }}>Step</button>
-          <button class={`tb-btn ${showTarget() ? "active" : ""}`} onClick={() => setShowTarget(!showTarget())} style={{ color: "#FFD700", "font-size": "9px", padding: "1px 4px" }}>Tgt</button>
-          <button class={`tb-btn ${showMasking() ? "active" : ""}`} onClick={() => setShowMasking(!showMasking())} style={{ "font-size": "9px", padding: "1px 4px" }}>Mask</button>
+          <button class={`tb-btn ${irShowTarget() ? "active" : ""}`} onClick={() => setIrShowTarget(!irShowTarget())} style={{ color: "#FFD700", "font-size": "9px", padding: "1px 4px" }}>Tgt</button>
+          <button class={`tb-btn ${irShowMasking() ? "active" : ""}`} onClick={() => setIrShowMasking(!irShowMasking())} style={{ "font-size": "9px", padding: "1px 4px" }}>Mask</button>
           <button class={`tb-btn ${irDbMode() ? "active" : ""}`} onClick={() => setIrDbMode(!irDbMode())} style={{ "font-size": "9px", padding: "1px 4px" }}>{irDbMode() ? "dB" : "Lin"}</button>
         </Show>
       </div>
