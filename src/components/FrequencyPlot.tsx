@@ -927,12 +927,7 @@ export default function FrequencyPlot() {
     });
   });
 
-  // IR/Step toggles tracked directly in main effect via irVersion signal
-  const [irVersion, setIrVersion] = createSignal(0);
-  createEffect(() => {
-    irDbMode(); showIr(); showStep(); showTarget(); showMasking();
-    setIrVersion(v => v + 1);
-  });
+  // IR/Step toggles: tracked directly in main effect (no intermediate signal)
 
   // Redraw when selected PEQ index changes (for vertical dashed line)
   createEffect(() => {
@@ -1028,7 +1023,9 @@ export default function FrequencyPlot() {
     const _fsnaps = band ? freqSnapshots(band.id) : [];
     const dragging = peqDragging();
     const pTab = plotTab();
-    const _irv = irVersion(); // track IR/Step toggle changes
+    // Track IR/Step toggles so effect re-runs when they change
+    const _irDb = irDbMode(); const _showIr = showIr(); const _showSt = showStep();
+    const _showTgt = showTarget(); const _showMask = showMasking();
 
     // Non-freq tabs: IR/Step (combined) or GD
     if (pTab === "ir" || pTab === "step" || pTab === "gd") {
