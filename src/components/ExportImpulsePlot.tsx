@@ -34,6 +34,8 @@ export default function ExportImpulsePlot() {
   const [showFir, setShowFir] = createSignal(true);
   const [showCorrected, setShowCorrected] = createSignal(true);
   const [showMasking, setShowMasking] = createSignal(true);
+  type ScaleMode = "linear" | "dB";
+  const [scaleMode, setScaleMode] = createSignal<ScaleMode>("linear");
 
   // Track actual data range for fitData
   let dataXMin = -0.5;
@@ -153,7 +155,11 @@ export default function ExportImpulsePlot() {
     const endIdx = Math.min(impulse.length, startIdx + Math.ceil(viewLen));
 
     const trimTime = time.slice(startIdx, endIdx);
-    const trimFir = normFir.slice(startIdx, endIdx);
+    const isDb = scaleMode() === "dB";
+    const toDb = (v: number) => { const a = Math.abs(v); return a > 1e-10 ? 20 * Math.log10(a) : -200; };
+    const trimFir = isDb
+      ? normFir.slice(startIdx, endIdx).map(toDb)
+      : normFir.slice(startIdx, endIdx);
 
     // Build series & data
     const uSeries: uPlot.Series[] = [{}];
@@ -161,7 +167,7 @@ export default function ExportImpulsePlot() {
 
     // FIR impulse
     uSeries.push({
-      label: "FIR",
+      label: isDb ? "FIR dB" : "FIR",
       stroke: FIR_IMPULSE_COLOR,
       width: 1.5,
       scale: "amp",
@@ -182,7 +188,7 @@ export default function ExportImpulsePlot() {
       const shiftedTime = correctedTime.map(t => t + timeShift);
 
       // Resample shifted corrected onto FIR time grid
-      const trimCorr = trimTime.map(t => {
+      const trimCorrRaw = trimTime.map(t => {
         if (t <= shiftedTime[0]) return 0;
         if (t >= shiftedTime[shiftedTime.length - 1]) return 0;
         let lo = 0, hi = shiftedTime.length - 1;
@@ -193,8 +199,9 @@ export default function ExportImpulsePlot() {
         const frac = (t - shiftedTime[lo]) / (shiftedTime[hi] - shiftedTime[lo]);
         return normCorr![lo] + frac * (normCorr![hi] - normCorr![lo]);
       });
+      const trimCorr = isDb ? trimCorrRaw.map(toDb) : trimCorrRaw;
       uSeries.push({
-        label: "Corrected",
+        label: isDb ? "Corr dB" : "Corrected",
         stroke: CORRECTED_IMPULSE_COLOR,
         width: 1.5,
         scale: "amp",
@@ -206,17 +213,19 @@ export default function ExportImpulsePlot() {
     const uData = uDataArr as uPlot.AlignedData;
 
     // Fit ranges
-    let yMin = 0, yMax = 0;
+    let yMin = Infinity, yMax = -Infinity;
     for (const arr of uDataArr.slice(1)) {
-      for (const v of arr) { if (v != null) { if (v < yMin) yMin = v; if (v > yMax) yMax = v; } }
+      for (const v of arr) { if (v != null && v > -190) { if (v < yMin) yMin = v; if (v > yMax) yMax = v; } }
     }
-    const fitYPad = Math.max(0.1, (yMax - yMin) * 0.1);
+    if (!isFinite(yMin)) { yMin = isDb ? -80 : -1.1; }
+    if (!isFinite(yMax)) { yMax = isDb ? 0 : 1.1; }
+    const fitYPad = isDb ? 5 : Math.max(0.1, (yMax - yMin) * 0.1);
     dataXMin = trimTime[0] - 0.5;
     dataXMax = trimTime[trimTime.length - 1] + 0.5;
-    dataYMin = yMin - fitYPad;
+    dataYMin = isDb ? Math.max(yMin - fitYPad, -80) : yMin - fitYPad;
     dataYMax = yMax + fitYPad;
-    curAmpMin = resetScales ? dataYMin : curAmpMin || dataYMin;
-    curAmpMax = resetScales ? dataYMax : curAmpMax || dataYMax;
+    curAmpMin = dataYMin;
+    curAmpMax = dataYMax;
 
     const opts: uPlot.Options = {
       width: w, height: h,
@@ -233,7 +242,7 @@ export default function ExportImpulsePlot() {
           values: (_u: uPlot, vals: number[]) => vals.map(v => v == null ? "" : v.toFixed(1)),
         },
         {
-          label: "Amp", scale: "amp", stroke: "#9b9ba6",
+          label: isDb ? "dBFS" : "Amp", scale: "amp", stroke: "#9b9ba6",
           grid: { stroke: "rgba(255,255,255,0.12)" },
           ticks: { stroke: "rgba(255,255,255,0.20)" },
           values: (_u: uPlot, vals: number[]) => vals.map(v => v == null ? "" : v.toFixed(2)),
@@ -268,33 +277,44 @@ export default function ExportImpulsePlot() {
 
             ctx.save();
 
-            // Green wedge (safe masking zone): exponential curve from peak to boundary
-            // Backward masking threshold per psychoacoustic research:
-            //   -40 dB (1%) at peak, exponential decay toward boundary
-            //   0-5ms: strong masking, 5-20ms: transition, >20ms: no masking
-            // threshold(dt) = 0.01 * exp(-4 * dt / T_mask)
+            // Masking wedge: threshold curve from peak to masking boundary
+            // In linear mode: ±1% exp decay; in dB mode: -40 dB linear decay
+            const isDbMode = scaleMode() === "dB";
             if (peakX > clampedMaskStart) {
               const nSteps = 40;
               const maskWidthX = peakX - clampedMaskStart;
-              const PEAK_THRESHOLD = 0.01; // 1% = -40 dB — trained listener threshold
-              const DECAY_RATE = 4; // steeper than before — conservative
 
-              // Build exponential curve points
               ctx.fillStyle = MASKING_ZONE_COLOR;
               ctx.beginPath();
-              for (let s = 0; s <= nSteps; s++) {
-                const t = s / nSteps;
-                const amp = PEAK_THRESHOLD * Math.exp(-DECAY_RATE * t);
-                const x = peakX - t * maskWidthX;
-                const y = u.valToPos(amp, "amp", true);
-                if (s === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-              }
-              for (let s = nSteps; s >= 0; s--) {
-                const t = s / nSteps;
-                const amp = -PEAK_THRESHOLD * Math.exp(-DECAY_RATE * t);
-                const x = peakX - t * maskWidthX;
-                const y = u.valToPos(amp, "amp", true);
-                ctx.lineTo(x, y);
+              if (isDbMode) {
+                // dB mode: single curve from 0 dB at peak to -80 dB at boundary
+                for (let s = 0; s <= nSteps; s++) {
+                  const t = s / nSteps;
+                  const db = -40 - 40 * t; // -40 at peak, -80 at boundary
+                  const x = peakX - t * maskWidthX;
+                  const y = u.valToPos(db, "amp", true);
+                  if (s === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                }
+                // Close along bottom of plot
+                const yBottom = u.valToPos(curAmpMin, "amp", true);
+                ctx.lineTo(clampedMaskStart, yBottom);
+                ctx.lineTo(peakX, yBottom);
+              } else {
+                // Linear mode: ±1% exponential decay
+                const PEAK_THRESHOLD = 0.01;
+                const DECAY_RATE = 4;
+                for (let s = 0; s <= nSteps; s++) {
+                  const t = s / nSteps;
+                  const amp = PEAK_THRESHOLD * Math.exp(-DECAY_RATE * t);
+                  const x = peakX - t * maskWidthX;
+                  ctx.lineTo(x, u.valToPos(amp, "amp", true));
+                }
+                for (let s = nSteps; s >= 0; s--) {
+                  const t = s / nSteps;
+                  const amp = -PEAK_THRESHOLD * Math.exp(-DECAY_RATE * t);
+                  const x = peakX - t * maskWidthX;
+                  ctx.lineTo(x, u.valToPos(amp, "amp", true));
+                }
               }
               ctx.closePath();
               ctx.fill();
@@ -304,19 +324,24 @@ export default function ExportImpulsePlot() {
               ctx.lineWidth = 1;
               ctx.setLineDash([4, 4]);
               ctx.beginPath();
-              for (let s = 0; s <= nSteps; s++) {
-                const t = s / nSteps;
-                const amp = PEAK_THRESHOLD * Math.exp(-DECAY_RATE * t);
-                const x = peakX - t * maskWidthX;
-                const y = u.valToPos(amp, "amp", true);
-                if (s === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-              }
-              for (let s = nSteps; s >= 0; s--) {
-                const t = s / nSteps;
-                const amp = -PEAK_THRESHOLD * Math.exp(-DECAY_RATE * t);
-                const x = peakX - t * maskWidthX;
-                const y = u.valToPos(amp, "amp", true);
-                ctx.lineTo(x, y);
+              if (isDbMode) {
+                for (let s = 0; s <= nSteps; s++) {
+                  const t = s / nSteps;
+                  const db = -40 - 40 * t;
+                  const x = peakX - t * maskWidthX;
+                  if (s === 0) ctx.moveTo(x, u.valToPos(db, "amp", true)); else ctx.lineTo(x, u.valToPos(db, "amp", true));
+                }
+              } else {
+                const PEAK_THRESHOLD = 0.01;
+                const DECAY_RATE = 4;
+                for (let s = 0; s <= nSteps; s++) {
+                  const t = s / nSteps;
+                  ctx.lineTo(peakX - t * maskWidthX, u.valToPos(PEAK_THRESHOLD * Math.exp(-DECAY_RATE * t), "amp", true));
+                }
+                for (let s = nSteps; s >= 0; s--) {
+                  const t = s / nSteps;
+                  ctx.lineTo(peakX - t * maskWidthX, u.valToPos(-PEAK_THRESHOLD * Math.exp(-DECAY_RATE * t), "amp", true));
+                }
               }
               ctx.stroke();
               ctx.setLineDash([]);
@@ -407,6 +432,7 @@ export default function ExportImpulsePlot() {
       return;
     }
 
+    const _mode = scaleMode(); // track — triggers full recompute on Lin/dB switch
     const sr = exportSampleRate();
     const taps = exportTaps();
     const win = exportWindow();
@@ -561,6 +587,11 @@ export default function ExportImpulsePlot() {
           onClick={() => setShowMasking(!showMasking())}
           style={{ "font-size": "9px", padding: "1px 4px" }}
         >Mask</button>
+        <button
+          class={`tb-btn ${scaleMode() === "dB" ? "active" : ""}`}
+          onClick={() => setScaleMode(scaleMode() === "linear" ? "dB" : "linear")}
+          style={{ "font-size": "9px", padding: "1px 4px" }}
+        >{scaleMode() === "dB" ? "dB" : "Lin"}</button>
         <span class="impulse-sep" />
         <span style={{ "font-size": "10px", color: "#8b8b96" }}>
           {info() || "FIR Impulse Response"}
