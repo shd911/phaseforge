@@ -244,45 +244,66 @@ export default function ExportImpulsePlot() {
       cursor: { drag: { x: false, y: false, setScale: false } },
       hooks: {
         draw: [
-          // Pre-ringing masking zone overlay
+          // Pre-ringing masking wedge overlay
+          // Wedge shape: full height at peak, tapering to zero at masking boundary
+          // Pre-ringing inside wedge = masked (inaudible), outside = audible
           (u: uPlot) => {
             if (!showMasking()) return;
             const ctx = u.ctx;
             const plotLeft = u.bbox.left;
             const plotTop = u.bbox.top;
             const plotHeight = u.bbox.height;
+            const plotRight = plotLeft + u.bbox.width;
 
-            // Peak position
+            // Peak X position
             const peakX = u.valToPos(peakTimeMs, "x", true);
-            // Masking zone: peakTime - maskingMs .. peakTime
+            // Masking boundary X
             const maskStartX = u.valToPos(peakTimeMs - maskingMs, "x", true);
-            // Pre-ring danger zone: everything before masking zone
-            const plotLeftEdge = plotLeft;
+            const clampedMaskStart = Math.max(maskStartX, plotLeft);
+
+            // Y positions for amplitude: peak(1.0) and zero(0.0)
+            const yPeak = u.valToPos(1.0, "amp", true);  // top of peak
+            const yNegPeak = u.valToPos(-1.0, "amp", true); // bottom of negative peak
+            const yZero = u.valToPos(0.0, "amp", true);  // zero line
 
             ctx.save();
-            // Clamp masking start to visible area
-            const clampedMaskStart = Math.max(maskStartX, plotLeftEdge);
 
-            // Green masking zone (safe pre-ringing): from maskStart (or left edge) to peak
+            // Green wedge (safe masking zone): triangle from peak to masking boundary
             if (peakX > clampedMaskStart) {
               ctx.fillStyle = MASKING_ZONE_COLOR;
-              ctx.fillRect(clampedMaskStart, plotTop, peakX - clampedMaskStart, plotHeight);
-              // Border at masking boundary (only if visible)
-              if (maskStartX > plotLeftEdge) {
-                ctx.strokeStyle = MASKING_BORDER_COLOR;
-                ctx.lineWidth = 1;
-                ctx.setLineDash([4, 4]);
+              ctx.beginPath();
+              // Upper wedge: peak top → zero at mask boundary
+              ctx.moveTo(peakX, yPeak);
+              ctx.lineTo(clampedMaskStart, yZero);
+              // Lower wedge: zero at mask boundary → peak bottom
+              ctx.lineTo(peakX, yNegPeak);
+              ctx.closePath();
+              ctx.fill();
+
+              // Wedge border line
+              ctx.strokeStyle = MASKING_BORDER_COLOR;
+              ctx.lineWidth = 1;
+              ctx.setLineDash([4, 4]);
+              ctx.beginPath();
+              ctx.moveTo(peakX, yPeak);
+              ctx.lineTo(clampedMaskStart, yZero);
+              ctx.lineTo(peakX, yNegPeak);
+              ctx.stroke();
+              ctx.setLineDash([]);
+
+              // Vertical dashed line at masking boundary (if visible)
+              if (maskStartX > plotLeft) {
                 ctx.beginPath();
                 ctx.moveTo(maskStartX, plotTop);
                 ctx.lineTo(maskStartX, plotTop + plotHeight);
                 ctx.stroke();
-                ctx.setLineDash([]);
               }
             }
-            // Red danger zone (audible pre-ringing): left of masking zone
-            if (maskStartX > plotLeftEdge + 2) {
+
+            // Red danger zone: everything before masking boundary
+            if (maskStartX > plotLeft + 2) {
               ctx.fillStyle = PRE_RING_ZONE_COLOR;
-              ctx.fillRect(plotLeftEdge, plotTop, maskStartX - plotLeftEdge, plotHeight);
+              ctx.fillRect(plotLeft, plotTop, maskStartX - plotLeft, plotHeight);
             }
             ctx.restore();
           },
