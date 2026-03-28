@@ -12,10 +12,6 @@ import { handleOptimizePeq, handleOptimizeAll, computing } from "./stores/peq-op
 import { saveProject, saveProjectAs, loadProject, newProject, currentProjectPath, projectName } from "./lib/project-io";
 import FileMenu from "./components/FileMenu";
 import FrequencyPlot from "./components/FrequencyPlot";
-import ImpulseResponsePlot from "./components/ImpulseResponsePlot";
-import PeqResponsePlot from "./components/PeqResponsePlot";
-import ExportPlot from "./components/ExportPlot";
-import ExportImpulsePlot from "./components/ExportImpulsePlot";
 import ControlPanel from "./components/ControlPanel";
 import BandTabs from "./components/BandTabs";
 import ProjectNameDialog from "./components/ProjectNameDialog";
@@ -58,48 +54,14 @@ function App() {
     document.title = `PhaseForge — ${name}${dirty ? " *" : ""}`;
   });
 
-  const [impulseRatio, setImpulseRatio] = createSignal(0.35); // 35% для impulse plot
-
-  // Resize для plot split (между freq и impulse)
-  let plotDragging = false;
-  let plotStartY = 0;
-  let plotStartRatio = 0;
-  let plotAreaHeight = 0;
-
-  const onPlotResizeStart = (e: MouseEvent) => {
-    const plotArea = (e.target as HTMLElement).parentElement;
-    if (!plotArea) return;
-    plotDragging = true;
-    plotStartY = e.clientY;
-    plotStartRatio = impulseRatio();
-    plotAreaHeight = plotArea.getBoundingClientRect().height;
-
-    const onMove = (ev: MouseEvent) => {
-      if (!plotDragging || plotAreaHeight <= 0) return;
-      const delta = ev.clientY - plotStartY;
-      const ratioDelta = delta / plotAreaHeight;
-      const newRatio = Math.max(0.15, Math.min(0.65, plotStartRatio - ratioDelta));
-      setImpulseRatio(newRatio);
-    };
-    const onUp = () => {
-      plotDragging = false;
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  };
+  // Plot split removed — all modes now in FrequencyPlot tabs
 
   const infoText = () => {
     if (isSum()) return "";
     return "";
   };
 
-  // Показывать ли нижний plot: не SUM и есть активная полоса
-  const showBottomPlot = () => true;
-  // PEQ Response now always in bottom panel (no separate sidebar)
-  // На вкладке export — показываем ExportPlot + ExportImpulsePlot (only in band mode)
-  const showExportPlot = () => activeTab() === "export" && !isSum();
+  // All plot modes now handled by FrequencyPlot tabs (freq/ir/step/gd/export)
 
   return (
     <div class="app">
@@ -150,32 +112,9 @@ function App() {
         <div class="main-content-col">
           {/* Plot area — dual graph when not SUM */}
           <main class="plot-area">
-            <div
-              class="freq-plot-area"
-              style={{ flex: showBottomPlot() ? `${1 - impulseRatio()}` : "1", position: "relative" }}
-            >
-              {/* FrequencyPlot ALWAYS visible in normal flow.
-                  ExportPlot overlays on top when active (absolute positioned). */}
-              <div style={{ width: "100%", height: "100%" }}>
-                <FrequencyPlot />
-              </div>
-              <Show when={showExportPlot()}>
-                <div style={{ position: "absolute", inset: "0", "z-index": "10", background: "var(--bg-main, #1a1a2e)" }}>
-                  <ExportPlot />
-                </div>
-              </Show>
+            <div class="freq-plot-area" style={{ flex: "1" }}>
+              <FrequencyPlot />
             </div>
-            <Show when={showBottomPlot()}>
-              <div class="resize-handle-plots" onMouseDown={onPlotResizeStart} />
-              <div class="impulse-plot-area" style={{ flex: `${impulseRatio()}` }}>
-                <Show when={showExportPlot()}>
-                  <ExportImpulsePlot />
-                </Show>
-                <Show when={!showExportPlot()}>
-                  <ImpulseResponsePlot />
-                </Show>
-              </div>
-            </Show>
           </main>
 
           {/* Resize handle + Control panel — hidden on SUM */}

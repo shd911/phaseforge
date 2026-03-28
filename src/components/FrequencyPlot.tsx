@@ -1331,44 +1331,7 @@ export default function FrequencyPlot() {
             queueMicrotask(() => setBandCrossNormDb(band.id, xNorm));
           }
 
-          // --- Hybrid mode: 2-stage display ---
-          // Stage 1: "PEQ Corrected" = measurement + PEQ only (green, shows flat curve)
-          if (isHybrid && showMag && peqMag) {
-            const peqCorrected = result.measurement.magnitude.map(
-              (v: number, i: number) => v + peqMag![i]
-            );
-            // Normalize PEQ Corrected to target in passband (b82.06)
-            if (result.targetMag) {
-              const hpF2 = band.target.high_pass?.freq_hz ?? 20;
-              const lpF2 = band.target.low_pass?.freq_hz ?? 20000;
-              const pbL2 = Math.max(20, hpF2 * 1.5);
-              const pbH2 = Math.min(20000, lpF2 * 0.7);
-              const eL2 = pbL2 < pbH2 ? pbL2 : 200;
-              const eH2 = pbL2 < pbH2 ? pbH2 : 2000;
-              let dS2 = 0, dN2 = 0;
-              for (let k = 0; k < result.measurement.freq.length; k++) {
-                if (result.measurement.freq[k] >= eL2 && result.measurement.freq[k] <= eH2) {
-                  dS2 += result.targetMag[k] - peqCorrected[k];
-                  dN2++;
-                }
-              }
-              const pOff = dN2 > 0 ? dS2 / dN2 : 0;
-              if (Math.abs(pOff) > 0.01) {
-                for (let k = 0; k < peqCorrected.length; k++) peqCorrected[k] += pOff;
-              }
-            }
-            uSeries.push({
-              label: "PEQ Corrected dB",
-              stroke: cf.corrected,
-              width: 2,
-              scale: "mag",
-            });
-            uData.push(peqCorrected);
-            legend.push({ label: "PEQ Corrected", color: cf.corrected, dash: false, visible: true, seriesIdx: sIdx, category: "corrected" });
-            sIdx++;
-          }
-
-          // Stage 2: Full corrected = measurement + PEQ + cross-section
+          // Full corrected = measurement + PEQ + cross-section
           // Hybrid: amber "Corrected + XO", Standard: green "Corrected"
           const fullCorrected = result.measurement.magnitude.map(
             (v: number, i: number) =>
