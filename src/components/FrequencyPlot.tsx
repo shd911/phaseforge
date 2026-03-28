@@ -12,7 +12,7 @@ import { openCrossoverDialog, type CrossoverDialogData } from "./CrossoverDialog
 
 import {
   SUM_TARGET_COLOR, SUM_TARGET_PHASE_COLOR, SUM_CORRECTED_COLOR, SUM_MEAS_COLOR,
-  FREQ_SNAP_COLORS, bandColorFamily, smoothingConfig, wrapPhase, fmtFreq,
+  FREQ_SNAP_COLORS, bandColorFamily, smoothingConfig, wrapPhase, fmtFreq, computeGroupDelay,
 } from "../lib/plot-helpers";
 
 // ---------------------------------------------------------------------------
@@ -971,11 +971,25 @@ export default function FrequencyPlot() {
     const showTarget = appState.showTarget;
     const sumMode = isSum();
     const band = activeBand();
-    const _bv = bandsVersion(); // lightweight reactive trigger for band changes
-    const _tab = activeTab(); // track tab changes (align tab shows extra curves)
-    const _fsnaps = band ? freqSnapshots(band.id) : []; // track per-band snapshots
+    const _bv = bandsVersion();
+    const _tab = activeTab();
+    const _fsnaps = band ? freqSnapshots(band.id) : [];
     const dragging = peqDragging();
+    const pTab = plotTab();
 
+    // Non-freq tabs: IR/Step/GD
+    if (pTab === "ir" || pTab === "step" || pTab === "gd") {
+      renderTimeTab(pTab, sumMode, band);
+      return;
+    }
+
+    // Export tab: placeholder for now
+    if (pTab === "export") {
+      // Will be implemented in commit 4
+      return;
+    }
+
+    // Freq tab (default)
     const doRender = () => {
       if (sumMode) {
         renderSumMode(showPhase, showMag, showTarget);
@@ -995,6 +1009,210 @@ export default function FrequencyPlot() {
       doRender();
     }
   });
+
+  // ----------------------------------------------------------------
+  // IR / Step / GD rendering (time-domain tabs)
+  // ----------------------------------------------------------------
+  async function renderTimeTab(mode: "ir" | "step" | "gd", sumMode: boolean, band: BandState | null) {
+    const gen = ++renderGen;
+
+    // Collect bands with phase data
+    const bands = sumMode
+      ? appState.bands.filter(b => b.measurement?.phase)
+      : (band?.measurement?.phase ? [band] : []);
+
+    if (bands.length === 0) {
+      if (chart) { chart.destroy(); chart = undefined; }
+      setShowLegend(false);
+      setCursorFreq("—"); setCursorSPL("—"); setCursorPhase("—");
+      return;
+    }
+
+    try {
+      // For GD: compute from phase directly (no IPC needed)
+      if (mode === "gd") {
+        const b = bands[0];
+        const freq = [...b.measurement!.freq];
+        const phase = [...b.measurement!.phase!];
+
+        // If SUM mode, coherent sum first
+        let gdFreq = freq;
+        let gdPhase = phase;
+        if (sumMode && bands.length > 1) {
+          const n = freq.length;
+          const sumRe = new Float64Array(n);
+          const sumIm = new Float64Array(n);
+          for (const sb of bands) {
+            const sign = sb.inverted ? -1 : 1;
+            for (let j = 0; j < n; j++) {
+              const amp = Math.pow(10, (sb.measurement!.magnitude[j] ?? -200) / 20) * sign;
+              const phRad = (sb.measurement!.phase![j] ?? 0) * Math.PI / 180;
+              sumRe[j] += amp * Math.cos(phRad);
+              sumIm[j] += amp * Math.sin(phRad);
+            }
+          }
+          // Unwrap sum phase
+          const sumPh: number[] = [];
+          for (let j = 0; j < n; j++) {
+            sumPh.push(Math.atan2(sumIm[j], sumRe[j]) * 180 / Math.PI);
+          }
+          const unwrapped: number[] = [sumPh[0]];
+          for (let i = 1; i < n; i++) {
+            let diff = sumPh[i] - sumPh[i - 1];
+            while (diff > 180) diff -= 360;
+            while (diff <= -180) diff += 360;
+            unwrapped.push(unwrapped[i - 1] + diff);
+          }
+          gdPhase = unwrapped;
+        }
+
+        const { freqOut, gdMs } = computeGroupDelay(gdFreq, gdPhase);
+        if (gen !== renderGen) return;
+        renderGdChart(freqOut, gdMs);
+        return;
+      }
+
+      // IR or Step: compute via IPC
+      const b = bands[0];
+      const freq = [...b.measurement!.freq];
+      const magnitude = [...b.measurement!.magnitude];
+      const phase = [...b.measurement!.phase!];
+      const sr = b.measurement!.sample_rate ?? 48000;
+
+      let resultFreq = freq;
+      let resultMag = magnitude;
+      let resultPhase = phase;
+
+      // SUM mode: coherent sum in complex domain
+      if (sumMode && bands.length > 1) {
+        const n = freq.length;
+        const sumRe = new Float64Array(n);
+        const sumIm = new Float64Array(n);
+        for (const sb of bands) {
+          const sign = sb.inverted ? -1 : 1;
+          for (let j = 0; j < n; j++) {
+            const amp = Math.pow(10, (sb.measurement!.magnitude[j] ?? -200) / 20) * sign;
+            const phRad = (sb.measurement!.phase![j] ?? 0) * Math.PI / 180;
+            sumRe[j] += amp * Math.cos(phRad);
+            sumIm[j] += amp * Math.sin(phRad);
+          }
+        }
+        resultMag = [];
+        resultPhase = [];
+        for (let j = 0; j < n; j++) {
+          const amplitude = Math.sqrt(sumRe[j] * sumRe[j] + sumIm[j] * sumIm[j]);
+          resultMag.push(amplitude > 0 ? 20 * Math.log10(amplitude) : -200);
+          resultPhase.push(Math.atan2(sumIm[j], sumRe[j]) * 180 / Math.PI);
+        }
+      }
+
+      const result = await invoke<{ time: number[]; impulse: number[]; step: number[] }>("compute_impulse", {
+        freq: resultFreq, magnitude: resultMag, phase: resultPhase, sampleRate: sr,
+      });
+      if (gen !== renderGen) return;
+
+      const timeMs = result.time.map(t => t * 1000);
+      const data = mode === "ir" ? result.impulse : result.step;
+      renderTimeChart(timeMs, data, mode === "ir" ? "Impulse" : "Step", mode === "ir" ? "#4A9EFF" : "#22C55E");
+    } catch (e) {
+      console.error("Time tab render failed:", e);
+    }
+  }
+
+  function renderTimeChart(timeMs: number[], data: number[], label: string, color: string) {
+    if (chart) { chart.destroy(); chart = undefined; }
+    if (!containerRef) return;
+    const rect = containerRef.getBoundingClientRect();
+    const w = Math.max(rect.width, 400);
+    const h = Math.max(rect.height, 200);
+
+    // Find peak and normalize
+    let peak = 0, peakIdx = 0;
+    for (let i = 0; i < data.length; i++) {
+      if (Math.abs(data[i]) > peak) { peak = Math.abs(data[i]); peakIdx = i; }
+    }
+    if (peak < 1e-20) peak = 1;
+    const norm = data.map(v => v / peak);
+
+    // Y range
+    let yMin = 0, yMax = 0;
+    for (const v of norm) { if (v < yMin) yMin = v; if (v > yMax) yMax = v; }
+    const pad = Math.max(0.05, (yMax - yMin) * 0.05);
+
+    setShowLegend(false);
+    setCursorValues([]);
+
+    const opts: uPlot.Options = {
+      width: w, height: h,
+      series: [{}, { label, stroke: color, width: 1.5, scale: "y" }],
+      scales: {
+        x: { min: timeMs[0], max: timeMs[timeMs.length - 1] },
+        y: { auto: false, range: [yMin - pad, yMax + pad] as uPlot.Range.MinMax },
+      },
+      axes: [
+        { label: "ms", stroke: "#9b9ba6", grid: { stroke: "rgba(255,255,255,0.12)" }, ticks: { stroke: "rgba(255,255,255,0.20)" },
+          values: (_u: uPlot, vals: number[]) => vals.map(v => v == null ? "" : v.toFixed(1)) },
+        { label: "%", scale: "y", stroke: "#9b9ba6", grid: { stroke: "rgba(255,255,255,0.12)" }, ticks: { stroke: "rgba(255,255,255,0.20)" },
+          values: (_u: uPlot, vals: number[]) => vals.map(v => v == null ? "" : (v * 100).toFixed(0)), size: 50 },
+      ],
+      legend: { show: false },
+      cursor: { drag: { x: false, y: false, setScale: false } },
+      hooks: {
+        setCursor: [(u: uPlot) => {
+          const idx = u.cursor.idx;
+          if (idx == null || idx < 0 || idx >= u.data[0].length) { setCursorFreq("—"); setCursorSPL("—"); return; }
+          setCursorFreq(u.data[0][idx]?.toFixed(2) + " ms");
+          const v = u.data[1]?.[idx];
+          setCursorSPL(v != null ? ((v as number) * 100).toFixed(1) + "%" : "—");
+        }],
+      },
+    };
+    try { chart = new uPlot(opts, [timeMs, norm], containerRef); } catch (e) { console.error(e); }
+  }
+
+  function renderGdChart(freq: number[], gdMs: number[]) {
+    if (chart) { chart.destroy(); chart = undefined; }
+    if (!containerRef) return;
+    const rect = containerRef.getBoundingClientRect();
+    const w = Math.max(rect.width, 400);
+    const h = Math.max(rect.height, 200);
+
+    let yMin = Infinity, yMax = -Infinity;
+    for (const v of gdMs) { if (isFinite(v)) { if (v < yMin) yMin = v; if (v > yMax) yMax = v; } }
+    const pad = Math.max(0.5, (yMax - yMin) * 0.1);
+    if (!isFinite(yMin)) { yMin = -5; yMax = 20; }
+
+    setShowLegend(false);
+    setCursorValues([]);
+
+    const opts: uPlot.Options = {
+      width: w, height: h,
+      series: [{}, { label: "GD ms", stroke: "#F59E0B", width: 1.5, scale: "y" }],
+      scales: {
+        x: { min: 20, max: 20000, distr: 3 },
+        y: { auto: false, range: [yMin - pad, yMax + pad] as uPlot.Range.MinMax },
+      },
+      axes: [
+        { stroke: "#9b9ba6", grid: { stroke: "rgba(255,255,255,0.12)" }, ticks: { stroke: "rgba(255,255,255,0.20)" },
+          values: (_u: uPlot, vals: number[]) => vals.map(v => v == null ? "" : v >= 1000 ? (v/1000)+"k" : String(Math.round(v))) },
+        { label: "ms", scale: "y", stroke: "#9b9ba6", grid: { stroke: "rgba(255,255,255,0.12)" }, ticks: { stroke: "rgba(255,255,255,0.20)" },
+          values: (_u: uPlot, vals: number[]) => vals.map(v => v == null ? "" : v.toFixed(1)), size: 50 },
+      ],
+      legend: { show: false },
+      cursor: { drag: { x: false, y: false, setScale: false } },
+      hooks: {
+        setCursor: [(u: uPlot) => {
+          const idx = u.cursor.idx;
+          if (idx == null || idx < 0 || idx >= u.data[0].length) { setCursorFreq("—"); setCursorSPL("—"); return; }
+          const f = u.data[0][idx];
+          setCursorFreq(f != null ? (f >= 1000 ? (f/1000).toFixed(2) + " kHz" : Math.round(f) + " Hz") : "—");
+          const gd = u.data[1]?.[idx];
+          setCursorSPL(gd != null ? (gd as number).toFixed(2) + " ms" : "—");
+        }],
+      },
+    };
+    try { chart = new uPlot(opts, [freq, gdMs], containerRef); } catch (e) { console.error(e); }
+  }
 
   // ----------------------------------------------------------------
   // Single band rendering
