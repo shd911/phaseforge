@@ -524,7 +524,9 @@ body {
 }
 
 .plot-body:hover .axis-controls-y,
-.plot-body:hover .axis-controls-x {
+.plot-body:hover .axis-controls-x,
+.impulse-body:hover .axis-controls-y,
+.impulse-body:hover .axis-controls-x {
   opacity: 1;
   pointer-events: auto;
 }
