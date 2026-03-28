@@ -116,7 +116,16 @@ export default function ExportImpulsePlot() {
     // Compute masking duration: ~1.5 periods of HP cutoff frequency
     maskingMs = hpFreq > 0 ? (1.5 / hpFreq) * 1000 : 20;
 
-    if (chartRef.current) {
+    // Save user's Y scale before destroying chart
+    if (chartRef.current && !resetScales) {
+      const ys = chartRef.current.scales["amp"];
+      if (ys?.min != null && ys?.max != null) {
+        curAmpMin = ys.min;
+        curAmpMax = ys.max;
+      }
+      chartRef.current.destroy();
+      chartRef.current = undefined;
+    } else if (chartRef.current) {
       chartRef.current.destroy();
       chartRef.current = undefined;
     }
@@ -226,7 +235,12 @@ export default function ExportImpulsePlot() {
     dataXMax = trimTime[trimTime.length - 1] + 0.5;
     dataYMin = isDb ? Math.max(yMin - fitYPad, -80) : yMin - fitYPad;
     dataYMax = yMax + fitYPad;
-    if (resetScales || !chartRef.current) {
+    if (resetScales) {
+      curAmpMin = dataYMin;
+      curAmpMax = dataYMax;
+    }
+    // On first render (no saved scale), use data fit
+    if (curAmpMin === 0 && curAmpMax === 0) {
       curAmpMin = dataYMin;
       curAmpMax = dataYMax;
     }
