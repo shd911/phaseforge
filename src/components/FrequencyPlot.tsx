@@ -150,6 +150,13 @@ export default function FrequencyPlot() {
   const [legendEntries, setLegendEntries] = createStore<LegendEntry[]>([]);
   const [showLegend, setShowLegend] = createSignal(false);
 
+  // IR/Step tab options
+  const [irDbMode, setIrDbMode] = createSignal(false);
+  const [showIr, setShowIr] = createSignal(true);
+  const [showStep, setShowStep] = createSignal(true);
+  const [showTarget, setShowTarget] = createSignal(true);
+  const [showMasking, setShowMasking] = createSignal(true);
+
   // Persistent visibility — two maps for different modes:
   // SUM mode: by label (each band has its own curves like "Band 1 tgt", "Band 2 tgt")
   // Band mode: by category key (labels change per band, categories don't)
@@ -920,6 +927,19 @@ export default function FrequencyPlot() {
     });
   });
 
+  // Redraw when IR/Step toggles change (triggers full re-render)
+  createEffect(() => {
+    const _db = irDbMode(); const _ir = showIr(); const _st = showStep();
+    const _tgt = showTarget(); const _mask = showMasking();
+    const pTab = plotTab();
+    if (pTab === "ir" || pTab === "step") {
+      // Re-trigger main effect by incrementing renderGen
+      const band = activeBand();
+      const sumMode = isSum();
+      renderTimeTab("ir", sumMode, band);
+    }
+  });
+
   // Redraw when selected PEQ index changes (for vertical dashed line)
   createEffect(() => {
     const _sel = selectedPeqIdx(); // track
@@ -1258,76 +1278,192 @@ export default function FrequencyPlot() {
       });
       if (gen !== renderGen) return;
 
+      // Target impulse (if target enabled)
+      let targetResult: { time: number[]; impulse: number[]; step: number[] } | null = null;
+      if (!sumMode && band && band.targetEnabled) {
+        try {
+          const targetCurve = JSON.parse(JSON.stringify(band.target));
+          // Auto-ref: average measurement level in 200-2000 Hz
+          let sum = 0, n = 0;
+          for (let i = 0; i < freq.length; i++) {
+            if (freq[i] >= 200 && freq[i] <= 2000) { sum += magnitude[i]; n++; }
+          }
+          targetCurve.reference_level_db += n > 0 ? sum / n : 0;
+          const tResp = await invoke<{ magnitude: number[]; phase: number[] }>("evaluate_target", { target: targetCurve, freq });
+          if (gen !== renderGen) return;
+          targetResult = await invoke<{ time: number[]; impulse: number[]; step: number[] }>("compute_impulse", {
+            freq, magnitude: tResp.magnitude, phase: tResp.phase, sampleRate: sr,
+          });
+          if (gen !== renderGen) return;
+        } catch (_) {}
+      }
+
+      // HP freq for masking zone
+      const hpFreq = band?.target?.high_pass?.freq_hz ?? 20;
+
       const timeMs = result.time.map(t => t * 1000);
-      // Show both impulse and step on same chart
-      renderIrStepChart(timeMs, result.impulse, result.step);
+      const targetTimeMs = targetResult?.time.map(t => t * 1000) ?? null;
+      renderIrStepChart(timeMs, result.impulse, result.step, targetTimeMs, targetResult?.impulse ?? null, targetResult?.step ?? null, hpFreq);
     } catch (e) {
       console.error("Time tab render failed:", e);
     }
   }
 
-  function renderIrStepChart(timeMs: number[], impulse: number[], step: number[]) {
+  function renderIrStepChart(
+    timeMs: number[], impulse: number[], step: number[],
+    targetTimeMs: number[] | null, targetImpulse: number[] | null, targetStep: number[] | null,
+    hpFreq: number,
+  ) {
     try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
     if (!containerRef) return;
     const rect = containerRef.getBoundingClientRect();
     const w = Math.max(rect.width, 400);
     const h = Math.max(rect.height, 200);
+    const isDb = irDbMode();
+    const toDb = (v: number) => { const a = Math.abs(v); return a > 1e-10 ? 20 * Math.log10(a) : -200; };
 
-    // Normalize impulse by its peak
-    let irPeak = 0;
-    for (const v of impulse) { if (Math.abs(v) > irPeak) irPeak = Math.abs(v); }
+    // Normalize by impulse peak
+    let irPeak = 0, peakIdx = 0;
+    for (let i = 0; i < impulse.length; i++) { if (Math.abs(impulse[i]) > irPeak) { irPeak = Math.abs(impulse[i]); peakIdx = i; } }
     if (irPeak < 1e-20) irPeak = 1;
     const normIr = impulse.map(v => v / irPeak);
+    const normSt = step.map(v => { let p = 0; for (const s of step) { if (Math.abs(s) > p) p = Math.abs(s); } return p > 1e-20 ? v / p : 0; });
+    const peakTimeMs = timeMs[peakIdx];
 
-    // Normalize step by its peak
-    let stPeak = 0;
-    for (const v of step) { if (Math.abs(v) > stPeak) stPeak = Math.abs(v); }
-    if (stPeak < 1e-20) stPeak = 1;
-    const normSt = step.map(v => v / stPeak);
+    // Masking duration: 1.5 periods of HP freq
+    const maskingMs = hpFreq > 0 ? (1.5 / hpFreq) * 1000 : 20;
 
-    // Y range from both
-    let yMin = 0, yMax = 0;
-    for (const v of normIr) { if (v < yMin) yMin = v; if (v > yMax) yMax = v; }
-    for (const v of normSt) { if (v < yMin) yMin = v; if (v > yMax) yMax = v; }
-    const pad = Math.max(0.05, (yMax - yMin) * 0.05);
+    // Build series
+    const uSeries: uPlot.Series[] = [{}];
+    const uDataArr: number[][] = [timeMs];
+
+    // IR
+    uSeries.push({ label: isDb ? "IR dB" : "Impulse", stroke: "#4A9EFF", width: 1.5, scale: "y", show: showIr() });
+    uDataArr.push(isDb ? normIr.map(toDb) : normIr);
+
+    // Step
+    uSeries.push({ label: isDb ? "Step dB" : "Step", stroke: "#22C55E", width: 1.5, scale: "y", show: showStep() });
+    uDataArr.push(isDb ? normSt.map(toDb) : normSt);
+
+    // Target IR (if available, aligned to measurement peak)
+    if (targetTimeMs && targetImpulse && showTarget()) {
+      let tPeak = 0, tPeakIdx = 0;
+      for (let i = 0; i < targetImpulse.length; i++) { if (Math.abs(targetImpulse[i]) > tPeak) { tPeak = Math.abs(targetImpulse[i]); tPeakIdx = i; } }
+      if (tPeak < 1e-20) tPeak = 1;
+      const tShift = peakTimeMs - targetTimeMs[tPeakIdx];
+      const aligned = timeMs.map(t => {
+        const st = t - tShift;
+        if (st <= targetTimeMs[0] || st >= targetTimeMs[targetTimeMs.length - 1]) return isDb ? -200 : 0;
+        let lo = 0, hi = targetTimeMs.length - 1;
+        while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (targetTimeMs[mid] <= st) lo = mid; else hi = mid; }
+        const frac = (st - targetTimeMs[lo]) / (targetTimeMs[hi] - targetTimeMs[lo]);
+        const v = (targetImpulse[lo] + frac * (targetImpulse[hi] - targetImpulse[lo])) / tPeak;
+        return isDb ? toDb(v) : v;
+      });
+      uSeries.push({ label: "Target", stroke: "#FFD700", width: 1.5, dash: [6, 3], scale: "y" });
+      uDataArr.push(aligned);
+    }
+
+    // Y range
+    let yMin = Infinity, yMax = -Infinity;
+    for (let s = 1; s < uDataArr.length; s++) {
+      for (const v of uDataArr[s]) { if (v > -190 && v < yMin) yMin = v; if (v > -190 && v > yMax) yMax = v; }
+    }
+    if (!isFinite(yMin)) { yMin = isDb ? -80 : -1.1; yMax = isDb ? 0 : 1.1; }
+    const pad = isDb ? 5 : Math.max(0.05, (yMax - yMin) * 0.05);
 
     setShowLegend(false);
     setCursorValues([]);
 
     const opts: uPlot.Options = {
       width: w, height: h,
-      series: [
-        {},
-        { label: "Impulse", stroke: "#4A9EFF", width: 1.5, scale: "y" },
-        { label: "Step", stroke: "#22C55E", width: 1.5, scale: "y" },
-      ],
+      series: uSeries,
       scales: {
         x: { min: timeMs[0], max: timeMs[timeMs.length - 1] },
-        y: { auto: false, range: [yMin - pad, yMax + pad] as uPlot.Range.MinMax },
+        y: { auto: false, range: [isDb ? Math.max(yMin - pad, -80) : yMin - pad, yMax + pad] as uPlot.Range.MinMax },
       },
       axes: [
         { label: "ms", stroke: "#9b9ba6", grid: { stroke: "rgba(255,255,255,0.12)" }, ticks: { stroke: "rgba(255,255,255,0.20)" },
           values: (_u: uPlot, vals: number[]) => vals.map(v => v == null ? "" : v.toFixed(1)) },
-        { label: "%", scale: "y", stroke: "#9b9ba6", grid: { stroke: "rgba(255,255,255,0.12)" }, ticks: { stroke: "rgba(255,255,255,0.20)" },
-          values: (_u: uPlot, vals: number[]) => vals.map(v => v == null ? "" : (v * 100).toFixed(0)), size: 50 },
+        { label: isDb ? "dBFS" : "%", scale: "y", stroke: "#9b9ba6", grid: { stroke: "rgba(255,255,255,0.12)" }, ticks: { stroke: "rgba(255,255,255,0.20)" },
+          values: (_u: uPlot, vals: number[]) => vals.map(v => v == null ? "" : isDb ? v.toFixed(0) : (v * 100).toFixed(0)), size: 50 },
       ],
       legend: { show: false },
       cursor: { drag: { x: false, y: false, setScale: false } },
       hooks: {
+        draw: showMasking() ? [(u: uPlot) => {
+          const ctx = u.ctx;
+          const plotLeft = u.bbox.left;
+          const plotTop = u.bbox.top;
+          const plotHeight = u.bbox.height;
+          const peakX = u.valToPos(peakTimeMs, "x", true);
+          const maskStartX = u.valToPos(peakTimeMs - maskingMs, "x", true);
+          const clampedMaskStart = Math.max(maskStartX, plotLeft);
+
+          ctx.save();
+          if (peakX > clampedMaskStart) {
+            // Green safe wedge
+            const nSteps = 30;
+            const maskWidthX = peakX - clampedMaskStart;
+            if (isDb) {
+              ctx.fillStyle = "rgba(34, 197, 94, 0.10)";
+              ctx.beginPath();
+              for (let s = 0; s <= nSteps; s++) {
+                const t = s / nSteps;
+                const db = -40 - 40 * t;
+                if (s === 0) ctx.moveTo(peakX, u.valToPos(db, "y", true));
+                else ctx.lineTo(peakX - t * maskWidthX, u.valToPos(db, "y", true));
+              }
+              const yBot = u.valToPos(-80, "y", true);
+              ctx.lineTo(clampedMaskStart, yBot); ctx.lineTo(peakX, yBot);
+              ctx.closePath(); ctx.fill();
+              // Yellow caution
+              ctx.fillStyle = "rgba(234, 179, 8, 0.08)";
+              ctx.beginPath();
+              for (let s = 0; s <= nSteps; s++) {
+                const t = s / nSteps;
+                const db = -26 - 40 * t;
+                if (s === 0) ctx.moveTo(peakX, u.valToPos(db, "y", true));
+                else ctx.lineTo(peakX - t * maskWidthX, u.valToPos(db, "y", true));
+              }
+              ctx.lineTo(clampedMaskStart, yBot); ctx.lineTo(peakX, yBot);
+              ctx.closePath(); ctx.fill();
+            } else {
+              // Linear mode wedges
+              ctx.fillStyle = "rgba(234, 179, 8, 0.08)";
+              ctx.beginPath();
+              for (let s = 0; s <= nSteps; s++) { const t = s / nSteps; ctx.lineTo(peakX - t * maskWidthX, u.valToPos(0.05 * Math.exp(-3 * t), "y", true)); }
+              for (let s = nSteps; s >= 0; s--) { const t = s / nSteps; ctx.lineTo(peakX - t * maskWidthX, u.valToPos(-0.05 * Math.exp(-3 * t), "y", true)); }
+              ctx.closePath(); ctx.fill();
+              ctx.fillStyle = "rgba(34, 197, 94, 0.10)";
+              ctx.beginPath();
+              for (let s = 0; s <= nSteps; s++) { const t = s / nSteps; ctx.lineTo(peakX - t * maskWidthX, u.valToPos(0.01 * Math.exp(-4 * t), "y", true)); }
+              for (let s = nSteps; s >= 0; s--) { const t = s / nSteps; ctx.lineTo(peakX - t * maskWidthX, u.valToPos(-0.01 * Math.exp(-4 * t), "y", true)); }
+              ctx.closePath(); ctx.fill();
+            }
+          }
+          // Red zone before masking
+          if (maskStartX > plotLeft + 2) {
+            ctx.fillStyle = "rgba(239, 68, 68, 0.08)";
+            ctx.fillRect(plotLeft, plotTop, maskStartX - plotLeft, plotHeight);
+          }
+          ctx.restore();
+        }] : [],
         setCursor: [(u: uPlot) => {
           const idx = u.cursor.idx;
           if (idx == null || idx < 0 || idx >= u.data[0].length) { setCursorFreq("—"); setCursorSPL("—"); return; }
           setCursorFreq(u.data[0][idx]?.toFixed(2) + " ms");
           const ir = u.data[1]?.[idx];
           const st = u.data[2]?.[idx];
-          setCursorSPL(
-            (ir != null ? `IR: ${((ir as number) * 100).toFixed(1)}%` : "") +
-            (st != null ? ` Step: ${((st as number) * 100).toFixed(1)}%` : "")
-          );
+          if (isDb) {
+            setCursorSPL((ir != null && (ir as number) > -190 ? `IR: ${(ir as number).toFixed(0)} dB` : "") + (st != null && (st as number) > -190 ? ` Step: ${(st as number).toFixed(0)} dB` : ""));
+          } else {
+            setCursorSPL((ir != null ? `IR: ${((ir as number) * 100).toFixed(1)}%` : "") + (st != null ? ` Step: ${((st as number) * 100).toFixed(1)}%` : ""));
+          }
         }],
       },
     };
-    try { chart = new uPlot(opts, [timeMs, normIr, normSt], containerRef); } catch (e) { console.error(e); }
+    try { chart = new uPlot(opts, uDataArr as uPlot.AlignedData, containerRef); } catch (e) { console.error(e); }
   }
 
   function renderGdChart(freq: number[], gdMs: number[]) {
@@ -2366,6 +2502,15 @@ export default function FrequencyPlot() {
               </>
             );
           })()}
+        </Show>
+        {/* IR/Step tab toggles */}
+        <Show when={plotTab() === "ir" || plotTab() === "step"}>
+          <span class="readout-sep" />
+          <button class={`tb-btn ${showIr() ? "active" : ""}`} onClick={() => setShowIr(!showIr())} style={{ color: "#4A9EFF", "font-size": "9px", padding: "1px 4px" }}>IR</button>
+          <button class={`tb-btn ${showStep() ? "active" : ""}`} onClick={() => setShowStep(!showStep())} style={{ color: "#22C55E", "font-size": "9px", padding: "1px 4px" }}>Step</button>
+          <button class={`tb-btn ${showTarget() ? "active" : ""}`} onClick={() => setShowTarget(!showTarget())} style={{ color: "#FFD700", "font-size": "9px", padding: "1px 4px" }}>Tgt</button>
+          <button class={`tb-btn ${showMasking() ? "active" : ""}`} onClick={() => setShowMasking(!showMasking())} style={{ "font-size": "9px", padding: "1px 4px" }}>Mask</button>
+          <button class={`tb-btn ${irDbMode() ? "active" : ""}`} onClick={() => setIrDbMode(!irDbMode())} style={{ "font-size": "9px", padding: "1px 4px" }}>{irDbMode() ? "dB" : "Lin"}</button>
         </Show>
       </div>
       {/* SUM visibility matrix table */}
