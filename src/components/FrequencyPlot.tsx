@@ -1015,15 +1015,17 @@ export default function FrequencyPlot() {
     const dragging = peqDragging();
     const pTab = plotTab();
 
-    // Non-freq tabs: IR/Step/GD
+    // Non-freq tabs: IR/Step (combined) or GD
     if (pTab === "ir" || pTab === "step" || pTab === "gd") {
-      renderTimeTab(pTab, sumMode, band);
+      renderTimeTab(pTab === "step" ? "ir" : pTab, sumMode, band);
       return;
     }
 
-    // Export tab: placeholder for now
+    // Export tab: placeholder
     if (pTab === "export") {
-      // Will be implemented in commit 4
+      if (chart) { chart.destroy(); chart = undefined; }
+      setShowLegend(false);
+      setCursorFreq("—"); setCursorSPL("—"); setCursorPhase("—");
       return;
     }
 
@@ -1150,31 +1152,36 @@ export default function FrequencyPlot() {
       if (gen !== renderGen) return;
 
       const timeMs = result.time.map(t => t * 1000);
-      const data = mode === "ir" ? result.impulse : result.step;
-      renderTimeChart(timeMs, data, mode === "ir" ? "Impulse" : "Step", mode === "ir" ? "#4A9EFF" : "#22C55E");
+      // Show both impulse and step on same chart
+      renderIrStepChart(timeMs, result.impulse, result.step);
     } catch (e) {
       console.error("Time tab render failed:", e);
     }
   }
 
-  function renderTimeChart(timeMs: number[], data: number[], label: string, color: string) {
+  function renderIrStepChart(timeMs: number[], impulse: number[], step: number[]) {
     if (chart) { chart.destroy(); chart = undefined; }
     if (!containerRef) return;
     const rect = containerRef.getBoundingClientRect();
     const w = Math.max(rect.width, 400);
     const h = Math.max(rect.height, 200);
 
-    // Find peak and normalize
-    let peak = 0, peakIdx = 0;
-    for (let i = 0; i < data.length; i++) {
-      if (Math.abs(data[i]) > peak) { peak = Math.abs(data[i]); peakIdx = i; }
-    }
-    if (peak < 1e-20) peak = 1;
-    const norm = data.map(v => v / peak);
+    // Normalize impulse by its peak
+    let irPeak = 0;
+    for (const v of impulse) { if (Math.abs(v) > irPeak) irPeak = Math.abs(v); }
+    if (irPeak < 1e-20) irPeak = 1;
+    const normIr = impulse.map(v => v / irPeak);
 
-    // Y range
+    // Normalize step by its peak
+    let stPeak = 0;
+    for (const v of step) { if (Math.abs(v) > stPeak) stPeak = Math.abs(v); }
+    if (stPeak < 1e-20) stPeak = 1;
+    const normSt = step.map(v => v / stPeak);
+
+    // Y range from both
     let yMin = 0, yMax = 0;
-    for (const v of norm) { if (v < yMin) yMin = v; if (v > yMax) yMax = v; }
+    for (const v of normIr) { if (v < yMin) yMin = v; if (v > yMax) yMax = v; }
+    for (const v of normSt) { if (v < yMin) yMin = v; if (v > yMax) yMax = v; }
     const pad = Math.max(0.05, (yMax - yMin) * 0.05);
 
     setShowLegend(false);
@@ -1182,7 +1189,11 @@ export default function FrequencyPlot() {
 
     const opts: uPlot.Options = {
       width: w, height: h,
-      series: [{}, { label, stroke: color, width: 1.5, scale: "y" }],
+      series: [
+        {},
+        { label: "Impulse", stroke: "#4A9EFF", width: 1.5, scale: "y" },
+        { label: "Step", stroke: "#22C55E", width: 1.5, scale: "y" },
+      ],
       scales: {
         x: { min: timeMs[0], max: timeMs[timeMs.length - 1] },
         y: { auto: false, range: [yMin - pad, yMax + pad] as uPlot.Range.MinMax },
@@ -1200,12 +1211,16 @@ export default function FrequencyPlot() {
           const idx = u.cursor.idx;
           if (idx == null || idx < 0 || idx >= u.data[0].length) { setCursorFreq("—"); setCursorSPL("—"); return; }
           setCursorFreq(u.data[0][idx]?.toFixed(2) + " ms");
-          const v = u.data[1]?.[idx];
-          setCursorSPL(v != null ? ((v as number) * 100).toFixed(1) + "%" : "—");
+          const ir = u.data[1]?.[idx];
+          const st = u.data[2]?.[idx];
+          setCursorSPL(
+            (ir != null ? `IR: ${((ir as number) * 100).toFixed(1)}%` : "") +
+            (st != null ? ` Step: ${((st as number) * 100).toFixed(1)}%` : "")
+          );
         }],
       },
     };
-    try { chart = new uPlot(opts, [timeMs, norm], containerRef); } catch (e) { console.error(e); }
+    try { chart = new uPlot(opts, [timeMs, normIr, normSt], containerRef); } catch (e) { console.error(e); }
   }
 
   function renderGdChart(freq: number[], gdMs: number[]) {
@@ -2192,8 +2207,7 @@ export default function FrequencyPlot() {
     <div class="plot-wrapper">
       <div class="plot-tabs-strip">
         <button class={`plot-tab ${plotTab() === "freq" ? "active" : ""}`} onClick={() => setPlotTab("freq")}>АЧХ</button>
-        <button class={`plot-tab ${plotTab() === "ir" ? "active" : ""}`} onClick={() => setPlotTab("ir")}>IR</button>
-        <button class={`plot-tab ${plotTab() === "step" ? "active" : ""}`} onClick={() => setPlotTab("step")}>Step</button>
+        <button class={`plot-tab ${plotTab() === "ir" || plotTab() === "step" ? "active" : ""}`} onClick={() => setPlotTab("ir")}>IR/Step</button>
         <button class={`plot-tab ${plotTab() === "gd" ? "active" : ""}`} onClick={() => setPlotTab("gd")}>GD</button>
         <button class={`plot-tab ${plotTab() === "export" ? "active" : ""}`} onClick={() => setPlotTab("export")}>Export</button>
       </div>
