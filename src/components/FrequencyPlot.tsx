@@ -4,102 +4,16 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { invoke } from "@tauri-apps/api/core";
 import type { Measurement, TargetResponse, FilterType } from "../lib/types";
-import { appState, activeBand, isSum, activeTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, bandsVersion } from "../stores/bands";
+import { appState, activeBand, isSum, activeTab, plotTab, setPlotTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, bandsVersion } from "../stores/bands";
 import type { SmoothingMode, BandState, FreqSnapshot } from "../stores/bands";
 import { needAutoFit, setNeedAutoFit } from "../App";
 import { computeFloorBounce } from "../lib/floor-bounce";
 import { openCrossoverDialog, type CrossoverDialogData } from "./CrossoverDialog";
 
-// Σ (sum) curve colors — fixed, not derived from band colors
-const SUM_TARGET_COLOR = "#FFD700"; // gold
-const SUM_TARGET_PHASE_COLOR = "#B8960A"; // muted gold
-const SUM_CORRECTED_COLOR = "#4ADE80"; // bright green
-const SUM_MEAS_COLOR = "#94A3B8"; // muted slate
-
-// Snapshot overlay colors (muted, distinct from active curves)
-const FREQ_SNAP_COLORS = ["#808080", "#A855F7", "#EC4899", "#14B8A6"];
-
-// --- Color hierarchy derived from band.color ---
-// Measurement: base color at 70% opacity (muted)
-// Target:      same hue, desaturated, lightened (pastel reference)
-// Corrected:   same hue, full saturation, bright (vivid result)
-// Phase:       darker version of the corresponding curve
-
-function hexToHsl(hex: string): [number, number, number] {
-  const r = parseInt(hex.slice(1, 3), 16) / 255;
-  const g = parseInt(hex.slice(3, 5), 16) / 255;
-  const b = parseInt(hex.slice(5, 7), 16) / 255;
-  const max = Math.max(r, g, b), min = Math.min(r, g, b);
-  let h = 0, s = 0;
-  const l = (max + min) / 2;
-  if (max !== min) {
-    const d = max - min;
-    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
-    else if (max === g) h = ((b - r) / d + 2) / 6;
-    else h = ((r - g) / d + 4) / 6;
-  }
-  return [h * 360, s * 100, l * 100];
-}
-
-function hslToHex(h: number, s: number, l: number): string {
-  h /= 360; s /= 100; l /= 100;
-  const hue2rgb = (p: number, q: number, t: number) => {
-    if (t < 0) t += 1; if (t > 1) t -= 1;
-    if (t < 1/6) return p + (q - p) * 6 * t;
-    if (t < 1/2) return q;
-    if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
-    return p;
-  };
-  let r: number, g: number, b: number;
-  if (s === 0) { r = g = b = l; } else {
-    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-    const p = 2 * l - q;
-    r = hue2rgb(p, q, h + 1/3);
-    g = hue2rgb(p, q, h);
-    b = hue2rgb(p, q, h - 1/3);
-  }
-  const toHex = (v: number) => Math.round(v * 255).toString(16).padStart(2, "0");
-  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
-}
-
-/** Derive measurement (muted), target (pastel), corrected (vivid) from base color */
-function bandColorFamily(baseHex: string): {
-  meas: string; measPhase: string;
-  target: string; targetPhase: string;
-  corrected: string; correctedPhase: string;
-} {
-  const [h, _s, _l] = hexToHsl(baseHex);
-  return {
-    meas:           hslToHex(h, 30, 45) + "A0",  // dim, desaturated, 63% opacity
-    measPhase:      hslToHex(h, 20, 35) + "70",  // very dim, 44% opacity
-    target:         hslToHex(h, 25, 78),          // pale pastel — clearly lighter
-    targetPhase:    hslToHex(h, 20, 65),          // lighter muted
-    corrected:      hslToHex(h, 100, 60),         // fully saturated, vivid
-    correctedPhase: hslToHex(h, 80, 42),          // saturated but dark
-  };
-}
-
-function smoothingConfig(mode: SmoothingMode): { variable: boolean; fixed_fraction: number | null } {
-  if (mode === "var") return { variable: true, fixed_fraction: null };
-  const fractions: Record<string, number> = { "1/3": 1/3, "1/6": 1/6, "1/12": 1/12, "1/24": 1/24 };
-  return { variable: false, fixed_fraction: fractions[mode] ?? 1/6 };
-}
-
-function wrapPhase(phase: number[]): number[] {
-  for (let i = 0; i < phase.length; i++) {
-    let w = phase[i] % 360;
-    if (w > 180) w -= 360;
-    else if (w < -180) w += 360;
-    phase[i] = w;
-  }
-  return phase;
-}
-
-function fmtFreq(v: number): string {
-  if (v >= 1000) return (v / 1000).toFixed(2) + " kHz";
-  return v.toFixed(1) + " Hz";
-}
+import {
+  SUM_TARGET_COLOR, SUM_TARGET_PHASE_COLOR, SUM_CORRECTED_COLOR, SUM_MEAS_COLOR,
+  FREQ_SNAP_COLORS, bandColorFamily, smoothingConfig, wrapPhase, fmtFreq,
+} from "../lib/plot-helpers";
 
 // ---------------------------------------------------------------------------
 // Crossover point: band[i] LP ↔ band[i+1] HP
@@ -2057,6 +1971,13 @@ export default function FrequencyPlot() {
 
   return (
     <div class="plot-wrapper">
+      <div class="plot-tabs-strip">
+        <button class={`plot-tab ${plotTab() === "freq" ? "active" : ""}`} onClick={() => setPlotTab("freq")}>АЧХ</button>
+        <button class={`plot-tab ${plotTab() === "ir" ? "active" : ""}`} onClick={() => setPlotTab("ir")}>IR</button>
+        <button class={`plot-tab ${plotTab() === "step" ? "active" : ""}`} onClick={() => setPlotTab("step")}>Step</button>
+        <button class={`plot-tab ${plotTab() === "gd" ? "active" : ""}`} onClick={() => setPlotTab("gd")}>GD</button>
+        <button class={`plot-tab ${plotTab() === "export" ? "active" : ""}`} onClick={() => setPlotTab("export")}>Export</button>
+      </div>
       <div class="cursor-readout">
         <div class="readout-curves-area">
           <span class="readout-item">

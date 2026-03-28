@@ -282,6 +282,30 @@ body {
   position: relative;
 }
 
+.plot-tabs-strip {
+  display: flex;
+  gap: 0;
+  padding: 0 8px;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.plot-tab {
+  padding: 3px 12px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.plot-tab:hover { color: var(--text-primary); }
+.plot-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
 .plot-wrapper {
   display: flex;
   flex-direction: column;
