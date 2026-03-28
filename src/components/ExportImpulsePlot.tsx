@@ -19,9 +19,11 @@ import {
 
 const FIR_IMPULSE_COLOR = "#38BDF8"; // light blue
 const CORRECTED_IMPULSE_COLOR = "#4ade80"; // green — measurement + FIR
-const MASKING_ZONE_COLOR = "rgba(34, 197, 94, 0.08)";
-const MASKING_BORDER_COLOR = "rgba(34, 197, 94, 0.25)";
-const PRE_RING_ZONE_COLOR = "rgba(239, 68, 68, 0.08)";
+const MASKING_SAFE_COLOR = "rgba(34, 197, 94, 0.10)";    // green — inaudible (<1%, <-40dB)
+const MASKING_SAFE_BORDER = "rgba(34, 197, 94, 0.30)";
+const MASKING_CAUTION_COLOR = "rgba(234, 179, 8, 0.08)"; // yellow — threshold (1-5%, -40..-26dB)
+const MASKING_CAUTION_BORDER = "rgba(234, 179, 8, 0.25)";
+const PRE_RING_ZONE_COLOR = "rgba(239, 68, 68, 0.08)";   // red — audible (>5%, >-26dB)
 
 export default function ExportImpulsePlot() {
   let containerRef!: HTMLDivElement;
@@ -277,72 +279,60 @@ export default function ExportImpulsePlot() {
 
             ctx.save();
 
-            // Masking wedge: threshold curve from peak to masking boundary
-            // In linear mode: ±1% exp decay; in dB mode: -40 dB linear decay
+            // Masking wedges: two zones (caution yellow + safe green)
+            // Yellow (caution): 5% / -26 dB at peak — threshold for critical signals
+            // Green (safe):     1% / -40 dB at peak — inaudible to trained listener
             const isDbMode = scaleMode() === "dB";
             if (peakX > clampedMaskStart) {
               const nSteps = 40;
               const maskWidthX = peakX - clampedMaskStart;
+              const yBottom = u.valToPos(curAmpMin, "amp", true);
 
-              ctx.fillStyle = MASKING_ZONE_COLOR;
-              ctx.beginPath();
-              if (isDbMode) {
-                // dB mode: single curve from 0 dB at peak to -80 dB at boundary
-                for (let s = 0; s <= nSteps; s++) {
-                  const t = s / nSteps;
-                  const db = -40 - 40 * t; // -40 at peak, -80 at boundary
-                  const x = peakX - t * maskWidthX;
-                  const y = u.valToPos(db, "amp", true);
-                  if (s === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+              // Helper: draw wedge path
+              const drawWedge = (peakAmp: number, decayRate: number, peakDb: number, dbRange: number) => {
+                ctx.beginPath();
+                if (isDbMode) {
+                  for (let s = 0; s <= nSteps; s++) {
+                    const t = s / nSteps;
+                    const db = peakDb - dbRange * t;
+                    const x = peakX - t * maskWidthX;
+                    if (s === 0) ctx.moveTo(x, u.valToPos(db, "amp", true));
+                    else ctx.lineTo(x, u.valToPos(db, "amp", true));
+                  }
+                  ctx.lineTo(clampedMaskStart, yBottom);
+                  ctx.lineTo(peakX, yBottom);
+                } else {
+                  for (let s = 0; s <= nSteps; s++) {
+                    const t = s / nSteps;
+                    const x = peakX - t * maskWidthX;
+                    ctx.lineTo(x, u.valToPos(peakAmp * Math.exp(-decayRate * t), "amp", true));
+                  }
+                  for (let s = nSteps; s >= 0; s--) {
+                    const t = s / nSteps;
+                    const x = peakX - t * maskWidthX;
+                    ctx.lineTo(x, u.valToPos(-peakAmp * Math.exp(-decayRate * t), "amp", true));
+                  }
                 }
-                // Close along bottom of plot
-                const yBottom = u.valToPos(curAmpMin, "amp", true);
-                ctx.lineTo(clampedMaskStart, yBottom);
-                ctx.lineTo(peakX, yBottom);
-              } else {
-                // Linear mode: ±1% exponential decay
-                const PEAK_THRESHOLD = 0.01;
-                const DECAY_RATE = 4;
-                for (let s = 0; s <= nSteps; s++) {
-                  const t = s / nSteps;
-                  const amp = PEAK_THRESHOLD * Math.exp(-DECAY_RATE * t);
-                  const x = peakX - t * maskWidthX;
-                  ctx.lineTo(x, u.valToPos(amp, "amp", true));
-                }
-                for (let s = nSteps; s >= 0; s--) {
-                  const t = s / nSteps;
-                  const amp = -PEAK_THRESHOLD * Math.exp(-DECAY_RATE * t);
-                  const x = peakX - t * maskWidthX;
-                  ctx.lineTo(x, u.valToPos(amp, "amp", true));
-                }
-              }
-              ctx.closePath();
+                ctx.closePath();
+              };
+
+              // 1. Yellow caution wedge (wider): 5% / -26 dB
+              drawWedge(0.05, 3, -26, 40);
+              ctx.fillStyle = MASKING_CAUTION_COLOR;
               ctx.fill();
-
-              // Wedge border (dashed)
-              ctx.strokeStyle = MASKING_BORDER_COLOR;
+              ctx.strokeStyle = MASKING_CAUTION_BORDER;
               ctx.lineWidth = 1;
               ctx.setLineDash([4, 4]);
-              ctx.beginPath();
-              if (isDbMode) {
-                for (let s = 0; s <= nSteps; s++) {
-                  const t = s / nSteps;
-                  const db = -40 - 40 * t;
-                  const x = peakX - t * maskWidthX;
-                  if (s === 0) ctx.moveTo(x, u.valToPos(db, "amp", true)); else ctx.lineTo(x, u.valToPos(db, "amp", true));
-                }
-              } else {
-                const PEAK_THRESHOLD = 0.01;
-                const DECAY_RATE = 4;
-                for (let s = 0; s <= nSteps; s++) {
-                  const t = s / nSteps;
-                  ctx.lineTo(peakX - t * maskWidthX, u.valToPos(PEAK_THRESHOLD * Math.exp(-DECAY_RATE * t), "amp", true));
-                }
-                for (let s = nSteps; s >= 0; s--) {
-                  const t = s / nSteps;
-                  ctx.lineTo(peakX - t * maskWidthX, u.valToPos(-PEAK_THRESHOLD * Math.exp(-DECAY_RATE * t), "amp", true));
-                }
-              }
+              ctx.stroke();
+              ctx.setLineDash([]);
+
+              // 2. Green safe wedge (narrower): 1% / -40 dB
+              drawWedge(0.01, 4, -40, 40);
+              ctx.fillStyle = MASKING_SAFE_COLOR;
+              ctx.fill();
+              ctx.strokeStyle = MASKING_SAFE_BORDER;
+              ctx.lineWidth = 1;
+              ctx.setLineDash([4, 4]);
               ctx.stroke();
               ctx.setLineDash([]);
 
