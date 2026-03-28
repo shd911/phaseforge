@@ -268,26 +268,54 @@ export default function ExportImpulsePlot() {
 
             ctx.save();
 
-            // Green wedge (safe masking zone): triangle from peak to masking boundary
+            // Green wedge (safe masking zone): exponential curve from peak to boundary
+            // Backward masking: ~20 dB suppression at peak (0.1 amplitude), exp decay
+            // threshold(dt) = 0.1 * exp(-3 * dt / T_mask)
             if (peakX > clampedMaskStart) {
+              const nSteps = 40;
+              const maskWidthX = peakX - clampedMaskStart;
+
+              // Build exponential curve points
               ctx.fillStyle = MASKING_ZONE_COLOR;
               ctx.beginPath();
-              // Upper wedge: peak top → zero at mask boundary
-              ctx.moveTo(peakX, yPeak);
-              ctx.lineTo(clampedMaskStart, yZero);
-              // Lower wedge: zero at mask boundary → peak bottom
-              ctx.lineTo(peakX, yNegPeak);
+              // Upper curve: from peak going left
+              for (let s = 0; s <= nSteps; s++) {
+                const t = s / nSteps; // 0 = peak, 1 = boundary
+                const amp = 0.1 * Math.exp(-3 * t); // exponential decay
+                const x = peakX - t * maskWidthX;
+                const y = u.valToPos(amp, "amp", true);
+                if (s === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+              }
+              // Lower curve: from boundary back to peak (negative amplitude)
+              for (let s = nSteps; s >= 0; s--) {
+                const t = s / nSteps;
+                const amp = -0.1 * Math.exp(-3 * t);
+                const x = peakX - t * maskWidthX;
+                const y = u.valToPos(amp, "amp", true);
+                ctx.lineTo(x, y);
+              }
               ctx.closePath();
               ctx.fill();
 
-              // Wedge border line
+              // Wedge border line (dashed)
               ctx.strokeStyle = MASKING_BORDER_COLOR;
               ctx.lineWidth = 1;
               ctx.setLineDash([4, 4]);
               ctx.beginPath();
-              ctx.moveTo(peakX, yPeak);
-              ctx.lineTo(clampedMaskStart, yZero);
-              ctx.lineTo(peakX, yNegPeak);
+              for (let s = 0; s <= nSteps; s++) {
+                const t = s / nSteps;
+                const amp = 0.1 * Math.exp(-3 * t);
+                const x = peakX - t * maskWidthX;
+                const y = u.valToPos(amp, "amp", true);
+                if (s === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+              }
+              for (let s = nSteps; s >= 0; s--) {
+                const t = s / nSteps;
+                const amp = -0.1 * Math.exp(-3 * t);
+                const x = peakX - t * maskWidthX;
+                const y = u.valToPos(amp, "amp", true);
+                ctx.lineTo(x, y);
+              }
               ctx.stroke();
               ctx.setLineDash([]);
 
