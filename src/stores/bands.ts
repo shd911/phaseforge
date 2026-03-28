@@ -734,8 +734,11 @@ export function setBandColor(bandId: string, color: string) {
 // Active tab (shared between ControlPanel ↔ App.tsx bottom panel)
 // ---------------------------------------------------------------------------
 
-export type ActiveTab = "measurements" | "target" | "export";
+export type ActiveTab = "measurements" | "target" | "peq" | "export";
 export const [activeTab, setActiveTab] = createSignal<ActiveTab>("measurements");
+
+export type PlotTab = "freq" | "ir" | "step" | "gd" | "export";
+export const [plotTab, setPlotTab] = createSignal<PlotTab>("freq");
 
 // ---------------------------------------------------------------------------
 // Selected PEQ band index (for highlighting on graphs)
@@ -864,6 +867,17 @@ export function markDirty() {
   if (!isDirty()) setIsDirty(true);
   setBandsVersion(v => v + 1);
 }
+
+// ---------------------------------------------------------------------------
+// Export metrics (set by UnifiedPlot export tab, read by ControlPanel)
+// ---------------------------------------------------------------------------
+
+export interface ExportMetrics {
+  taps: number; sampleRate: number; window: string; phaseLabel: string;
+  peqCount: number; normDb: number; causality: number;
+  preRingMs: number; maxMagErr: number; gdRippleMs: number;
+}
+export const [exportMetrics, setExportMetrics] = createSignal<ExportMetrics | null>(null);
 
 // ---------------------------------------------------------------------------
 // Export

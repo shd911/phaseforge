@@ -454,7 +454,7 @@ async function restoreState(project: ProjectFile, projDir: string | null) {
   // with partially restored state (e.g. new bands + old export settings)
   batch(() => {
     resetAppState(newState);
-    const validTabs = ["measurements", "target", "export"];
+    const validTabs = ["measurements", "target", "peq", "export"];
     const savedTab = project.active_tab === "align" ? "target" : project.active_tab;
     setActiveTab((validTabs.includes(savedTab) ? savedTab : "measurements") as any);
     setExportSampleRate(project.export_sample_rate);
