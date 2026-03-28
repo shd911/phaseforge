@@ -148,7 +148,7 @@ export default function ExportImpulsePlot() {
 
     const sigLen = lastSig - firstSig;
     const viewLen = Math.max(sigLen * 1.3, 256);
-    const prePeak = Math.ceil(viewLen * 0.25);
+    const prePeak = Math.ceil(viewLen * 0.5);
     const startIdx = Math.max(0, peakIdx - prePeak);
     const endIdx = Math.min(impulse.length, startIdx + Math.ceil(viewLen));
 

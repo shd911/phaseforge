@@ -533,20 +533,20 @@ body {
 
 .axis-controls-y {
   flex-direction: column;
-  top: 8px;
+  top: 28px;
   padding: 4px 2px;
 }
 
 .axis-controls-y-left {
-  left: 8px;
+  left: 52px;
 }
 
 .axis-controls-y-right {
-  right: 8px;
+  right: 48px;
 }
 
 .axis-controls-x {
-  bottom: 8px;
+  bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
   padding: 2px 4px;
