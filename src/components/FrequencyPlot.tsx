@@ -1030,16 +1030,18 @@ export default function FrequencyPlot() {
     const dragging = peqDragging();
     const pTab = plotTab();
 
-    // Non-freq tabs: debounce to prevent concurrent IPC storms on fast tab switching
+    // Immediately destroy chart on tab switch to prevent stale uPlot issues
     if (debounceTimer) clearTimeout(debounceTimer);
+    try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
+    ++renderGen; // invalidate any in-flight async renders
 
     if (pTab === "ir" || pTab === "step" || pTab === "gd") {
-      debounceTimer = setTimeout(() => renderTimeTab(pTab === "step" ? "ir" : pTab, sumMode, band), 100);
+      renderTimeTab(pTab === "step" ? "ir" : pTab, sumMode, band);
       return;
     }
 
     if (pTab === "export") {
-      debounceTimer = setTimeout(() => renderExportTab(band), 100);
+      renderExportTab(band);
       return;
     }
 
