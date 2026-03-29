@@ -944,43 +944,10 @@ export default function FrequencyPlot() {
     });
   });
 
-  // IR/Step: saved scales for restore after rebuild
-  let irSavedXScale: { min: number; max: number } | null = null;
-  let irSavedYScale: { min: number; max: number } | null = null;
-  let irOrigStrokes: string[] = [];
-
-  function irToggleVisibility() {
-    if (!chart || irOrigStrokes.length === 0) return;
-    try {
-      // Save scales before redraw
-      const xs = chart.scales["x"];
-      const ys = chart.scales["y"];
-      const xr = xs?.min != null && xs?.max != null ? { min: xs.min, max: xs.max } : null;
-      const yr = ys?.min != null && ys?.max != null ? { min: ys.min, max: ys.max } : null;
-
-      const shows = [true, showMeasIr(), showMeasStep(), showTargetIr(), showTargetStep(), showCorrIr(), showCorrStep()];
-      for (let i = 1; i < Math.min(shows.length, chart.series.length); i++) {
-        const s = chart.series[i] as any;
-        if (s) {
-          s.stroke = shows[i] ? (irOrigStrokes[i] || s._stroke || s.stroke) : () => "transparent";
-        }
-      }
-      chart.redraw(false, false);
-
-      // Restore scales
-      if (xr) chart.setScale("x", xr);
-      if (yr) chart.setScale("y", yr);
-    } catch (_) {}
-  }
-
-  // IR dB/masking toggle: needs full rebuild — save scales first
-  function irFullRedraw() {
+  // IR/Step: all toggles go through full rebuild (simple, reliable)
+  function irToggleRedraw() {
     const pTab = plotTab();
-    if ((pTab === "ir" || pTab === "step") && chart) {
-      const xs = chart.scales["x"];
-      const ys = chart.scales["y"];
-      if (xs?.min != null && xs?.max != null) irSavedXScale = { min: xs.min, max: xs.max };
-      if (ys?.min != null && ys?.max != null) irSavedYScale = { min: ys.min, max: ys.max };
+    if (pTab === "ir" || pTab === "step") {
       renderTimeTab("ir", isSum(), activeBand());
     }
   }
@@ -1080,17 +1047,7 @@ export default function FrequencyPlot() {
     const dragging = peqDragging();
     const pTab = plotTab();
 
-    // Save IR scales before destroy — only if current chart IS an IR chart (has "y" scale)
     if (debounceTimer) clearTimeout(debounceTimer);
-    if (chart && chart.scales["y"] && (pTab === "ir" || pTab === "step")) {
-      const xs = chart.scales["x"];
-      const ys = chart.scales["y"];
-      if (xs?.min != null && xs?.max != null) irSavedXScale = { min: xs.min, max: xs.max };
-      if (ys?.min != null && ys?.max != null) irSavedYScale = { min: ys.min, max: ys.max };
-    } else {
-      irSavedXScale = null;
-      irSavedYScale = null;
-    }
     try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
     ++renderGen;
 
@@ -1610,10 +1567,7 @@ export default function FrequencyPlot() {
     try {
       chart = new uPlot(opts, uDataArr as uPlot.AlignedData, containerRef);
       // Save original stroke colors for toggle
-      irOrigStrokes = chart.series.map((s: any) => s.stroke || "");
-      // Restore saved scales (from irFullRedraw or previous view)
-      if (irSavedXScale) { chart.setScale("x", irSavedXScale); irSavedXScale = null; }
-      if (irSavedYScale) { chart.setScale("y", irSavedYScale); irSavedYScale = null; }
+      // No scale restore — always fit to data on rebuild
     } catch (e) { console.error(e); }
   }
 
@@ -2654,7 +2608,7 @@ export default function FrequencyPlot() {
         {/* IR/Step tab toggles */}
         <Show when={plotTab() === "ir" || plotTab() === "step"}>
           <span class="readout-sep" />
-          <button class={`tb-btn ${irDbMode() ? "active" : ""}`} onClick={() => { setIrDbMode(!irDbMode()); irFullRedraw(); }} style={{ "font-size": "9px", padding: "1px 4px" }}>{irDbMode() ? "dB" : "Lin"}</button>
+          <button class={`tb-btn ${irDbMode() ? "active" : ""}`} onClick={() => { setIrDbMode(!irDbMode()); irToggleRedraw(); }} style={{ "font-size": "9px", padding: "1px 4px" }}>{irDbMode() ? "dB" : "Lin"}</button>
         </Show>
       </div>
       {/* Unified visibility matrix — above plot, all modes */}
@@ -2674,23 +2628,23 @@ export default function FrequencyPlot() {
                 { label: "CORR", irSig: showCorrIr, setIr: setShowCorrIr, stSig: showCorrStep, setSt: setShowCorrStep, irColor: "#F97316", stColor: "#D97706" },
               ].map(row => (
                 <tr>
-                  <td class="sum-row-header" onClick={() => { row.setIr(!row.irSig()); row.setSt(!row.stSig()); irToggleVisibility(); }}>{row.label}</td>
+                  <td class="sum-row-header" onClick={() => { row.setIr(!row.irSig()); row.setSt(!row.stSig()); irToggleRedraw(); }}>{row.label}</td>
                   <td class="sum-cell">
-                    <button class={`legend-item ${row.irSig() ? "" : "legend-off"}`} onClick={() => { row.setIr(!row.irSig()); irToggleVisibility(); }}>
+                    <button class={`legend-item ${row.irSig() ? "" : "legend-off"}`} onClick={() => { row.setIr(!row.irSig()); irToggleRedraw(); }}>
                       <span class="legend-swatch" style={{ "background-color": row.irSig() ? row.irColor : "transparent", "border-color": row.irColor }} />
                     </button>
                   </td>
                   <td class="sum-cell">
-                    <button class={`legend-item ${row.stSig() ? "" : "legend-off"}`} onClick={() => { row.setSt(!row.stSig()); irToggleVisibility(); }}>
+                    <button class={`legend-item ${row.stSig() ? "" : "legend-off"}`} onClick={() => { row.setSt(!row.stSig()); irToggleRedraw(); }}>
                       <span class="legend-swatch" style={{ "background-color": row.stSig() ? row.stColor : "transparent", "border-color": row.stColor }} />
                     </button>
                   </td>
                 </tr>
               ))}
               <tr>
-                <td class="sum-row-header" onClick={() => { setIrShowMasking(!irShowMasking()); irFullRedraw(); }}>ZONES</td>
+                <td class="sum-row-header" onClick={() => { setIrShowMasking(!irShowMasking()); irToggleRedraw(); }}>ZONES</td>
                 <td class="sum-cell" colspan="2">
-                  <button class={`legend-item ${irShowMasking() ? "" : "legend-off"}`} onClick={() => { setIrShowMasking(!irShowMasking()); irFullRedraw(); }}>
+                  <button class={`legend-item ${irShowMasking() ? "" : "legend-off"}`} onClick={() => { setIrShowMasking(!irShowMasking()); irToggleRedraw(); }}>
                     <span class="legend-swatch" style={{ "background-color": irShowMasking() ? "rgba(34,197,94,0.5)" : "transparent", "border-color": "rgba(34,197,94,0.5)" }} />
                     <span class="legend-text" style={{ "font-size": "9px" }}>Pre-ringing</span>
                   </button>
