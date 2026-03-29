@@ -1599,9 +1599,13 @@ export default function FrequencyPlot() {
     };
     try {
       chart = new uPlot(opts, uDataArr as uPlot.AlignedData, containerRef);
-      // Save original stroke colors for toggle
-      // Restore user zoom if saved (from irToggleRedraw)
-      irRestoreScales();
+      // Restore user zoom OR auto-fit on first open
+      if (irUserXScale) {
+        irRestoreScales();
+      } else {
+        // First open — auto fit after short delay (let uPlot initialize)
+        requestAnimationFrame(() => fitData());
+      }
     } catch (e) { console.error(e); }
   }
 
