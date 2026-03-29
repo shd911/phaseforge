@@ -143,7 +143,9 @@ pub fn compute_impulse_response(
     }
 
     // --- Step response: cumulative sum of reordered raw impulse ---
-    // Normalized to its own peak = 100% (independent from impulse)
+    // Normalized by same raw peak as impulse — preserves physical proportions.
+    // For full-range: step settles to ~DC level relative to peak.
+    // For bandpass: step oscillates, peak = cumulative energy at its max.
     let mut step = Vec::with_capacity(total_len);
     let mut acc = 0.0;
     for v in &raw_reordered {
@@ -151,12 +153,8 @@ pub fn compute_impulse_response(
         step.push(acc);
     }
 
-    let step_peak = step.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
-    let step_norm: Vec<f64> = if step_peak > 0.0 {
-        step.iter().map(|v| (v / step_peak) * 100.0).collect()
-    } else {
-        step
-    };
+    // Normalize by impulse raw peak (same as impulse normalization)
+    let step_norm: Vec<f64> = step.iter().map(|v| (v / peak) * 100.0).collect();
 
     ImpulseResult {
         time,
@@ -238,5 +236,58 @@ mod tests {
                 i, result.time[i], result.time[i - 1]
             );
         }
+    }
+
+    #[test]
+    fn test_linphase_bandpass_step_at_ir_peak() {
+        // Linear-phase bandpass: step should be ~50% at IR peak time
+        let n = 512;
+        let freq: Vec<f64> = (0..n).map(|i| 20.0 + i as f64 * (20000.0 - 20.0) / (n - 1) as f64).collect();
+        let mut mag = vec![-60.0_f64; n];
+        let mut phase = vec![0.0_f64; n];
+        let delay = 0.005; // 5ms
+        for i in 0..n {
+            let f = freq[i];
+            // Bandpass 200-3000 Hz
+            if f >= 200.0 && f <= 3000.0 { mag[i] = 0.0; }
+            // Linear phase (constant group delay)
+            phase[i] = -360.0 * f * delay;
+        }
+
+        let result = compute_impulse_response(&freq, &mag, &phase, 48000.0);
+
+        // Find IR peak
+        let mut ir_peak_idx = 0;
+        let mut ir_peak_val = 0.0_f64;
+        for (i, &v) in result.impulse.iter().enumerate() {
+            if v.abs() > ir_peak_val { ir_peak_val = v.abs(); ir_peak_idx = i; }
+        }
+
+        // Find Step peak
+        let mut st_peak_idx = 0;
+        let mut st_peak_val = 0.0_f64;
+        for (i, &v) in result.step.iter().enumerate() {
+            if v.abs() > st_peak_val { st_peak_val = v.abs(); st_peak_idx = i; }
+        }
+
+        let step_at_ir_peak = result.step[ir_peak_idx];
+        let ir_at_step_peak = result.impulse[st_peak_idx].abs();
+
+        eprintln!("IR peak: idx={} t={:.3}ms val={:.1}%", ir_peak_idx, result.time[ir_peak_idx] * 1000.0, ir_peak_val);
+        eprintln!("Step peak: idx={} t={:.3}ms val={:.1}%", st_peak_idx, result.time[st_peak_idx] * 1000.0, st_peak_val);
+        eprintln!("Step at IR peak: {:.1}% (should be ~50%)", step_at_ir_peak);
+        eprintln!("IR at Step peak: {:.1}% (should be ~0 for symmetric)", ir_at_step_peak);
+        eprintln!("IR peak time != Step peak time? {} != {} → {}", ir_peak_idx, st_peak_idx, ir_peak_idx != st_peak_idx);
+
+        // Step at IR peak should be roughly 50% (of impulse peak=100%)
+        // For linear-phase bandpass: cumsum reaches ~half at the symmetric center
+        assert!(
+            step_at_ir_peak > 30.0 && step_at_ir_peak < 70.0,
+            "Step at IR peak should be ~50%, got {:.1}%",
+            step_at_ir_peak
+        );
+
+        // IR and Step peaks should NOT be at the same time for bandpass
+        assert_ne!(ir_peak_idx, st_peak_idx, "IR and Step peaks should be at different times for bandpass");
     }
 }
