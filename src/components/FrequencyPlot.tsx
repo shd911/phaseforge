@@ -1419,13 +1419,14 @@ export default function FrequencyPlot() {
     const toDb = (v: number) => { const a = Math.abs(v); return a > 1e-10 ? 20 * Math.log10(a) : -200; };
 
     // Rust already normalizes: impulse peak=100%, step by same factor.
-    // No additional normalization — just find peak index for centering.
     let peakIdx = 0, peakVal = 0;
     for (let i = 0; i < impulse.length; i++) { if (Math.abs(impulse[i]) > peakVal) { peakVal = Math.abs(impulse[i]); peakIdx = i; } }
-    // Use data as-is (percentage units from Rust)
     const normIr = impulse;
     const normSt = step;
-    const peakTimeMs = timeMs[peakIdx];
+    const peakTimeMs = timeMs[peakIdx] ?? 0;
+    // Clamp initial X view to ±30ms around peak
+    const xViewMin = peakTimeMs - 30;
+    const xViewMax = peakTimeMs + 30;
 
     // Masking duration: 1.5 periods of HP freq
     const maskingMs = hpFreq > 0 ? (1.5 / hpFreq) * 1000 : 20;
@@ -1512,8 +1513,7 @@ export default function FrequencyPlot() {
       width: w, height: h,
       series: uSeries,
       scales: {
-        // Auto-fit X: show ±30ms around peak (covers most impulse responses)
-        x: { min: peakTimeMs - 30, max: peakTimeMs + 30 },
+        x: { min: xViewMin, max: xViewMax },
         y: { auto: false, range: () => [isDb ? Math.max(yMin - pad, -80) : yMin - pad, yMax + pad] as uPlot.Range.MinMax },
       },
       axes: [
@@ -1599,13 +1599,11 @@ export default function FrequencyPlot() {
     };
     try {
       chart = new uPlot(opts, uDataArr as uPlot.AlignedData, containerRef);
-      // Restore user zoom OR auto-fit on first open
-      if (irUserXScale) {
+      // Restore user zoom if saved AND reasonable (not 198000ms range)
+      if (irUserXScale && (irUserXScale.max - irUserXScale.min) < 500) {
         irRestoreScales();
-      } else {
-        // First open — auto fit after short delay (let uPlot initialize)
-        requestAnimationFrame(() => fitData());
       }
+      // Otherwise chart uses xViewMin..xViewMax (±30ms) from options
     } catch (e) { console.error(e); }
   }
 
