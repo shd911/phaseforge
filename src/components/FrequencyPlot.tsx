@@ -927,7 +927,13 @@ export default function FrequencyPlot() {
     });
   });
 
-  // IR/Step toggles: tracked directly in main effect (no intermediate signal)
+  // IR/Step toggles: button onClick changes signal then re-renders
+  function irToggleRedraw() {
+    const pTab = plotTab();
+    if (pTab === "ir" || pTab === "step") {
+      renderTimeTab("ir", isSum(), activeBand());
+    }
+  }
 
   // Redraw when selected PEQ index changes (for vertical dashed line)
   createEffect(() => {
@@ -1025,13 +1031,8 @@ export default function FrequencyPlot() {
     const pTab = plotTab();
 
     // Non-freq tabs: IR/Step (combined) or GD
-    // Read toggle signals synchronously here so SolidJS tracks them
-    const irOpts = {
-      db: irDbMode(), ir: showIr(), step: showStep(),
-      target: irShowTarget(), masking: irShowMasking(),
-    };
     if (pTab === "ir" || pTab === "step" || pTab === "gd") {
-      renderTimeTab(pTab === "step" ? "ir" : pTab, sumMode, band, irOpts);
+      renderTimeTab(pTab === "step" ? "ir" : pTab, sumMode, band);
       return;
     }
 
@@ -1174,8 +1175,10 @@ export default function FrequencyPlot() {
   // ----------------------------------------------------------------
   // IR / Step / GD rendering (time-domain tabs)
   // ----------------------------------------------------------------
-  async function renderTimeTab(mode: "ir" | "step" | "gd", sumMode: boolean, band: BandState | null, irOpts?: { db: boolean; ir: boolean; step: boolean; target: boolean; masking: boolean }) {
+  async function renderTimeTab(mode: "ir" | "step" | "gd", sumMode: boolean, band: BandState | null) {
     const gen = ++renderGen;
+    // Snapshot toggle state BEFORE any await (not tracked by SolidJS here — called from effect)
+    const irCfg = { db: irDbMode(), ir: showIr(), step: showStep(), target: irShowTarget(), masking: irShowMasking() };
 
     // Collect bands with phase data
     const bands = sumMode
@@ -1297,7 +1300,7 @@ export default function FrequencyPlot() {
 
       const timeMs = result.time.map(t => t * 1000);
       const targetTimeMs = targetResult?.time.map(t => t * 1000) ?? null;
-      renderIrStepChart(timeMs, result.impulse, result.step, targetTimeMs, targetResult?.impulse ?? null, targetResult?.step ?? null, hpFreq, irOpts);
+      renderIrStepChart(timeMs, result.impulse, result.step, targetTimeMs, targetResult?.impulse ?? null, targetResult?.step ?? null, hpFreq, irCfg);
     } catch (e) {
       console.error("Time tab render failed:", e);
     }
@@ -2501,11 +2504,11 @@ export default function FrequencyPlot() {
         {/* IR/Step tab toggles */}
         <Show when={plotTab() === "ir" || plotTab() === "step"}>
           <span class="readout-sep" />
-          <button class={`tb-btn ${showIr() ? "active" : ""}`} onClick={() => setShowIr(!showIr())} style={{ color: "#4A9EFF", "font-size": "9px", padding: "1px 4px" }}>IR</button>
-          <button class={`tb-btn ${showStep() ? "active" : ""}`} onClick={() => setShowStep(!showStep())} style={{ color: "#22C55E", "font-size": "9px", padding: "1px 4px" }}>Step</button>
-          <button class={`tb-btn ${irShowTarget() ? "active" : ""}`} onClick={() => setIrShowTarget(!irShowTarget())} style={{ color: "#FFD700", "font-size": "9px", padding: "1px 4px" }}>Tgt</button>
-          <button class={`tb-btn ${irShowMasking() ? "active" : ""}`} onClick={() => setIrShowMasking(!irShowMasking())} style={{ "font-size": "9px", padding: "1px 4px" }}>Mask</button>
-          <button class={`tb-btn ${irDbMode() ? "active" : ""}`} onClick={() => setIrDbMode(!irDbMode())} style={{ "font-size": "9px", padding: "1px 4px" }}>{irDbMode() ? "dB" : "Lin"}</button>
+          <button class={`tb-btn ${showIr() ? "active" : ""}`} onClick={() => { setShowIr(!showIr()); irToggleRedraw(); }} style={{ color: "#4A9EFF", "font-size": "9px", padding: "1px 4px" }}>IR</button>
+          <button class={`tb-btn ${showStep() ? "active" : ""}`} onClick={() => { setShowStep(!showStep()); irToggleRedraw(); }} style={{ color: "#22C55E", "font-size": "9px", padding: "1px 4px" }}>Step</button>
+          <button class={`tb-btn ${irShowTarget() ? "active" : ""}`} onClick={() => { setIrShowTarget(!irShowTarget()); irToggleRedraw(); }} style={{ color: "#FFD700", "font-size": "9px", padding: "1px 4px" }}>Tgt</button>
+          <button class={`tb-btn ${irShowMasking() ? "active" : ""}`} onClick={() => { setIrShowMasking(!irShowMasking()); irToggleRedraw(); }} style={{ "font-size": "9px", padding: "1px 4px" }}>Mask</button>
+          <button class={`tb-btn ${irDbMode() ? "active" : ""}`} onClick={() => { setIrDbMode(!irDbMode()); irToggleRedraw(); }} style={{ "font-size": "9px", padding: "1px 4px" }}>{irDbMode() ? "dB" : "Lin"}</button>
         </Show>
       </div>
       {/* SUM visibility matrix table */}
