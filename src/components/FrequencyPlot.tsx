@@ -944,7 +944,9 @@ export default function FrequencyPlot() {
     });
   });
 
-  // IR/Step visibility: store original strokes, toggle via stroke manipulation
+  // IR/Step: saved scales for restore after rebuild
+  let irSavedXScale: { min: number; max: number } | null = null;
+  let irSavedYScale: { min: number; max: number } | null = null;
   let irOrigStrokes: string[] = [];
 
   function irToggleVisibility() {
@@ -971,10 +973,14 @@ export default function FrequencyPlot() {
     } catch (_) {}
   }
 
-  // IR dB/masking toggle: needs full rebuild (data changes)
+  // IR dB/masking toggle: needs full rebuild — save scales first
   function irFullRedraw() {
     const pTab = plotTab();
-    if (pTab === "ir" || pTab === "step") {
+    if ((pTab === "ir" || pTab === "step") && chart) {
+      const xs = chart.scales["x"];
+      const ys = chart.scales["y"];
+      if (xs?.min != null && xs?.max != null) irSavedXScale = { min: xs.min, max: xs.max };
+      if (ys?.min != null && ys?.max != null) irSavedYScale = { min: ys.min, max: ys.max };
       renderTimeTab("ir", isSum(), activeBand());
     }
   }
@@ -1596,6 +1602,9 @@ export default function FrequencyPlot() {
       chart = new uPlot(opts, uDataArr as uPlot.AlignedData, containerRef);
       // Save original stroke colors for toggle
       irOrigStrokes = chart.series.map((s: any) => s.stroke || "");
+      // Restore saved scales (from irFullRedraw or previous view)
+      if (irSavedXScale) { chart.setScale("x", irSavedXScale); irSavedXScale = null; }
+      if (irSavedYScale) { chart.setScale("y", irSavedYScale); irSavedYScale = null; }
     } catch (e) { console.error(e); }
   }
 
