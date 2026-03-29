@@ -944,8 +944,29 @@ export default function FrequencyPlot() {
     });
   });
 
-  // IR/Step: all toggles go through full rebuild (simple, reliable)
+  // IR/Step: saved user zoom for restore after rebuild
+  let irUserXScale: { min: number; max: number } | null = null;
+  let irUserYScale: { min: number; max: number } | null = null;
+
+  function irSaveScales() {
+    if (chart && chart.scales["y"]) {
+      const xs = chart.scales["x"];
+      const ys = chart.scales["y"];
+      if (xs?.min != null && xs?.max != null) irUserXScale = { min: xs.min, max: xs.max };
+      if (ys?.min != null && ys?.max != null) irUserYScale = { min: ys.min, max: ys.max };
+    }
+  }
+
+  function irRestoreScales() {
+    if (chart && irUserXScale) { try { chart.setScale("x", irUserXScale); } catch(_){} }
+    if (chart && irUserYScale) { try { chart.setScale("y", irUserYScale); } catch(_){} }
+    irUserXScale = null;
+    irUserYScale = null;
+  }
+
+  // IR/Step: all toggles save scales → rebuild → restore
   function irToggleRedraw() {
+    irSaveScales();
     const pTab = plotTab();
     if (pTab === "ir" || pTab === "step") {
       renderTimeTab("ir", isSum(), activeBand());
@@ -1048,6 +1069,10 @@ export default function FrequencyPlot() {
     const pTab = plotTab();
 
     if (debounceTimer) clearTimeout(debounceTimer);
+    // Save IR user zoom before destroy (only if current chart is IR)
+    if (chart && chart.scales["y"] && (pTab === "ir" || pTab === "step")) {
+      irSaveScales();
+    }
     try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
     ++renderGen;
 
@@ -1568,7 +1593,8 @@ export default function FrequencyPlot() {
     try {
       chart = new uPlot(opts, uDataArr as uPlot.AlignedData, containerRef);
       // Save original stroke colors for toggle
-      // No scale restore — always fit to data on rebuild
+      // Restore user zoom if saved (from irToggleRedraw)
+      irRestoreScales();
     } catch (e) { console.error(e); }
   }
 
