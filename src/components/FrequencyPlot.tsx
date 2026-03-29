@@ -1080,10 +1080,20 @@ export default function FrequencyPlot() {
     const dragging = peqDragging();
     const pTab = plotTab();
 
-    // Immediately destroy chart on tab switch to prevent stale uPlot issues
+    // Save IR scales before destroy (for re-render within same tab, e.g. filter change)
     if (debounceTimer) clearTimeout(debounceTimer);
+    if (chart && (pTab === "ir" || pTab === "step")) {
+      const xs = chart.scales["x"];
+      const ys = chart.scales["y"];
+      if (xs?.min != null && xs?.max != null) irSavedXScale = { min: xs.min, max: xs.max };
+      if (ys?.min != null && ys?.max != null) irSavedYScale = { min: ys.min, max: ys.max };
+    } else {
+      // Different tab — clear saved IR scales
+      irSavedXScale = null;
+      irSavedYScale = null;
+    }
     try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
-    ++renderGen; // invalidate any in-flight async renders
+    ++renderGen;
 
     if (pTab === "ir" || pTab === "step" || pTab === "gd") {
       renderTimeTab(pTab === "step" ? "ir" : pTab, sumMode, band);
