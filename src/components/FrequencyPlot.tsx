@@ -2588,45 +2588,47 @@ export default function FrequencyPlot() {
           <button class={`tb-btn ${irDbMode() ? "active" : ""}`} onClick={() => { setIrDbMode(!irDbMode()); irFullRedraw(); }} style={{ "font-size": "9px", padding: "1px 4px" }}>{irDbMode() ? "dB" : "Lin"}</button>
         </Show>
       </div>
-      {/* IR/Step visibility matrix */}
+      {/* Unified visibility matrix — above plot, all modes */}
       <Show when={plotTab() === "ir" || plotTab() === "step"}>
-        <div class="ir-legend-matrix">
-          <table class="ir-matrix-table">
-            <thead>
-              <tr>
-                <th></th>
-                <th style={{ color: "#4A9EFF" }}>IR</th>
-                <th style={{ color: "#22C55E" }}>Step</th>
-              </tr>
-            </thead>
+        {/* IR/Step matrix */}
+        <div class="sum-vis-table">
+          <table>
+            <thead><tr>
+              <th class="sum-corner" />
+              <th style={{ color: "#4A9EFF" }}>IR</th>
+              <th style={{ color: "#22C55E" }}>Step</th>
+            </tr></thead>
             <tbody>
               <tr>
-                <td class="ir-matrix-label">Measurement</td>
-                <td><input type="checkbox" checked={showMeasIr()} onChange={() => { setShowMeasIr(!showMeasIr()); irToggleVisibility(); }} /></td>
-                <td><input type="checkbox" checked={showMeasStep()} onChange={() => { setShowMeasStep(!showMeasStep()); irToggleVisibility(); }} /></td>
+                <td class="sum-row-header" onClick={() => { setShowMeasIr(!showMeasIr()); setShowMeasStep(!showMeasStep()); irToggleVisibility(); }}>MEAS</td>
+                <td class="sum-cell"><input type="checkbox" checked={showMeasIr()} onChange={() => { setShowMeasIr(!showMeasIr()); irToggleVisibility(); }} /></td>
+                <td class="sum-cell"><input type="checkbox" checked={showMeasStep()} onChange={() => { setShowMeasStep(!showMeasStep()); irToggleVisibility(); }} /></td>
               </tr>
               <tr>
-                <td class="ir-matrix-label" style={{ color: "#FFD700" }}>Target</td>
-                <td><input type="checkbox" checked={showTargetIr()} onChange={() => { setShowTargetIr(!showTargetIr()); irToggleVisibility(); }} /></td>
-                <td><input type="checkbox" checked={showTargetStep()} onChange={() => { setShowTargetStep(!showTargetStep()); irToggleVisibility(); }} /></td>
+                <td class="sum-row-header" onClick={() => { setShowTargetIr(!showTargetIr()); setShowTargetStep(!showTargetStep()); irToggleVisibility(); }}>TARGET</td>
+                <td class="sum-cell"><input type="checkbox" checked={showTargetIr()} onChange={() => { setShowTargetIr(!showTargetIr()); irToggleVisibility(); }} /></td>
+                <td class="sum-cell"><input type="checkbox" checked={showTargetStep()} onChange={() => { setShowTargetStep(!showTargetStep()); irToggleVisibility(); }} /></td>
               </tr>
               <tr>
-                <td class="ir-matrix-label" style={{ color: "#F97316" }}>Corrected</td>
-                <td><input type="checkbox" checked={showCorrIr()} onChange={() => { setShowCorrIr(!showCorrIr()); irToggleVisibility(); }} /></td>
-                <td><input type="checkbox" checked={showCorrStep()} onChange={() => { setShowCorrStep(!showCorrStep()); irToggleVisibility(); }} /></td>
+                <td class="sum-row-header" onClick={() => { setShowCorrIr(!showCorrIr()); setShowCorrStep(!showCorrStep()); irToggleVisibility(); }}>CORR</td>
+                <td class="sum-cell"><input type="checkbox" checked={showCorrIr()} onChange={() => { setShowCorrIr(!showCorrIr()); irToggleVisibility(); }} /></td>
+                <td class="sum-cell"><input type="checkbox" checked={showCorrStep()} onChange={() => { setShowCorrStep(!showCorrStep()); irToggleVisibility(); }} /></td>
+              </tr>
+              <tr>
+                <td class="sum-row-header">OPTIONS</td>
+                <td class="sum-cell" colspan="2">
+                  <label style={{ "font-size": "9px", cursor: "pointer", display: "flex", "align-items": "center", gap: "3px" }}>
+                    <input type="checkbox" checked={irShowMasking()} onChange={() => { setIrShowMasking(!irShowMasking()); irFullRedraw(); }} />
+                    Pre-ringing
+                  </label>
+                </td>
               </tr>
             </tbody>
           </table>
-          <div class="ir-matrix-options">
-            <label class="ir-matrix-check">
-              <input type="checkbox" checked={irShowMasking()} onChange={() => { setIrShowMasking(!irShowMasking()); irFullRedraw(); }} />
-              <span>Pre-ringing zones</span>
-            </label>
-          </div>
         </div>
       </Show>
-      {/* SUM visibility matrix table */}
       <Show when={isSum() && showLegend() && legendEntries.length > 0}>
+        {/* SUM matrix */}
         <div class="sum-vis-table">
           {(() => {
             const bandNames = () => appState.bands.map(b => b.name);
@@ -2634,22 +2636,12 @@ export default function FrequencyPlot() {
             const categories: ("target" | "measurement" | "corrected")[] = ["target", "measurement", "corrected"];
             const catLabels: Record<string, string> = { target: "TARGETS", measurement: "MEAS", corrected: "CORR+XO" };
             const catColors: Record<string, string> = { target: "#AAB4C0", measurement: "#8898A8", corrected: "#B0C0D0" };
-
             return (
               <table>
-                {/* Header row: empty corner + band names + Σ */}
-                <thead>
-                  <tr>
-                    <th class="sum-corner" />
-                    <For each={cols()}>
-                      {(col) => (
-                        <th onClick={() => toggleColumn(col)} title={`Toggle all ${col}`}>
-                          {col}
-                        </th>
-                      )}
-                    </For>
-                  </tr>
-                </thead>
+                <thead><tr>
+                  <th class="sum-corner" />
+                  <For each={cols()}>{(col) => <th onClick={() => toggleColumn(col)} title={`Toggle all ${col}`}>{col}</th>}</For>
+                </tr></thead>
                 <tbody>
                   <For each={categories}>
                     {(cat) => {
@@ -2658,13 +2650,8 @@ export default function FrequencyPlot() {
                       const anyOn = () => catEnts().some(e => e.visible);
                       return (
                         <tr>
-                          <td
-                            class={`sum-row-header ${allOn() ? "row-on" : anyOn() ? "row-partial" : ""}`}
-                            onClick={() => toggleCategory(cat)}
-                            title={`Toggle all ${catLabels[cat]}`}
-                          >
-                            <span class="sum-row-swatch" style={{ "border-color": catColors[cat] }} />
-                            {catLabels[cat]}
+                          <td class={`sum-row-header ${allOn() ? "row-on" : anyOn() ? "row-partial" : ""}`} onClick={() => toggleCategory(cat)} title={`Toggle all ${catLabels[cat]}`}>
+                            <span class="sum-row-swatch" style={{ "border-color": catColors[cat] }} />{catLabels[cat]}
                           </td>
                           <For each={cols()}>
                             {(col) => {
@@ -2674,15 +2661,9 @@ export default function FrequencyPlot() {
                                   {(e) => {
                                     const idx = () => legendEntries.findIndex(le => le.seriesIdx === e().seriesIdx);
                                     return (
-                                      <td>
-                                        <button
-                                          class={`legend-item ${e().visible ? "" : "legend-off"}`}
-                                          onClick={() => { const i = idx(); if (i >= 0) toggleLegendEntry(i); }}
-                                        >
-                                          <span
-                                            class={`legend-swatch ${e().dash ? "legend-swatch-dash" : ""}`}
-                                            style={{ "background-color": e().dash ? "transparent" : e().color, "border-color": e().color }}
-                                          />
+                                      <td class="sum-cell">
+                                        <button class={`legend-item ${e().visible ? "" : "legend-off"}`} onClick={() => { const i = idx(); if (i >= 0) toggleLegendEntry(i); }}>
+                                          <span class={`legend-swatch ${e().dash ? "legend-swatch-dash" : ""}`} style={{ "background-color": e().dash ? "transparent" : e().color, "border-color": e().color }} />
                                         </button>
                                       </td>
                                     );
@@ -2691,6 +2672,40 @@ export default function FrequencyPlot() {
                               );
                             }}
                           </For>
+                        </tr>
+                      );
+                    }}
+                  </For>
+                </tbody>
+              </table>
+            );
+          })()}
+        </div>
+      </Show>
+      <Show when={!isSum() && showLegend() && legendEntries.length > 0 && plotTab() === "freq"}>
+        {/* Freq band matrix */}
+        <div class="sum-vis-table">
+          {(() => {
+            const categories: ("target" | "measurement" | "corrected")[] = ["measurement", "target", "corrected"];
+            const catLabels: Record<string, string> = { target: "TARGET", measurement: "MEAS", corrected: "CORR" };
+            return (
+              <table>
+                <thead><tr><th class="sum-corner" /><th>dB</th><th>°</th></tr></thead>
+                <tbody>
+                  <For each={categories}>
+                    {(cat) => {
+                      const catEnts = () => legendEntries.filter(e => e.category === cat);
+                      const magE = () => catEnts().find(e => !e.dash);
+                      const phE = () => catEnts().find(e => e.dash);
+                      return (
+                        <tr>
+                          <td class="sum-row-header" onClick={() => toggleCategory(cat)}>{catLabels[cat]}</td>
+                          <td class="sum-cell" onClick={() => { const e = magE(); if (e) toggleLegendEntry(legendEntries.indexOf(e)); }}>
+                            <Show when={magE()}>{(e) => <span class={`sum-cell-dot ${e().visible ? "on" : ""}`} style={{ background: e().visible ? e().color : "transparent", "border-color": e().color }} />}</Show>
+                          </td>
+                          <td class="sum-cell" onClick={() => { const e = phE(); if (e) toggleLegendEntry(legendEntries.indexOf(e)); }}>
+                            <Show when={phE()}>{(e) => <span class={`sum-cell-dot ${e().visible ? "on" : ""}`} style={{ background: e().visible ? e().color : "transparent", "border-color": e().color }} />}</Show>
+                          </td>
                         </tr>
                       );
                     }}
@@ -2779,24 +2794,7 @@ export default function FrequencyPlot() {
           })()}
         </div>
       </Show>
-      <Show when={showLegend() && !isSum() && legendEntries.length > 0 && plotTab() !== "freq"}>
-        <div class="band-legend">
-          <For each={legendEntries}>
-            {(entry, idx) => (
-              <button
-                class={`legend-item ${entry.visible ? "" : "legend-off"}`}
-                onClick={() => toggleLegendEntry(idx())}
-              >
-                <span
-                  class={`legend-swatch ${entry.dash ? "legend-swatch-dash" : ""}`}
-                  style={{ "background-color": entry.dash ? "transparent" : entry.color, "border-color": entry.color }}
-                />
-                <span class="legend-text">{entry.label}</span>
-              </button>
-            )}
-          </For>
-        </div>
-      </Show>
+      {/* Old band-legend removed — all modes use matrix above */}
     </div>
   );
 }
