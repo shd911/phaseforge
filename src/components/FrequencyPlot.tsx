@@ -1069,9 +1069,14 @@ export default function FrequencyPlot() {
     const pTab = plotTab();
 
     if (debounceTimer) clearTimeout(debounceTimer);
-    // Save IR user zoom before destroy (only if current chart is IR)
+    // Save IR user zoom before destroy — ONLY if staying on IR tab
+    // Check: does current chart have "y" scale (IR) and are we staying on IR?
     if (chart && chart.scales["y"] && (pTab === "ir" || pTab === "step")) {
       irSaveScales();
+    } else {
+      // Switching away from IR or non-IR chart — clear stale saved scales
+      irUserXScale = null;
+      irUserYScale = null;
     }
     try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
     ++renderGen;
