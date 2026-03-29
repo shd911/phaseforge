@@ -150,11 +150,14 @@ export default function FrequencyPlot() {
   const [legendEntries, setLegendEntries] = createStore<LegendEntry[]>([]);
   const [showLegend, setShowLegend] = createSignal(false);
 
-  // IR/Step tab options
+  // IR/Step tab options — matrix: [meas/target/corrected] × [ir/step]
   const [irDbMode, setIrDbMode] = createSignal(false);
-  const [showIr, setShowIr] = createSignal(true);
-  const [showStep, setShowStep] = createSignal(true);
-  const [irShowTarget, setIrShowTarget] = createSignal(true);
+  const [showMeasIr, setShowMeasIr] = createSignal(true);
+  const [showMeasStep, setShowMeasStep] = createSignal(true);
+  const [showTargetIr, setShowTargetIr] = createSignal(true);
+  const [showTargetStep, setShowTargetStep] = createSignal(true);
+  const [showCorrIr, setShowCorrIr] = createSignal(true);
+  const [showCorrStep, setShowCorrStep] = createSignal(true);
   const [irShowMasking, setIrShowMasking] = createSignal(true);
 
   // Persistent visibility — two maps for different modes:
@@ -1180,8 +1183,14 @@ export default function FrequencyPlot() {
   // ----------------------------------------------------------------
   async function renderTimeTab(mode: "ir" | "step" | "gd", sumMode: boolean, band: BandState | null) {
     const gen = ++renderGen;
-    // Snapshot toggle state BEFORE any await (not tracked by SolidJS here — called from effect)
-    const irCfg = { db: irDbMode(), ir: showIr(), step: showStep(), target: irShowTarget(), masking: irShowMasking() };
+    // Snapshot toggle state BEFORE any await
+    const irCfg = {
+      db: irDbMode(),
+      measIr: showMeasIr(), measStep: showMeasStep(),
+      targetIr: showTargetIr(), targetStep: showTargetStep(),
+      corrIr: showCorrIr(), corrStep: showCorrStep(),
+      masking: irShowMasking(),
+    };
 
     // Collect bands with phase data
     const bands = sumMode
@@ -1298,12 +1307,48 @@ export default function FrequencyPlot() {
         } catch (_) {}
       }
 
+      // Corrected impulse (meas + PEQ + cross-section)
+      let corrResult: { time: number[]; impulse: number[]; step: number[] } | null = null;
+      if (!sumMode && band && band.targetEnabled && band.peqBands?.length > 0) {
+        try {
+          const targetCurve = JSON.parse(JSON.stringify(band.target));
+          let sum2 = 0, n2 = 0;
+          for (let i = 0; i < freq.length; i++) { if (freq[i] >= 200 && freq[i] <= 2000) { sum2 += magnitude[i]; n2++; } }
+          targetCurve.reference_level_db += n2 > 0 ? sum2 / n2 : 0;
+          const tResp2 = await invoke<{ magnitude: number[]; phase: number[] }>("evaluate_target", { target: targetCurve, freq });
+          if (gen !== renderGen) return;
+          const peqBands = band.peqBands.filter((p: any) => p.enabled);
+          let corrMag = [...magnitude];
+          let corrPh = [...phase];
+          if (peqBands.length > 0) {
+            const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", { freq, bands: peqBands });
+            if (gen !== renderGen) return;
+            corrMag = corrMag.map((v, i) => v + pm[i]);
+            corrPh = corrPh.map((v, i) => v + pp[i]);
+          }
+          // Add cross-section (HP/LP filter response)
+          if (band.target.high_pass || band.target.low_pass) {
+            const [xm, xp] = await invoke<[number[], number[], number]>("compute_cross_section", {
+              freq, highPass: band.target.high_pass, lowPass: band.target.low_pass,
+            });
+            if (gen !== renderGen) return;
+            corrMag = corrMag.map((v, i) => v + xm[i]);
+            corrPh = corrPh.map((v, i) => v + xp[i]);
+          }
+          corrResult = await invoke<{ time: number[]; impulse: number[]; step: number[] }>("compute_impulse", {
+            freq, magnitude: corrMag, phase: corrPh, sampleRate: sr,
+          });
+          if (gen !== renderGen) return;
+        } catch (_) {}
+      }
+
       // HP freq for masking zone
       const hpFreq = band?.target?.high_pass?.freq_hz ?? 20;
 
       const timeMs = result.time.map(t => t * 1000);
       const targetTimeMs = targetResult?.time.map(t => t * 1000) ?? null;
-      renderIrStepChart(timeMs, result.impulse, result.step, targetTimeMs, targetResult?.impulse ?? null, targetResult?.step ?? null, hpFreq, irCfg);
+      const corrTimeMs = corrResult?.time.map(t => t * 1000) ?? null;
+      renderIrStepChart(timeMs, result.impulse, result.step, targetTimeMs, targetResult?.impulse ?? null, targetResult?.step ?? null, corrTimeMs, corrResult?.impulse ?? null, corrResult?.step ?? null, hpFreq, irCfg);
     } catch (e) {
       console.error("Time tab render failed:", e);
     }
@@ -1312,8 +1357,9 @@ export default function FrequencyPlot() {
   function renderIrStepChart(
     timeMs: number[], impulse: number[], step: number[],
     targetTimeMs: number[] | null, targetImpulse: number[] | null, targetStep: number[] | null,
+    corrTimeMs: number[] | null, corrImpulse: number[] | null, corrStep: number[] | null,
     hpFreq: number,
-    irCfg: { db: boolean; ir: boolean; step: boolean; target: boolean; masking: boolean },
+    irCfg: { db: boolean; measIr: boolean; measStep: boolean; targetIr: boolean; targetStep: boolean; corrIr: boolean; corrStep: boolean; masking: boolean },
   ) {
     try { try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; } } catch (_) { chart = undefined; }
     if (!containerRef) return;
@@ -1338,31 +1384,50 @@ export default function FrequencyPlot() {
     const uSeries: uPlot.Series[] = [{}];
     const uDataArr: number[][] = [timeMs];
 
-    // IR
-    uSeries.push({ label: isDb ? "IR dB" : "Impulse", stroke: "#4A9EFF", width: 1.5, scale: "y", show: irCfg.ir });
-    uDataArr.push(isDb ? normIr.map(toDb) : normIr);
-
-    // Step
-    uSeries.push({ label: isDb ? "Step dB" : "Step", stroke: "#22C55E", width: 1.5, scale: "y", show: irCfg.step });
-    uDataArr.push(isDb ? normSt.map(toDb) : normSt);
-
-    // Target IR (if available, aligned to measurement peak)
-    if (targetTimeMs && targetImpulse && irCfg.target) {
-      let tPeak = 0, tPeakIdx = 0;
-      for (let i = 0; i < targetImpulse.length; i++) { if (Math.abs(targetImpulse[i]) > tPeak) { tPeak = Math.abs(targetImpulse[i]); tPeakIdx = i; } }
-      if (tPeak < 1e-20) tPeak = 1;
-      const tShift = peakTimeMs - targetTimeMs[tPeakIdx];
-      const aligned = timeMs.map(t => {
-        const st = t - tShift;
-        if (st <= targetTimeMs[0] || st >= targetTimeMs[targetTimeMs.length - 1]) return isDb ? -200 : 0;
-        let lo = 0, hi = targetTimeMs.length - 1;
-        while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (targetTimeMs[mid] <= st) lo = mid; else hi = mid; }
-        const frac = (st - targetTimeMs[lo]) / (targetTimeMs[hi] - targetTimeMs[lo]);
-        const v = (targetImpulse[lo] + frac * (targetImpulse[hi] - targetImpulse[lo])) / tPeak;
+    // Helper: align and resample another impulse onto timeMs grid
+    const alignAndResample = (srcTime: number[], srcData: number[], srcPeak?: number) => {
+      let sp = srcPeak ?? 0, spIdx = 0;
+      for (let i = 0; i < srcData.length; i++) { if (Math.abs(srcData[i]) > sp) { sp = Math.abs(srcData[i]); spIdx = i; } }
+      if (sp < 1e-20) sp = 1;
+      const shift = peakTimeMs - srcTime[spIdx];
+      return timeMs.map(t => {
+        const st = t - shift;
+        if (st <= srcTime[0] || st >= srcTime[srcTime.length - 1]) return isDb ? -200 : 0;
+        let lo = 0, hi = srcTime.length - 1;
+        while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (srcTime[mid] <= st) lo = mid; else hi = mid; }
+        const frac = (st - srcTime[lo]) / (srcTime[hi] - srcTime[lo]);
+        const v = (srcData[lo] + frac * (srcData[hi] - srcData[lo])) / sp;
         return isDb ? toDb(v) : v;
       });
-      uSeries.push({ label: "Target", stroke: "#FFD700", width: 1.5, dash: [6, 3], scale: "y" });
-      uDataArr.push(aligned);
+    };
+
+    // Measurement IR
+    uSeries.push({ label: "Meas IR", stroke: "#4A9EFF", width: 1.5, scale: "y", show: irCfg.measIr });
+    uDataArr.push(isDb ? normIr.map(toDb) : normIr);
+
+    // Measurement Step
+    uSeries.push({ label: "Meas Step", stroke: "#22C55E", width: 1.5, scale: "y", show: irCfg.measStep });
+    uDataArr.push(isDb ? normSt.map(toDb) : normSt);
+
+    // Target IR
+    if (targetTimeMs && targetImpulse && irCfg.targetIr) {
+      uSeries.push({ label: "Target IR", stroke: "#FFD700", width: 1.5, dash: [6, 3], scale: "y" });
+      uDataArr.push(alignAndResample(targetTimeMs, targetImpulse));
+    }
+    // Target Step
+    if (targetTimeMs && targetStep && irCfg.targetStep) {
+      uSeries.push({ label: "Target Step", stroke: "#B8960A", width: 1.5, dash: [6, 3], scale: "y" });
+      uDataArr.push(alignAndResample(targetTimeMs, targetStep));
+    }
+    // Corrected IR
+    if (corrTimeMs && corrImpulse && irCfg.corrIr) {
+      uSeries.push({ label: "Corr IR", stroke: "#F97316", width: 1.5, scale: "y" });
+      uDataArr.push(alignAndResample(corrTimeMs, corrImpulse));
+    }
+    // Corrected Step
+    if (corrTimeMs && corrStep && irCfg.corrStep) {
+      uSeries.push({ label: "Corr Step", stroke: "#D97706", width: 1.5, scale: "y" });
+      uDataArr.push(alignAndResample(corrTimeMs, corrStep));
     }
 
     // Y range
@@ -2521,19 +2586,18 @@ export default function FrequencyPlot() {
             <tbody>
               <tr>
                 <td class="ir-matrix-label">Measurement</td>
-                <td>
-                  <input type="checkbox" checked={showIr()} onChange={() => { setShowIr(!showIr()); irToggleRedraw(); }} />
-                </td>
-                <td>
-                  <input type="checkbox" checked={showStep()} onChange={() => { setShowStep(!showStep()); irToggleRedraw(); }} />
-                </td>
+                <td><input type="checkbox" checked={showMeasIr()} onChange={() => { setShowMeasIr(!showMeasIr()); irToggleRedraw(); }} /></td>
+                <td><input type="checkbox" checked={showMeasStep()} onChange={() => { setShowMeasStep(!showMeasStep()); irToggleRedraw(); }} /></td>
               </tr>
               <tr>
                 <td class="ir-matrix-label" style={{ color: "#FFD700" }}>Target</td>
-                <td>
-                  <input type="checkbox" checked={irShowTarget()} onChange={() => { setIrShowTarget(!irShowTarget()); irToggleRedraw(); }} />
-                </td>
-                <td></td>
+                <td><input type="checkbox" checked={showTargetIr()} onChange={() => { setShowTargetIr(!showTargetIr()); irToggleRedraw(); }} /></td>
+                <td><input type="checkbox" checked={showTargetStep()} onChange={() => { setShowTargetStep(!showTargetStep()); irToggleRedraw(); }} /></td>
+              </tr>
+              <tr>
+                <td class="ir-matrix-label" style={{ color: "#F97316" }}>Corrected</td>
+                <td><input type="checkbox" checked={showCorrIr()} onChange={() => { setShowCorrIr(!showCorrIr()); irToggleRedraw(); }} /></td>
+                <td><input type="checkbox" checked={showCorrStep()} onChange={() => { setShowCorrStep(!showCorrStep()); irToggleRedraw(); }} /></td>
               </tr>
             </tbody>
           </table>
