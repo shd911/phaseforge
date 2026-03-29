@@ -930,8 +930,22 @@ export default function FrequencyPlot() {
     });
   });
 
-  // IR/Step toggles: button onClick changes signal then re-renders
-  function irToggleRedraw() {
+  // IR/Step visibility toggle: setSeries by fixed indices
+  // Series order always: [x, measIr, measStep, targetIr, targetStep, corrIr, corrStep]
+  function irToggleVisibility() {
+    if (!chart) return;
+    try {
+      if (chart.series[1]) chart.setSeries(1, { show: showMeasIr() });
+      if (chart.series[2]) chart.setSeries(2, { show: showMeasStep() });
+      if (chart.series[3]) chart.setSeries(3, { show: showTargetIr() });
+      if (chart.series[4]) chart.setSeries(4, { show: showTargetStep() });
+      if (chart.series[5]) chart.setSeries(5, { show: showCorrIr() });
+      if (chart.series[6]) chart.setSeries(6, { show: showCorrStep() });
+    } catch (_) {}
+  }
+
+  // IR dB/masking toggle: needs full rebuild (data changes)
+  function irFullRedraw() {
     const pTab = plotTab();
     if (pTab === "ir" || pTab === "step") {
       renderTimeTab("ir", isSum(), activeBand());
@@ -1401,34 +1415,31 @@ export default function FrequencyPlot() {
       });
     };
 
-    // Measurement IR
+    const emptyData = timeMs.map(() => isDb ? -200 : 0);
+
+    // Series 1: Measurement IR
     uSeries.push({ label: "Meas IR", stroke: "#4A9EFF", width: 1.5, scale: "y", show: irCfg.measIr });
     uDataArr.push(isDb ? normIr.map(toDb) : normIr);
 
-    // Measurement Step
+    // Series 2: Measurement Step
     uSeries.push({ label: "Meas Step", stroke: "#22C55E", width: 1.5, scale: "y", show: irCfg.measStep });
     uDataArr.push(isDb ? normSt.map(toDb) : normSt);
 
-    // Target IR
-    if (targetTimeMs && targetImpulse && irCfg.targetIr) {
-      uSeries.push({ label: "Target IR", stroke: "#FFD700", width: 1.5, dash: [6, 3], scale: "y" });
-      uDataArr.push(alignAndResample(targetTimeMs, targetImpulse));
-    }
-    // Target Step
-    if (targetTimeMs && targetStep && irCfg.targetStep) {
-      uSeries.push({ label: "Target Step", stroke: "#B8960A", width: 1.5, dash: [6, 3], scale: "y" });
-      uDataArr.push(alignAndResample(targetTimeMs, targetStep));
-    }
-    // Corrected IR
-    if (corrTimeMs && corrImpulse && irCfg.corrIr) {
-      uSeries.push({ label: "Corr IR", stroke: "#F97316", width: 1.5, scale: "y" });
-      uDataArr.push(alignAndResample(corrTimeMs, corrImpulse));
-    }
-    // Corrected Step
-    if (corrTimeMs && corrStep && irCfg.corrStep) {
-      uSeries.push({ label: "Corr Step", stroke: "#D97706", width: 1.5, scale: "y" });
-      uDataArr.push(alignAndResample(corrTimeMs, corrStep));
-    }
+    // Series 3: Target IR
+    uSeries.push({ label: "Target IR", stroke: "#FFD700", width: 1.5, dash: [6, 3], scale: "y", show: irCfg.targetIr });
+    uDataArr.push(targetTimeMs && targetImpulse ? alignAndResample(targetTimeMs, targetImpulse) : emptyData);
+
+    // Series 4: Target Step
+    uSeries.push({ label: "Target Step", stroke: "#B8960A", width: 1.5, dash: [6, 3], scale: "y", show: irCfg.targetStep });
+    uDataArr.push(targetTimeMs && targetStep ? alignAndResample(targetTimeMs, targetStep) : emptyData);
+
+    // Series 5: Corrected IR
+    uSeries.push({ label: "Corr IR", stroke: "#F97316", width: 1.5, scale: "y", show: irCfg.corrIr });
+    uDataArr.push(corrTimeMs && corrImpulse ? alignAndResample(corrTimeMs, corrImpulse) : emptyData);
+
+    // Series 6: Corrected Step
+    uSeries.push({ label: "Corr Step", stroke: "#D97706", width: 1.5, scale: "y", show: irCfg.corrStep });
+    uDataArr.push(corrTimeMs && corrStep ? alignAndResample(corrTimeMs, corrStep) : emptyData);
 
     // Y range
     let yMin = Infinity, yMax = -Infinity;
@@ -1445,7 +1456,12 @@ export default function FrequencyPlot() {
       width: w, height: h,
       series: uSeries,
       scales: {
-        x: { min: timeMs[0], max: timeMs[timeMs.length - 1] },
+        // Center peak in view
+        x: (() => {
+          const range = timeMs[timeMs.length - 1] - timeMs[0];
+          const halfView = Math.max(range * 0.6, 5);
+          return { min: peakTimeMs - halfView, max: peakTimeMs + halfView };
+        })(),
         y: { auto: false, range: [isDb ? Math.max(yMin - pad, -80) : yMin - pad, yMax + pad] as uPlot.Range.MinMax },
       },
       axes: [
@@ -2569,7 +2585,7 @@ export default function FrequencyPlot() {
         {/* IR/Step tab toggles */}
         <Show when={plotTab() === "ir" || plotTab() === "step"}>
           <span class="readout-sep" />
-          <button class={`tb-btn ${irDbMode() ? "active" : ""}`} onClick={() => { setIrDbMode(!irDbMode()); irToggleRedraw(); }} style={{ "font-size": "9px", padding: "1px 4px" }}>{irDbMode() ? "dB" : "Lin"}</button>
+          <button class={`tb-btn ${irDbMode() ? "active" : ""}`} onClick={() => { setIrDbMode(!irDbMode()); irFullRedraw(); }} style={{ "font-size": "9px", padding: "1px 4px" }}>{irDbMode() ? "dB" : "Lin"}</button>
         </Show>
       </div>
       {/* IR/Step visibility matrix */}
@@ -2586,24 +2602,24 @@ export default function FrequencyPlot() {
             <tbody>
               <tr>
                 <td class="ir-matrix-label">Measurement</td>
-                <td><input type="checkbox" checked={showMeasIr()} onChange={() => { setShowMeasIr(!showMeasIr()); irToggleRedraw(); }} /></td>
-                <td><input type="checkbox" checked={showMeasStep()} onChange={() => { setShowMeasStep(!showMeasStep()); irToggleRedraw(); }} /></td>
+                <td><input type="checkbox" checked={showMeasIr()} onChange={() => { setShowMeasIr(!showMeasIr()); irToggleVisibility(); }} /></td>
+                <td><input type="checkbox" checked={showMeasStep()} onChange={() => { setShowMeasStep(!showMeasStep()); irToggleVisibility(); }} /></td>
               </tr>
               <tr>
                 <td class="ir-matrix-label" style={{ color: "#FFD700" }}>Target</td>
-                <td><input type="checkbox" checked={showTargetIr()} onChange={() => { setShowTargetIr(!showTargetIr()); irToggleRedraw(); }} /></td>
-                <td><input type="checkbox" checked={showTargetStep()} onChange={() => { setShowTargetStep(!showTargetStep()); irToggleRedraw(); }} /></td>
+                <td><input type="checkbox" checked={showTargetIr()} onChange={() => { setShowTargetIr(!showTargetIr()); irToggleVisibility(); }} /></td>
+                <td><input type="checkbox" checked={showTargetStep()} onChange={() => { setShowTargetStep(!showTargetStep()); irToggleVisibility(); }} /></td>
               </tr>
               <tr>
                 <td class="ir-matrix-label" style={{ color: "#F97316" }}>Corrected</td>
-                <td><input type="checkbox" checked={showCorrIr()} onChange={() => { setShowCorrIr(!showCorrIr()); irToggleRedraw(); }} /></td>
-                <td><input type="checkbox" checked={showCorrStep()} onChange={() => { setShowCorrStep(!showCorrStep()); irToggleRedraw(); }} /></td>
+                <td><input type="checkbox" checked={showCorrIr()} onChange={() => { setShowCorrIr(!showCorrIr()); irToggleVisibility(); }} /></td>
+                <td><input type="checkbox" checked={showCorrStep()} onChange={() => { setShowCorrStep(!showCorrStep()); irToggleVisibility(); }} /></td>
               </tr>
             </tbody>
           </table>
           <div class="ir-matrix-options">
             <label class="ir-matrix-check">
-              <input type="checkbox" checked={irShowMasking()} onChange={() => { setIrShowMasking(!irShowMasking()); irToggleRedraw(); }} />
+              <input type="checkbox" checked={irShowMasking()} onChange={() => { setIrShowMasking(!irShowMasking()); irFullRedraw(); }} />
               <span>Pre-ringing zones</span>
             </label>
           </div>
