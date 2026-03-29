@@ -1621,9 +1621,6 @@ export default function FrequencyPlot() {
             });
             xsMag = xm;
             xsPhase = xp;
-            // Defer store update to avoid re-triggering the render effect
-            // (setBandCrossNormDb modifies appState.bands which is tracked by bandsSnapshot)
-            queueMicrotask(() => setBandCrossNormDb(band.id, xNorm));
           }
 
           // Full corrected = measurement + PEQ + cross-section
