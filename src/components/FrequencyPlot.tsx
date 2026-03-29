@@ -1422,7 +1422,8 @@ export default function FrequencyPlot() {
       });
     };
 
-    const emptyData = timeMs.map(() => isDb ? -200 : 0);
+    // Empty data: use NaN (not 0) so it doesn't affect Y range
+    const emptyData = timeMs.map(() => NaN);
 
     // Series 1: Measurement IR
     uSeries.push({ label: "Meas IR", stroke: "#4A9EFF", width: 1.5, scale: "y", show: irCfg.measIr });
@@ -1432,7 +1433,7 @@ export default function FrequencyPlot() {
     uSeries.push({ label: "Meas Step", stroke: "#22C55E", width: 1.5, scale: "y", show: irCfg.measStep });
     uDataArr.push(isDb ? normSt.map(toDb) : normSt);
 
-    // Series 3: Target IR — align by target impulse peak
+    // Series 3: Target IR — always include data for stable Y range
     uSeries.push({ label: "Target IR", stroke: "#FFD700", width: 1.5, dash: [6, 3], scale: "y", show: irCfg.targetIr });
     let targetIrPeakTime: number | undefined;
     if (targetTimeMs && targetImpulse) {
