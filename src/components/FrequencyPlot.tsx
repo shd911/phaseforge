@@ -1566,13 +1566,14 @@ export default function FrequencyPlot() {
               // Linear mode wedges
               ctx.fillStyle = "rgba(234, 179, 8, 0.08)";
               ctx.beginPath();
-              for (let s = 0; s <= nSteps; s++) { const t = s / nSteps; ctx.lineTo(peakX - t * maskWidthX, u.valToPos(0.05 * Math.exp(-3 * t), "y", true)); }
-              for (let s = nSteps; s >= 0; s--) { const t = s / nSteps; ctx.lineTo(peakX - t * maskWidthX, u.valToPos(-0.05 * Math.exp(-3 * t), "y", true)); }
+              // Data in % (peak=100). Yellow: 5% threshold, Green: 1% threshold
+              for (let s = 0; s <= nSteps; s++) { const t = s / nSteps; ctx.lineTo(peakX - t * maskWidthX, u.valToPos(5.0 * Math.exp(-3 * t), "y", true)); }
+              for (let s = nSteps; s >= 0; s--) { const t = s / nSteps; ctx.lineTo(peakX - t * maskWidthX, u.valToPos(-5.0 * Math.exp(-3 * t), "y", true)); }
               ctx.closePath(); ctx.fill();
               ctx.fillStyle = "rgba(34, 197, 94, 0.10)";
               ctx.beginPath();
-              for (let s = 0; s <= nSteps; s++) { const t = s / nSteps; ctx.lineTo(peakX - t * maskWidthX, u.valToPos(0.01 * Math.exp(-4 * t), "y", true)); }
-              for (let s = nSteps; s >= 0; s--) { const t = s / nSteps; ctx.lineTo(peakX - t * maskWidthX, u.valToPos(-0.01 * Math.exp(-4 * t), "y", true)); }
+              for (let s = 0; s <= nSteps; s++) { const t = s / nSteps; ctx.lineTo(peakX - t * maskWidthX, u.valToPos(1.0 * Math.exp(-4 * t), "y", true)); }
+              for (let s = nSteps; s >= 0; s--) { const t = s / nSteps; ctx.lineTo(peakX - t * maskWidthX, u.valToPos(-1.0 * Math.exp(-4 * t), "y", true)); }
               ctx.closePath(); ctx.fill();
             }
           }
