@@ -930,14 +930,21 @@ export default function FrequencyPlot() {
     });
   });
 
-  // IR/Step visibility toggle: setSeries show/hide (safe now with untrack + range function)
+  // IR/Step visibility: store original strokes, toggle via stroke manipulation
+  let irOrigStrokes: string[] = [];
+
   function irToggleVisibility() {
-    if (!chart) return;
+    if (!chart || irOrigStrokes.length === 0) return;
     try {
       const shows = [true, showMeasIr(), showMeasStep(), showTargetIr(), showTargetStep(), showCorrIr(), showCorrStep()];
-      for (let i = 1; i <= 6; i++) {
-        if (chart.series[i]) chart.setSeries(i, { show: shows[i] });
+      for (let i = 1; i < Math.min(shows.length, chart.series.length); i++) {
+        const s = chart.series[i] as any;
+        if (s) {
+          s._stroke = s._stroke || s.stroke; // backup original
+          s.stroke = shows[i] ? (irOrigStrokes[i] || s._stroke) : () => "transparent";
+        }
       }
+      chart.redraw(false, false);
     } catch (_) {}
   }
 
@@ -1542,7 +1549,11 @@ export default function FrequencyPlot() {
         }],
       },
     };
-    try { chart = new uPlot(opts, uDataArr as uPlot.AlignedData, containerRef); } catch (e) { console.error(e); }
+    try {
+      chart = new uPlot(opts, uDataArr as uPlot.AlignedData, containerRef);
+      // Save original stroke colors for toggle
+      irOrigStrokes = chart.series.map((s: any) => s.stroke || "");
+    } catch (e) { console.error(e); }
   }
 
   function renderGdChart(freq: number[], gdMs: number[]) {
