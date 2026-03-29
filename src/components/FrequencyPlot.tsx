@@ -1030,18 +1030,16 @@ export default function FrequencyPlot() {
     const dragging = peqDragging();
     const pTab = plotTab();
 
-    console.log("[MAIN EFFECT] pTab=", pTab, "sumMode=", sumMode, "band=", band?.name ?? "null", "gen=", renderGen);
+    // Non-freq tabs: debounce to prevent concurrent IPC storms on fast tab switching
+    if (debounceTimer) clearTimeout(debounceTimer);
 
-    // Non-freq tabs: IR/Step (combined) or GD
     if (pTab === "ir" || pTab === "step" || pTab === "gd") {
-      console.log("[MAIN EFFECT] → renderTimeTab", pTab);
-      renderTimeTab(pTab === "step" ? "ir" : pTab, sumMode, band);
+      debounceTimer = setTimeout(() => renderTimeTab(pTab === "step" ? "ir" : pTab, sumMode, band), 100);
       return;
     }
 
-    // Export tab: Model vs FIR realization
     if (pTab === "export") {
-      renderExportTab(band);
+      debounceTimer = setTimeout(() => renderExportTab(band), 100);
       return;
     }
 
@@ -1180,7 +1178,6 @@ export default function FrequencyPlot() {
   // ----------------------------------------------------------------
   async function renderTimeTab(mode: "ir" | "step" | "gd", sumMode: boolean, band: BandState | null) {
     const gen = ++renderGen;
-    console.log("[renderTimeTab] mode=", mode, "gen=", gen);
     // Snapshot toggle state BEFORE any await (not tracked by SolidJS here — called from effect)
     const irCfg = { db: irDbMode(), ir: showIr(), step: showStep(), target: irShowTarget(), masking: irShowMasking() };
 
@@ -1517,7 +1514,6 @@ export default function FrequencyPlot() {
   // ----------------------------------------------------------------
   async function renderBandMode(band: BandState, showPhase: boolean, showMag: boolean, showTarget: boolean) {
     const gen = ++renderGen;
-    console.log("[renderBandMode] band=", band.name, "gen=", gen);
     zoomCenter = 0; // reset before async — will be recalculated from measurement
     try {
       const result = await evaluateBand(band, showPhase);
