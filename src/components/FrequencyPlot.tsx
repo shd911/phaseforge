@@ -2504,13 +2504,47 @@ export default function FrequencyPlot() {
         {/* IR/Step tab toggles */}
         <Show when={plotTab() === "ir" || plotTab() === "step"}>
           <span class="readout-sep" />
-          <button class={`tb-btn ${showIr() ? "active" : ""}`} onClick={() => { setShowIr(!showIr()); irToggleRedraw(); }} style={{ color: "#4A9EFF", "font-size": "9px", padding: "1px 4px" }}>IR</button>
-          <button class={`tb-btn ${showStep() ? "active" : ""}`} onClick={() => { setShowStep(!showStep()); irToggleRedraw(); }} style={{ color: "#22C55E", "font-size": "9px", padding: "1px 4px" }}>Step</button>
-          <button class={`tb-btn ${irShowTarget() ? "active" : ""}`} onClick={() => { setIrShowTarget(!irShowTarget()); irToggleRedraw(); }} style={{ color: "#FFD700", "font-size": "9px", padding: "1px 4px" }}>Tgt</button>
-          <button class={`tb-btn ${irShowMasking() ? "active" : ""}`} onClick={() => { setIrShowMasking(!irShowMasking()); irToggleRedraw(); }} style={{ "font-size": "9px", padding: "1px 4px" }}>Mask</button>
           <button class={`tb-btn ${irDbMode() ? "active" : ""}`} onClick={() => { setIrDbMode(!irDbMode()); irToggleRedraw(); }} style={{ "font-size": "9px", padding: "1px 4px" }}>{irDbMode() ? "dB" : "Lin"}</button>
         </Show>
       </div>
+      {/* IR/Step visibility matrix */}
+      <Show when={plotTab() === "ir" || plotTab() === "step"}>
+        <div class="ir-legend-matrix">
+          <table class="ir-matrix-table">
+            <thead>
+              <tr>
+                <th></th>
+                <th style={{ color: "#4A9EFF" }}>IR</th>
+                <th style={{ color: "#22C55E" }}>Step</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="ir-matrix-label">Measurement</td>
+                <td>
+                  <input type="checkbox" checked={showIr()} onChange={() => { setShowIr(!showIr()); irToggleRedraw(); }} />
+                </td>
+                <td>
+                  <input type="checkbox" checked={showStep()} onChange={() => { setShowStep(!showStep()); irToggleRedraw(); }} />
+                </td>
+              </tr>
+              <tr>
+                <td class="ir-matrix-label" style={{ color: "#FFD700" }}>Target</td>
+                <td>
+                  <input type="checkbox" checked={irShowTarget()} onChange={() => { setIrShowTarget(!irShowTarget()); irToggleRedraw(); }} />
+                </td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="ir-matrix-options">
+            <label class="ir-matrix-check">
+              <input type="checkbox" checked={irShowMasking()} onChange={() => { setIrShowMasking(!irShowMasking()); irToggleRedraw(); }} />
+              <span>Pre-ringing zones</span>
+            </label>
+          </div>
+        </div>
+      </Show>
       {/* SUM visibility matrix table */}
       <Show when={isSum() && showLegend() && legendEntries.length > 0}>
         <div class="sum-vis-table">
