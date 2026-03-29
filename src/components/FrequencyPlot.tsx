@@ -930,19 +930,14 @@ export default function FrequencyPlot() {
     });
   });
 
-  // IR/Step visibility toggle: change stroke color to hide/show (no setSeries)
+  // IR/Step visibility toggle: setSeries show/hide (safe now with untrack + range function)
   function irToggleVisibility() {
     if (!chart) return;
     try {
-      const colors = ["", "#4A9EFF", "#22C55E", "#FFD700", "#B8960A", "#F97316", "#D97706"];
       const shows = [true, showMeasIr(), showMeasStep(), showTargetIr(), showTargetStep(), showCorrIr(), showCorrStep()];
       for (let i = 1; i <= 6; i++) {
-        if (chart.series[i]) {
-          (chart.series[i] as any).stroke = shows[i] ? colors[i] : "transparent";
-          (chart.series[i] as any).width = shows[i] ? 1.5 : 0;
-        }
+        if (chart.series[i]) chart.setSeries(i, { show: shows[i] });
       }
-      chart.redraw(false, false);
     } catch (_) {}
   }
 

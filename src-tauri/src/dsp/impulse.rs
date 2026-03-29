@@ -109,22 +109,10 @@ pub fn compute_impulse_response(
     let min_pre = ((sample_rate * 0.050) as usize).min(max_pre);
     pre_peak_count = pre_peak_count.max(min_pre);
 
-    // --- Determine post-peak trim point ---
-    // Search in the first half of the buffer (forward direction from peak)
+    // --- Post-peak: include up to half buffer (no aggressive trimming) ---
     let half = fft_size / 2;
     let impulse_norm_full: Vec<f64> = impulse_raw.iter().map(|v| (v / peak) * 100.0).collect();
-    let threshold_norm = 0.5; // 0.5% of peak
-
-    let mut trim_end = half; // default: up to half buffer
-    for i in (peak_idx..half).rev() {
-        if impulse_norm_full[i].abs() > threshold_norm {
-            let padding = ((half - i) / 10).max(100).min(half - i);
-            trim_end = (i + padding).min(half);
-            break;
-        }
-    }
-    let min_samples = (sample_rate * 0.001) as usize;
-    trim_end = trim_end.max(min_samples);
+    let trim_end = half;
 
     // --- Build output arrays ---
     // Layout: [pre-peak from end of buffer] + [0..trim_end from start of buffer]
