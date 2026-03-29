@@ -1506,11 +1506,18 @@ export default function FrequencyPlot() {
       width: w, height: h,
       series: uSeries,
       scales: {
-        // Center peak in view
+        // Auto-fit X: find significant region (>1% of peak) around impulse peak
         x: (() => {
-          const range = timeMs[timeMs.length - 1] - timeMs[0];
-          const halfView = Math.max(range * 0.6, 5);
-          return { min: peakTimeMs - halfView, max: peakTimeMs + halfView };
+          // Find first and last sample with |value| > 1% of 100 (=1)
+          const threshold = 1.0; // 1% of peak (data in %)
+          let firstSig = peakIdx, lastSig = peakIdx;
+          for (let i = 0; i < normIr.length; i++) { if (Math.abs(normIr[i]) > threshold) { firstSig = i; break; } }
+          for (let i = normIr.length - 1; i >= 0; i--) { if (Math.abs(normIr[i]) > threshold) { lastSig = i; break; } }
+          const tFirst = timeMs[firstSig];
+          const tLast = timeMs[lastSig];
+          const sigRange = tLast - tFirst;
+          const viewPad = Math.max(sigRange * 0.2, 2); // 20% padding, min 2ms
+          return { min: tFirst - viewPad, max: tLast + viewPad };
         })(),
         y: { auto: false, range: () => [isDb ? Math.max(yMin - pad, -80) : yMin - pad, yMax + pad] as uPlot.Range.MinMax },
       },
