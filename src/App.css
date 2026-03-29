@@ -502,6 +502,25 @@ body {
 .sum-vis-table .sum-cell-empty {
   opacity: 0.15;
 }
+.sum-vis-table .sum-cell {
+  cursor: pointer;
+  text-align: center;
+  padding: 2px 6px;
+}
+.sum-vis-table .sum-cell:hover {
+  background: var(--bg-hover);
+}
+.sum-cell-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid;
+  transition: background 0.15s;
+}
+.sum-cell-dot:not(.on) {
+  background: transparent !important;
+}
 /* Row header (category name) */
 .sum-vis-table .sum-row-header {
   text-align: left;

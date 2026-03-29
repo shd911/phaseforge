@@ -2727,8 +2727,59 @@ export default function FrequencyPlot() {
           </div>
         </div>
       </div>
-      {/* Band legend — below plot (not in SUM, SUM uses matrix above) */}
-      <Show when={showLegend() && !isSum() && legendEntries.length > 0}>
+      {/* Band legend — matrix table (not in SUM, SUM uses its own matrix above) */}
+      <Show when={showLegend() && !isSum() && legendEntries.length > 0 && plotTab() === "freq"}>
+        <div class="sum-vis-table">
+          {(() => {
+            const categories: ("target" | "measurement" | "corrected")[] = ["measurement", "target", "corrected"];
+            const catLabels: Record<string, string> = { target: "TARGET", measurement: "MEAS", corrected: "CORR" };
+            const colLabels = ["dB", "°"];
+            return (
+              <table>
+                <thead>
+                  <tr>
+                    <th class="sum-corner" />
+                    <For each={colLabels}>
+                      {(col) => <th>{col}</th>}
+                    </For>
+                  </tr>
+                </thead>
+                <tbody>
+                  <For each={categories}>
+                    {(cat) => {
+                      const catEnts = () => legendEntries.filter(e => e.category === cat);
+                      const magEntry = () => catEnts().find(e => !e.dash);
+                      const phEntry = () => catEnts().find(e => e.dash);
+                      return (
+                        <tr>
+                          <td class="sum-row-header" onClick={() => toggleCategory(cat)}>
+                            {catLabels[cat]}
+                          </td>
+                          <td class="sum-cell" onClick={() => { const e = magEntry(); if (e) toggleLegendEntry(legendEntries.indexOf(e)); }}>
+                            <Show when={magEntry()}>
+                              {(e) => (
+                                <span class={`sum-cell-dot ${e().visible ? "on" : ""}`} style={{ background: e().visible ? e().color : "transparent", "border-color": e().color }} />
+                              )}
+                            </Show>
+                          </td>
+                          <td class="sum-cell" onClick={() => { const e = phEntry(); if (e) toggleLegendEntry(legendEntries.indexOf(e)); }}>
+                            <Show when={phEntry()}>
+                              {(e) => (
+                                <span class={`sum-cell-dot ${e().visible ? "on" : ""}`} style={{ background: e().visible ? e().color : "transparent", "border-color": e().color }} />
+                              )}
+                            </Show>
+                          </td>
+                        </tr>
+                      );
+                    }}
+                  </For>
+                </tbody>
+              </table>
+            );
+          })()}
+        </div>
+      </Show>
+      <Show when={showLegend() && !isSum() && legendEntries.length > 0 && plotTab() !== "freq"}>
         <div class="band-legend">
           <For each={legendEntries}>
             {(entry, idx) => (
