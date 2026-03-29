@@ -1416,7 +1416,8 @@ export default function FrequencyPlot() {
     const w = Math.max(rect.width, 400);
     const h = Math.max(rect.height, 200);
     const isDb = irCfg.db;
-    const toDb = (v: number) => { const a = Math.abs(v); return a > 1e-10 ? 20 * Math.log10(a) : -200; };
+    // Convert % to dB relative to peak (100% = 0 dB)
+    const toDb = (v: number) => { const a = Math.abs(v); return a > 1e-8 ? 20 * Math.log10(a / 100) : -200; };
 
     // Rust already normalizes: impulse peak=100%, step by same factor.
     let peakIdx = 0, peakVal = 0;
@@ -1519,7 +1520,7 @@ export default function FrequencyPlot() {
       axes: [
         { label: "ms", stroke: "#9b9ba6", grid: { stroke: "rgba(255,255,255,0.12)" }, ticks: { stroke: "rgba(255,255,255,0.20)" },
           values: (_u: uPlot, vals: number[]) => vals.map(v => v == null ? "" : v.toFixed(1)) },
-        { label: isDb ? "dBFS" : "%", scale: "y", stroke: "#9b9ba6", grid: { stroke: "rgba(255,255,255,0.12)" }, ticks: { stroke: "rgba(255,255,255,0.20)" },
+        { label: isDb ? "dBr" : "%", scale: "y", stroke: "#9b9ba6", grid: { stroke: "rgba(255,255,255,0.12)" }, ticks: { stroke: "rgba(255,255,255,0.20)" },
           values: (_u: uPlot, vals: number[]) => vals.map(v => v == null ? "" : isDb ? v.toFixed(0) : v.toFixed(0) + "%"), size: 50 },
       ],
       legend: { show: false },
