@@ -1023,13 +1023,15 @@ export default function FrequencyPlot() {
     const _fsnaps = band ? freqSnapshots(band.id) : [];
     const dragging = peqDragging();
     const pTab = plotTab();
-    // Track IR/Step toggles so effect re-runs when they change
-    const _irDb = irDbMode(); const _showIr = showIr(); const _showSt = showStep();
-    const _showTgt = irShowTarget(); const _showMask = irShowMasking();
 
     // Non-freq tabs: IR/Step (combined) or GD
+    // Read toggle signals synchronously here so SolidJS tracks them
+    const irOpts = {
+      db: irDbMode(), ir: showIr(), step: showStep(),
+      target: irShowTarget(), masking: irShowMasking(),
+    };
     if (pTab === "ir" || pTab === "step" || pTab === "gd") {
-      renderTimeTab(pTab === "step" ? "ir" : pTab, sumMode, band);
+      renderTimeTab(pTab === "step" ? "ir" : pTab, sumMode, band, irOpts);
       return;
     }
 
@@ -1172,7 +1174,7 @@ export default function FrequencyPlot() {
   // ----------------------------------------------------------------
   // IR / Step / GD rendering (time-domain tabs)
   // ----------------------------------------------------------------
-  async function renderTimeTab(mode: "ir" | "step" | "gd", sumMode: boolean, band: BandState | null) {
+  async function renderTimeTab(mode: "ir" | "step" | "gd", sumMode: boolean, band: BandState | null, irOpts?: { db: boolean; ir: boolean; step: boolean; target: boolean; masking: boolean }) {
     const gen = ++renderGen;
 
     // Collect bands with phase data
@@ -1295,7 +1297,7 @@ export default function FrequencyPlot() {
 
       const timeMs = result.time.map(t => t * 1000);
       const targetTimeMs = targetResult?.time.map(t => t * 1000) ?? null;
-      renderIrStepChart(timeMs, result.impulse, result.step, targetTimeMs, targetResult?.impulse ?? null, targetResult?.step ?? null, hpFreq);
+      renderIrStepChart(timeMs, result.impulse, result.step, targetTimeMs, targetResult?.impulse ?? null, targetResult?.step ?? null, hpFreq, irOpts);
     } catch (e) {
       console.error("Time tab render failed:", e);
     }
@@ -1305,13 +1307,14 @@ export default function FrequencyPlot() {
     timeMs: number[], impulse: number[], step: number[],
     targetTimeMs: number[] | null, targetImpulse: number[] | null, targetStep: number[] | null,
     hpFreq: number,
+    irCfg: { db: boolean; ir: boolean; step: boolean; target: boolean; masking: boolean },
   ) {
     try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
     if (!containerRef) return;
     const rect = containerRef.getBoundingClientRect();
     const w = Math.max(rect.width, 400);
     const h = Math.max(rect.height, 200);
-    const isDb = irDbMode();
+    const isDb = irCfg.db;
     const toDb = (v: number) => { const a = Math.abs(v); return a > 1e-10 ? 20 * Math.log10(a) : -200; };
 
     // Normalize by impulse peak
@@ -1330,15 +1333,15 @@ export default function FrequencyPlot() {
     const uDataArr: number[][] = [timeMs];
 
     // IR
-    uSeries.push({ label: isDb ? "IR dB" : "Impulse", stroke: "#4A9EFF", width: 1.5, scale: "y", show: showIr() });
+    uSeries.push({ label: isDb ? "IR dB" : "Impulse", stroke: "#4A9EFF", width: 1.5, scale: "y", show: irCfg.ir });
     uDataArr.push(isDb ? normIr.map(toDb) : normIr);
 
     // Step
-    uSeries.push({ label: isDb ? "Step dB" : "Step", stroke: "#22C55E", width: 1.5, scale: "y", show: showStep() });
+    uSeries.push({ label: isDb ? "Step dB" : "Step", stroke: "#22C55E", width: 1.5, scale: "y", show: irCfg.step });
     uDataArr.push(isDb ? normSt.map(toDb) : normSt);
 
     // Target IR (if available, aligned to measurement peak)
-    if (targetTimeMs && targetImpulse && irShowTarget()) {
+    if (targetTimeMs && targetImpulse && irCfg.target) {
       let tPeak = 0, tPeakIdx = 0;
       for (let i = 0; i < targetImpulse.length; i++) { if (Math.abs(targetImpulse[i]) > tPeak) { tPeak = Math.abs(targetImpulse[i]); tPeakIdx = i; } }
       if (tPeak < 1e-20) tPeak = 1;
@@ -1383,7 +1386,7 @@ export default function FrequencyPlot() {
       legend: { show: false },
       cursor: { drag: { x: false, y: false, setScale: false } },
       hooks: {
-        draw: irShowMasking() ? [(u: uPlot) => {
+        draw: irCfg.masking ? [(u: uPlot) => {
           const ctx = u.ctx;
           const plotLeft = u.bbox.left;
           const plotTop = u.bbox.top;
