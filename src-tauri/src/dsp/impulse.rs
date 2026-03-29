@@ -109,10 +109,19 @@ pub fn compute_impulse_response(
     let min_pre = ((sample_rate * 0.050) as usize).min(max_pre);
     pre_peak_count = pre_peak_count.max(min_pre);
 
-    // --- Post-peak: include up to half buffer (no aggressive trimming) ---
+    // --- Post-peak: include enough to see ringing, max 200ms ---
     let half = fft_size / 2;
     let impulse_norm_full: Vec<f64> = impulse_raw.iter().map(|v| (v / peak) * 100.0).collect();
-    let trim_end = half;
+    let max_post_samples = ((sample_rate * 0.200) as usize).min(half); // 200ms max
+    // Find last significant sample (>0.5% of peak)
+    let threshold_norm = 0.5;
+    let mut trim_end = max_post_samples;
+    for i in (peak_idx..max_post_samples).rev() {
+        if impulse_norm_full[i].abs() > threshold_norm {
+            trim_end = (i + (sample_rate * 0.010) as usize).min(max_post_samples); // +10ms padding
+            break;
+        }
+    }
 
     // --- Build output arrays ---
     // Layout: [pre-peak from end of buffer] + [0..trim_end from start of buffer]
