@@ -1481,7 +1481,7 @@ export default function FrequencyPlot() {
     } else { uDataArr.push(emptyData); }
 
     // Series 4: Target Step — align by TARGET IMPULSE peak (not step peak!)
-    uSeries.push({ label: "Target Step", stroke: "#B8960A", width: 1.5, dash: [6, 3], scale: "y", show: irCfg.targetStep });
+    uSeries.push({ label: "Target Step", stroke: "#A855F7", width: 1.5, dash: [6, 3], scale: "y", show: irCfg.targetStep });
     uDataArr.push(targetTimeMs && targetStep ? alignAndResample(targetTimeMs, targetStep, targetIrPeakTime) : emptyData);
 
     // Series 5: Corrected IR — align by corrected impulse peak
@@ -1495,7 +1495,7 @@ export default function FrequencyPlot() {
     } else { uDataArr.push(emptyData); }
 
     // Series 6: Corrected Step — align by CORRECTED IMPULSE peak
-    uSeries.push({ label: "Corr Step", stroke: "#D97706", width: 1.5, scale: "y", show: irCfg.corrStep });
+    uSeries.push({ label: "Corr Step", stroke: "#EC4899", width: 1.5, scale: "y", show: irCfg.corrStep });
     uDataArr.push(corrTimeMs && corrStep ? alignAndResample(corrTimeMs, corrStep, corrIrPeakTime) : emptyData);
 
     // Y range
@@ -2660,8 +2660,8 @@ export default function FrequencyPlot() {
             <tbody>
               {[
                 { label: "MEAS", irSig: showMeasIr, setIr: setShowMeasIr, stSig: showMeasStep, setSt: setShowMeasStep, irColor: "#4A9EFF", stColor: "#22C55E" },
-                { label: "TARGET", irSig: showTargetIr, setIr: setShowTargetIr, stSig: showTargetStep, setSt: setShowTargetStep, irColor: "#FFD700", stColor: "#B8960A" },
-                { label: "CORR", irSig: showCorrIr, setIr: setShowCorrIr, stSig: showCorrStep, setSt: setShowCorrStep, irColor: "#F97316", stColor: "#D97706" },
+                { label: "TARGET", irSig: showTargetIr, setIr: setShowTargetIr, stSig: showTargetStep, setSt: setShowTargetStep, irColor: "#FFD700", stColor: "#A855F7" },
+                { label: "CORR", irSig: showCorrIr, setIr: setShowCorrIr, stSig: showCorrStep, setSt: setShowCorrStep, irColor: "#F97316", stColor: "#EC4899" },
               ].map(row => (
                 <tr>
                   <td class="sum-row-header" onClick={() => { row.setIr(!row.irSig()); row.setSt(!row.stSig()); irToggleRedraw(); }}>{row.label}</td>
