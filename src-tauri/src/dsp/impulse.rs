@@ -143,8 +143,7 @@ pub fn compute_impulse_response(
     }
 
     // --- Step response: cumulative sum of reordered raw impulse ---
-    // Normalized by same factor as impulse (peak amplitude) to preserve
-    // the relationship: for linear-phase bandpass, step = 50% at impulse peak time
+    // Normalized to its own peak = 100% (independent from impulse)
     let mut step = Vec::with_capacity(total_len);
     let mut acc = 0.0;
     for v in &raw_reordered {
@@ -152,7 +151,12 @@ pub fn compute_impulse_response(
         step.push(acc);
     }
 
-    let step_norm: Vec<f64> = step.iter().map(|v| (v / peak) * 100.0).collect();
+    let step_peak = step.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
+    let step_norm: Vec<f64> = if step_peak > 0.0 {
+        step.iter().map(|v| (v / step_peak) * 100.0).collect()
+    } else {
+        step
+    };
 
     ImpulseResult {
         time,

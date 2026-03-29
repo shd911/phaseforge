@@ -1418,10 +1418,11 @@ export default function FrequencyPlot() {
     const uDataArr: number[][] = [timeMs];
 
     // Helper: align and resample another impulse onto timeMs grid
-    const alignAndResample = (srcTime: number[], srcData: number[], srcPeak?: number) => {
-      let sp = srcPeak ?? 0, spIdx = 0;
-      for (let i = 0; i < srcData.length; i++) { if (Math.abs(srcData[i]) > sp) { sp = Math.abs(srcData[i]); spIdx = i; } }
-      if (sp < 1e-20) sp = 1;
+    // Data from Rust already in % (peak=100%) — no additional normalization
+    const alignAndResample = (srcTime: number[], srcData: number[]) => {
+      // Find peak index for time alignment
+      let spIdx = 0, spVal = 0;
+      for (let i = 0; i < srcData.length; i++) { if (Math.abs(srcData[i]) > spVal) { spVal = Math.abs(srcData[i]); spIdx = i; } }
       const shift = peakTimeMs - srcTime[spIdx];
       return timeMs.map(t => {
         const st = t - shift;
@@ -1429,7 +1430,7 @@ export default function FrequencyPlot() {
         let lo = 0, hi = srcTime.length - 1;
         while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (srcTime[mid] <= st) lo = mid; else hi = mid; }
         const frac = (st - srcTime[lo]) / (srcTime[hi] - srcTime[lo]);
-        const v = (srcData[lo] + frac * (srcData[hi] - srcData[lo])) / sp;
+        const v = srcData[lo] + frac * (srcData[hi] - srcData[lo]);
         return isDb ? toDb(v) : v;
       });
     };
