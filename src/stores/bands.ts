@@ -720,6 +720,8 @@ export function setBandFirResult(bandId: string, result: FirResult | null) {
 export function setBandCrossNormDb(bandId: string, val: number) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
+  // Guard: don't trigger store update if value unchanged (prevents render loop)
+  if (Math.abs(state.bands[idx].crossNormDb - val) < 0.001) return;
   setState("bands", idx, "crossNormDb", val);
 }
 

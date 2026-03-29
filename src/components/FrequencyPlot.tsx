@@ -552,7 +552,7 @@ export default function FrequencyPlot() {
       }
       window.removeEventListener("mousemove", handleZoomBoxMove);
       window.removeEventListener("mouseup", handleZoomBoxUp);
-      chart.destroy();
+      try { chart.destroy(); } catch (_) {}
       chart = undefined;
     }
 
@@ -1030,8 +1030,11 @@ export default function FrequencyPlot() {
     const dragging = peqDragging();
     const pTab = plotTab();
 
+    console.log("[MAIN EFFECT] pTab=", pTab, "sumMode=", sumMode, "band=", band?.name ?? "null", "gen=", renderGen);
+
     // Non-freq tabs: IR/Step (combined) or GD
     if (pTab === "ir" || pTab === "step" || pTab === "gd") {
+      console.log("[MAIN EFFECT] → renderTimeTab", pTab);
       renderTimeTab(pTab === "step" ? "ir" : pTab, sumMode, band);
       return;
     }
@@ -1049,7 +1052,7 @@ export default function FrequencyPlot() {
       } else if (band) {
         renderBandMode(band, showPhase, showMag, showTarget);
       } else {
-        if (chart) { chart.destroy(); chart = undefined; }
+        try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
         setShowLegend(false);
         setCursorFreq("—"); setCursorSPL("—"); setCursorPhase("—");
       }
@@ -1069,7 +1072,7 @@ export default function FrequencyPlot() {
   async function renderExportTab(band: BandState | null) {
     const gen = ++renderGen;
     if (!band || !band.target) {
-      try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
+      try { try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; } } catch (_) { chart = undefined; }
       setShowLegend(false);
       setCursorFreq("—"); setCursorSPL("—"); setCursorPhase("—");
       return;
@@ -1128,7 +1131,7 @@ export default function FrequencyPlot() {
       });
 
       // Render chart
-      try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
+      try { try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; } } catch (_) { chart = undefined; }
       if (!containerRef) return;
       const rect = containerRef.getBoundingClientRect();
 
@@ -1177,6 +1180,7 @@ export default function FrequencyPlot() {
   // ----------------------------------------------------------------
   async function renderTimeTab(mode: "ir" | "step" | "gd", sumMode: boolean, band: BandState | null) {
     const gen = ++renderGen;
+    console.log("[renderTimeTab] mode=", mode, "gen=", gen);
     // Snapshot toggle state BEFORE any await (not tracked by SolidJS here — called from effect)
     const irCfg = { db: irDbMode(), ir: showIr(), step: showStep(), target: irShowTarget(), masking: irShowMasking() };
 
@@ -1186,7 +1190,7 @@ export default function FrequencyPlot() {
       : (band?.measurement?.phase ? [band] : []);
 
     if (bands.length === 0) {
-      if (chart) { chart.destroy(); chart = undefined; }
+      try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
       setShowLegend(false);
       setCursorFreq("—"); setCursorSPL("—"); setCursorPhase("—");
       return;
@@ -1312,7 +1316,7 @@ export default function FrequencyPlot() {
     hpFreq: number,
     irCfg: { db: boolean; ir: boolean; step: boolean; target: boolean; masking: boolean },
   ) {
-    try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
+    try { try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; } } catch (_) { chart = undefined; }
     if (!containerRef) return;
     const rect = containerRef.getBoundingClientRect();
     const w = Math.max(rect.width, 400);
@@ -1465,7 +1469,7 @@ export default function FrequencyPlot() {
   }
 
   function renderGdChart(freq: number[], gdMs: number[]) {
-    try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
+    try { try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; } } catch (_) { chart = undefined; }
     if (!containerRef) return;
     const rect = containerRef.getBoundingClientRect();
     const w = Math.max(rect.width, 400);
@@ -1513,13 +1517,14 @@ export default function FrequencyPlot() {
   // ----------------------------------------------------------------
   async function renderBandMode(band: BandState, showPhase: boolean, showMag: boolean, showTarget: boolean) {
     const gen = ++renderGen;
+    console.log("[renderBandMode] band=", band.name, "gen=", gen);
     zoomCenter = 0; // reset before async — will be recalculated from measurement
     try {
       const result = await evaluateBand(band, showPhase);
       if (gen !== renderGen) return; // stale render, discard
 
       if (!result.freq) {
-        if (chart) { chart.destroy(); chart = undefined; }
+        try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
         setShowLegend(false);
         setCursorFreq("—"); setCursorSPL("—"); setCursorPhase("—");
         return;
@@ -1814,7 +1819,7 @@ export default function FrequencyPlot() {
         }
       }
       if (!commonFreq || commonFreq.length === 0) {
-        if (chart) { chart.destroy(); chart = undefined; }
+        try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
         setShowLegend(false);
         setCursorFreq("—"); setCursorSPL("—"); setCursorPhase("—");
         return;
