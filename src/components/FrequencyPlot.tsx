@@ -950,15 +950,24 @@ export default function FrequencyPlot() {
   function irToggleVisibility() {
     if (!chart || irOrigStrokes.length === 0) return;
     try {
+      // Save scales before redraw
+      const xs = chart.scales["x"];
+      const ys = chart.scales["y"];
+      const xr = xs?.min != null && xs?.max != null ? { min: xs.min, max: xs.max } : null;
+      const yr = ys?.min != null && ys?.max != null ? { min: ys.min, max: ys.max } : null;
+
       const shows = [true, showMeasIr(), showMeasStep(), showTargetIr(), showTargetStep(), showCorrIr(), showCorrStep()];
       for (let i = 1; i < Math.min(shows.length, chart.series.length); i++) {
         const s = chart.series[i] as any;
         if (s) {
-          s._stroke = s._stroke || s.stroke; // backup original
-          s.stroke = shows[i] ? (irOrigStrokes[i] || s._stroke) : () => "transparent";
+          s.stroke = shows[i] ? (irOrigStrokes[i] || s._stroke || s.stroke) : () => "transparent";
         }
       }
       chart.redraw(false, false);
+
+      // Restore scales
+      if (xr) chart.setScale("x", xr);
+      if (yr) chart.setScale("y", yr);
     } catch (_) {}
   }
 
@@ -1417,13 +1426,19 @@ export default function FrequencyPlot() {
     const uSeries: uPlot.Series[] = [{}];
     const uDataArr: number[][] = [timeMs];
 
-    // Helper: align and resample another impulse onto timeMs grid
-    // Data from Rust already in % (peak=100%) — no additional normalization
-    const alignAndResample = (srcTime: number[], srcData: number[]) => {
-      // Find peak index for time alignment
-      let spIdx = 0, spVal = 0;
-      for (let i = 0; i < srcData.length; i++) { if (Math.abs(srcData[i]) > spVal) { spVal = Math.abs(srcData[i]); spIdx = i; } }
-      const shift = peakTimeMs - srcTime[spIdx];
+    // Helper: align and resample onto timeMs grid
+    // alignByPeakTime: if provided, use this time for alignment instead of data peak
+    const alignAndResample = (srcTime: number[], srcData: number[], alignByPeakTime?: number) => {
+      let shift: number;
+      if (alignByPeakTime != null) {
+        // Align by provided peak time (e.g. impulse peak for step data)
+        shift = peakTimeMs - alignByPeakTime;
+      } else {
+        // Align by data's own peak
+        let spIdx = 0, spVal = 0;
+        for (let i = 0; i < srcData.length; i++) { if (Math.abs(srcData[i]) > spVal) { spVal = Math.abs(srcData[i]); spIdx = i; } }
+        shift = peakTimeMs - srcTime[spIdx];
+      }
       return timeMs.map(t => {
         const st = t - shift;
         if (st <= srcTime[0] || st >= srcTime[srcTime.length - 1]) return isDb ? -200 : 0;
@@ -1445,21 +1460,33 @@ export default function FrequencyPlot() {
     uSeries.push({ label: "Meas Step", stroke: "#22C55E", width: 1.5, scale: "y", show: irCfg.measStep });
     uDataArr.push(isDb ? normSt.map(toDb) : normSt);
 
-    // Series 3: Target IR
+    // Series 3: Target IR — align by target impulse peak
     uSeries.push({ label: "Target IR", stroke: "#FFD700", width: 1.5, dash: [6, 3], scale: "y", show: irCfg.targetIr });
-    uDataArr.push(targetTimeMs && targetImpulse ? alignAndResample(targetTimeMs, targetImpulse) : emptyData);
+    let targetIrPeakTime: number | undefined;
+    if (targetTimeMs && targetImpulse) {
+      let tpIdx = 0, tpVal = 0;
+      for (let i = 0; i < targetImpulse.length; i++) { if (Math.abs(targetImpulse[i]) > tpVal) { tpVal = Math.abs(targetImpulse[i]); tpIdx = i; } }
+      targetIrPeakTime = targetTimeMs[tpIdx];
+      uDataArr.push(alignAndResample(targetTimeMs, targetImpulse));
+    } else { uDataArr.push(emptyData); }
 
-    // Series 4: Target Step
+    // Series 4: Target Step — align by TARGET IMPULSE peak (not step peak!)
     uSeries.push({ label: "Target Step", stroke: "#B8960A", width: 1.5, dash: [6, 3], scale: "y", show: irCfg.targetStep });
-    uDataArr.push(targetTimeMs && targetStep ? alignAndResample(targetTimeMs, targetStep) : emptyData);
+    uDataArr.push(targetTimeMs && targetStep ? alignAndResample(targetTimeMs, targetStep, targetIrPeakTime) : emptyData);
 
-    // Series 5: Corrected IR
+    // Series 5: Corrected IR — align by corrected impulse peak
     uSeries.push({ label: "Corr IR", stroke: "#F97316", width: 1.5, scale: "y", show: irCfg.corrIr });
-    uDataArr.push(corrTimeMs && corrImpulse ? alignAndResample(corrTimeMs, corrImpulse) : emptyData);
+    let corrIrPeakTime: number | undefined;
+    if (corrTimeMs && corrImpulse) {
+      let cpIdx = 0, cpVal = 0;
+      for (let i = 0; i < corrImpulse.length; i++) { if (Math.abs(corrImpulse[i]) > cpVal) { cpVal = Math.abs(corrImpulse[i]); cpIdx = i; } }
+      corrIrPeakTime = corrTimeMs[cpIdx];
+      uDataArr.push(alignAndResample(corrTimeMs, corrImpulse));
+    } else { uDataArr.push(emptyData); }
 
-    // Series 6: Corrected Step
+    // Series 6: Corrected Step — align by CORRECTED IMPULSE peak
     uSeries.push({ label: "Corr Step", stroke: "#D97706", width: 1.5, scale: "y", show: irCfg.corrStep });
-    uDataArr.push(corrTimeMs && corrStep ? alignAndResample(corrTimeMs, corrStep) : emptyData);
+    uDataArr.push(corrTimeMs && corrStep ? alignAndResample(corrTimeMs, corrStep, corrIrPeakTime) : emptyData);
 
     // Y range
     let yMin = Infinity, yMax = -Infinity;
