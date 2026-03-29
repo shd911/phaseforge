@@ -1470,7 +1470,7 @@ export default function FrequencyPlot() {
           const halfView = Math.max(range * 0.6, 5);
           return { min: peakTimeMs - halfView, max: peakTimeMs + halfView };
         })(),
-        y: { auto: false, range: [isDb ? Math.max(yMin - pad, -80) : yMin - pad, yMax + pad] as uPlot.Range.MinMax },
+        y: { auto: false, range: () => [isDb ? Math.max(yMin - pad, -80) : yMin - pad, yMax + pad] as uPlot.Range.MinMax },
       },
       axes: [
         { label: "ms", stroke: "#9b9ba6", grid: { stroke: "rgba(255,255,255,0.12)" }, ticks: { stroke: "rgba(255,255,255,0.20)" },
@@ -2607,28 +2607,32 @@ export default function FrequencyPlot() {
               <th style={{ color: "#22C55E" }}>Step</th>
             </tr></thead>
             <tbody>
+              {[
+                { label: "MEAS", irSig: showMeasIr, setIr: setShowMeasIr, stSig: showMeasStep, setSt: setShowMeasStep, irColor: "#4A9EFF", stColor: "#22C55E" },
+                { label: "TARGET", irSig: showTargetIr, setIr: setShowTargetIr, stSig: showTargetStep, setSt: setShowTargetStep, irColor: "#FFD700", stColor: "#B8960A" },
+                { label: "CORR", irSig: showCorrIr, setIr: setShowCorrIr, stSig: showCorrStep, setSt: setShowCorrStep, irColor: "#F97316", stColor: "#D97706" },
+              ].map(row => (
+                <tr>
+                  <td class="sum-row-header" onClick={() => { row.setIr(!row.irSig()); row.setSt(!row.stSig()); irToggleVisibility(); }}>{row.label}</td>
+                  <td class="sum-cell">
+                    <button class={`legend-item ${row.irSig() ? "" : "legend-off"}`} onClick={() => { row.setIr(!row.irSig()); irToggleVisibility(); }}>
+                      <span class="legend-swatch" style={{ "background-color": row.irSig() ? row.irColor : "transparent", "border-color": row.irColor }} />
+                    </button>
+                  </td>
+                  <td class="sum-cell">
+                    <button class={`legend-item ${row.stSig() ? "" : "legend-off"}`} onClick={() => { row.setSt(!row.stSig()); irToggleVisibility(); }}>
+                      <span class="legend-swatch" style={{ "background-color": row.stSig() ? row.stColor : "transparent", "border-color": row.stColor }} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
               <tr>
-                <td class="sum-row-header" onClick={() => { setShowMeasIr(!showMeasIr()); setShowMeasStep(!showMeasStep()); irToggleVisibility(); }}>MEAS</td>
-                <td class="sum-cell"><input type="checkbox" checked={showMeasIr()} onChange={() => { setShowMeasIr(!showMeasIr()); irToggleVisibility(); }} /></td>
-                <td class="sum-cell"><input type="checkbox" checked={showMeasStep()} onChange={() => { setShowMeasStep(!showMeasStep()); irToggleVisibility(); }} /></td>
-              </tr>
-              <tr>
-                <td class="sum-row-header" onClick={() => { setShowTargetIr(!showTargetIr()); setShowTargetStep(!showTargetStep()); irToggleVisibility(); }}>TARGET</td>
-                <td class="sum-cell"><input type="checkbox" checked={showTargetIr()} onChange={() => { setShowTargetIr(!showTargetIr()); irToggleVisibility(); }} /></td>
-                <td class="sum-cell"><input type="checkbox" checked={showTargetStep()} onChange={() => { setShowTargetStep(!showTargetStep()); irToggleVisibility(); }} /></td>
-              </tr>
-              <tr>
-                <td class="sum-row-header" onClick={() => { setShowCorrIr(!showCorrIr()); setShowCorrStep(!showCorrStep()); irToggleVisibility(); }}>CORR</td>
-                <td class="sum-cell"><input type="checkbox" checked={showCorrIr()} onChange={() => { setShowCorrIr(!showCorrIr()); irToggleVisibility(); }} /></td>
-                <td class="sum-cell"><input type="checkbox" checked={showCorrStep()} onChange={() => { setShowCorrStep(!showCorrStep()); irToggleVisibility(); }} /></td>
-              </tr>
-              <tr>
-                <td class="sum-row-header">OPTIONS</td>
+                <td class="sum-row-header" onClick={() => { setIrShowMasking(!irShowMasking()); irFullRedraw(); }}>ZONES</td>
                 <td class="sum-cell" colspan="2">
-                  <label style={{ "font-size": "9px", cursor: "pointer", display: "flex", "align-items": "center", gap: "3px" }}>
-                    <input type="checkbox" checked={irShowMasking()} onChange={() => { setIrShowMasking(!irShowMasking()); irFullRedraw(); }} />
-                    Pre-ringing
-                  </label>
+                  <button class={`legend-item ${irShowMasking() ? "" : "legend-off"}`} onClick={() => { setIrShowMasking(!irShowMasking()); irFullRedraw(); }}>
+                    <span class="legend-swatch" style={{ "background-color": irShowMasking() ? "rgba(34,197,94,0.5)" : "transparent", "border-color": "rgba(34,197,94,0.5)" }} />
+                    <span class="legend-text" style={{ "font-size": "9px" }}>Pre-ringing</span>
+                  </button>
                 </td>
               </tr>
             </tbody>
@@ -2709,10 +2713,18 @@ export default function FrequencyPlot() {
                         <tr>
                           <td class="sum-row-header" onClick={() => toggleCategory(cat)}>{catLabels[cat]}</td>
                           <td class="sum-cell">
-                            <Show when={magE()}>{(e) => <input type="checkbox" checked={e().visible} onChange={() => toggleLegendEntry(legendEntries.indexOf(e()))} />}</Show>
+                            <Show when={magE()}>{(e) => (
+                              <button class={`legend-item ${e().visible ? "" : "legend-off"}`} onClick={() => toggleLegendEntry(legendEntries.indexOf(e()))}>
+                                <span class="legend-swatch" style={{ "background-color": e().visible ? e().color : "transparent", "border-color": e().color }} />
+                              </button>
+                            )}</Show>
                           </td>
                           <td class="sum-cell">
-                            <Show when={phE()}>{(e) => <input type="checkbox" checked={e().visible} onChange={() => toggleLegendEntry(legendEntries.indexOf(e()))} />}</Show>
+                            <Show when={phE()}>{(e) => (
+                              <button class={`legend-item ${e().visible ? "" : "legend-off"}`} onClick={() => toggleLegendEntry(legendEntries.indexOf(e()))}>
+                                <span class={`legend-swatch legend-swatch-dash`} style={{ "background-color": "transparent", "border-color": e().color, opacity: e().visible ? 1 : 0.3 }} />
+                              </button>
+                            )}</Show>
                           </td>
                         </tr>
                       );
