@@ -266,11 +266,25 @@ export default function FrequencyPlot() {
       const s = chart.scales["y"];
       if (s) chart.setScale("y", { min: s.min, max: s.max });
     } else {
-      // IR/Step — auto range from data
+      // IR/Step — fit from data range
       const d = chart.data[0];
       if (d && d.length > 0) chart.setScale("x", { min: d[0], max: d[d.length - 1] });
-      const s = chart.scales["y"];
-      if (s) chart.setScale("y", { min: s.min, max: s.max });
+      // Compute Y range from all visible series data
+      let yMin = Infinity, yMax = -Infinity;
+      for (let si = 1; si < chart.data.length; si++) {
+        const arr = chart.data[si];
+        if (!arr) continue;
+        for (const v of arr) {
+          if (v != null && v > -190) {
+            if (v < yMin) yMin = v;
+            if (v > yMax) yMax = v;
+          }
+        }
+      }
+      if (isFinite(yMin) && isFinite(yMax)) {
+        const pad = Math.max(0.05, (yMax - yMin) * 0.05);
+        chart.setScale("y", { min: yMin - pad, max: yMax + pad });
+      }
     }
   }
 
