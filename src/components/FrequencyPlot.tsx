@@ -930,17 +930,25 @@ export default function FrequencyPlot() {
     });
   });
 
-  // IR/Step visibility toggle: setSeries by fixed indices
-  // Series order always: [x, measIr, measStep, targetIr, targetStep, corrIr, corrStep]
+  // IR/Step visibility toggle: setSeries by fixed indices, preserve scales
   function irToggleVisibility() {
     if (!chart) return;
     try {
+      // Save current scales
+      const xs = chart.scales["x"];
+      const ys = chart.scales["y"];
+      const xMin = xs?.min; const xMax = xs?.max;
+      const yMin = ys?.min; const yMax = ys?.max;
+      // Toggle series
       if (chart.series[1]) chart.setSeries(1, { show: showMeasIr() });
       if (chart.series[2]) chart.setSeries(2, { show: showMeasStep() });
       if (chart.series[3]) chart.setSeries(3, { show: showTargetIr() });
       if (chart.series[4]) chart.setSeries(4, { show: showTargetStep() });
       if (chart.series[5]) chart.setSeries(5, { show: showCorrIr() });
       if (chart.series[6]) chart.setSeries(6, { show: showCorrStep() });
+      // Restore scales
+      if (xMin != null && xMax != null) chart.setScale("x", { min: xMin, max: xMax });
+      if (yMin != null && yMax != null) chart.setScale("y", { min: yMin, max: yMax });
     } catch (_) {}
   }
 
@@ -2683,7 +2691,7 @@ export default function FrequencyPlot() {
         </div>
       </Show>
       <Show when={!isSum() && showLegend() && legendEntries.length > 0 && plotTab() === "freq"}>
-        {/* Freq band matrix */}
+        {/* Freq band matrix — checkboxes like IR/Step */}
         <div class="sum-vis-table">
           {(() => {
             const categories: ("target" | "measurement" | "corrected")[] = ["measurement", "target", "corrected"];
@@ -2700,11 +2708,11 @@ export default function FrequencyPlot() {
                       return (
                         <tr>
                           <td class="sum-row-header" onClick={() => toggleCategory(cat)}>{catLabels[cat]}</td>
-                          <td class="sum-cell" onClick={() => { const e = magE(); if (e) toggleLegendEntry(legendEntries.indexOf(e)); }}>
-                            <Show when={magE()}>{(e) => <span class={`sum-cell-dot ${e().visible ? "on" : ""}`} style={{ background: e().visible ? e().color : "transparent", "border-color": e().color }} />}</Show>
+                          <td class="sum-cell">
+                            <Show when={magE()}>{(e) => <input type="checkbox" checked={e().visible} onChange={() => toggleLegendEntry(legendEntries.indexOf(e()))} />}</Show>
                           </td>
-                          <td class="sum-cell" onClick={() => { const e = phE(); if (e) toggleLegendEntry(legendEntries.indexOf(e)); }}>
-                            <Show when={phE()}>{(e) => <span class={`sum-cell-dot ${e().visible ? "on" : ""}`} style={{ background: e().visible ? e().color : "transparent", "border-color": e().color }} />}</Show>
+                          <td class="sum-cell">
+                            <Show when={phE()}>{(e) => <input type="checkbox" checked={e().visible} onChange={() => toggleLegendEntry(legendEntries.indexOf(e()))} />}</Show>
                           </td>
                         </tr>
                       );
