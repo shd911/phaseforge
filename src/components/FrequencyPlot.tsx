@@ -930,25 +930,19 @@ export default function FrequencyPlot() {
     });
   });
 
-  // IR/Step visibility toggle: setSeries by fixed indices, preserve scales
+  // IR/Step visibility toggle: change stroke color to hide/show (no setSeries)
   function irToggleVisibility() {
     if (!chart) return;
     try {
-      // Save current scales
-      const xs = chart.scales["x"];
-      const ys = chart.scales["y"];
-      const xMin = xs?.min; const xMax = xs?.max;
-      const yMin = ys?.min; const yMax = ys?.max;
-      // Toggle series
-      if (chart.series[1]) chart.setSeries(1, { show: showMeasIr() });
-      if (chart.series[2]) chart.setSeries(2, { show: showMeasStep() });
-      if (chart.series[3]) chart.setSeries(3, { show: showTargetIr() });
-      if (chart.series[4]) chart.setSeries(4, { show: showTargetStep() });
-      if (chart.series[5]) chart.setSeries(5, { show: showCorrIr() });
-      if (chart.series[6]) chart.setSeries(6, { show: showCorrStep() });
-      // Restore scales
-      if (xMin != null && xMax != null) chart.setScale("x", { min: xMin, max: xMax });
-      if (yMin != null && yMax != null) chart.setScale("y", { min: yMin, max: yMax });
+      const colors = ["", "#4A9EFF", "#22C55E", "#FFD700", "#B8960A", "#F97316", "#D97706"];
+      const shows = [true, showMeasIr(), showMeasStep(), showTargetIr(), showTargetStep(), showCorrIr(), showCorrStep()];
+      for (let i = 1; i <= 6; i++) {
+        if (chart.series[i]) {
+          (chart.series[i] as any).stroke = shows[i] ? colors[i] : "transparent";
+          (chart.series[i] as any).width = shows[i] ? 1.5 : 0;
+        }
+      }
+      chart.redraw(false, false);
     } catch (_) {}
   }
 
