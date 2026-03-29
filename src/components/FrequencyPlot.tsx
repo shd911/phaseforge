@@ -266,9 +266,15 @@ export default function FrequencyPlot() {
       const s = chart.scales["y"];
       if (s) chart.setScale("y", { min: s.min, max: s.max });
     } else {
-      // IR/Step — fit from data range
+      // IR/Step — fit ±30ms around peak
       const d = chart.data[0];
-      if (d && d.length > 0) chart.setScale("x", { min: d[0], max: d[d.length - 1] });
+      const ir = chart.data[1];
+      if (d && d.length > 0 && ir) {
+        let pkIdx = 0, pkVal = 0;
+        for (let i = 0; i < ir.length; i++) { const v = ir[i]; if (v != null && Math.abs(v as number) > pkVal) { pkVal = Math.abs(v as number); pkIdx = i; } }
+        const pkT = d[pkIdx] as number;
+        chart.setScale("x", { min: pkT - 30, max: pkT + 30 });
+      }
       // Compute Y range from all visible series data
       let yMin = Infinity, yMax = -Infinity;
       for (let si = 1; si < chart.data.length; si++) {
@@ -1506,19 +1512,8 @@ export default function FrequencyPlot() {
       width: w, height: h,
       series: uSeries,
       scales: {
-        // Auto-fit X: find significant region (>1% of peak) around impulse peak
-        x: (() => {
-          // Find first and last sample with |value| > 1% of 100 (=1)
-          const threshold = 1.0; // 1% of peak (data in %)
-          let firstSig = peakIdx, lastSig = peakIdx;
-          for (let i = 0; i < normIr.length; i++) { if (Math.abs(normIr[i]) > threshold) { firstSig = i; break; } }
-          for (let i = normIr.length - 1; i >= 0; i--) { if (Math.abs(normIr[i]) > threshold) { lastSig = i; break; } }
-          const tFirst = timeMs[firstSig];
-          const tLast = timeMs[lastSig];
-          const sigRange = tLast - tFirst;
-          const viewPad = Math.max(sigRange * 0.2, 2); // 20% padding, min 2ms
-          return { min: tFirst - viewPad, max: tLast + viewPad };
-        })(),
+        // Auto-fit X: show ±30ms around peak (covers most impulse responses)
+        x: { min: peakTimeMs - 30, max: peakTimeMs + 30 },
         y: { auto: false, range: () => [isDb ? Math.max(yMin - pad, -80) : yMin - pad, yMax + pad] as uPlot.Range.MinMax },
       },
       axes: [
