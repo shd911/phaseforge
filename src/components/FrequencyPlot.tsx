@@ -1080,15 +1080,14 @@ export default function FrequencyPlot() {
     const dragging = peqDragging();
     const pTab = plotTab();
 
-    // Save IR scales before destroy (for re-render within same tab, e.g. filter change)
+    // Save IR scales before destroy — only if current chart IS an IR chart (has "y" scale)
     if (debounceTimer) clearTimeout(debounceTimer);
-    if (chart && (pTab === "ir" || pTab === "step")) {
+    if (chart && chart.scales["y"] && (pTab === "ir" || pTab === "step")) {
       const xs = chart.scales["x"];
       const ys = chart.scales["y"];
       if (xs?.min != null && xs?.max != null) irSavedXScale = { min: xs.min, max: xs.max };
       if (ys?.min != null && ys?.max != null) irSavedYScale = { min: ys.min, max: ys.max };
     } else {
-      // Different tab — clear saved IR scales
       irSavedXScale = null;
       irSavedYScale = null;
     }
@@ -1366,7 +1365,7 @@ export default function FrequencyPlot() {
 
       // Corrected impulse (meas + PEQ + cross-section)
       let corrResult: { time: number[]; impulse: number[]; step: number[] } | null = null;
-      if (!sumMode && band && band.targetEnabled && band.peqBands?.length > 0) {
+      if (!sumMode && band && band.targetEnabled) {
         try {
           const targetCurve = JSON.parse(JSON.stringify(band.target));
           let sum2 = 0, n2 = 0;
