@@ -1401,12 +1401,17 @@ export default function FrequencyPlot() {
     const isDb = irCfg.db;
     const toDb = (v: number) => { const a = Math.abs(v); return a > 1e-10 ? 20 * Math.log10(a) : -200; };
 
-    // Normalize by impulse peak
+    // Normalize IR and Step by shared peak (max of both)
+    // This preserves the relationship: for linear-phase bandpass,
+    // step reaches 50% at the moment impulse reaches 100%
     let irPeak = 0, peakIdx = 0;
     for (let i = 0; i < impulse.length; i++) { if (Math.abs(impulse[i]) > irPeak) { irPeak = Math.abs(impulse[i]); peakIdx = i; } }
-    if (irPeak < 1e-20) irPeak = 1;
-    const normIr = impulse.map(v => v / irPeak);
-    const normSt = step.map(v => { let p = 0; for (const s of step) { if (Math.abs(s) > p) p = Math.abs(s); } return p > 1e-20 ? v / p : 0; });
+    let stPeak = 0;
+    for (const v of step) { if (Math.abs(v) > stPeak) stPeak = Math.abs(v); }
+    const sharedPeak = Math.max(irPeak, stPeak);
+    if (sharedPeak < 1e-20) { return; }
+    const normIr = impulse.map(v => v / sharedPeak);
+    const normSt = step.map(v => v / sharedPeak);
     const peakTimeMs = timeMs[peakIdx];
 
     // Masking duration: 1.5 periods of HP freq
