@@ -1,4 +1,4 @@
-import { createEffect, createSignal, onCleanup, onMount, For, Show } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount, For, Show, untrack } from "solid-js";
 import { createStore } from "solid-js/store";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
@@ -1199,14 +1199,14 @@ export default function FrequencyPlot() {
   // ----------------------------------------------------------------
   async function renderTimeTab(mode: "ir" | "step" | "gd", sumMode: boolean, band: BandState | null) {
     const gen = ++renderGen;
-    // Snapshot toggle state BEFORE any await
-    const irCfg = {
+    // Snapshot toggle state — untrack to prevent main effect re-trigger on toggle
+    const irCfg = untrack(() => ({
       db: irDbMode(),
       measIr: showMeasIr(), measStep: showMeasStep(),
       targetIr: showTargetIr(), targetStep: showTargetStep(),
       corrIr: showCorrIr(), corrStep: showCorrStep(),
       masking: irShowMasking(),
-    };
+    }));
 
     // Collect bands with phase data
     const bands = sumMode

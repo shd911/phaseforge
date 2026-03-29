@@ -105,8 +105,8 @@ pub fn compute_impulse_response(
             pre_peak_count = i + 1;
         }
     }
-    // Always include at least 5ms of pre-peak context (linear-phase filters need this)
-    let min_pre = ((sample_rate * 0.005) as usize).min(max_pre);
+    // Always include at least 50ms of pre-peak context (linear-phase filters and masking zone need this)
+    let min_pre = ((sample_rate * 0.050) as usize).min(max_pre);
     pre_peak_count = pre_peak_count.max(min_pre);
 
     // --- Determine post-peak trim point ---
