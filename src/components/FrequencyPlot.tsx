@@ -461,16 +461,12 @@ export default function FrequencyPlot() {
           }
         }
       }
-      // On non-SPL tabs: toggle IR/Step series directly via setSeries
-      if (!onFreq && chart && (pTab === "ir" || pTab === "step")) {
-        // Map SPL category to IR/Step series: measurement→1,2 target→3,4 corrected→5,6
-        const catSeriesMap: Record<string, number[]> = { measurement: [1, 2], target: [3, 4], corrected: [5, 6] };
-        const seriesIds = catSeriesMap[entry.category];
-        if (seriesIds) {
-          // Check if ANY entry in this category is still visible
-          const catVis = legendEntries.some(e => e.category === entry.category && e.visible);
-          for (const sid of seriesIds) chart.setSeries(sid, { show: catVis });
-        }
+      // On non-SPL tabs: flip IR signals for this entry's category
+      if (!onFreq && (pTab === "ir" || pTab === "step")) {
+        if (entry.category === "measurement") { const v = !showMeasIr(); setShowMeasIr(v); setShowMeasStep(v); }
+        else if (entry.category === "target") { const v = !showTargetIr(); setShowTargetIr(v); setShowTargetStep(v); }
+        else { const v = !showCorrIr(); setShowCorrIr(v); setShowCorrStep(v); }
+        if (chart) applyIrShowStatesToChart();
       } else if (!onFreq) {
         if (pTab === "gd") gdToggleRedraw();
       }
@@ -509,8 +505,20 @@ export default function FrequencyPlot() {
       }
     }
     if (isSum() && !onFreq) {
-      if (pTab === "ir" || pTab === "step" || pTab === "gd") {
-        // Force re-render via main effect (band composition changed)
+      if (pTab === "ir" || pTab === "step") {
+        if (colName === "\u03A3") {
+          // Sigma column: flip all IR signals
+          const allOn = showMeasIr() && showTargetIr() && showCorrIr();
+          const v = !allOn;
+          setShowMeasIr(v); setShowMeasStep(v);
+          setShowTargetIr(v); setShowTargetStep(v);
+          setShowCorrIr(v); setShowCorrStep(v);
+          if (chart) applyIrShowStatesToChart();
+        } else {
+          // Band column: recompute coherent sum excluding/including this band
+          setIrRenderTrigger(v => v + 1);
+        }
+      } else if (pTab === "gd") {
         setIrRenderTrigger(v => v + 1);
       }
     }
@@ -554,12 +562,12 @@ export default function FrequencyPlot() {
         }
       }
     }
-    if (isSum() && !onFreq && chart && (pTab === "ir" || pTab === "step")) {
-      const catSeriesMap: Record<string, number[]> = { measurement: [1, 2], target: [3, 4], corrected: [5, 6] };
-      for (const [c, sids] of Object.entries(catSeriesMap)) {
-        const catVis = legendEntries.some(e => e.category === c && e.visible);
-        for (const sid of sids) chart.setSeries(sid, { show: catVis });
-      }
+    if (isSum() && !onFreq && (pTab === "ir" || pTab === "step")) {
+      // Flip IR signals directly — entries state is irrelevant for IR/Step
+      if (cat === "measurement") { const v = !showMeasIr(); setShowMeasIr(v); setShowMeasStep(v); }
+      else if (cat === "target") { const v = !showTargetIr(); setShowTargetIr(v); setShowTargetStep(v); }
+      else { const v = !showCorrIr(); setShowCorrIr(v); setShowCorrStep(v); }
+      if (chart) applyIrShowStatesToChart();
     } else if (isSum() && !onFreq) {
       if (pTab === "gd") gdToggleRedraw();
     }
@@ -1036,6 +1044,20 @@ export default function FrequencyPlot() {
     }
   }
 
+  // Helper: sync persistent IR/Step show signals from category visibility in legendEntries
+  // Called after row/category/Sigma toggles on IR/Step tab to keep signals in sync
+
+  // Helper: apply persistent IR/Step show signals to chart series (after rebuild)
+  function applyIrShowStatesToChart() {
+    if (!chart) return;
+    chart.setSeries(1, { show: showMeasIr() });
+    chart.setSeries(2, { show: showMeasStep() });
+    chart.setSeries(3, { show: showTargetIr() });
+    chart.setSeries(4, { show: showTargetStep() });
+    chart.setSeries(5, { show: showCorrIr() });
+    chart.setSeries(6, { show: showCorrStep() });
+  }
+
   function gdToggleRedraw() {
     const pTab = plotTab();
     if (pTab === "gd") {
@@ -1317,9 +1339,13 @@ export default function FrequencyPlot() {
     const allWithPhase = sumMode
       ? appState.bands.filter(b => b.measurement?.phase && b.measurement.phase.length > 0)
       : (band?.measurement?.phase && band.measurement.phase.length > 0 ? [band] : []);
-    // In SUM mode, filter by band visibility from SPL matrix (sumVisMap)
+    // In SUM mode, filter by band visibility from legend matrix
     const bands = sumMode
-      ? allWithPhase.filter(b => sumVisMap.get(b.name) !== false)
+      ? allWithPhase.filter(b => {
+          // Check if this band's measurement entry is visible in legendEntries
+          const measEntry = legendEntries.find(e => e.category === "measurement" && e.label === b.name);
+          return !measEntry || measEntry.visible; // default visible if not found
+        })
       : allWithPhase;
 
     if (bands.length === 0) {
@@ -1878,6 +1904,11 @@ export default function FrequencyPlot() {
       // Restore user zoom if saved AND reasonable (not 198000ms range)
       if (irUserXScale && (irUserXScale.max - irUserXScale.min) < 500) {
         irRestoreScales();
+      }
+      // In SUM mode, apply persistent show state from signals
+      // (irCfg was snapshot at renderTimeTab start, but row toggles may have changed signals since)
+      if (isSum()) {
+        applyIrShowStatesToChart();
       }
     } catch (e) { console.error("IR chart error:", e); }
   }
