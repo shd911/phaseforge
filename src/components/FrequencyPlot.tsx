@@ -160,6 +160,21 @@ export default function FrequencyPlot() {
   const [showCorrStep, setShowCorrStep] = createSignal(true);
   const [irShowMasking, setIrShowMasking] = createSignal(true);
 
+  // Force IR/Step re-render (incremented by legend band toggles)
+  const [irRenderTrigger, setIrRenderTrigger] = createSignal(0);
+
+  // IR/Step colors derived from band — updated on each render
+  const defaultIrColors = { measIr: "#4A9EFF", measStep: "#4A9EFF80", targetIr: "#FFD700", targetStep: "#FFD700A0", corrIr: "#22C55E", corrStep: "#22C55E80" };
+  const [irColors, setIrColors] = createSignal(defaultIrColors);
+  // GD colors and visibility
+  const defaultGdColors = { meas: "#F59E0B", target: "#FFD700", corr: "#22C55E" };
+  const [gdColors, setGdColors] = createSignal(defaultGdColors);
+  const [showGdMeas, setShowGdMeas] = createSignal(true);
+  const [showGdTarget, setShowGdTarget] = createSignal(true);
+  const [showGdCorr, setShowGdCorr] = createSignal(true);
+  // Export colors derived from band
+  const [exportColors, setExportColors] = createSignal({ model: "#FF9F43", fir: "#38BDF8" });
+
   // Persistent visibility — two maps for different modes:
   // SUM mode: by label (each band has its own curves like "Band 1 tgt", "Band 2 tgt")
   // Band mode: by category key (labels change per band, categories don't)
@@ -185,11 +200,20 @@ export default function FrequencyPlot() {
     const s = chart.scales[yKey];
     if (!s || s.min == null || s.max == null) return;
     pushZoom();
-    const center = (pTab === "freq" || pTab === "export") ? zoomCenter : (s.min + s.max) / 2;
-    const half = ((s.max - s.min) / 2) * factor;
-    if (half * 2 < 0.01 || half * 2 > 500) { zoomStack.pop(); return; }
-    const newMin = center - half;
-    const newMax = center + half;
+    let newMin: number, newMax: number;
+    if (pTab === "freq" || pTab === "export") {
+      // Anchor 0 dB at 20% from top — zoom expands/contracts below
+      const totalRange = (s.max - s.min) * factor;
+      if (totalRange < 0.01 || totalRange > 500) { zoomStack.pop(); return; }
+      newMax = 0 + totalRange * 0.2;
+      newMin = 0 - totalRange * 0.8;
+    } else {
+      const center = (s.min + s.max) / 2;
+      const half = ((s.max - s.min) / 2) * factor;
+      if (half * 2 < 0.01 || half * 2 > 500) { zoomStack.pop(); return; }
+      newMin = center - half;
+      newMax = center + half;
+    }
     if (pTab === "freq" || pTab === "export") { curMagMin = newMin; curMagMax = newMax; }
     chart.setScale(yKey, { min: newMin, max: newMax });
   }
@@ -393,30 +417,31 @@ export default function FrequencyPlot() {
 
   // Переключение видимости серии через легенду
   function toggleLegendEntry(idx: number) {
-    if (!chart) return;
     const entry = legendEntries[idx];
     const newVis = !entry.visible;
     setLegendEntries(idx, "visible", newVis);
-    chart.setSeries(entry.seriesIdx, { show: newVis });
+    const pTab = plotTab();
+    const onFreq = pTab === "freq";
+    // On SPL tab: also toggle the chart series directly
+    if (onFreq && chart) {
+      chart.setSeries(entry.seriesIdx, { show: newVis });
+    }
     if (isSum()) {
       sumVisMap.set(entry.label, newVis);
       // Also toggle paired phase series (mag ↔ phase)
       if (!entry.label.endsWith(" \u00B0")) {
-        // This is a mag series — find paired phase
         const phaseSuffix = " \u00B0";
         for (let pi = 0; pi < legendEntries.length; pi++) {
           const pe = legendEntries[pi];
           if (pe.category === entry.category && pe.label === entry.label + phaseSuffix) {
             if (pe.visible !== newVis) {
               setLegendEntries(pi, "visible", newVis);
-              chart.setSeries(pe.seriesIdx, { show: newVis });
+              if (onFreq && chart) chart.setSeries(pe.seriesIdx, { show: newVis });
               sumVisMap.set(pe.label, newVis);
             }
             break;
           }
         }
-        // For Σ series: legend label may differ from series label
-        // "Σ corrected" mag → "Σ corr °" phase, "Σ meas" → "Σ meas °", "Σ target" → "Σ target °"
         const sigmaPhaseMap: Record<string, string> = {
           "\u03A3 corrected": "\u03A3 corr \u00B0",
           "\u03A3 meas": "\u03A3 meas \u00B0",
@@ -428,13 +453,26 @@ export default function FrequencyPlot() {
             if (legendEntries[pi].label === sigmaPhLabel) {
               if (legendEntries[pi].visible !== newVis) {
                 setLegendEntries(pi, "visible", newVis);
-                chart.setSeries(legendEntries[pi].seriesIdx, { show: newVis });
+                if (onFreq && chart) chart.setSeries(legendEntries[pi].seriesIdx, { show: newVis });
                 sumVisMap.set(sigmaPhLabel, newVis);
               }
               break;
             }
           }
         }
+      }
+      // On non-SPL tabs: toggle IR/Step series directly via setSeries
+      if (!onFreq && chart && (pTab === "ir" || pTab === "step")) {
+        // Map SPL category to IR/Step series: measurement→1,2 target→3,4 corrected→5,6
+        const catSeriesMap: Record<string, number[]> = { measurement: [1, 2], target: [3, 4], corrected: [5, 6] };
+        const seriesIds = catSeriesMap[entry.category];
+        if (seriesIds) {
+          // Check if ANY entry in this category is still visible
+          const catVis = legendEntries.some(e => e.category === entry.category && e.visible);
+          for (const sid of seriesIds) chart.setSeries(sid, { show: catVis });
+        }
+      } else if (!onFreq) {
+        if (pTab === "gd") gdToggleRedraw();
       }
     } else {
       bandVisMap.set(catKey(entry), newVis);
@@ -443,7 +481,6 @@ export default function FrequencyPlot() {
 
   // Toggle all series for a given band column in SUM mode
   function toggleColumn(colName: string) {
-    if (!chart) return;
     const matching: number[] = [];
     for (let i = 0; i < legendEntries.length; i++) {
       const e = legendEntries[i];
@@ -458,15 +495,23 @@ export default function FrequencyPlot() {
     if (matching.length === 0) return;
     const allOn = matching.every(i => legendEntries[i].visible);
     const newVis = !allOn;
+    const pTab = plotTab();
+    const onFreq = pTab === "freq";
     for (const i of matching) {
       if (legendEntries[i].visible !== newVis) {
         setLegendEntries(i, "visible", newVis);
-        chart.setSeries(legendEntries[i].seriesIdx, { show: newVis });
+        if (onFreq && chart) chart.setSeries(legendEntries[i].seriesIdx, { show: newVis });
         if (isSum()) {
           sumVisMap.set(legendEntries[i].label, newVis);
         } else {
           bandVisMap.set(catKey(legendEntries[i]), newVis);
         }
+      }
+    }
+    if (isSum() && !onFreq) {
+      if (pTab === "ir" || pTab === "step" || pTab === "gd") {
+        // Force re-render via main effect (band composition changed)
+        setIrRenderTrigger(v => v + 1);
       }
     }
   }
@@ -489,7 +534,6 @@ export default function FrequencyPlot() {
 
   // Переключение всей категории (targets / measurements / corrected)
   function toggleCategory(cat: "measurement" | "target" | "corrected") {
-    if (!chart) return;
     const indices: number[] = [];
     for (let i = 0; i < legendEntries.length; i++) {
       if (legendEntries[i].category === cat) indices.push(i);
@@ -497,16 +541,27 @@ export default function FrequencyPlot() {
     if (indices.length === 0) return;
     const allOn = indices.every(i => legendEntries[i].visible);
     const newVis = !allOn;
+    const pTab = plotTab();
+    const onFreq = pTab === "freq";
     for (const i of indices) {
       if (legendEntries[i].visible !== newVis) {
         setLegendEntries(i, "visible", newVis);
-        chart.setSeries(legendEntries[i].seriesIdx, { show: newVis });
+        if (onFreq && chart) chart.setSeries(legendEntries[i].seriesIdx, { show: newVis });
         if (isSum()) {
           sumVisMap.set(legendEntries[i].label, newVis);
         } else {
           bandVisMap.set(catKey(legendEntries[i]), newVis);
         }
       }
+    }
+    if (isSum() && !onFreq && chart && (pTab === "ir" || pTab === "step")) {
+      const catSeriesMap: Record<string, number[]> = { measurement: [1, 2], target: [3, 4], corrected: [5, 6] };
+      for (const [c, sids] of Object.entries(catSeriesMap)) {
+        const catVis = legendEntries.some(e => e.category === c && e.visible);
+        for (const sid of sids) chart.setSeries(sid, { show: catVis });
+      }
+    } else if (isSum() && !onFreq) {
+      if (pTab === "gd") gdToggleRedraw();
     }
   }
 
@@ -599,10 +654,12 @@ export default function FrequencyPlot() {
     }
     if (!isFinite(magMin)) { magMin = -100; magMax = 100; }
 
-    // Fit range: +10 dBr top, noise floor (data minimum) bottom
-    fitMagMax = zoomCenter + 10;
+    // Fit range: 0 dB at 20% from top, bottom from data minimum
     fitMagMin = Math.floor(magMin / 5) * 5; // round down to nearest 5 dB
-    if (fitMagMax - fitMagMin < 20) fitMagMin = fitMagMax - 20;
+    const fitRange = Math.max(20, 0 - fitMagMin); // range below 0
+    fitMagMax = fitRange * 0.25; // 0 sits at 80% from bottom = 20% from top
+    fitMagMin = 0 - fitRange;
+    if (fitMagMax - fitMagMin < 20) { fitMagMax = 5; fitMagMin = -15; }
     curMagMin = savedMagMin ?? fitMagMin;
     curMagMax = savedMagMax ?? fitMagMax;
 
@@ -979,6 +1036,13 @@ export default function FrequencyPlot() {
     }
   }
 
+  function gdToggleRedraw() {
+    const pTab = plotTab();
+    if (pTab === "gd") {
+      renderTimeTab("gd", isSum(), activeBand());
+    }
+  }
+
   // Redraw when selected PEQ index changes (for vertical dashed line)
   createEffect(() => {
     const _sel = selectedPeqIdx(); // track
@@ -1073,6 +1137,7 @@ export default function FrequencyPlot() {
     const _fsnaps = band ? freqSnapshots(band.id) : [];
     const dragging = peqDragging();
     const pTab = plotTab();
+    const _irTrigger = irRenderTrigger(); // track: force IR re-render from legend band toggles
 
     if (debounceTimer) clearTimeout(debounceTimer);
     // Save IR user zoom before destroy — ONLY if staying on IR tab
@@ -1182,6 +1247,12 @@ export default function FrequencyPlot() {
         preRingMs: 0, maxMagErr: 0, gdRippleMs: 0,
       });
 
+      // Derive colors from band
+      const bandColor = band.color ?? "#FF9F43";
+      const ecf = bandColorFamily(bandColor);
+      const expClr = { model: ecf.target, fir: ecf.corrected };
+      setExportColors(expClr);
+
       // Render chart
       try { try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; } } catch (_) { chart = undefined; }
       if (!containerRef) return;
@@ -1191,8 +1262,8 @@ export default function FrequencyPlot() {
         width: Math.max(rect.width, 400), height: Math.max(rect.height, 200),
         series: [
           {},
-          { label: "Model dB", stroke: "#FF9F43", width: 2, scale: "mag" },
-          { label: "FIR dB", stroke: "#38BDF8", width: 2, scale: "mag" },
+          { label: "Model dB", stroke: expClr.model, width: 2, scale: "mag" },
+          { label: "FIR dB", stroke: expClr.fir, width: 2, scale: "mag" },
         ],
         scales: {
           x: { min: 20, max: 20000, distr: 3 },
@@ -1211,16 +1282,17 @@ export default function FrequencyPlot() {
             const idx = u.cursor.idx;
             if (idx == null || idx < 0 || idx >= u.data[0].length) { setCursorFreq("—"); setCursorSPL("—"); return; }
             const f = u.data[0][idx];
-            setCursorFreq(f != null ? (f >= 1000 ? (f/1000).toFixed(2)+" kHz" : Math.round(f)+" Hz") : "—");
+            setCursorFreq(f != null ? fmtFreq(f) : "—");
             const m = u.data[1]?.[idx]; const r = u.data[2]?.[idx];
-            setCursorSPL(
-              (m != null ? `Model: ${(m as number).toFixed(1)}` : "") +
-              (r != null ? ` FIR: ${(r as number).toFixed(1)}` : "") + " dB"
-            );
+            const vals: { label: string; color: string; value: string }[] = [];
+            if (m != null) vals.push({ label: "Model", color: expClr.model, value: (m as number).toFixed(1) + " dB" });
+            if (r != null) vals.push({ label: "FIR", color: expClr.fir, value: (r as number).toFixed(1) + " dB" });
+            setCursorValues(vals);
+            setCursorSPL(vals.map(v => `${v.label}: ${v.value}`).join(" ") || "—");
           }],
         },
       };
-      setShowLegend(false);
+      if (!isSum()) setShowLegend(false);
       try { chart = new uPlot(opts, [freq, normModelMag, firResult.realized_mag], containerRef); } catch (e) { console.error(e); }
     } catch (e) {
       console.error("Export tab render failed:", e);
@@ -1241,10 +1313,14 @@ export default function FrequencyPlot() {
       masking: irShowMasking(),
     }));
 
-    // Collect bands with phase data
+    // Collect bands with phase data (phase must be non-empty array)
+    const allWithPhase = sumMode
+      ? appState.bands.filter(b => b.measurement?.phase && b.measurement.phase.length > 0)
+      : (band?.measurement?.phase && band.measurement.phase.length > 0 ? [band] : []);
+    // In SUM mode, filter by band visibility from SPL matrix (sumVisMap)
     const bands = sumMode
-      ? appState.bands.filter(b => b.measurement?.phase)
-      : (band?.measurement?.phase ? [band] : []);
+      ? allWithPhase.filter(b => sumVisMap.get(b.name) !== false)
+      : allWithPhase;
 
     if (bands.length === 0) {
       try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
@@ -1276,7 +1352,6 @@ export default function FrequencyPlot() {
               sumIm[j] += amp * Math.sin(phRad);
             }
           }
-          // Unwrap sum phase
           const sumPh: number[] = [];
           for (let j = 0; j < n; j++) {
             sumPh.push(Math.atan2(sumIm[j], sumRe[j]) * 180 / Math.PI);
@@ -1291,9 +1366,56 @@ export default function FrequencyPlot() {
           gdPhase = unwrapped;
         }
 
-        const { freqOut, gdMs } = computeGroupDelay(gdFreq, gdPhase);
+        // Measurement GD
+        const measGd = computeGroupDelay(gdFreq, gdPhase);
         if (gen !== renderGen) return;
-        renderGdChart(freqOut, gdMs);
+
+        // Target GD (band mode only)
+        let targetGdMs: number[] | null = null;
+        if (!sumMode && band && band.targetEnabled) {
+          try {
+            const targetCurve = JSON.parse(JSON.stringify(band.target));
+            const tResp = await invoke<{ magnitude: number[]; phase: number[] }>("evaluate_target", { target: targetCurve, freq });
+            if (gen !== renderGen) return;
+            const tgd = computeGroupDelay(freq, tResp.phase);
+            targetGdMs = tgd.gdMs;
+          } catch (_) {}
+        }
+
+        // Corrected GD (band mode only, meas + PEQ + cross-section)
+        let corrGdMs: number[] | null = null;
+        if (!sumMode && band && band.targetEnabled) {
+          try {
+            let corrPh = [...phase];
+            const peqBands = band.peqBands?.filter((p: any) => p.enabled) ?? [];
+            if (peqBands.length > 0) {
+              const [, pp] = await invoke<[number[], number[]]>("compute_peq_complex", { freq, bands: peqBands });
+              if (gen !== renderGen) return;
+              corrPh = corrPh.map((v, i) => v + pp[i]);
+            }
+            if (band.target.high_pass || band.target.low_pass) {
+              const [, xp] = await invoke<[number[], number[], number]>("compute_cross_section", {
+                freq, highPass: band.target.high_pass, lowPass: band.target.low_pass,
+              });
+              if (gen !== renderGen) return;
+              corrPh = corrPh.map((v, i) => v + xp[i]);
+            }
+            const cgd = computeGroupDelay(freq, corrPh);
+            corrGdMs = cgd.gdMs;
+          } catch (_) {}
+        }
+
+        // GD colors from band
+        const bandColor = (!sumMode && band) ? band.color : "#F59E0B";
+        const cf = bandColorFamily(bandColor);
+        const stripAlpha = (c: string) => c.length === 9 ? c.slice(0, 7) : c;
+        const gdClr = { meas: stripAlpha(cf.meas), target: cf.target, corr: cf.corrected };
+        setGdColors(gdClr);
+
+        // Snapshot visibility (untracked)
+        const gdCfg = untrack(() => ({ meas: showGdMeas(), target: showGdTarget(), corr: showGdCorr() }));
+
+        renderGdChart(measGd.freqOut, measGd.gdMs, targetGdMs, corrGdMs, gdClr, gdCfg);
         return;
       }
 
@@ -1331,17 +1453,75 @@ export default function FrequencyPlot() {
         }
       }
 
-      const result = await invoke<{ time: number[]; impulse: number[]; step: number[] }>("compute_impulse", {
-        freq: resultFreq, magnitude: resultMag, phase: resultPhase, sampleRate: sr,
-      });
+      let result: { time: number[]; impulse: number[]; step: number[] };
+      try {
+        result = await invoke<{ time: number[]; impulse: number[]; step: number[] }>("compute_impulse", {
+          freq: resultFreq, magnitude: resultMag, phase: resultPhase, sampleRate: sr,
+        });
+      } catch (e) {
+        console.error("MEAS IR ERR:", e);
+        return;
+      }
       if (gen !== renderGen) return;
 
-      // Target impulse (if target enabled)
+      // Target impulse
       let targetResult: { time: number[]; impulse: number[]; step: number[] } | null = null;
-      if (!sumMode && band && band.targetEnabled) {
+      if (sumMode) {
+        // SUM target: coherent sum of all band targets
+        try {
+          const n = freq.length;
+          const tgtRe = new Float64Array(n);
+          const tgtIm = new Float64Array(n);
+          let anyTarget = false;
+          for (const sb of bands) {
+            if (!sb.targetEnabled) continue;
+            anyTarget = true;
+            const tc = JSON.parse(JSON.stringify(sb.target));
+            // Auto-ref from band's measurement
+            let s2 = 0, n2 = 0;
+            for (let i = 0; i < sb.measurement!.freq.length; i++) {
+              if (sb.measurement!.freq[i] >= 200 && sb.measurement!.freq[i] <= 2000) { s2 += sb.measurement!.magnitude[i]; n2++; }
+            }
+            tc.reference_level_db += n2 > 0 ? s2 / n2 : 0;
+            const tResp = await invoke<{ magnitude: number[]; phase: number[] }>("evaluate_target", { target: tc, freq });
+            if (gen !== renderGen) return;
+            // Add cross-section (HP/LP)
+            let tMag = tResp.magnitude;
+            let tPh = tResp.phase;
+            if (sb.target.high_pass || sb.target.low_pass) {
+              const [xm, xp] = await invoke<[number[], number[], number]>("compute_cross_section", {
+                freq, highPass: sb.target.high_pass, lowPass: sb.target.low_pass,
+              });
+              if (gen !== renderGen) return;
+              tMag = tMag.map((v: number, i: number) => v + xm[i]);
+              tPh = tPh.map((v: number, i: number) => v + xp[i]);
+            }
+            const sign = sb.inverted ? -1 : 1;
+            for (let j = 0; j < n; j++) {
+              const amp = Math.pow(10, (tMag[j] ?? -200) / 20) * sign;
+              const phRad = (tPh[j] ?? 0) * Math.PI / 180;
+              tgtRe[j] += amp * Math.cos(phRad);
+              tgtIm[j] += amp * Math.sin(phRad);
+            }
+          }
+          if (anyTarget) {
+            const tgtMag: number[] = [];
+            const tgtPh: number[] = [];
+            for (let j = 0; j < n; j++) {
+              const amp = Math.sqrt(tgtRe[j] * tgtRe[j] + tgtIm[j] * tgtIm[j]);
+              tgtMag.push(amp > 0 ? 20 * Math.log10(amp) : -200);
+              tgtPh.push(Math.atan2(tgtIm[j], tgtRe[j]) * 180 / Math.PI);
+            }
+            targetResult = await invoke<{ time: number[]; impulse: number[]; step: number[] }>("compute_impulse", {
+              freq, magnitude: tgtMag, phase: tgtPh, sampleRate: sr,
+            });
+            if (gen !== renderGen) return;
+          }
+        } catch (e) { console.error("TGT ERR:", e); }
+      } else if (band && band.targetEnabled) {
+        // Single band target
         try {
           const targetCurve = JSON.parse(JSON.stringify(band.target));
-          // Auto-ref: average measurement level in 200-2000 Hz
           let sum = 0, n = 0;
           for (let i = 0; i < freq.length; i++) {
             if (freq[i] >= 200 && freq[i] <= 2000) { sum += magnitude[i]; n++; }
@@ -1358,7 +1538,61 @@ export default function FrequencyPlot() {
 
       // Corrected impulse (meas + PEQ + cross-section)
       let corrResult: { time: number[]; impulse: number[]; step: number[] } | null = null;
-      if (!sumMode && band && band.targetEnabled) {
+      if (sumMode) {
+        // SUM corrected: coherent sum of all band corrected curves
+        try {
+          const n = freq.length;
+          const corrRe = new Float64Array(n);
+          const corrIm = new Float64Array(n);
+          let anyCorrected = false;
+          for (const sb of bands) {
+            anyCorrected = true;
+            let cMag = [...sb.measurement!.magnitude];
+            let cPh = [...sb.measurement!.phase!];
+            // Pad/truncate to freq length
+            while (cMag.length < n) cMag.push(-200);
+            while (cPh.length < n) cPh.push(0);
+            // PEQ
+            const peqBands = sb.peqBands?.filter((p: any) => p.enabled) ?? [];
+            if (peqBands.length > 0) {
+              const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", { freq, bands: peqBands });
+              if (gen !== renderGen) return;
+              cMag = cMag.map((v, i) => v + (pm[i] ?? 0));
+              cPh = cPh.map((v, i) => v + (pp[i] ?? 0));
+            }
+            // Cross-section
+            if (sb.targetEnabled && (sb.target.high_pass || sb.target.low_pass)) {
+              const [xm, xp] = await invoke<[number[], number[], number]>("compute_cross_section", {
+                freq, highPass: sb.target.high_pass, lowPass: sb.target.low_pass,
+              });
+              if (gen !== renderGen) return;
+              cMag = cMag.map((v, i) => v + (xm[i] ?? 0));
+              cPh = cPh.map((v, i) => v + (xp[i] ?? 0));
+            }
+            const sign = sb.inverted ? -1 : 1;
+            for (let j = 0; j < n; j++) {
+              const amp = Math.pow(10, (cMag[j] ?? -200) / 20) * sign;
+              const phRad = (cPh[j] ?? 0) * Math.PI / 180;
+              corrRe[j] += amp * Math.cos(phRad);
+              corrIm[j] += amp * Math.sin(phRad);
+            }
+          }
+          if (anyCorrected) {
+            const cMagSum: number[] = [];
+            const cPhSum: number[] = [];
+            for (let j = 0; j < n; j++) {
+              const amp = Math.sqrt(corrRe[j] * corrRe[j] + corrIm[j] * corrIm[j]);
+              cMagSum.push(amp > 0 ? 20 * Math.log10(amp) : -200);
+              cPhSum.push(Math.atan2(corrIm[j], corrRe[j]) * 180 / Math.PI);
+            }
+            corrResult = await invoke<{ time: number[]; impulse: number[]; step: number[] }>("compute_impulse", {
+              freq, magnitude: cMagSum, phase: cPhSum, sampleRate: sr,
+            });
+            if (gen !== renderGen) return;
+          }
+        } catch (e) { console.error("CORR ERR:", e); }
+      } else if (band && band.targetEnabled) {
+        // Single band corrected
         try {
           const targetCurve = JSON.parse(JSON.stringify(band.target));
           let sum2 = 0, n2 = 0;
@@ -1375,7 +1609,6 @@ export default function FrequencyPlot() {
             corrMag = corrMag.map((v, i) => v + pm[i]);
             corrPh = corrPh.map((v, i) => v + pp[i]);
           }
-          // Add cross-section (HP/LP filter response)
           if (band.target.high_pass || band.target.low_pass) {
             const [xm, xp] = await invoke<[number[], number[], number]>("compute_cross_section", {
               freq, highPass: band.target.high_pass, lowPass: band.target.low_pass,
@@ -1394,10 +1627,36 @@ export default function FrequencyPlot() {
       // HP freq for masking zone
       const hpFreq = band?.target?.high_pass?.freq_hz ?? 20;
 
+      // Derive colors — SUM uses high-contrast fixed colors, band mode uses bandColorFamily
+      let irClr: { measIr: string; measStep: string; targetIr: string; targetStep: string; corrIr: string; corrStep: string };
+      if (sumMode) {
+        irClr = {
+          measIr: "#4A9EFF",   // bright blue
+          measStep: "#2563EB",  // darker blue
+          targetIr: "#FFD700",  // gold
+          targetStep: "#F59E0B", // amber
+          corrIr: "#22C55E",    // green
+          corrStep: "#16A34A",  // darker green
+        };
+      } else {
+        const bandColor = band ? band.color : "#4A9EFF";
+        const cf = bandColorFamily(bandColor);
+        const stripAlpha = (c: string) => c.length === 9 ? c.slice(0, 7) : c;
+        irClr = {
+          measIr: stripAlpha(cf.meas),
+          measStep: stripAlpha(cf.measPhase),
+          targetIr: cf.target,
+          targetStep: cf.targetPhase,
+          corrIr: cf.corrected,
+          corrStep: cf.correctedPhase,
+        };
+      }
+      setIrColors(irClr);
+
       const timeMs = result.time.map(t => t * 1000);
       const targetTimeMs = targetResult?.time.map(t => t * 1000) ?? null;
       const corrTimeMs = corrResult?.time.map(t => t * 1000) ?? null;
-      renderIrStepChart(timeMs, result.impulse, result.step, targetTimeMs, targetResult?.impulse ?? null, targetResult?.step ?? null, corrTimeMs, corrResult?.impulse ?? null, corrResult?.step ?? null, hpFreq, irCfg);
+      renderIrStepChart(timeMs, result.impulse, result.step, targetTimeMs, targetResult?.impulse ?? null, targetResult?.step ?? null, corrTimeMs, corrResult?.impulse ?? null, corrResult?.step ?? null, hpFreq, irCfg, irClr);
     } catch (e) {
       console.error("Time tab render failed:", e);
     }
@@ -1409,6 +1668,7 @@ export default function FrequencyPlot() {
     corrTimeMs: number[] | null, corrImpulse: number[] | null, corrStep: number[] | null,
     hpFreq: number,
     irCfg: { db: boolean; measIr: boolean; measStep: boolean; targetIr: boolean; targetStep: boolean; corrIr: boolean; corrStep: boolean; masking: boolean },
+    clr: { measIr: string; measStep: string; targetIr: string; targetStep: string; corrIr: string; corrStep: string } = defaultIrColors,
   ) {
     try { try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; } } catch (_) { chart = undefined; }
     if (!containerRef) return;
@@ -1464,40 +1724,54 @@ export default function FrequencyPlot() {
     const emptyData = timeMs.map(() => NaN);
 
     // Series 1: Measurement IR
-    uSeries.push({ label: "Meas IR", stroke: "#4A9EFF", width: 1.5, scale: "y", show: irCfg.measIr });
+    uSeries.push({ label: "Meas IR", stroke: clr.measIr, width: 1.5, scale: "y", show: irCfg.measIr });
     uDataArr.push(isDb ? normIr.map(toDb) : normIr);
 
     // Series 2: Measurement Step
-    uSeries.push({ label: "Meas Step", stroke: "#22C55E", width: 1.5, scale: "y", show: irCfg.measStep });
+    uSeries.push({ label: "Meas Step", stroke: clr.measStep, width: 1.5, scale: "y", show: irCfg.measStep });
     uDataArr.push(isDb ? normSt.map(toDb) : normSt);
 
-    // Series 3: Target IR — always include data for stable Y range
-    uSeries.push({ label: "Target IR", stroke: "#FFD700", width: 1.5, dash: [6, 3], scale: "y", show: irCfg.targetIr });
+    // Helper: resample srcData onto timeMs grid WITHOUT peak alignment
+    // Uses absolute time — just interpolate srcData at timeMs positions
+    const resampleOntoTimeMs = (srcTime: number[], srcData: number[]): number[] => {
+      return timeMs.map(t => {
+        if (t < srcTime[0] || t > srcTime[srcTime.length - 1]) return isDb ? -200 : 0;
+        let lo = 0, hi = srcTime.length - 1;
+        while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (srcTime[mid] <= t) lo = mid; else hi = mid; }
+        const dt = srcTime[hi] - srcTime[lo];
+        const frac = dt > 0 ? (t - srcTime[lo]) / dt : 0;
+        const v = srcData[lo] + frac * (srcData[hi] - srcData[lo]);
+        return isDb ? toDb(v) : v;
+      });
+    };
+
+    // Series 3: Target IR
+    uSeries.push({ label: "Target IR", stroke: clr.targetIr, width: 2, scale: "y", show: irCfg.targetIr });
     let targetIrPeakTime: number | undefined;
     if (targetTimeMs && targetImpulse) {
       let tpIdx = 0, tpVal = 0;
       for (let i = 0; i < targetImpulse.length; i++) { if (Math.abs(targetImpulse[i]) > tpVal) { tpVal = Math.abs(targetImpulse[i]); tpIdx = i; } }
       targetIrPeakTime = targetTimeMs[tpIdx];
-      uDataArr.push(alignAndResample(targetTimeMs, targetImpulse));
+      uDataArr.push(resampleOntoTimeMs(targetTimeMs, targetImpulse));
     } else { uDataArr.push(emptyData); }
 
-    // Series 4: Target Step — align by TARGET IMPULSE peak (not step peak!)
-    uSeries.push({ label: "Target Step", stroke: "#A855F7", width: 1.5, dash: [6, 3], scale: "y", show: irCfg.targetStep });
-    uDataArr.push(targetTimeMs && targetStep ? alignAndResample(targetTimeMs, targetStep, targetIrPeakTime) : emptyData);
+    // Series 4: Target Step
+    uSeries.push({ label: "Target Step", stroke: clr.targetStep, width: 2, scale: "y", show: irCfg.targetStep });
+    uDataArr.push(targetTimeMs && targetStep ? resampleOntoTimeMs(targetTimeMs, targetStep) : emptyData);
 
     // Series 5: Corrected IR — align by corrected impulse peak
-    uSeries.push({ label: "Corr IR", stroke: "#F97316", width: 1.5, scale: "y", show: irCfg.corrIr });
+    uSeries.push({ label: "Corr IR", stroke: clr.corrIr, width: 2, scale: "y", show: irCfg.corrIr });
     let corrIrPeakTime: number | undefined;
     if (corrTimeMs && corrImpulse) {
       let cpIdx = 0, cpVal = 0;
       for (let i = 0; i < corrImpulse.length; i++) { if (Math.abs(corrImpulse[i]) > cpVal) { cpVal = Math.abs(corrImpulse[i]); cpIdx = i; } }
       corrIrPeakTime = corrTimeMs[cpIdx];
-      uDataArr.push(alignAndResample(corrTimeMs, corrImpulse));
+      uDataArr.push(resampleOntoTimeMs(corrTimeMs, corrImpulse));
     } else { uDataArr.push(emptyData); }
 
     // Series 6: Corrected Step — align by CORRECTED IMPULSE peak
-    uSeries.push({ label: "Corr Step", stroke: "#EC4899", width: 1.5, scale: "y", show: irCfg.corrStep });
-    uDataArr.push(corrTimeMs && corrStep ? alignAndResample(corrTimeMs, corrStep, corrIrPeakTime) : emptyData);
+    uSeries.push({ label: "Corr Step", stroke: clr.corrStep, width: 2, scale: "y", show: irCfg.corrStep });
+    uDataArr.push(corrTimeMs && corrStep ? resampleOntoTimeMs(corrTimeMs, corrStep) : emptyData);
 
     // Y range
     let yMin = Infinity, yMax = -Infinity;
@@ -1507,7 +1781,7 @@ export default function FrequencyPlot() {
     if (!isFinite(yMin)) { yMin = isDb ? -80 : -1.1; yMax = isDb ? 0 : 1.1; }
     const pad = isDb ? 5 : Math.max(0.05, (yMax - yMin) * 0.05);
 
-    setShowLegend(false);
+    if (!isSum()) setShowLegend(false);
     setCursorValues([]);
 
     const opts: uPlot.Options = {
@@ -1605,28 +1879,50 @@ export default function FrequencyPlot() {
       if (irUserXScale && (irUserXScale.max - irUserXScale.min) < 500) {
         irRestoreScales();
       }
-      // Otherwise chart uses xViewMin..xViewMax (±30ms) from options
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error("IR chart error:", e); }
   }
 
-  function renderGdChart(freq: number[], gdMs: number[]) {
+  function renderGdChart(
+    freq: number[], measGdMs: number[],
+    targetGdMs: number[] | null, corrGdMs: number[] | null,
+    clr: { meas: string; target: string; corr: string } = defaultGdColors,
+    cfg: { meas: boolean; target: boolean; corr: boolean } = { meas: true, target: true, corr: true },
+  ) {
     try { try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; } } catch (_) { chart = undefined; }
     if (!containerRef) return;
     const rect = containerRef.getBoundingClientRect();
     const w = Math.max(rect.width, 400);
     const h = Math.max(rect.height, 200);
 
+    const emptyData = freq.map(() => NaN);
+    const uSeries: uPlot.Series[] = [{}];
+    const uDataArr: number[][] = [freq];
+
+    // Series 1: Measurement GD
+    uSeries.push({ label: "Meas GD", stroke: clr.meas, width: 1.5, scale: "y", show: cfg.meas });
+    uDataArr.push(measGdMs);
+
+    // Series 2: Target GD
+    uSeries.push({ label: "Target GD", stroke: clr.target, width: 1.5, dash: [6, 3], scale: "y", show: cfg.target });
+    uDataArr.push(targetGdMs ?? emptyData);
+
+    // Series 3: Corrected GD
+    uSeries.push({ label: "Corr GD", stroke: clr.corr, width: 1.5, scale: "y", show: cfg.corr });
+    uDataArr.push(corrGdMs ?? emptyData);
+
     let yMin = Infinity, yMax = -Infinity;
-    for (const v of gdMs) { if (isFinite(v)) { if (v < yMin) yMin = v; if (v > yMax) yMax = v; } }
+    for (let s = 1; s < uDataArr.length; s++) {
+      for (const v of uDataArr[s]) { if (isFinite(v)) { if (v < yMin) yMin = v; if (v > yMax) yMax = v; } }
+    }
     const pad = Math.max(0.5, (yMax - yMin) * 0.1);
     if (!isFinite(yMin)) { yMin = -5; yMax = 20; }
 
-    setShowLegend(false);
+    if (!isSum()) setShowLegend(false);
     setCursorValues([]);
 
     const opts: uPlot.Options = {
       width: w, height: h,
-      series: [{}, { label: "GD ms", stroke: "#F59E0B", width: 1.5, scale: "y" }],
+      series: uSeries,
       scales: {
         x: { min: 20, max: 20000, distr: 3 },
         y: { auto: false, range: [yMin - pad, yMax + pad] as uPlot.Range.MinMax },
@@ -1644,13 +1940,17 @@ export default function FrequencyPlot() {
           const idx = u.cursor.idx;
           if (idx == null || idx < 0 || idx >= u.data[0].length) { setCursorFreq("—"); setCursorSPL("—"); return; }
           const f = u.data[0][idx];
-          setCursorFreq(f != null ? (f >= 1000 ? (f/1000).toFixed(2) + " kHz" : Math.round(f) + " Hz") : "—");
-          const gd = u.data[1]?.[idx];
-          setCursorSPL(gd != null ? (gd as number).toFixed(2) + " ms" : "—");
+          setCursorFreq(f != null ? fmtFreq(f) : "—");
+          const vals: { label: string; color: string; value: string }[] = [];
+          const m = u.data[1]?.[idx]; if (m != null && isFinite(m as number)) vals.push({ label: "Meas", color: clr.meas, value: (m as number).toFixed(2) + " ms" });
+          const t = u.data[2]?.[idx]; if (t != null && isFinite(t as number)) vals.push({ label: "Target", color: clr.target, value: (t as number).toFixed(2) + " ms" });
+          const c = u.data[3]?.[idx]; if (c != null && isFinite(c as number)) vals.push({ label: "Corr", color: clr.corr, value: (c as number).toFixed(2) + " ms" });
+          setCursorValues(vals);
+          setCursorSPL(vals.length > 0 ? vals.map(v => v.value).join(" / ") : "—");
         }],
       },
     };
-    try { chart = new uPlot(opts, [freq, gdMs], containerRef); } catch (e) { console.error(e); }
+    try { chart = new uPlot(opts, uDataArr, containerRef); } catch (e) { console.error(e); }
   }
 
   // ----------------------------------------------------------------
@@ -1721,7 +2021,7 @@ export default function FrequencyPlot() {
       if (showTarget && result.targetMag && result.targetMag.length > 0) {
         uSeries.push({ label: "Target dB", stroke: cf.target, width: 1.5, dash: [8, 4], scale: "mag" });
         uData.push(result.targetMag);
-        legend.push({ label: "Target", color: cf.target, dash: true, visible: true, seriesIdx: sIdx, category: "target" });
+        legend.push({ label: "Target", color: cf.target, dash: false, visible: true, seriesIdx: sIdx, category: "target" });
         sIdx++;
       }
 
@@ -2589,7 +2889,7 @@ export default function FrequencyPlot() {
   return (
     <div class="plot-wrapper">
       <div class="plot-tabs-strip">
-        <button class={`plot-tab ${plotTab() === "freq" ? "active" : ""}`} onClick={() => setPlotTab("freq")}>АЧХ</button>
+        <button class={`plot-tab ${plotTab() === "freq" ? "active" : ""}`} onClick={() => setPlotTab("freq")}>SPL</button>
         <button class={`plot-tab ${plotTab() === "ir" || plotTab() === "step" ? "active" : ""}`} onClick={() => setPlotTab("ir")}>IR/Step</button>
         <button class={`plot-tab ${plotTab() === "gd" ? "active" : ""}`} onClick={() => setPlotTab("gd")}>GD</button>
         <button class={`plot-tab ${plotTab() === "export" ? "active" : ""}`} onClick={() => setPlotTab("export")}>Export</button>
@@ -2647,34 +2947,48 @@ export default function FrequencyPlot() {
         <Show when={plotTab() === "ir" || plotTab() === "step"}>
           <span class="readout-sep" />
           <button class={`tb-btn ${irDbMode() ? "active" : ""}`} onClick={() => { setIrDbMode(!irDbMode()); irToggleRedraw(); }} style={{ "font-size": "9px", padding: "1px 4px" }}>{irDbMode() ? "dB" : "Lin"}</button>
+          <span class="readout-sep" />
+          <button class={`tb-btn ${showMeasIr() || showMeasStep() ? "active" : ""}`} onClick={() => {
+            const v = !(showMeasIr() || showMeasStep()); setShowMeasIr(v); setShowMeasStep(v);
+            if (chart) { chart.setSeries(1, { show: v }); chart.setSeries(2, { show: v }); }
+          }} style={{ "font-size": "9px", padding: "1px 4px" }}>Meas</button>
+          <button class={`tb-btn ${showTargetIr() || showTargetStep() ? "active" : ""}`} onClick={() => {
+            const v = !(showTargetIr() || showTargetStep()); setShowTargetIr(v); setShowTargetStep(v);
+            if (chart) { chart.setSeries(3, { show: v }); chart.setSeries(4, { show: v }); }
+          }} style={{ "font-size": "9px", padding: "1px 4px" }}>Tgt</button>
+          <button class={`tb-btn ${showCorrIr() || showCorrStep() ? "active" : ""}`} onClick={() => {
+            const v = !(showCorrIr() || showCorrStep()); setShowCorrIr(v); setShowCorrStep(v);
+            if (chart) { chart.setSeries(5, { show: v }); chart.setSeries(6, { show: v }); }
+          }} style={{ "font-size": "9px", padding: "1px 4px" }}>Corr</button>
         </Show>
       </div>
       {/* Unified visibility matrix — above plot, all modes */}
-      <Show when={plotTab() === "ir" || plotTab() === "step"}>
-        {/* IR/Step matrix */}
+      {/* SUM matrix is shared across all tabs — shown below via legendEntries */}
+      <Show when={(plotTab() === "ir" || plotTab() === "step") && !isSum()}>
+        {/* Band IR/Step matrix */}
         <div class="sum-vis-table">
           <table>
             <thead><tr>
               <th class="sum-corner" />
-              <th style={{ color: "#4A9EFF" }}>IR</th>
-              <th style={{ color: "#22C55E" }}>Step</th>
+              <th style={{ color: irColors().measIr }}>IR</th>
+              <th style={{ color: irColors().measStep }}>Step</th>
             </tr></thead>
             <tbody>
               {[
-                { label: "MEAS", irSig: showMeasIr, setIr: setShowMeasIr, stSig: showMeasStep, setSt: setShowMeasStep, irColor: "#4A9EFF", stColor: "#22C55E" },
-                { label: "TARGET", irSig: showTargetIr, setIr: setShowTargetIr, stSig: showTargetStep, setSt: setShowTargetStep, irColor: "#FFD700", stColor: "#A855F7" },
-                { label: "CORR", irSig: showCorrIr, setIr: setShowCorrIr, stSig: showCorrStep, setSt: setShowCorrStep, irColor: "#F97316", stColor: "#EC4899" },
+                { label: "MEAS", irSig: showMeasIr, setIr: setShowMeasIr, stSig: showMeasStep, setSt: setShowMeasStep, irColor: () => irColors().measIr, stColor: () => irColors().measStep },
+                { label: "TARGET", irSig: showTargetIr, setIr: setShowTargetIr, stSig: showTargetStep, setSt: setShowTargetStep, irColor: () => irColors().targetIr, stColor: () => irColors().targetStep },
+                { label: "CORR", irSig: showCorrIr, setIr: setShowCorrIr, stSig: showCorrStep, setSt: setShowCorrStep, irColor: () => irColors().corrIr, stColor: () => irColors().corrStep },
               ].map(row => (
                 <tr>
                   <td class="sum-row-header" onClick={() => { row.setIr(!row.irSig()); row.setSt(!row.stSig()); irToggleRedraw(); }}>{row.label}</td>
                   <td class="sum-cell">
                     <button class={`legend-item ${row.irSig() ? "" : "legend-off"}`} onClick={() => { row.setIr(!row.irSig()); irToggleRedraw(); }}>
-                      <span class="legend-swatch" style={{ "background-color": row.irSig() ? row.irColor : "transparent", "border-color": row.irColor }} />
+                      <span class="legend-swatch" style={{ "background-color": row.irSig() ? row.irColor() : "transparent", "border-color": row.irColor() }} />
                     </button>
                   </td>
                   <td class="sum-cell">
                     <button class={`legend-item ${row.stSig() ? "" : "legend-off"}`} onClick={() => { row.setSt(!row.stSig()); irToggleRedraw(); }}>
-                      <span class="legend-swatch" style={{ "background-color": row.stSig() ? row.stColor : "transparent", "border-color": row.stColor }} />
+                      <span class="legend-swatch" style={{ "background-color": row.stSig() ? row.stColor() : "transparent", "border-color": row.stColor() }} />
                     </button>
                   </td>
                 </tr>
@@ -2692,7 +3006,59 @@ export default function FrequencyPlot() {
           </table>
         </div>
       </Show>
-      <Show when={isSum() && showLegend() && legendEntries.length > 0}>
+      <Show when={plotTab() === "gd"}>
+        {/* GD legend — meas/target/corr */}
+        <div class="sum-vis-table">
+          <table>
+            <thead><tr>
+              <th class="sum-corner" />
+              <th style={{ color: gdColors().meas }}>ms</th>
+            </tr></thead>
+            <tbody>
+              {[
+                { label: "MEAS", sig: showGdMeas, set: setShowGdMeas, color: () => gdColors().meas },
+                { label: "TARGET", sig: showGdTarget, set: setShowGdTarget, color: () => gdColors().target },
+                { label: "CORR", sig: showGdCorr, set: setShowGdCorr, color: () => gdColors().corr },
+              ].map(row => (
+                <tr>
+                  <td class="sum-row-header" onClick={() => { row.set(!row.sig()); gdToggleRedraw(); }}>{row.label}</td>
+                  <td class="sum-cell">
+                    <button class={`legend-item ${row.sig() ? "" : "legend-off"}`} onClick={() => { row.set(!row.sig()); gdToggleRedraw(); }}>
+                      <span class="legend-swatch" style={{ "background-color": row.sig() ? row.color() : "transparent", "border-color": row.color() }} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Show>
+      <Show when={plotTab() === "export"}>
+        {/* Export legend — Model + FIR */}
+        <div class="sum-vis-table">
+          <table>
+            <tbody>
+              <tr>
+                <td class="sum-row-header">MODEL</td>
+                <td class="sum-cell">
+                  <span class="legend-item">
+                    <span class="legend-swatch legend-swatch-dash" style={{ "border-color": exportColors().model }} />
+                  </span>
+                </td>
+              </tr>
+              <tr>
+                <td class="sum-row-header">FIR</td>
+                <td class="sum-cell">
+                  <span class="legend-item">
+                    <span class="legend-swatch" style={{ "background-color": exportColors().fir, "border-color": exportColors().fir }} />
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </Show>
+      <Show when={isSum() && legendEntries.length > 0}>
         {/* SUM matrix */}
         <div class="sum-vis-table">
           {(() => {
@@ -2815,58 +3181,6 @@ export default function FrequencyPlot() {
           </div>
         </div>
       </div>
-      {/* Band legend — matrix table (not in SUM, SUM uses its own matrix above) */}
-      <Show when={showLegend() && !isSum() && legendEntries.length > 0 && plotTab() === "freq"}>
-        <div class="sum-vis-table">
-          {(() => {
-            const categories: ("target" | "measurement" | "corrected")[] = ["measurement", "target", "corrected"];
-            const catLabels: Record<string, string> = { target: "TARGET", measurement: "MEAS", corrected: "CORR" };
-            const colLabels = ["dB", "°"];
-            return (
-              <table>
-                <thead>
-                  <tr>
-                    <th class="sum-corner" />
-                    <For each={colLabels}>
-                      {(col) => <th>{col}</th>}
-                    </For>
-                  </tr>
-                </thead>
-                <tbody>
-                  <For each={categories}>
-                    {(cat) => {
-                      const catEnts = () => legendEntries.filter(e => e.category === cat);
-                      const magEntry = () => catEnts().find(e => !e.dash);
-                      const phEntry = () => catEnts().find(e => e.dash);
-                      return (
-                        <tr>
-                          <td class="sum-row-header" onClick={() => toggleCategory(cat)}>
-                            {catLabels[cat]}
-                          </td>
-                          <td class="sum-cell" onClick={() => { const e = magEntry(); if (e) toggleLegendEntry(legendEntries.indexOf(e)); }}>
-                            <Show when={magEntry()}>
-                              {(e) => (
-                                <span class={`sum-cell-dot ${e().visible ? "on" : ""}`} style={{ background: e().visible ? e().color : "transparent", "border-color": e().color }} />
-                              )}
-                            </Show>
-                          </td>
-                          <td class="sum-cell" onClick={() => { const e = phEntry(); if (e) toggleLegendEntry(legendEntries.indexOf(e)); }}>
-                            <Show when={phEntry()}>
-                              {(e) => (
-                                <span class={`sum-cell-dot ${e().visible ? "on" : ""}`} style={{ background: e().visible ? e().color : "transparent", "border-color": e().color }} />
-                              )}
-                            </Show>
-                          </td>
-                        </tr>
-                      );
-                    }}
-                  </For>
-                </tbody>
-              </table>
-            );
-          })()}
-        </div>
-      </Show>
       {/* Old band-legend removed — all modes use matrix above */}
     </div>
   );
