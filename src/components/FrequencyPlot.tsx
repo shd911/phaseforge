@@ -180,6 +180,8 @@ export default function FrequencyPlot() {
   // Band mode: by category key (labels change per band, categories don't)
   let sumVisMap = new Map<string, boolean>();
   let bandVisMap = new Map<string, boolean>();
+  // Reactive set of excluded band names for SUM IR/Step coherent sum
+  const [irExcludedBands, setIrExcludedBands] = createSignal<Set<string>>(new Set());
 
   /** Key for band-mode visibility persistence — use label directly.
    *  Labels are stable across bands: "Measurement", "Target", "PEQ Corrected", etc. */
@@ -419,8 +421,24 @@ export default function FrequencyPlot() {
   function toggleLegendEntry(idx: number) {
     const entry = legendEntries[idx];
     const newVis = !entry.visible;
-    setLegendEntries(idx, "visible", newVis);
     const pTab = plotTab();
+
+    // IR/Step SUM: band cell → toggle band inclusion; Σ cell → toggle category
+    if (isSum() && (pTab === "ir" || pTab === "step")) {
+        if (!entry.label.startsWith("\u03A3")) {
+            const bandName = entry.label.replace(/ tgt$/, "").replace(/ corr\+XO$/, "").replace(/ \u00B0$/, "");
+            setIrExcludedBands(prev => { const s = new Set(prev); if (s.has(bandName)) s.delete(bandName); else s.add(bandName); return s; });
+            setIrRenderTrigger(v => v + 1);
+        } else {
+            if (entry.category === "measurement") { const v = !showMeasIr(); setShowMeasIr(v); setShowMeasStep(v); }
+            else if (entry.category === "target") { const v = !showTargetIr(); setShowTargetIr(v); setShowTargetStep(v); }
+            else { const v = !showCorrIr(); setShowCorrIr(v); setShowCorrStep(v); }
+            if (chart) applyIrShowStatesToChart();
+        }
+        return;
+    }
+
+    setLegendEntries(idx, "visible", newVis);
     const onFreq = pTab === "freq";
     // On SPL tab: also toggle the chart series directly
     if (onFreq && chart) {
@@ -462,12 +480,7 @@ export default function FrequencyPlot() {
         }
       }
       // On non-SPL tabs: flip IR signals for this entry's category
-      if (!onFreq && (pTab === "ir" || pTab === "step")) {
-        if (entry.category === "measurement") { const v = !showMeasIr(); setShowMeasIr(v); setShowMeasStep(v); }
-        else if (entry.category === "target") { const v = !showTargetIr(); setShowTargetIr(v); setShowTargetStep(v); }
-        else { const v = !showCorrIr(); setShowCorrIr(v); setShowCorrStep(v); }
-        if (chart) applyIrShowStatesToChart();
-      } else if (!onFreq) {
+      if (!onFreq) {
         if (pTab === "gd") gdToggleRedraw();
       }
     } else {
@@ -477,6 +490,23 @@ export default function FrequencyPlot() {
 
   // Toggle all series for a given band column in SUM mode
   function toggleColumn(colName: string) {
+    const pTab = plotTab();
+    // IR/Step SUM: separate logic
+    if (isSum() && (pTab === "ir" || pTab === "step")) {
+        if (colName === "\u03A3") {
+            const allOn = showMeasIr() && showTargetIr() && showCorrIr();
+            const v = !allOn;
+            setShowMeasIr(v); setShowMeasStep(v);
+            setShowTargetIr(v); setShowTargetStep(v);
+            setShowCorrIr(v); setShowCorrStep(v);
+            if (chart) applyIrShowStatesToChart();
+        } else {
+            setIrExcludedBands(prev => { const s = new Set(prev); if (s.has(colName)) s.delete(colName); else s.add(colName); return s; });
+            setIrRenderTrigger(v => v + 1);
+        }
+        return;
+    }
+
     const matching: number[] = [];
     for (let i = 0; i < legendEntries.length; i++) {
       const e = legendEntries[i];
@@ -491,7 +521,6 @@ export default function FrequencyPlot() {
     if (matching.length === 0) return;
     const allOn = matching.every(i => legendEntries[i].visible);
     const newVis = !allOn;
-    const pTab = plotTab();
     const onFreq = pTab === "freq";
     for (const i of matching) {
       if (legendEntries[i].visible !== newVis) {
@@ -542,6 +571,19 @@ export default function FrequencyPlot() {
 
   // Переключение всей категории (targets / measurements / corrected)
   function toggleCategory(cat: "measurement" | "target" | "corrected") {
+    const pTab = plotTab();
+    // IR/Step SUM: only toggle signals, don't touch legendEntries
+    if (isSum() && (pTab === "ir" || pTab === "step")) {
+        if (cat === "measurement") { const v = !showMeasIr(); setShowMeasIr(v); setShowMeasStep(v); }
+        else if (cat === "target") { const v = !showTargetIr(); setShowTargetIr(v); setShowTargetStep(v); }
+        else { const v = !showCorrIr(); setShowCorrIr(v); setShowCorrStep(v); }
+        if (chart) {
+            applyIrShowStatesToChart();
+        } else {
+        }
+        return;
+    }
+
     const indices: number[] = [];
     for (let i = 0; i < legendEntries.length; i++) {
       if (legendEntries[i].category === cat) indices.push(i);
@@ -549,7 +591,6 @@ export default function FrequencyPlot() {
     if (indices.length === 0) return;
     const allOn = indices.every(i => legendEntries[i].visible);
     const newVis = !allOn;
-    const pTab = plotTab();
     const onFreq = pTab === "freq";
     for (const i of indices) {
       if (legendEntries[i].visible !== newVis) {
@@ -1038,10 +1079,7 @@ export default function FrequencyPlot() {
   // IR/Step: all toggles save scales → rebuild → restore
   function irToggleRedraw() {
     irSaveScales();
-    const pTab = plotTab();
-    if (pTab === "ir" || pTab === "step") {
-      renderTimeTab("ir", isSum(), activeBand());
-    }
+    setIrRenderTrigger(v => v + 1);
   }
 
   // Helper: sync persistent IR/Step show signals from category visibility in legendEntries
@@ -1341,11 +1379,7 @@ export default function FrequencyPlot() {
       : (band?.measurement?.phase && band.measurement.phase.length > 0 ? [band] : []);
     // In SUM mode, filter by band visibility from legend matrix
     const bands = sumMode
-      ? allWithPhase.filter(b => {
-          // Check if this band's measurement entry is visible in legendEntries
-          const measEntry = legendEntries.find(e => e.category === "measurement" && e.label === b.name);
-          return !measEntry || measEntry.visible; // default visible if not found
-        })
+      ? allWithPhase.filter(b => !untrack(() => irExcludedBands()).has(b.name))
       : allWithPhase;
 
     if (bands.length === 0) {
@@ -3089,7 +3123,7 @@ export default function FrequencyPlot() {
           </table>
         </div>
       </Show>
-      <Show when={isSum() && legendEntries.length > 0}>
+      <Show when={isSum() && legendEntries.length > 0 && plotTab() !== "ir" && plotTab() !== "step"}>
         {/* SUM matrix */}
         <div class="sum-vis-table">
           {(() => {
@@ -3138,6 +3172,65 @@ export default function FrequencyPlot() {
                       );
                     }}
                   </For>
+                </tbody>
+              </table>
+            );
+          })()}
+        </div>
+      </Show>
+      <Show when={isSum() && (plotTab() === "ir" || plotTab() === "step")}>
+        <div class="sum-vis-table">
+          {(() => {
+            const bandNames = () => appState.bands.filter(b => b.measurement?.phase && b.measurement.phase.length > 0).map(b => b.name);
+            const cols = () => [...bandNames(), "\u03A3"];
+            const categories = [
+              { label: "MEAS", cat: "measurement" as const, sig: showMeasIr, color: () => irColors().measIr },
+              { label: "TARGETS", cat: "target" as const, sig: showTargetIr, color: () => irColors().targetIr },
+              { label: "CORR+XO", cat: "corrected" as const, sig: showCorrIr, color: () => irColors().corrIr },
+            ];
+            return (
+              <table>
+                <thead><tr>
+                  <th class="sum-corner" />
+                  <For each={cols()}>{(col) => (
+                    <th onClick={() => toggleColumn(col)} title={`Toggle ${col}`}
+                      style={{ cursor: "pointer", opacity: col !== "\u03A3" && irExcludedBands().has(col) ? 0.4 : 1 }}>
+                      {col.length > 12 ? col.slice(0, 12) + "\u2026" : col}
+                    </th>
+                  )}</For>
+                </tr></thead>
+                <tbody>
+                  {categories.map(row => (
+                    <tr>
+                      <td class={`sum-row-header ${row.sig() ? "row-on" : ""}`}
+                        onClick={() => toggleCategory(row.cat)}>
+                        <span class="sum-row-swatch" style={{ "border-color": row.color() }} />{row.label}
+                      </td>
+                      <For each={cols()}>{(col) => {
+                        const bandIncluded = () => !irExcludedBands().has(col);
+                        const active = () => col === "\u03A3" ? row.sig() : (bandIncluded() && row.sig());
+                        return (
+                          <td class="sum-cell" onClick={col === "\u03A3" ? () => toggleCategory(row.cat) : undefined}>
+                            {col === "\u03A3" ? (
+                              <button class={`legend-item ${row.sig() ? "" : "legend-off"}`}>
+                                <span class="legend-swatch" style={{
+                                  "background-color": row.sig() ? row.color() : "transparent",
+                                  "border-color": row.color()
+                                }} />
+                              </button>
+                            ) : (
+                              <span class={`legend-item ${active() ? "" : "legend-off"}`} style={{ cursor: "default" }}>
+                                <span class="legend-swatch" style={{
+                                  "background-color": active() ? row.color() : "transparent",
+                                  "border-color": row.color()
+                                }} />
+                              </span>
+                            )}
+                          </td>
+                        );
+                      }}</For>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             );
