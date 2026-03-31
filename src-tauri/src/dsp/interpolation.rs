@@ -13,6 +13,13 @@ pub fn interpolate_log_grid(
     let log_min = f_min.ln();
     let log_max = f_max.ln();
 
+    if n_points < 2 {
+        let f = ((log_min + log_max) / 2.0).exp();
+        let m = interp_1d(freq, mag, &[f]);
+        let p = phase.map(|ph| interp_1d(freq, ph, &[f]));
+        return (vec![f], m, p);
+    }
+
     let grid_freq: Vec<f64> = (0..n_points)
         .map(|i| {
             let t = i as f64 / (n_points - 1) as f64;
@@ -41,8 +48,8 @@ pub fn interpolate_linear_grid(
 
     let grid_freq: Vec<f64> = (0..n_bins).map(|i| i as f64 * df).collect();
 
-    let grid_mag = interp_1d_with_edges(freq, mag, &grid_freq);
-    let grid_phase = phase.map(|p| interp_1d_with_edges(freq, p, &grid_freq));
+    let grid_mag = interp_1d(freq, mag, &grid_freq); // magnitude: clamp to boundary (flat extension)
+    let grid_phase = phase.map(|p| interp_1d_phase_edges(freq, p, &grid_freq)); // phase: blend to 0 at DC
 
     (grid_freq, grid_mag, grid_phase)
 }
@@ -55,13 +62,27 @@ fn interp_1d(x_data: &[f64], y_data: &[f64], x_query: &[f64]) -> Vec<f64> {
         .collect()
 }
 
-/// Linear interpolation with special edge handling for FFT grids.
-/// DC (0 Hz): extrapolate from first point, Phase = 0.
-/// Beyond Nyquist: hold last value.
-fn interp_1d_with_edges(x_data: &[f64], y_data: &[f64], x_query: &[f64]) -> Vec<f64> {
+/// Phase interpolation with DC edge handling for FFT grids.
+/// Below measurement range: linearly blend from 0 at DC to first data value.
+/// This ensures DC phase = 0° for real signals.
+/// Within and above range: standard interpolation with boundary clamping.
+fn interp_1d_phase_edges(x_data: &[f64], y_data: &[f64], x_query: &[f64]) -> Vec<f64> {
     x_query
         .iter()
-        .map(|&xq| interp_single(x_data, y_data, xq))
+        .map(|&xq| {
+            if x_data.is_empty() {
+                return 0.0;
+            }
+            if xq >= x_data[0] {
+                return interp_single(x_data, y_data, xq);
+            }
+            // Below measurement range: blend phase from 0 (at DC) to phase[0]
+            if x_data[0] <= 0.0 {
+                return y_data[0];
+            }
+            let t = xq / x_data[0]; // 0.0 at DC, 1.0 at first measurement freq
+            y_data[0] * t
+        })
         .collect()
 }
 

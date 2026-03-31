@@ -491,7 +491,7 @@ function MeasurementsTab() {
       try {
         const [newPhase, delay, distance] = await invoke<[number[], number, number]>(
           "remove_measurement_delay",
-          { freq: measurement.freq, magnitude: measurement.magnitude, phase: measurement.phase }
+          { freq: measurement.freq, magnitude: measurement.magnitude, phase: measurement.phase, sampleRate: measurement.sample_rate }
         );
         setBandDelayInfo(b.id, delay, distance);
         markBandDelayRemoved(b.id, newPhase);

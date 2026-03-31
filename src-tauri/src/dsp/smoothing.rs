@@ -17,20 +17,25 @@ impl Default for SmoothingConfig {
     }
 }
 
-/// Apply variable fractional-octave smoothing.
+/// Apply variable fractional-octave smoothing in power domain.
 ///
 /// Smoothing fraction depends on frequency:
 /// - < 100 Hz: 1/48 octave (detailed for room modes)
 /// - 100–500 Hz: 1/12 octave (moderate)
 /// - > 500 Hz: 1/3 octave (coarse for HF)
+///
+/// Averaging is done in the power (linear squared) domain to avoid
+/// the systematic bias of arithmetic dB averaging:
+///   result_dB = 10 * log10(mean(10^(mag_i / 10)))
 pub fn variable_smoothing(freq: &[f64], mag: &[f64], config: &SmoothingConfig) -> Vec<f64> {
     let n = freq.len();
     if n == 0 { return vec![]; }
 
-    // Prefix sum for O(1) range queries
+    // Convert dB to linear power for prefix-sum averaging
+    let power: Vec<f64> = mag.iter().map(|&db| 10.0_f64.powf(db / 10.0)).collect();
     let mut prefix = vec![0.0_f64; n + 1];
     for i in 0..n {
-        prefix[i + 1] = prefix[i] + mag[i];
+        prefix[i + 1] = prefix[i] + power[i];
     }
 
     freq.iter()
@@ -47,13 +52,15 @@ pub fn variable_smoothing(freq: &[f64], mag: &[f64], config: &SmoothingConfig) -
             } else {
                 config.fixed_fraction.unwrap_or(1.0 / 6.0)
             };
-            smooth_bin_prefix(freq, &prefix, i, fraction)
+            let avg_power = smooth_bin_prefix(freq, &prefix, i, fraction);
+            // Convert back to dB
+            if avg_power > 1e-30 { 10.0 * avg_power.log10() } else { -300.0 }
         })
         .collect()
 }
 
-/// Smooth a single frequency bin using fractional-octave window.
-/// Uses binary search + prefix sum for O(log n) per bin instead of O(n).
+/// Smooth a single frequency bin using fractional-octave window in power domain.
+/// Uses binary search for O(log n) per bin.
 pub fn fractional_octave_smooth(freq: &[f64], mag: &[f64], idx: usize, fraction: f64) -> f64 {
     let center = freq[idx];
     if center <= 0.0 {
@@ -71,11 +78,12 @@ pub fn fractional_octave_smooth(freq: &[f64], mag: &[f64], idx: usize, fraction:
         return mag[idx];
     }
 
-    let mut sum = 0.0;
+    let mut sum_power = 0.0;
     for i in lo..hi {
-        sum += mag[i];
+        sum_power += 10.0_f64.powf(mag[i] / 10.0);
     }
-    sum / (hi - lo) as f64
+    let avg_power = sum_power / (hi - lo) as f64;
+    if avg_power > 1e-30 { 10.0 * avg_power.log10() } else { -300.0 }
 }
 
 /// Internal: smooth using pre-computed prefix sum (O(log n) per bin)

@@ -644,6 +644,22 @@ export async function newProject(): Promise<void> {
   setExportSampleRate(48000);
   setExportTaps(65536);
   setExportWindow("Blackman");
+  // Reset FIR optimization signals to defaults
+  setFirIterations(3);
+  setFirFreqWeighting(true);
+  setFirNarrowbandLimit(true);
+  setFirNbSmoothingOct(0.333);
+  setFirNbMaxExcess(6.0);
+  setFirMaxBoost(24.0);
+  setFirNoiseFloor(-150.0);
+  // Reset PEQ optimization signals to defaults
+  setTolerance(1.0);
+  setMaxBands(20);
+  setGainRegularization(0.0);
+  setPeqFloor(60);
+  setPeqRangeMode("auto");
+  setPeqDirectLow(20);
+  setPeqDirectHigh(20000);
 
   // 5. Set project signals — .pfproj goes INSIDE the subfolder
   setProjectDir(folderPath);

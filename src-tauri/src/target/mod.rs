@@ -251,6 +251,181 @@ fn butterworth_hp_complex(f: f64, fc: f64, n: u8) -> (f64, f64) {
 }
 
 // ---------------------------------------------------------------------------
+// Bessel complex transfer function (frequency-normalized poles)
+// ---------------------------------------------------------------------------
+
+/// Bessel filter poles (normalized to unit group delay at DC).
+/// These are the standard frequency-normalized Bessel poles for orders 1–8.
+/// Each entry is (real, imag) for left-half-plane poles with imag >= 0.
+/// Conjugate pairs are implied for complex poles.
+fn bessel_poles(order: u8) -> Vec<(f64, f64)> {
+    match order {
+        1 => vec![(-1.0, 0.0)],
+        2 => vec![(-1.1016, 0.6368)],
+        3 => vec![(-1.3226, 0.0), (-1.0474, 0.9992)],
+        4 => vec![(-1.3700, 0.4102), (-0.9953, 1.2571)],
+        5 => vec![(-1.5069, 0.0), (-1.3810, 0.7179), (-0.9576, 1.4711)],
+        6 => vec![(-1.5735, 0.3213), (-1.3836, 0.9727), (-0.9307, 1.6620)],
+        7 => vec![(-1.6853, 0.0), (-1.6130, 0.5896), (-1.3797, 1.1923), (-0.9104, 1.8364)],
+        8 => vec![(-1.7575, 0.2737), (-1.6365, 0.8230), (-1.3690, 1.3883), (-0.8955, 1.9983)],
+        _ => bessel_poles(8), // clamp to 8
+    }
+}
+
+fn bessel_lp_complex(f: f64, fc: f64, n: u8) -> (f64, f64) {
+    let poles = bessel_poles(n);
+    // Frequency scaling: Bessel poles are normalized to ω₀=1 for group delay.
+    // Scale by fc to move cutoff: s_scaled = s / (2π·fc), but we evaluate at s=j·2π·f.
+    // Simplified: w = f/fc, evaluate H(jw) = K / product(jw - p_k) for all poles (including conjugates).
+    let w = f / fc;
+    let mut re_prod = 1.0_f64;
+    let mut im_prod = 0.0_f64;
+
+    for &(pr, pi) in &poles {
+        if pi.abs() < 1e-15 {
+            // Real pole: 1/(jw - pr)
+            let dr = -pr;
+            let di = w;
+            let denom = dr * dr + di * di;
+            let inv_re = dr / denom;
+            let inv_im = -di / denom;
+            let new_re = re_prod * inv_re - im_prod * inv_im;
+            let new_im = re_prod * inv_im + im_prod * inv_re;
+            re_prod = new_re;
+            im_prod = new_im;
+        } else {
+            // Conjugate pair: 1/(jw - p) * 1/(jw - p*)
+            // = 1/((jw - pr - j·pi)(jw - pr + j·pi))
+            // = 1/((−pr + j(w − pi))(−pr + j(w + pi)))
+            let dr1 = -pr;
+            let di1 = w - pi;
+            let dr2 = -pr;
+            let di2 = w + pi;
+            // Multiply the two denominators
+            let d_re = dr1 * dr2 - di1 * di2;
+            let d_im = dr1 * di2 + di1 * dr2;
+            let d_mag2 = d_re * d_re + d_im * d_im;
+            let inv_re = d_re / d_mag2;
+            let inv_im = -d_im / d_mag2;
+            let new_re = re_prod * inv_re - im_prod * inv_im;
+            let new_im = re_prod * inv_im + im_prod * inv_re;
+            re_prod = new_re;
+            im_prod = new_im;
+        }
+    }
+
+    // Normalize DC gain to 0 dB: at w=0, H(0) = 1/product(-p_k) for all poles.
+    // Compute DC gain and divide.
+    let mut dc_re = 1.0_f64;
+    let mut dc_im = 0.0_f64;
+    for &(pr, pi) in &poles {
+        if pi.abs() < 1e-15 {
+            let dr = -pr;
+            let inv_re = 1.0 / dr;
+            let new_re = dc_re * inv_re;
+            let new_im = dc_im * inv_re;
+            dc_re = new_re;
+            dc_im = new_im;
+        } else {
+            let dr1 = -pr;
+            let di1 = -pi;
+            let dr2 = -pr;
+            let di2 = pi;
+            let d_re = dr1 * dr2 - di1 * di2;
+            let d_im = dr1 * di2 + di1 * dr2;
+            let d_mag2 = d_re * d_re + d_im * d_im;
+            let inv_re = d_re / d_mag2;
+            let inv_im = -d_im / d_mag2;
+            let new_re = dc_re * inv_re - dc_im * inv_im;
+            let new_im = dc_re * inv_im + dc_im * inv_re;
+            dc_re = new_re;
+            dc_im = new_im;
+        }
+    }
+    // Normalize: H(0) is real positive for Bessel (symmetric poles). Divide by |H(0)|.
+    let dc_mag = (dc_re * dc_re + dc_im * dc_im).sqrt();
+    let final_re = re_prod / dc_mag;
+    let final_im = im_prod / dc_mag;
+
+    let mag_linear = (final_re * final_re + final_im * final_im).sqrt();
+    let mag_db = if mag_linear > 1e-30 { 20.0 * mag_linear.log10() } else { -600.0 };
+    let phase_deg = final_im.atan2(final_re) * (180.0 / PI);
+
+    (mag_db, phase_deg)
+}
+
+fn bessel_hp_complex(f: f64, fc: f64, n: u8) -> (f64, f64) {
+    // HP via LP-to-HP transform: s → wc/s (same approach as Butterworth HP)
+    let poles = bessel_poles(n);
+    let w = f / fc;
+    let mut re_prod = 1.0_f64;
+    let mut im_prod = 0.0_f64;
+
+    for &(pr, pi) in &poles {
+        if pi.abs() < 1e-15 {
+            let dr = -pr;
+            let di = -1.0 / w;
+            let denom = dr * dr + di * di;
+            let inv_re = dr / denom;
+            let inv_im = -di / denom;
+            let new_re = re_prod * inv_re - im_prod * inv_im;
+            let new_im = re_prod * inv_im + im_prod * inv_re;
+            re_prod = new_re;
+            im_prod = new_im;
+        } else {
+            let dr1 = -pr;
+            let di1 = -1.0 / w - pi;
+            let dr2 = -pr;
+            let di2 = -1.0 / w + pi;
+            let d_re = dr1 * dr2 - di1 * di2;
+            let d_im = dr1 * di2 + di1 * dr2;
+            let d_mag2 = d_re * d_re + d_im * d_im;
+            let inv_re = d_re / d_mag2;
+            let inv_im = -d_im / d_mag2;
+            let new_re = re_prod * inv_re - im_prod * inv_im;
+            let new_im = re_prod * inv_im + im_prod * inv_re;
+            re_prod = new_re;
+            im_prod = new_im;
+        }
+    }
+
+    // DC normalization (same as LP, but for HP gain at HF → 0 dB)
+    // At w→∞, HP → 0 dB. The product form naturally gives this. Just normalize DC of underlying LP.
+    let mut dc_re = 1.0_f64;
+    let mut dc_im = 0.0_f64;
+    for &(pr, pi) in &poles {
+        if pi.abs() < 1e-15 {
+            let inv_re = 1.0 / (-pr);
+            let new_re = dc_re * inv_re;
+            let new_im = dc_im * inv_re;
+            dc_re = new_re;
+            dc_im = new_im;
+        } else {
+            // Conjugate pair at HF limit (1/w → 0):
+            // (-pr + j·(-pi))(-pr + j·(+pi)) = pr² + pi²
+            let d_re = pr * pr + pi * pi;
+            let d_im = 0.0;
+            let d_mag2 = d_re * d_re + d_im * d_im;
+            let inv_re = d_re / d_mag2;
+            let inv_im = -d_im / d_mag2;
+            let new_re = dc_re * inv_re - dc_im * inv_im;
+            let new_im = dc_re * inv_im + dc_im * inv_re;
+            dc_re = new_re;
+            dc_im = new_im;
+        }
+    }
+    let dc_mag = (dc_re * dc_re + dc_im * dc_im).sqrt();
+    let final_re = re_prod / dc_mag;
+    let final_im = im_prod / dc_mag;
+
+    let mag_linear = (final_re * final_re + final_im * final_im).sqrt();
+    let mag_db = if mag_linear > 1e-30 { 20.0 * mag_linear.log10() } else { -600.0 };
+    let phase_deg = final_im.atan2(final_re) * (180.0 / PI);
+
+    (mag_db, phase_deg)
+}
+
+// ---------------------------------------------------------------------------
 // LP / HP response dispatchers
 // ---------------------------------------------------------------------------
 
@@ -265,7 +440,7 @@ fn filter_lp_response(f: f64, fc: f64, cfg: &FilterConfig) -> (f64, f64) {
             (2.0 * m, 2.0 * p)
         }
         FilterType::Bessel => {
-            butterworth_lp_complex(f, fc, cfg.order)
+            bessel_lp_complex(f, fc, cfg.order)
         }
         FilterType::Gaussian => {
             let m = cfg.shape.unwrap_or(1.0);
@@ -290,7 +465,7 @@ fn filter_hp_response(f: f64, fc: f64, cfg: &FilterConfig) -> (f64, f64) {
             (2.0 * m, 2.0 * p)
         }
         FilterType::Bessel => {
-            butterworth_hp_complex(f, fc, cfg.order)
+            bessel_hp_complex(f, fc, cfg.order)
         }
         FilterType::Gaussian => {
             let m = cfg.shape.unwrap_or(1.0);
@@ -417,23 +592,63 @@ fn apply_shelf(
     }
 }
 
+/// Analog 2nd-order shelf: exact s-domain transfer function.
+///
+/// Low shelf:  H(s) = A * (s² + s*(√A)/Q + A*ω₀²) / (A*s² + s*(√A)/Q + ω₀²)
+///   where A = 10^(gain_dB/20), ω₀ = 2π·fc, and s = j·2π·f.
+/// High shelf: dual — swap numerator/denominator roles.
+///
+/// This is the exact analog prototype used by the RBJ Audio EQ Cookbook
+/// (before bilinear transform), ensuring consistency with PEQ biquad shelves
+/// at low frequencies where warping is negligible.
 fn shelf_response(f: f64, fc: f64, gain_db: f64, q: f64, is_low: bool) -> (f64, f64) {
-    let ratio = if is_low { f / fc } else { fc / f };
-    let ratio2 = ratio * ratio;
-    let denom = ratio2 + ratio / q + 1.0;
-    let shelf_linear = 1.0 / denom;
-    let mag_db = gain_db * shelf_linear;
+    if gain_db.abs() < 1e-10 || q <= 0.0 || fc <= 0.0 {
+        return (0.0, 0.0);
+    }
+    let a = 10.0_f64.powf(gain_db / 40.0); // A = sqrt(linear gain), per RBJ convention
+    let sqrt_a = a.sqrt();
+    let w0 = fc; // normalized frequency ratio
+    let w = f;   // current frequency
+    // Work with ratio s = j·(w/w0) for numerical stability
+    let r = w / w0; // frequency ratio
+    let r2 = r * r;
 
-    // Phase: shelf filters introduce phase shift around the transition frequency.
-    // For a 2nd-order shelf: phase ≈ -atan2(ratio/q, 1 - ratio²) * (gain_sign)
-    let phase_num = ratio / q;
-    let phase_den = 1.0 - ratio2;
-    let raw_phase = phase_num.atan2(phase_den);
-    // Scale by gain direction: positive gain → negative phase shift (lag)
-    let sign = if gain_db > 0.0 { -1.0 } else { 1.0 };
-    // The phase magnitude scales with the shelf depth
-    let phase_scale = (1.0 - shelf_linear).abs().min(1.0);
-    let phase_deg = sign * raw_phase * phase_scale * (180.0 / PI);
+    // Low shelf H(jω) = A · (−r² + j·r·√A/Q + A) / (−A·r² + j·r·√A/Q + 1)
+    // Simplify: numerator = (A − r²) + j·(r·√A/Q)
+    //           denominator = (1 − A·r²) + j·(r·√A/Q)
+    let (num_re, num_im, den_re, den_im) = if is_low {
+        (
+            a - r2,
+            r * sqrt_a / q,
+            1.0 - a * r2,
+            r * sqrt_a / q,
+        )
+    } else {
+        // High shelf: H(jω) = A · (A − r²) / (1 − A·r²) but with swapped shelf direction
+        // H_hs(s) = A · (A·s² + s·√A/Q + ω₀²) / (s² + s·√A/Q + A·ω₀²)
+        // → num = (A·(−r²) + 1) + j·(r·√A/Q) = (1 − A·r²) + j·(r·√A/Q)
+        // → den = (−r² + A) + j·(r·√A/Q) = (A − r²) + j·(r·√A/Q)
+        // Then multiply by A
+        (
+            1.0 - a * r2,
+            r * sqrt_a / q,
+            a - r2,
+            r * sqrt_a / q,
+        )
+    };
+
+    // H = A · (num_re + j·num_im) / (den_re + j·den_im)
+    let den_mag2 = den_re * den_re + den_im * den_im;
+    if den_mag2 < 1e-30 {
+        return (gain_db, 0.0); // at singularity, return full gain
+    }
+    // Complex division: (num * conj(den)) / |den|²
+    let h_re = a * (num_re * den_re + num_im * den_im) / den_mag2;
+    let h_im = a * (num_im * den_re - num_re * den_im) / den_mag2;
+
+    let mag_linear = (h_re * h_re + h_im * h_im).sqrt();
+    let mag_db = if mag_linear > 1e-30 { 20.0 * mag_linear.log10() } else { -600.0 };
+    let phase_deg = h_im.atan2(h_re) * (180.0 / PI);
 
     (mag_db, phase_deg)
 }
@@ -849,5 +1064,51 @@ mod tests {
         );
         eprintln!("LR8 lin-phase: max dev = {:.4} dB @ {:.1} Hz", dev, f);
         assert!(dev < 0.001, "LR8 lin-phase should be flat, got {:.4} dB", dev);
+    }
+
+    #[test]
+    fn bessel_lp_dc_gain_zero_and_rolloff() {
+        // Bessel LP: DC gain should be 0 dB, at fc should be roughly -3 dB (frequency-normalized)
+        let (mag_dc, _) = bessel_lp_complex(10.0, 10000.0, 2);
+        assert!((mag_dc - 0.0).abs() < 0.01, "Bessel LP DC gain should be ~0 dB, got {}", mag_dc);
+        // At fc, Bessel order 2 should be about -3 dB (group-delay-normalized poles)
+        let (mag_fc, _) = bessel_lp_complex(1000.0, 1000.0, 2);
+        assert!(mag_fc < -2.0 && mag_fc > -5.0, "Bessel LP at fc should be ~-3 dB, got {}", mag_fc);
+        // Well above fc should be heavily attenuated
+        let (mag_hi, _) = bessel_lp_complex(10000.0, 1000.0, 4);
+        assert!(mag_hi < -20.0, "Bessel LP 10x above fc order 4 should be < -20 dB, got {}", mag_hi);
+    }
+
+    #[test]
+    fn bessel_hp_hf_gain_zero_and_rolloff() {
+        let (mag_hf, _) = bessel_hp_complex(10000.0, 100.0, 2);
+        assert!((mag_hf - 0.0).abs() < 0.5, "Bessel HP HF gain should be ~0 dB, got {}", mag_hf);
+        let (mag_fc, _) = bessel_hp_complex(1000.0, 1000.0, 2);
+        assert!(mag_fc < -2.0 && mag_fc > -5.0, "Bessel HP at fc should be ~-3 dB, got {}", mag_fc);
+        let (mag_lo, _) = bessel_hp_complex(10.0, 1000.0, 4);
+        assert!(mag_lo < -20.0, "Bessel HP well below fc should be < -20 dB, got {}", mag_lo);
+    }
+
+    #[test]
+    fn shelf_low_gains_at_limits() {
+        // Low shelf +6 dB at fc=200 Hz, Q=0.707:
+        // At DC (f << fc): should be ~+6 dB
+        let (mag_dc, _) = shelf_response(10.0, 200.0, 6.0, 0.707, true);
+        assert!((mag_dc - 6.0).abs() < 0.3, "Low shelf DC should be ~+6 dB, got {}", mag_dc);
+        // At HF (f >> fc): should be ~0 dB
+        let (mag_hf, _) = shelf_response(10000.0, 200.0, 6.0, 0.707, true);
+        assert!(mag_hf.abs() < 0.3, "Low shelf HF should be ~0 dB, got {}", mag_hf);
+        // At fc: should be ~+3 dB (half gain)
+        let (mag_fc, _) = shelf_response(200.0, 200.0, 6.0, 0.707, true);
+        assert!((mag_fc - 3.0).abs() < 1.0, "Low shelf at fc should be ~+3 dB, got {}", mag_fc);
+    }
+
+    #[test]
+    fn shelf_high_gains_at_limits() {
+        // High shelf +6 dB at fc=2000 Hz, Q=0.707:
+        let (mag_hf, _) = shelf_response(10000.0, 2000.0, 6.0, 0.707, false);
+        assert!((mag_hf - 6.0).abs() < 0.3, "High shelf HF should be ~+6 dB, got {}", mag_hf);
+        let (mag_dc, _) = shelf_response(10.0, 2000.0, 6.0, 0.707, false);
+        assert!(mag_dc.abs() < 0.3, "High shelf DC should be ~0 dB, got {}", mag_dc);
     }
 }

@@ -1,5 +1,5 @@
 import { createStore, reconcile } from "solid-js/store";
-import { createSignal } from "solid-js";
+import { createSignal, batch } from "solid-js";
 import type { Measurement, TargetCurve, MergeConfig, PeqBand, FirResult, WindowType, ExclusionZone } from "../lib/types";
 import { MEASUREMENT_COLORS } from "../lib/types";
 
@@ -223,9 +223,11 @@ export function isSum(): boolean {
 export function addBand() {
   const num = state.nextBandNum;
   const band = createBand(num);
-  setState("bands", (prev) => [...prev, band]);
-  setState("nextBandNum", num + 1);
-  setState("activeBandId", band.id);
+  batch(() => {
+    setState("bands", (prev) => [...prev, band]);
+    setState("nextBandNum", num + 1);
+    setState("activeBandId", band.id);
+  });
   assignDefaultTargets(state.bands as BandState[]);
   markDirty();
 }
@@ -234,15 +236,17 @@ export function removeBand(id: string) {
   if (state.bands.length <= 1) return; // нельзя удалить последнюю полосу
   const idx = bandIndex(id);
   if (idx < 0) return;
-  // Сбрасываем linkedToNext у предыдущей полосы (если была связана с удаляемой)
-  if (idx > 0 && state.bands[idx - 1].linkedToNext) {
-    setState("bands", idx - 1, "linkedToNext", false);
-  }
-  setState("bands", (prev) => prev.filter((b) => b.id !== id));
-  // Если удалили активную полосу — переключаемся на первую
-  if (state.activeBandId === id) {
-    setState("activeBandId", state.bands[0]?.id ?? SUM_ID);
-  }
+  batch(() => {
+    // Сбрасываем linkedToNext у предыдущей полосы (если была связана с удаляемой)
+    if (idx > 0 && state.bands[idx - 1].linkedToNext) {
+      setState("bands", idx - 1, "linkedToNext", false);
+    }
+    setState("bands", (prev) => prev.filter((b) => b.id !== id));
+    // Если удалили активную полосу — переключаемся на первую
+    if (state.activeBandId === id) {
+      setState("activeBandId", state.bands[0]?.id ?? SUM_ID);
+    }
+  });
   // Очищаем снэпшоты удалённой полосы
   setExportSnapshots(id, []);
   setFreqSnapshots(id, []);
@@ -315,8 +319,10 @@ export function moveBand(fromIdx: number, toIdx: number) {
 export function setBandMeasurement(bandId: string, m: Measurement) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
-  setState("bands", idx, "measurement", m);
-  setState("bands", idx, "settings", defaultSettings());
+  batch(() => {
+    setState("bands", idx, "measurement", m);
+    setState("bands", idx, "settings", defaultSettings());
+  });
   markDirty();
 }
 
@@ -331,9 +337,11 @@ export function replaceBandMeasurement(bandId: string, m: Measurement) {
 export function clearBandMeasurement(bandId: string) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
-  setState("bands", idx, "measurement", null);
-  setState("bands", idx, "measurementFile", null);
-  setState("bands", idx, "settings", null);
+  batch(() => {
+    setState("bands", idx, "measurement", null);
+    setState("bands", idx, "measurementFile", null);
+    setState("bands", idx, "settings", null);
+  });
   markDirty();
 }
 
@@ -372,11 +380,13 @@ export function markBandDelayRemoved(bandId: string, newPhase: number[]) {
   if (idx < 0 || !state.bands[idx].settings || !state.bands[idx].measurement) return;
   // Сохраняем оригинальную фазу перед заменой
   const origPhase = state.bands[idx].measurement!.phase;
-  if (origPhase && !state.bands[idx].settings!.originalPhase) {
-    setState("bands", idx, "settings", "originalPhase", [...origPhase]);
-  }
-  setState("bands", idx, "measurement", "phase", newPhase);
-  setState("bands", idx, "settings", "delay_removed", true);
+  batch(() => {
+    if (origPhase && !state.bands[idx].settings!.originalPhase) {
+      setState("bands", idx, "settings", "originalPhase", [...origPhase]);
+    }
+    setState("bands", idx, "measurement", "phase", newPhase);
+    setState("bands", idx, "settings", "delay_removed", true);
+  });
   markDirty();
 }
 
@@ -501,16 +511,17 @@ export function setBandHighPass(bandId: string, config: import("../lib/types").F
     const prevLp = state.bands[idx - 1].target.low_pass;
     if (prevLp) {
       _propagating = true;
-      setState("bands", idx - 1, "target", "low_pass", {
-        ...prevLp,
-        freq_hz: config.freq_hz,
-        filter_type: config.filter_type,
-        order: config.order,
-        shape: config.shape,
-        linear_phase: config.linear_phase,
-        q: config.q,
-      });
-      _propagating = false;
+      try {
+        setState("bands", idx - 1, "target", "low_pass", {
+          ...prevLp,
+          freq_hz: config.freq_hz,
+          filter_type: config.filter_type,
+          order: config.order,
+          shape: config.shape,
+          linear_phase: config.linear_phase,
+          q: config.q,
+        });
+      } finally { _propagating = false; }
     }
   }
   markDirty();
@@ -535,16 +546,17 @@ export function setBandLowPass(bandId: string, config: import("../lib/types").Fi
     const nextHp = state.bands[idx + 1].target.high_pass;
     if (nextHp) {
       _propagating = true;
-      setState("bands", idx + 1, "target", "high_pass", {
-        ...nextHp,
-        freq_hz: config.freq_hz,
-        filter_type: config.filter_type,
-        order: config.order,
-        shape: config.shape,
-        linear_phase: config.linear_phase,
-        q: config.q,
-      });
-      _propagating = false;
+      try {
+        setState("bands", idx + 1, "target", "high_pass", {
+          ...nextHp,
+          freq_hz: config.freq_hz,
+          filter_type: config.filter_type,
+          order: config.order,
+          shape: config.shape,
+          linear_phase: config.linear_phase,
+          q: config.q,
+        });
+      } finally { _propagating = false; }
     }
   }
   markDirty();
@@ -754,7 +766,7 @@ export const [peqDragging, setPeqDragging] = createSignal(false);
 // ---------------------------------------------------------------------------
 
 export const [plotShowOnly, setPlotShowOnly] =
-  createSignal<("measurement" | "target" | "corrected")[] | null>(null);
+  createSignal<("measurement" | "target" | "corrected" | "peq")[] | null>(null);
 
 // ---------------------------------------------------------------------------
 // Shared X-scale (sync frequency axis between top FrequencyPlot and bottom PeqResponsePlot)

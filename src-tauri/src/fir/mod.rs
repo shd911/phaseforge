@@ -997,6 +997,7 @@ fn generate_window(n: usize, wtype: &WindowType) -> Vec<f64> {
 // ---------------------------------------------------------------------------
 
 fn cosine_sum_window(n: usize, coeffs: &[f64]) -> Vec<f64> {
+    if n <= 1 { return vec![1.0; n]; }
     (0..n).map(|i| {
         let x = 2.0 * PI * i as f64 / (n - 1) as f64;
         let mut val = 0.0;

@@ -67,15 +67,14 @@ export function smoothingConfig(mode: SmoothingMode): { variable: boolean; fixed
   return { variable: false, fixed_fraction: fractions[mode] ?? 1/6 };
 }
 
-// --- Phase wrapping (in-place) ---
+// --- Phase wrapping (returns new array, does NOT mutate input) ---
 export function wrapPhase(phase: number[]): number[] {
-  for (let i = 0; i < phase.length; i++) {
-    let w = phase[i] % 360;
+  return phase.map(p => {
+    let w = p % 360;
     if (w > 180) w -= 360;
     else if (w < -180) w += 360;
-    phase[i] = w;
-  }
-  return phase;
+    return w;
+  });
 }
 
 // --- Frequency formatting ---
