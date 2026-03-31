@@ -154,6 +154,8 @@ export default function FrequencyPlot() {
   // IR/Step mutable Y scale (like curMagMin/Max for freq)
   let irCurYMin = -120;
   let irCurYMax = 120;
+  let irCurXMin = -30;
+  let irCurXMax = 30;
 
   // GD scale persistence across rebuilds (toggle redraw)
   let gdUserYMin: number | null = null;
@@ -176,6 +178,11 @@ export default function FrequencyPlot() {
     curMagMax = prev.magMax;
     curPhaseMin = prev.phaseMin;
     curPhaseMax = prev.phaseMax;
+    const pTab = plotTab();
+    if (pTab === "ir" || pTab === "step") {
+      irCurXMin = prev.xMin;
+      irCurXMax = prev.xMax;
+    }
     chart.setScale("x", { min: prev.xMin, max: prev.xMax });
     chart.setScale("mag", { min: curMagMin, max: curMagMax });
     chart.setScale("phase", { min: curPhaseMin, max: curPhaseMax });
@@ -324,7 +331,9 @@ export default function FrequencyPlot() {
       // Linear scale zoom (IR/Step)
       const center = (s.min + s.max) / 2;
       const half = ((s.max - s.min) / 2) * factor;
-      chart.setScale("x", { min: center - half, max: center + half });
+      irCurXMin = center - half;
+      irCurXMax = center + half;
+      chart.setScale("x", { min: irCurXMin, max: irCurXMax });
     }
   }
 
@@ -342,7 +351,9 @@ export default function FrequencyPlot() {
     } else {
       const range = s.max - s.min;
       const step = range * 0.15 * direction;
-      chart.setScale("x", { min: s.min + step, max: s.max + step });
+      irCurXMin = s.min + step;
+      irCurXMax = s.max + step;
+      chart.setScale("x", { min: irCurXMin, max: irCurXMax });
     }
   }
 
@@ -380,7 +391,9 @@ export default function FrequencyPlot() {
         let pkIdx = 0, pkVal = 0;
         for (let i = 0; i < ir.length; i++) { const v = ir[i]; if (v != null && Math.abs(v as number) > pkVal) { pkVal = Math.abs(v as number); pkIdx = i; } }
         const pkT = d[pkIdx] as number;
-        chart.setScale("x", { min: pkT - 30, max: pkT + 30 });
+        irCurXMin = pkT - 30;
+        irCurXMax = pkT + 30;
+        chart.setScale("x", { min: irCurXMin, max: irCurXMax });
       }
       // Compute Y range from visible series data only
       let yMin = Infinity, yMax = -Infinity;
@@ -485,6 +498,11 @@ export default function FrequencyPlot() {
     const magMin2 = chart.posToVal(y2, "mag");
 
     if (isFinite(fMin) && isFinite(fMax) && fMin > 0 && fMax > fMin) {
+      const pTab = plotTab();
+      if (pTab === "ir" || pTab === "step") {
+        irCurXMin = fMin;
+        irCurXMax = fMax;
+      }
       chart.setScale("x", { min: fMin, max: fMax });
     }
     if (isFinite(magMin2) && isFinite(magMax2) && magMax2 > magMin2) {
@@ -778,6 +796,8 @@ export default function FrequencyPlot() {
       savedXMin = persistedXMin;
       savedXMax = persistedXMax;
     }
+    // Discard non-positive X scales (from IR/GD linear chart) — log freq scale needs x > 0
+    if (savedXMin != null && savedXMin <= 0) { savedXMin = null; savedXMax = null; }
     if (chart) {
       // Remove event listeners before destroying
       if (chart.over) {
@@ -1189,9 +1209,12 @@ export default function FrequencyPlot() {
   });
 
   // Sync X-scale from PeqResponsePlot (or any other plot that sets sharedXScale)
+  // Skip for IR/Step — they use their own linear X range (irCurXMin/irCurXMax)
   createEffect(() => {
     const xs = sharedXScale();
     if (!chart) return;
+    const pTab = untrack(() => plotTab());
+    if (pTab === "ir" || pTab === "step") return;
     const cur = chart.scales["x"];
     if (cur?.min != null && cur?.max != null) {
       // Only update if significantly different to avoid loops
@@ -1220,6 +1243,8 @@ export default function FrequencyPlot() {
       // Guard: discard stale X scales with unreasonable range (>5000ms = not IR data)
       const xRange = irUserXScale.max - irUserXScale.min;
       if (xRange > 0 && xRange < 5000) {
+        irCurXMin = irUserXScale.min;
+        irCurXMax = irUserXScale.max;
         try { chart.setScale("x", irUserXScale); } catch(_){}
       } else {
         irUserXScale = null;
@@ -2165,6 +2190,19 @@ export default function FrequencyPlot() {
     const peakTimeMs = timeMs[peakIdx] ?? 0;
     const xViewMin = peakTimeMs - 30;
     const xViewMax = peakTimeMs + 30;
+    // Set mutable X range (used by range function, zoomX, scrollX)
+    // Guard: discard stale freq-range scales (e.g. 20–20000 from SPL tab)
+    if (irUserXScale) {
+      const xRange = irUserXScale.max - irUserXScale.min;
+      if (xRange <= 0 || xRange >= 5000) irUserXScale = null;
+    }
+    if (!irUserXScale) {
+      irCurXMin = xViewMin;
+      irCurXMax = xViewMax;
+    } else {
+      irCurXMin = irUserXScale.min;
+      irCurXMax = irUserXScale.max;
+    }
     const maskingMs = hpFreq > 0 ? (1.5 / hpFreq) * 1000 : 20;
 
     // Resample srcData onto timeMs grid (absolute time, no alignment)
@@ -2311,7 +2349,7 @@ export default function FrequencyPlot() {
       width: w, height: h,
       series: uSeries,
       scales: {
-        x: { auto: false, range: [xViewMin, xViewMax] as uPlot.Range.MinMax },
+        x: { auto: false, range: [irCurXMin, irCurXMax] as uPlot.Range.MinMax },
         y: { auto: false, range: () => [irCurYMin, irCurYMax] as uPlot.Range.MinMax },
       },
       axes: [
