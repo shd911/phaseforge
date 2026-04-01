@@ -124,7 +124,6 @@ export default function CrossoverDialog() {
                   const ft = e.currentTarget.value as FilterType;
                   setFilterType(ft);
                   if (ft === "Gaussian") {
-                    setLinearPhase(true);
                     setShape(shape() || 1.0);
                   } else if (ft === "Custom") {
                     setCustomQ(customQ() || 0.707);
@@ -202,12 +201,11 @@ export default function CrossoverDialog() {
               <input
                 type="checkbox"
                 id="xo-lin-phase"
-                checked={isGaussian() ? true : linearPhase()}
-                disabled={isGaussian()}
+                checked={linearPhase()}
                 onChange={(e) => setLinearPhase(e.currentTarget.checked)}
               />
               <label class="xo-checkbox-label" for="xo-lin-phase">
-                Linear Phase{isGaussian() ? " (always)" : ""}
+                Linear Phase
               </label>
             </div>
 

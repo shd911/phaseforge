@@ -327,7 +327,7 @@ function FilterBlock(props: FilterBlockProps) {
               onChange={(e) => {
                 const ft = e.currentTarget.value as FilterType;
                 if (ft === "Gaussian") {
-                  props.onChange({ ...c()!, filter_type: ft, shape: c()!.shape ?? 1.0, linear_phase: true, q: null });
+                  props.onChange({ ...c()!, filter_type: ft, shape: c()!.shape ?? 1.0, q: null });
                 } else if (ft === "Custom") {
                   props.onChange({ ...c()!, filter_type: ft, shape: null, q: c()!.q ?? 0.707 });
                 } else {
@@ -378,11 +378,10 @@ function FilterBlock(props: FilterBlockProps) {
           </Show>
           <div class="fb-row">
             <label class="fb-label"></label>
-            <label class="fb-checkbox" title={isGaussian() ? "Gaussian is always linear-phase" : "Linear phase (magnitude only, no phase rotation)"}>
+            <label class="fb-checkbox" title="Linear phase (magnitude only, no phase rotation)">
               <input
                 type="checkbox"
-                checked={isGaussian() ? true : c()!.linear_phase}
-                disabled={isGaussian()}
+                checked={c()!.linear_phase}
                 onChange={(e) => props.onChange({ ...c()!, linear_phase: e.currentTarget.checked })}
               />
               <span class="fb-check-label">Lin-φ</span>
@@ -999,7 +998,7 @@ function ExportTab() {
 
   // Determine phase mode from target filters (HP/LP linear_phase flags)
   const isFilterLinear = (f: import("../lib/types").FilterConfig | null | undefined) =>
-    !f || f.linear_phase || f.filter_type === "Gaussian";
+    !f || f.linear_phase;
 
   const bandPhaseLabel = (b: BandState) => {
     if (exportHybridPhase() && b.measurement) return "Hybrid-\u03C6";
@@ -1074,7 +1073,7 @@ function ExportTab() {
     }
 
     // 3. Generate FIR
-    const isLin = (f: any) => !f || f.linear_phase || f.filter_type === "Gaussian";
+    const isLin = (f: any) => !f || f.linear_phase;
 
     const firResult = await invoke<{
       impulse: number[]; time_ms: number[]; realized_mag: number[];

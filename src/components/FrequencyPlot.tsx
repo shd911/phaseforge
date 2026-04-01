@@ -642,6 +642,27 @@ export default function FrequencyPlot() {
     }
   }
 
+  // Toggle all IR or all Step series at once (header click in legend table)
+  function toggleAllIrOrStep(suffix: "IR" | "Step") {
+    const matching: number[] = [];
+    for (let i = 0; i < legendEntries.length; i++) {
+      if (legendEntries[i].label.endsWith(" " + suffix)) matching.push(i);
+    }
+    if (matching.length === 0) return;
+    const allOn = matching.every(i => legendEntries[i].visible);
+    const newVis = !allOn;
+    for (const i of matching) {
+      if (legendEntries[i].visible !== newVis) {
+        setLegendEntries(i, "visible", newVis);
+        if (isSum()) sumVisMap.set(legendEntries[i].label, newVis);
+        else bandVisMap.set(catKey(legendEntries[i]), newVis);
+      }
+    }
+    irSaveScales();
+    irUserYScale = null; // let Y auto-fit to new visible series
+    setIrRenderTrigger(v => v + 1);
+  }
+
   // Find a legend entry for a specific [bandName, category] cell
   // On IR/Step tab: returns the IR entry (the Step entry is toggled via pairing in toggleLegendEntry)
   function findCellEntry(colName: string, cat: "measurement" | "target" | "corrected"): LegendEntry | undefined {
@@ -1257,9 +1278,10 @@ export default function FrequencyPlot() {
     }
   }
 
-  // IR/Step: all toggles save scales → rebuild → restore
+  // IR/Step: save X scale → rebuild → auto-fit Y to visible series
   function irToggleRedraw() {
     irSaveScales();
+    irUserYScale = null; // let Y auto-fit to new visible series
     setIrRenderTrigger(v => v + 1);
   }
 
@@ -1842,13 +1864,21 @@ export default function FrequencyPlot() {
           });
         }
 
-        // Coherent sum measurement
+        // Coherent sum measurement — normalize each band to 0 dB avg before summing
+        // so that per-band impulses (each peaked at 100%) contribute equally
         const sumRe = new Float64Array(n);
         const sumIm = new Float64Array(n);
         for (const sb of bands) {
+          const mag = sb.measurement!.magnitude;
+          // Normalize by peak magnitude so each band contributes equally
+          let peakMag = -Infinity;
+          for (let j = 0; j < mag.length; j++) {
+            if ((mag[j] ?? -200) > peakMag) peakMag = mag[j] ?? -200;
+          }
+          const offset = -peakMag;
           const sign = sb.inverted ? -1 : 1;
           for (let j = 0; j < n; j++) {
-            const amp = Math.pow(10, (sb.measurement!.magnitude[j] ?? -200) / 20) * sign;
+            const amp = Math.pow(10, ((mag[j] ?? -200) + offset) / 20) * sign;
             const phRad = (sb.measurement!.phase![j] ?? 0) * Math.PI / 180;
             sumRe[j] += amp * Math.cos(phRad);
             sumIm[j] += amp * Math.sin(phRad);
@@ -1937,9 +1967,15 @@ export default function FrequencyPlot() {
               tMag = tMag.map((v: number, i: number) => v + xm[i]);
               tPh = tPh.map((v: number, i: number) => v + xp[i]);
             }
+            // Normalize by peak magnitude so bands contribute equally
+            let tPeakMag = -Infinity;
+            for (let j = 0; j < tMag.length; j++) {
+              if ((tMag[j] ?? -200) > tPeakMag) tPeakMag = tMag[j] ?? -200;
+            }
+            const tOffset = -tPeakMag;
             const sign = sb.inverted ? -1 : 1;
             for (let j = 0; j < n; j++) {
-              const amp = Math.pow(10, (tMag[j] ?? -200) / 20) * sign;
+              const amp = Math.pow(10, ((tMag[j] ?? -200) + tOffset) / 20) * sign;
               const phRad = (tPh[j] ?? 0) * Math.PI / 180;
               tgtRe[j] += amp * Math.cos(phRad);
               tgtIm[j] += amp * Math.sin(phRad);
@@ -2023,9 +2059,15 @@ export default function FrequencyPlot() {
               cMag = cMag.map((v, i) => v + (xm[i] ?? 0));
               cPh = cPh.map((v, i) => v + (xp[i] ?? 0));
             }
+            // Normalize by peak magnitude so bands contribute equally
+            let peakMag = -Infinity;
+            for (let j = 0; j < cMag.length; j++) {
+              if ((cMag[j] ?? -200) > peakMag) peakMag = cMag[j] ?? -200;
+            }
+            const offset = -peakMag;
             const sign = sb.inverted ? -1 : 1;
             for (let j = 0; j < n; j++) {
-              const amp = Math.pow(10, (cMag[j] ?? -200) / 20) * sign;
+              const amp = Math.pow(10, ((cMag[j] ?? -200) + offset) / 20) * sign;
               const phRad = (cPh[j] ?? 0) * Math.PI / 180;
               corrRe[j] += amp * Math.cos(phRad);
               corrIm[j] += amp * Math.sin(phRad);
@@ -2177,17 +2219,19 @@ export default function FrequencyPlot() {
     const toDb = (v: number) => { const a = Math.abs(v); return a > 1e-8 ? 20 * Math.log10(a / 100) : -200; };
     const stripAlpha = (c: string) => c.length === 9 ? c.slice(0, 7) : c;
 
-    // Reference time axis: first measurement band's timeMs
+    // Reference time axis: first measurement band's timeMs, aligned so IR peak = t=0
     const refBand = measBands[0];
     if (!refBand) return;
-    const timeMs = refBand.timeMs;
-
-    // Find peak of first meas band impulse for X view
-    let peakIdx = 0, peakVal = 0;
+    // Find ref band's peak for time alignment
+    let refPeakIdx = 0, refPeakVal = 0;
     for (let i = 0; i < refBand.impulse.length; i++) {
-      if (Math.abs(refBand.impulse[i]) > peakVal) { peakVal = Math.abs(refBand.impulse[i]); peakIdx = i; }
+      if (Math.abs(refBand.impulse[i]) > refPeakVal) { refPeakVal = Math.abs(refBand.impulse[i]); refPeakIdx = i; }
     }
-    const peakTimeMs = timeMs[peakIdx] ?? 0;
+    const refPeakT = refBand.timeMs[refPeakIdx] ?? 0;
+    const timeMs = refBand.timeMs.map(t => t - refPeakT);
+
+    // Peak is now at t=0, view centered around it
+    const peakTimeMs = 0;
     const xViewMin = peakTimeMs - 30;
     const xViewMax = peakTimeMs + 30;
     // Set mutable X range (used by range function, zoomX, scrollX)
@@ -2205,7 +2249,7 @@ export default function FrequencyPlot() {
     }
     const maskingMs = hpFreq > 0 ? (1.5 / hpFreq) * 1000 : 20;
 
-    // Resample srcData onto timeMs grid (absolute time, no alignment)
+    // Resample srcData onto timeMs grid (linear interpolation)
     const resampleOnto = (srcTime: number[], srcData: number[]): number[] => {
       return timeMs.map(t => {
         if (t < srcTime[0] || t > srcTime[srcTime.length - 1]) return isDb ? -200 : 0;
@@ -2220,6 +2264,17 @@ export default function FrequencyPlot() {
 
     const applyDb = (data: number[]): number[] => isDb ? data.map(toDb) : data;
     const emptyData = timeMs.map(() => NaN);
+
+    // Align IR peak to t=0 for min-phase targets/corrected
+    const alignPeakToZero = (bd: IrBandData): IrBandData => {
+      let pkIdx = 0, pkVal = 0;
+      for (let i = 0; i < bd.impulse.length; i++) {
+        if (Math.abs(bd.impulse[i]) > pkVal) { pkVal = Math.abs(bd.impulse[i]); pkIdx = i; }
+      }
+      const peakT = bd.timeMs[pkIdx] ?? 0;
+      if (Math.abs(peakT) < 0.01) return bd; // already at 0
+      return { ...bd, timeMs: bd.timeMs.map(t => t - peakT) };
+    };
 
     // Build series + data + legend
     const uSeries: uPlot.Series[] = [{}];
@@ -2242,8 +2297,11 @@ export default function FrequencyPlot() {
       dash: boolean,
     ) => {
       // Resample onto reference grid if different time axis
-      const irData = bandTimeMs === timeMs ? applyDb(impulse) : resampleOnto(bandTimeMs, impulse);
-      const stData = bandTimeMs === timeMs ? applyDb(step) : resampleOnto(bandTimeMs, step);
+      const sameGrid = bandTimeMs.length === timeMs.length
+        && Math.abs((bandTimeMs[0] ?? 0) - (timeMs[0] ?? 0)) < 0.001
+        && Math.abs((bandTimeMs[bandTimeMs.length - 1] ?? 0) - (timeMs[timeMs.length - 1] ?? 0)) < 0.001;
+      const irData = sameGrid ? applyDb(impulse) : resampleOnto(bandTimeMs, impulse);
+      const stData = sameGrid ? applyDb(step) : resampleOnto(bandTimeMs, step);
 
       uSeries.push({ label: label + " IR", stroke: irColor, width: lineWidth, scale: "y", show: true, dash: dash ? [6, 4] : undefined });
       uDataArr.push(irData);
@@ -2256,8 +2314,9 @@ export default function FrequencyPlot() {
       sIdx++;
     };
 
-    // --- Measurement per-band ---
-    for (const bd of measBands) {
+    // --- Measurement per-band (align IR peak to t=0) ---
+    for (const rawBd of measBands) {
+      const bd = alignPeakToZero(rawBd);
       if (inSum) {
         const cf = bandColorFamily(bd.bandColor);
         addIrStepPair(bd.bandName, stripAlpha(cf.meas), stripAlpha(cf.measPhase), bd.timeMs, bd.impulse, bd.step, 1.5, "measurement", false);
@@ -2266,13 +2325,15 @@ export default function FrequencyPlot() {
         addIrStepPair("Measurement", stripAlpha(cf.meas), stripAlpha(cf.measPhase), bd.timeMs, bd.impulse, bd.step, 1.5, "measurement", false);
       }
     }
-    // Measurement sum
+    // Measurement sum (align peak to t=0)
     if (measSum) {
-      addIrStepPair("\u03A3 meas", sumClr.measIr, sumClr.measStep, measSum.timeMs, measSum.impulse, measSum.step, 2, "measurement", false);
+      const ms = alignPeakToZero({ bandName: "", bandColor: "", ...measSum });
+      addIrStepPair("\u03A3 meas", sumClr.measIr, sumClr.measStep, ms.timeMs, ms.impulse, ms.step, 2, "measurement", false);
     }
 
-    // --- Target per-band ---
-    for (const bd of targetBands) {
+    // --- Target per-band (align IR peak to t=0) ---
+    for (const rawBd of targetBands) {
+      const bd = alignPeakToZero(rawBd);
       if (inSum) {
         const cf = bandColorFamily(bd.bandColor);
         addIrStepPair(bd.bandName + " tgt", cf.target, cf.targetPhase, bd.timeMs, bd.impulse, bd.step, 1.5, "target", true);
@@ -2281,13 +2342,15 @@ export default function FrequencyPlot() {
         addIrStepPair("Target", cf.target, cf.targetPhase, bd.timeMs, bd.impulse, bd.step, 2, "target", true);
       }
     }
-    // Target sum
+    // Target sum (align peak to t=0)
     if (targetSum) {
-      addIrStepPair("\u03A3 target", sumClr.targetIr, sumClr.targetStep, targetSum.timeMs, targetSum.impulse, targetSum.step, 2, "target", true);
+      const ts = alignPeakToZero({ bandName: "", bandColor: "", ...targetSum });
+      addIrStepPair("\u03A3 target", sumClr.targetIr, sumClr.targetStep, ts.timeMs, ts.impulse, ts.step, 2, "target", true);
     }
 
-    // --- Corrected per-band ---
-    for (const bd of corrBands) {
+    // --- Corrected per-band (align IR peak to t=0) ---
+    for (const rawBd of corrBands) {
+      const bd = alignPeakToZero(rawBd);
       if (inSum) {
         const cf = bandColorFamily(bd.bandColor);
         addIrStepPair(bd.bandName + " corr+XO", cf.corrected, cf.correctedPhase, bd.timeMs, bd.impulse, bd.step, 1.5, "corrected", false);
@@ -2296,9 +2359,28 @@ export default function FrequencyPlot() {
         addIrStepPair("Corrected", cf.corrected, cf.correctedPhase, bd.timeMs, bd.impulse, bd.step, 2, "corrected", false);
       }
     }
-    // Corrected sum
+    // Corrected sum (align peak to t=0)
     if (corrSum) {
-      addIrStepPair("\u03A3 corrected", sumClr.corrIr, sumClr.corrStep, corrSum.timeMs, corrSum.impulse, corrSum.step, 2, "corrected", false);
+      const cs = alignPeakToZero({ bandName: "", bandColor: "", ...corrSum });
+      addIrStepPair("\u03A3 corrected", sumClr.corrIr, sumClr.corrStep, cs.timeMs, cs.impulse, cs.step, 2, "corrected", false);
+    }
+
+    // Restore visibility persistence BEFORE Y-range so hidden series are excluded from auto-fit
+    if (inSum) {
+      for (const e of irLegend) {
+        const saved = sumVisMap.get(e.label);
+        if (saved !== undefined) e.visible = saved;
+      }
+    } else {
+      for (const e of irLegend) {
+        const saved = bandVisMap.get(catKey(e));
+        if (saved !== undefined) e.visible = saved;
+      }
+    }
+    for (const e of irLegend) {
+      if (!e.visible && e.seriesIdx < uSeries.length) {
+        (uSeries[e.seriesIdx] as any).show = false;
+      }
     }
 
     // Y range — only from visible series and visible X window (±30ms around peak)
@@ -2349,7 +2431,7 @@ export default function FrequencyPlot() {
       width: w, height: h,
       series: uSeries,
       scales: {
-        x: { auto: false, range: [irCurXMin, irCurXMax] as uPlot.Range.MinMax },
+        x: { auto: false, range: () => [irCurXMin, irCurXMax] as uPlot.Range.MinMax },
         y: { auto: false, range: () => [irCurYMin, irCurYMax] as uPlot.Range.MinMax },
       },
       axes: [
@@ -2434,25 +2516,6 @@ export default function FrequencyPlot() {
         }],
       },
     };
-    // Apply visibility persistence BEFORE chart creation (via series opts show:)
-    if (inSum) {
-      for (const e of irLegend) {
-        const saved = sumVisMap.get(e.label);
-        if (saved !== undefined) e.visible = saved;
-      }
-    } else {
-      for (const e of irLegend) {
-        const saved = bandVisMap.get(catKey(e));
-        if (saved !== undefined) e.visible = saved;
-      }
-    }
-    // Apply show state to uSeries opts before chart creation
-    for (const e of irLegend) {
-      if (!e.visible && e.seriesIdx < uSeries.length) {
-        (uSeries[e.seriesIdx] as any).show = false;
-      }
-    }
-
     try {
       chart = new uPlot(opts, uDataArr as uPlot.AlignedData, containerRef);
       // Restore user zoom if saved (irCurYMin/Max already set from data or saved scale)
@@ -3727,8 +3790,8 @@ export default function FrequencyPlot() {
               <table>
                 <thead><tr>
                   <th class="sum-corner" />
-                  <th style={{ color: irColors().measIr }}>IR</th>
-                  <th style={{ color: irColors().measStep }}>Step</th>
+                  <th style={{ color: irColors().measIr, cursor: "pointer" }} onClick={() => toggleAllIrOrStep("IR")}>IR</th>
+                  <th style={{ color: irColors().measStep, cursor: "pointer" }} onClick={() => toggleAllIrOrStep("Step")}>Step</th>
                 </tr></thead>
                 <tbody>
                   <For each={categories}>
@@ -3951,6 +4014,23 @@ export default function FrequencyPlot() {
                       );
                     }}
                   </For>
+                  <Show when={plotTab() === "ir" || plotTab() === "step"}>
+                    <tr>
+                      <td class="sum-row-header">VIEW</td>
+                      <td colspan={cols().length} style={{ "text-align": "center" }}>
+                        <button
+                          class={`tb-btn ${legendEntries.some(e => e.label.endsWith(" IR") && e.visible) ? "active" : ""}`}
+                          onClick={() => toggleAllIrOrStep("IR")}
+                          style={{ "font-size": "9px", padding: "1px 6px", "margin-right": "4px" }}
+                        >IR</button>
+                        <button
+                          class={`tb-btn ${legendEntries.some(e => e.label.endsWith(" Step") && e.visible) ? "active" : ""}`}
+                          onClick={() => toggleAllIrOrStep("Step")}
+                          style={{ "font-size": "9px", padding: "1px 6px" }}
+                        >Step</button>
+                      </td>
+                    </tr>
+                  </Show>
                 </tbody>
               </table>
             );
