@@ -69,7 +69,7 @@ interface LegendEntry {
   dash: boolean;
   visible: boolean;
   seriesIdx: number;
-  category: "measurement" | "target" | "corrected" | "peq";
+  category: "measurement" | "target" | "corrected" | "peq" | "snapshot";
 }
 
 // Per-band IR/Step data for SUM mode rendering
@@ -204,8 +204,11 @@ export default function FrequencyPlot() {
   const lastCorrData: { freq: number[]; mag: number[]; phase: (number | null)[] } = { freq: [], mag: [], phase: [] };
   const lastMeasData: { freq: number[]; mag: number[]; phase: (number | null)[] } = { freq: [], mag: [], phase: [] };
   const lastTargetData: { freq: number[]; mag: number[]; phase: (number | null)[] } = { freq: [], mag: [], phase: [] };
-  // IR/Step snapshot data (corrected curve)
+  // IR/Step snapshot data — per-category LINEAR (pre-dB), peak-aligned
   const lastIrData: { timeMs: number[]; impulse: number[]; step: number[] } = { timeMs: [], impulse: [], step: [] };
+  const lastIrMeasData: { timeMs: number[]; impulse: number[]; step: number[] } = { timeMs: [], impulse: [], step: [] };
+  const lastIrTargetData: { timeMs: number[]; impulse: number[]; step: number[] } = { timeMs: [], impulse: [], step: [] };
+  const lastIrCorrData: { timeMs: number[]; impulse: number[]; step: number[] } = { timeMs: [], impulse: [], step: [] };
   // GD snapshot data (corrected GD)
   const lastGdData: { freq: number[]; gdMs: number[] } = { freq: [], gdMs: [] };
   // Export snapshot data (FIR curve)
@@ -222,30 +225,40 @@ export default function FrequencyPlot() {
       const s = chart.series[i] as any;
       if (!s.show) continue;
       const lbl = typeof s.label === "string" ? s.label : "";
-      const isDash = !!s.dash;
-      if (lbl.includes("orrect") || lbl.includes("orr")) { if (isDash) corrPhVis = true; else corrMagVis = true; }
-      else if (lbl.includes("arget") || lbl.includes("tgt")) { if (isDash) tgtPhVis = true; else tgtMagVis = true; }
-      else if (lbl.includes("eas") || lbl.includes("meas") || lbl.includes("Meas")) { if (isDash) measPhVis = true; else measMagVis = true; }
+      if (lbl.startsWith("Snap ")) continue;
+      // Detect phase by scale or label suffix "°"
+      const isPhase = s.scale === "phase" || lbl.includes("\u00B0");
+      // Detect category: corrected/target by keyword, everything else = measurement
+      if (lbl.includes("orrect") || lbl.includes("orr")) { if (isPhase) corrPhVis = true; else corrMagVis = true; }
+      else if (lbl.includes("arget") || lbl.includes("tgt")) { if (isPhase) tgtPhVis = true; else tgtMagVis = true; }
+      else { if (isPhase) measPhVis = true; else measMagVis = true; }
     }
-    // Pick data from highest-priority visible category
-    const magVis = corrMagVis || tgtMagVis || measMagVis;
-    const phVis = corrPhVis || tgtPhVis || measPhVis;
-    const src = (corrMagVis || corrPhVis) && lastCorrData.freq.length > 0 ? lastCorrData
-      : (tgtMagVis || tgtPhVis) && lastTargetData.freq.length > 0 ? lastTargetData
-      : (measMagVis || measPhVis) && lastMeasData.freq.length > 0 ? lastMeasData
-      : null;
-    if (!src || (!magVis && !phVis)) return;
+    // Capture ALL visible categories (not just highest-priority)
+    const categories = [
+      { key: "Corr", magVis: corrMagVis, phVis: corrPhVis, data: lastCorrData },
+      { key: "Tgt", magVis: tgtMagVis, phVis: tgtPhVis, data: lastTargetData },
+      { key: "Meas", magVis: measMagVis, phVis: measPhVis, data: lastMeasData },
+    ];
+    const visCats = categories.filter(c => (c.magVis || c.phVis) && c.data.freq.length > 0);
+    if (visCats.length === 0) return;
     const snaps = freqSnapshots(band.id);
-    const idx = snaps.length;
-    const color = FREQ_SNAP_COLORS[idx % FREQ_SNAP_COLORS.length];
-    const label = `Snap ${idx + 1}`;
-    setFreqSnapshots(band.id, [...snaps, {
-      label,
-      freq: [...src.freq],
-      mag: magVis ? [...src.mag] : [],
-      phase: phVis ? [...src.phase] : [],
-      color,
-    }]);
+    // Count snap groups for color cycling
+    const snapNums = new Set(snaps.map(s => s.label.match(/Snap (\d+)/)?.[1]).filter(Boolean));
+    const groupIdx = snapNums.size;
+    const color = FREQ_SNAP_COLORS[groupIdx % FREQ_SNAP_COLORS.length];
+    const label = `Snap ${groupIdx + 1}`;
+    const needSuffix = visCats.length > 1;
+    const newSnaps = [...snaps];
+    for (const cat of visCats) {
+      newSnaps.push({
+        label: needSuffix ? `${label} ${cat.key}` : label,
+        freq: [...cat.data.freq],
+        mag: cat.magVis ? [...cat.data.mag] : [],
+        phase: cat.phVis ? [...cat.data.phase] : [],
+        color,
+      });
+    }
+    setFreqSnapshots(band.id, newSnaps);
   }
 
   function clearFreqSnapshots() {
@@ -260,31 +273,41 @@ export default function FrequencyPlot() {
     const tab = plotTab();
     if (tab === "freq") { takeFreqSnapshot(); return; }
     const existing = plotSnapshots(band.id, tab === "step" ? "ir" : tab);
-    const idx = existing.length;
-    const color = FREQ_SNAP_COLORS[idx % FREQ_SNAP_COLORS.length];
-    const label = `Snap ${idx + 1}`;
-    if ((tab === "ir" || tab === "step") && chart && chart.data[0] && chart.data[0].length > 0) {
-      // Read first visible IR and first visible Step directly from chart data
-      const timeMs = chart.data[0] as number[];
-      let snapIr: number[] | undefined;
-      let snapSt: number[] | undefined;
-      for (let i = 1; i < chart.series.length; i++) {
-        const s = chart.series[i] as any;
-        if (!s.show) continue;
-        const lbl = typeof s.label === "string" ? s.label : "";
-        const d = chart.data[i] as number[];
-        if (!d) continue;
-        // Skip snapshot series (don't snapshot a snapshot)
-        if (lbl.startsWith("Snap ")) continue;
-        if (lbl.endsWith(" IR") && !snapIr) snapIr = [...d];
-        if (lbl.endsWith(" Step") && !snapSt) snapSt = [...d];
+    // Count snap groups (unique "Snap N" prefixes), not individual entries
+    const snapNums = new Set(existing.map(s => s.label.match(/Snap (\d+)/)?.[1]).filter(Boolean));
+    const groupIdx = snapNums.size;
+    const color = FREQ_SNAP_COLORS[groupIdx % FREQ_SNAP_COLORS.length];
+    const label = `Snap ${groupIdx + 1}`;
+    if (tab === "ir" || tab === "step") {
+      // Use bandVisMap as source of truth for visibility (not chart.series.show — avoids async race)
+      const isVis = (lbl: string) => bandVisMap.get(lbl) !== false;
+      // Capture ALL visible categories (not just highest-priority)
+      const categories = [
+        { key: "Corr", irLbl: "Corrected IR", stLbl: "Corrected Step", data: lastIrCorrData },
+        { key: "Tgt", irLbl: "Target IR", stLbl: "Target Step", data: lastIrTargetData },
+        { key: "Meas", irLbl: "Measurement IR", stLbl: "Measurement Step", data: lastIrMeasData },
+      ];
+      let captured = 0;
+      for (const cat of categories) {
+        const hasIr = isVis(cat.irLbl) && cat.data.impulse.length > 0;
+        const hasSt = isVis(cat.stLbl) && cat.data.step.length > 0;
+        if (!hasIr && !hasSt) continue;
+        // Count visible categories to decide if suffix needed
+        captured++;
       }
-      if (!snapIr && !snapSt) return;
-      addPlotSnapshot(band.id, {
-        label, color, tab: "ir", timeMs: [...timeMs],
-        impulse: snapIr,
-        step: snapSt,
-      });
+      if (captured === 0) return;
+      const needSuffix = captured > 1;
+      for (const cat of categories) {
+        const hasIr = isVis(cat.irLbl) && cat.data.impulse.length > 0;
+        const hasSt = isVis(cat.stLbl) && cat.data.step.length > 0;
+        if (!hasIr && !hasSt) continue;
+        const snapLabel = needSuffix ? `${label} ${cat.key}` : label;
+        addPlotSnapshot(band.id, {
+          label: snapLabel, color, tab: "ir", timeMs: [...cat.data.timeMs],
+          impulse: hasIr ? [...cat.data.impulse] : undefined,
+          step: hasSt ? [...cat.data.step] : undefined,
+        });
+      }
     } else if (tab === "gd" && lastGdData.freq.length > 0) {
       addPlotSnapshot(band.id, { label, color, tab: "gd", freq: [...lastGdData.freq], gdMs: [...lastGdData.gdMs] });
     } else if (tab === "export" && lastExportData.freq.length > 0) {
@@ -2521,6 +2544,8 @@ export default function FrequencyPlot() {
       } else {
         const cf = bandColorFamily(bd.bandColor);
         addIrStepPair("Measurement", stripAlpha(cf.meas), stripAlpha(cf.measPhase), bd.timeMs, bd.impulse, bd.step, 1.5, "measurement", false);
+        // Save LINEAR data for snapshot capture (pre-dB, peak-aligned)
+        lastIrMeasData.timeMs = [...bd.timeMs]; lastIrMeasData.impulse = [...bd.impulse]; lastIrMeasData.step = [...bd.step];
       }
     }
     // Measurement sum (align peak to t=0)
@@ -2538,7 +2563,11 @@ export default function FrequencyPlot() {
       } else {
         const cf = bandColorFamily(bd.bandColor);
         addIrStepPair("Target", cf.target, cf.targetPhase, bd.timeMs, bd.impulse, bd.step, 2, "target", true);
+        lastIrTargetData.timeMs = [...bd.timeMs]; lastIrTargetData.impulse = [...bd.impulse]; lastIrTargetData.step = [...bd.step];
       }
+    }
+    if (!inSum && targetBands.length === 0) {
+      lastIrTargetData.timeMs = []; lastIrTargetData.impulse = []; lastIrTargetData.step = [];
     }
     // Target sum (align peak to t=0)
     if (targetSum) {
@@ -2555,7 +2584,11 @@ export default function FrequencyPlot() {
       } else {
         const cf = bandColorFamily(bd.bandColor);
         addIrStepPair("Corrected", cf.corrected, cf.correctedPhase, bd.timeMs, bd.impulse, bd.step, 2, "corrected", false);
+        lastIrCorrData.timeMs = [...bd.timeMs]; lastIrCorrData.impulse = [...bd.impulse]; lastIrCorrData.step = [...bd.step];
       }
+    }
+    if (!inSum && corrBands.length === 0) {
+      lastIrCorrData.timeMs = []; lastIrCorrData.impulse = []; lastIrCorrData.step = [];
     }
     // Corrected sum (align peak to t=0)
     if (corrSum) {
@@ -2563,7 +2596,7 @@ export default function FrequencyPlot() {
       addIrStepPair("\u03A3 corrected", sumClr.corrIr, sumClr.corrStep, cs.timeMs, cs.impulse, cs.step, 2, "corrected", false);
     }
 
-    // IR/Step snapshots — data captured from chart.data, already in display units
+    // IR/Step snapshots — data stored in LINEAR units, apply dB conversion via same pipeline as live data
     if (!inSum) {
       const band = activeBand();
       const snaps = band ? plotSnapshots(band.id, "ir") : [];
@@ -2572,31 +2605,21 @@ export default function FrequencyPlot() {
         const hasIr = snap.impulse && snap.impulse.length > 0;
         const hasSt = snap.step && snap.step.length > 0;
         if (!hasIr && !hasSt) continue;
-        // Simple resample without dB conversion (data already in display units)
-        const snapResample = (srcTime: number[], srcData: number[]): number[] => {
-          return timeMs.map(t => {
-            if (t < srcTime[0] || t > srcTime[srcTime.length - 1]) return NaN;
-            let lo = 0, hi2 = srcTime.length - 1;
-            while (hi2 - lo > 1) { const mid = (lo + hi2) >> 1; if (srcTime[mid] <= t) lo = mid; else hi2 = mid; }
-            const dt = srcTime[hi2] - srcTime[lo];
-            const frac = dt > 0 ? (t - srcTime[lo]) / dt : 0;
-            return srcData[lo] + frac * (srcData[hi2] - srcData[lo]);
-          });
-        };
         const sameSnGrid = snap.timeMs.length === timeMs.length
           && Math.abs((snap.timeMs[0] ?? 0) - (timeMs[0] ?? 0)) < 0.001;
         if (hasIr) {
-          const irData = sameSnGrid ? snap.impulse! : snapResample(snap.timeMs, snap.impulse!);
+          // Use same dB conversion pipeline as live data (resampleOnto applies toDb, applyDb for same grid)
+          const irData = sameSnGrid ? applyDb(snap.impulse!) : resampleOnto(snap.timeMs, snap.impulse!);
           uSeries.push({ label: snap.label + " IR", stroke: snap.color, width: 1, scale: "y", show: true, dash: [4, 3] });
           uDataArr.push(irData);
-          irLegend.push({ label: snap.label + " IR", color: snap.color, dash: true, visible: true, seriesIdx: sIdx, category: "corrected" });
+          irLegend.push({ label: snap.label + " IR", color: snap.color, dash: true, visible: true, seriesIdx: sIdx, category: "snapshot" });
           sIdx++;
         }
         if (hasSt) {
-          const stData = sameSnGrid ? snap.step! : snapResample(snap.timeMs, snap.step!);
+          const stData = sameSnGrid ? applyDb(snap.step!) : resampleOnto(snap.timeMs, snap.step!);
           uSeries.push({ label: snap.label + " Step", stroke: snap.color + "80", width: 1, scale: "y", show: true, dash: [4, 3] });
           uDataArr.push(stData);
-          irLegend.push({ label: snap.label + " Step", color: snap.color + "80", dash: true, visible: true, seriesIdx: sIdx, category: "corrected" });
+          irLegend.push({ label: snap.label + " Step", color: snap.color + "80", dash: true, visible: true, seriesIdx: sIdx, category: "snapshot" });
           sIdx++;
         }
       }
@@ -3152,7 +3175,7 @@ export default function FrequencyPlot() {
             scale: "mag",
           });
           uData.push(snapMag);
-          legend.push({ label: snap.label, color: snap.color, dash: true, visible: true, seriesIdx: sIdx, category: "corrected" });
+          legend.push({ label: snap.label, color: snap.color, dash: true, visible: true, seriesIdx: sIdx, category: "snapshot" });
           sIdx++;
         }
 
@@ -3166,7 +3189,7 @@ export default function FrequencyPlot() {
             scale: "phase",
           });
           uData.push(snapPhase as number[]);
-          legend.push({ label: `${snap.label} \u00B0`, color: snap.color, dash: true, visible: true, seriesIdx: sIdx, category: "corrected" });
+          legend.push({ label: `${snap.label} \u00B0`, color: snap.color, dash: true, visible: true, seriesIdx: sIdx, category: "snapshot" });
           sIdx++;
         }
       }
