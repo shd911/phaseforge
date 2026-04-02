@@ -165,6 +165,60 @@ fn compute_impulse(
     Ok(dsp::impulse::compute_impulse_response(&freq, &magnitude, &phase, sr))
 }
 
+/// Compute minimum phase from magnitude spectrum via Hilbert transform.
+/// Input: freq (log grid), magnitude (dB). Output: phase (degrees) on same grid.
+#[tauri::command]
+fn compute_minimum_phase(
+    freq: Vec<f64>,
+    magnitude: Vec<f64>,
+) -> Result<Vec<f64>, String> {
+    let n = freq.len();
+    if n == 0 { return Err("empty freq".into()); }
+    let n_fft = ((n * 4).max(4096)).next_power_of_two();
+    let n_bins = n_fft / 2 + 1;
+    let nyquist = freq.last().copied().unwrap_or(24000.0);
+
+    // Clamp magnitude to reasonable dynamic range to avoid Hilbert artifacts
+    let mag_peak = magnitude.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let mag_floor = mag_peak - 80.0; // -80 dB dynamic range
+    let clamped: Vec<f64> = magnitude.iter().map(|&v| v.max(mag_floor)).collect();
+
+    // Resample magnitude from log freq grid onto linear FFT grid
+    let mut lin_mag = vec![clamped[0]; n_bins];
+    for k in 0..n_bins {
+        let f_lin = nyquist * k as f64 / (n_bins - 1) as f64;
+        if f_lin <= freq[0] {
+            lin_mag[k] = clamped[0];
+        } else if f_lin >= *freq.last().unwrap() {
+            lin_mag[k] = *clamped.last().unwrap();
+        } else {
+            let mut lo = 0usize;
+            let mut hi = n - 1;
+            while hi - lo > 1 {
+                let mid = (lo + hi) / 2;
+                if freq[mid] <= f_lin { lo = mid; } else { hi = mid; }
+            }
+            let dt = freq[hi] - freq[lo];
+            let frac = if dt > 0.0 { (f_lin - freq[lo]) / dt } else { 0.0 };
+            lin_mag[k] = clamped[lo] + frac * (clamped[hi] - clamped[lo]);
+        }
+    }
+
+    let min_ph_rad = dsp::minimum_phase_from_magnitude(&lin_mag, n_fft);
+
+    // Resample phase from linear grid back to log freq grid, convert to degrees
+    let mut phase_deg = Vec::with_capacity(n);
+    for i in 0..n {
+        let bin_f = freq[i] / nyquist * (n_bins - 1) as f64;
+        let lo = (bin_f as usize).min(n_bins - 2);
+        let hi = lo + 1;
+        let frac = bin_f - lo as f64;
+        let ph_rad = min_ph_rad[lo] * (1.0 - frac) + min_ph_rad[hi] * frac;
+        phase_deg.push(ph_rad.to_degrees());
+    }
+    Ok(phase_deg)
+}
+
 /// Compute corrected impulse: measurement convolved with FIR correction.
 /// Adds realized_mag/phase to interpolated measurement, then IFFT.
 #[tauri::command]
@@ -453,6 +507,7 @@ pub fn run() {
             remove_measurement_delay,
             apply_manual_delay,
             compute_impulse,
+            compute_minimum_phase,
             compute_corrected_impulse,
             merge_measurements,
             preview_baffle_step,

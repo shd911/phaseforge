@@ -867,6 +867,47 @@ export function clearAllFreqSnapshots() {
   _setFreqSnapMap(new Map());
 }
 
+// Generic plot snapshots for IR/Step, GD, Export tabs
+export interface PlotSnapshot {
+  label: string;
+  color: string;
+  tab: "ir" | "gd" | "export";
+  // Time-domain data (IR/Step)
+  timeMs?: number[];
+  impulse?: number[];
+  step?: number[];
+  // Frequency-domain data (GD, Export)
+  freq?: number[];
+  gdMs?: number[];
+  exportMag?: number[];
+}
+
+const [_plotSnapMap, _setPlotSnapMap] = createSignal<Map<string, PlotSnapshot[]>>(new Map());
+
+export function plotSnapshots(bandId: string, tab: string): PlotSnapshot[] {
+  return (_plotSnapMap().get(bandId) ?? []).filter(s => s.tab === tab);
+}
+
+export function addPlotSnapshot(bandId: string, snap: PlotSnapshot) {
+  const m = new Map(_plotSnapMap());
+  const existing = m.get(bandId) ?? [];
+  m.set(bandId, [...existing, snap]);
+  _setPlotSnapMap(m);
+}
+
+export function clearPlotSnapshots(bandId: string, tab: string) {
+  const m = new Map(_plotSnapMap());
+  const existing = m.get(bandId) ?? [];
+  const filtered = existing.filter(s => s.tab !== tab);
+  if (filtered.length === 0) m.delete(bandId);
+  else m.set(bandId, filtered);
+  _setPlotSnapMap(m);
+}
+
+export function clearAllPlotSnapshots() {
+  _setPlotSnapMap(new Map());
+}
+
 // Export plot Y-scale: persists across ExportPlot unmount/remount.
 // null = not yet set (use auto-range), {min,max} = user has zoomed/scrolled.
 export const [exportYScale, setExportYScale] = createSignal<{ min: number; max: number } | null>(null);

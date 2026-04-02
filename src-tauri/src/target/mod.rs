@@ -179,48 +179,10 @@ fn apply_filter(
         return;
     }
 
-    // Gaussian minimum phase: resample mag onto linear grid, Hilbert, resample phase back
+    // Gaussian: no analytical phase available — phase stays 0 in target display.
+    // Minimum phase is handled at FIR generation level (Hilbert on linear FFT grid).
     if matches!(cfg.filter_type, FilterType::Gaussian) {
-        let n_fft = {
-            let desired = (freq.len() * 4).max(4096);
-            desired.next_power_of_two()
-        };
-        let n_bins = n_fft / 2 + 1;
-        let nyquist = freq.last().copied().unwrap_or(24000.0);
-
-        // Resample filter magnitude from log freq grid onto linear FFT grid (DC..Nyquist)
-        let mut lin_mag = vec![filt_mag_db[0]; n_bins];
-        for k in 0..n_bins {
-            let f_lin = nyquist * k as f64 / (n_bins - 1) as f64;
-            // Find bracketing indices in log freq grid
-            if f_lin <= freq[0] {
-                lin_mag[k] = filt_mag_db[0];
-            } else if f_lin >= *freq.last().unwrap() {
-                lin_mag[k] = *filt_mag_db.last().unwrap();
-            } else {
-                let mut lo = 0usize;
-                let mut hi = freq.len() - 1;
-                while hi - lo > 1 {
-                    let mid = (lo + hi) / 2;
-                    if freq[mid] <= f_lin { lo = mid; } else { hi = mid; }
-                }
-                let dt = freq[hi] - freq[lo];
-                let frac = if dt > 0.0 { (f_lin - freq[lo]) / dt } else { 0.0 };
-                lin_mag[k] = filt_mag_db[lo] + frac * (filt_mag_db[hi] - filt_mag_db[lo]);
-            }
-        }
-
-        let min_ph_rad = crate::dsp::minimum_phase_from_magnitude(&lin_mag, n_fft);
-
-        // Resample phase from linear grid back to log freq grid
-        for i in 0..freq.len() {
-            let bin_f = freq[i] / nyquist * (n_bins - 1) as f64;
-            let lo = (bin_f as usize).min(n_bins - 2);
-            let hi = lo + 1;
-            let frac = bin_f - lo as f64;
-            let ph_rad = min_ph_rad[lo] * (1.0 - frac) + min_ph_rad[hi] * frac;
-            phase[i] += ph_rad.to_degrees();
-        }
+        return;
     } else {
         // Other filter types: use analytical phase from filter_response
         for i in 0..freq.len() {
