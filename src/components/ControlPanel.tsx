@@ -52,6 +52,10 @@ import {
 } from "../stores/bands";
 import type { PresetName, SmoothingMode, MergeSource, BandState } from "../stores/bands";
 import {
+  firMaxBoost, firNoiseFloor, firIterations,
+  firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess,
+} from "../stores/bands";
+import {
   tolerance, setTolerance,
   maxBands, setMaxBands,
   gainRegularization, setGainRegularization,
@@ -1060,6 +1064,12 @@ function ExportTab() {
     const targetMag = response.magnitude;
     let modelPhase = response.phase;
 
+    // Gaussian min-phase: compute phase from magnitude via Hilbert
+    const gmp = (f: any) => f && f.filter_type === "Gaussian" && !f.linear_phase;
+    if (gmp(b.target.high_pass) || gmp(b.target.low_pass)) {
+      modelPhase = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: targetMag });
+    }
+
     // 2. Compute PEQ contribution separately (PEQ always min-phase)
     let peqMagArr: number[] = [];
     if (peqBands.length > 0) {
@@ -1086,11 +1096,15 @@ function ExportTab() {
       config: {
         taps,
         sample_rate: sr,
-        max_boost_db: 24.0,
-        noise_floor_db: -150.0,
+        max_boost_db: firMaxBoost(),
+        noise_floor_db: firNoiseFloor(),
         window: win,
         phase_mode: (isLin(b.target.high_pass) && isLin(b.target.low_pass)) ? "LinearPhase" : "MinimumPhase",
-        iterations: 3,
+        iterations: firIterations(),
+        freq_weighting: firFreqWeighting(),
+        narrowband_limit: firNarrowbandLimit(),
+        nb_smoothing_oct: firNbSmoothingOct(),
+        nb_max_excess_db: firNbMaxExcess(),
       },
     });
 

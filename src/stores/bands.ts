@@ -880,6 +880,7 @@ export interface PlotSnapshot {
   freq?: number[];
   gdMs?: number[];
   exportMag?: number[];
+  exportPhase?: number[];
 }
 
 const [_plotSnapMap, _setPlotSnapMap] = createSignal<Map<string, PlotSnapshot[]>>(new Map());

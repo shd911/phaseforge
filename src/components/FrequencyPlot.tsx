@@ -212,7 +212,7 @@ export default function FrequencyPlot() {
   // GD snapshot data (corrected GD)
   const lastGdData: { freq: number[]; gdMs: number[] } = { freq: [], gdMs: [] };
   // Export snapshot data (FIR curve)
-  const lastExportData: { freq: number[]; mag: number[] } = { freq: [], mag: [] };
+  const lastExportData: { freq: number[]; mag: number[]; phase: number[] } = { freq: [], mag: [], phase: [] };
 
   function takeFreqSnapshot() {
     const band = activeBand();
@@ -311,7 +311,14 @@ export default function FrequencyPlot() {
     } else if (tab === "gd" && lastGdData.freq.length > 0) {
       addPlotSnapshot(band.id, { label, color, tab: "gd", freq: [...lastGdData.freq], gdMs: [...lastGdData.gdMs] });
     } else if (tab === "export" && lastExportData.freq.length > 0) {
-      addPlotSnapshot(band.id, { label, color, tab: "export", freq: [...lastExportData.freq], exportMag: [...lastExportData.mag] });
+      const hasMag = showExpFir() && lastExportData.mag.length > 0;
+      const hasPh = showExpFirPh() && lastExportData.phase.length > 0;
+      if (!hasMag && !hasPh) return;
+      addPlotSnapshot(band.id, {
+        label, color, tab: "export", freq: [...lastExportData.freq],
+        exportMag: hasMag ? [...lastExportData.mag] : undefined,
+        exportPhase: hasPh ? [...lastExportData.phase] : undefined,
+      });
     }
     // Trigger re-render to show snapshot on chart (preserve scales)
     irToggleRedraw();
@@ -352,7 +359,12 @@ export default function FrequencyPlot() {
   const [showGdTarget, setShowGdTarget] = createSignal(true);
   const [showGdCorr, setShowGdCorr] = createSignal(true);
   // Export colors derived from band
-  const [exportColors, setExportColors] = createSignal({ model: "#FF9F43", fir: "#38BDF8" });
+  const [exportColors, setExportColors] = createSignal({ model: "#FF9F43", fir: "#38BDF8", modelPhase: "#9b8060", firPhase: "#1a6e8a" });
+  // Export legend visibility
+  const [showExpModel, setShowExpModel] = createSignal(true);
+  const [showExpFir, setShowExpFir] = createSignal(true);
+  const [showExpModelPh, setShowExpModelPh] = createSignal(true);
+  const [showExpFirPh, setShowExpFirPh] = createSignal(true);
 
   // Persistent visibility — two maps for different modes:
   // SUM mode: by label (each band has its own curves like "Band 1 tgt", "Band 2 tgt")
@@ -1669,6 +1681,13 @@ export default function FrequencyPlot() {
       const targetMag = response.magnitude;
       let modelPhase = response.phase;
 
+      // Gaussian min-phase: compute phase from magnitude via Hilbert (same as freq tab)
+      const gmp = (f: any) => f && f.filter_type === "Gaussian" && !f.linear_phase;
+      if (gmp(target.high_pass) || gmp(target.low_pass)) {
+        modelPhase = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: targetMag });
+        if (gen !== renderGen) return;
+      }
+
       // PEQ contribution
       let peqMagArr: number[] = [];
       if (peqBands.length > 0) {
@@ -1679,7 +1698,7 @@ export default function FrequencyPlot() {
       if (gen !== renderGen) return;
 
       // Generate FIR
-      const isLin = (f: any) => !f || f.linear_phase || f.filter_type === "Gaussian";
+      const isLin = (f: any) => !f || f.linear_phase;
       const allLinear = isLin(target.high_pass) && isLin(target.low_pass);
       const firConfig = {
         taps, sample_rate: sr, max_boost_db: firMaxBoost(), noise_floor_db: firNoiseFloor(),
@@ -1756,7 +1775,7 @@ export default function FrequencyPlot() {
       // Derive colors from band
       const bandColor = band.color ?? "#FF9F43";
       const ecf = bandColorFamily(bandColor);
-      const expClr = { model: ecf.target, fir: ecf.corrected };
+      const expClr = { model: ecf.target, fir: ecf.corrected, modelPhase: ecf.targetPhase, firPhase: ecf.correctedPhase };
       setExportColors(expClr);
 
       // Render chart
@@ -1764,22 +1783,31 @@ export default function FrequencyPlot() {
       if (!containerRef) return;
       const rect = containerRef.getBoundingClientRect();
 
+      // Wrap phase for display
+      const wrappedModelPhase = wrapPhase(modelPhase);
+      const wrappedFirPhase = wrapPhase(firResult.realized_phase);
+
       const opts: uPlot.Options = {
         width: Math.max(rect.width, 400), height: Math.max(rect.height, 200),
         series: [
           {},
           { label: "Model dB", stroke: expClr.model, width: 2, scale: "mag" },
           { label: "FIR dB", stroke: expClr.fir, width: 2, scale: "mag" },
+          { label: "Model °", stroke: expClr.modelPhase, width: 1, dash: [4, 4], scale: "phase" },
+          { label: "FIR °", stroke: expClr.firPhase, width: 1, dash: [4, 4], scale: "phase" },
         ],
         scales: {
           x: { min: 20, max: 20000, distr: 3 },
           mag: { auto: false, range: () => [curMagMin, curMagMax] as uPlot.Range.MinMax },
+          phase: { auto: false, range: [-180, 180] },
         },
         axes: [
           { stroke: "#9b9ba6", grid: { stroke: "rgba(255,255,255,0.12)" }, ticks: { stroke: "rgba(255,255,255,0.20)" },
             values: (_u: uPlot, vals: number[]) => vals.map(v => v == null ? "" : v >= 1000 ? (v/1000)+"k" : String(Math.round(v))) },
           { label: "dB", scale: "mag", stroke: "#9b9ba6", grid: { stroke: "rgba(255,255,255,0.12)" }, ticks: { stroke: "rgba(255,255,255,0.20)" },
             values: (_u: uPlot, vals: number[]) => vals.map(v => v == null ? "" : v.toFixed(1)), size: 50 },
+          { label: "Phase (°)", scale: "phase", side: 1, stroke: "#9b9ba6",
+            grid: { show: false }, ticks: { stroke: "rgba(255,255,255,0.20)" } },
         ],
         legend: { show: false },
         cursor: { drag: { x: false, y: false, setScale: false } },
@@ -1790,9 +1818,12 @@ export default function FrequencyPlot() {
             const f = u.data[0][idx];
             setCursorFreq(f != null ? fmtFreq(f) : "—");
             const m = u.data[1]?.[idx]; const r = u.data[2]?.[idx];
+            const mp = u.data[3]?.[idx]; const rp = u.data[4]?.[idx];
             const vals: { label: string; color: string; value: string }[] = [];
             if (m != null) vals.push({ label: "Model", color: expClr.model, value: (m as number).toFixed(1) + " dB" });
             if (r != null) vals.push({ label: "FIR", color: expClr.fir, value: (r as number).toFixed(1) + " dB" });
+            if (mp != null) vals.push({ label: "Model°", color: expClr.modelPhase, value: (mp as number).toFixed(1) + "°" });
+            if (rp != null) vals.push({ label: "FIR°", color: expClr.firPhase, value: (rp as number).toFixed(1) + "°" });
             setCursorValues(vals);
             setCursorSPL(vals.map(v => `${v.label}: ${v.value}`).join(" ") || "—");
           }],
@@ -1813,28 +1844,40 @@ export default function FrequencyPlot() {
       }
       if (!isSum()) setShowLegend(false);
       // Save FIR data for snapshot capture
-      lastExportData.freq = [...freq]; lastExportData.mag = [...firResult.realized_mag];
+      lastExportData.freq = [...freq]; lastExportData.mag = [...firResult.realized_mag]; lastExportData.phase = [...wrappedFirPhase];
       // Export snapshots
-      const expData: number[][] = [freq, normModelMag, firResult.realized_mag];
+      const expData: number[][] = [freq, normModelMag, firResult.realized_mag, wrappedModelPhase, wrappedFirPhase];
       {
         const b = activeBand();
         const snaps = b ? plotSnapshots(b.id, "export") : [];
+        const interpSnap = (srcFreq: number[], srcData: number[]) => freq.map(f => {
+          if (f < srcFreq[0] || f > srcFreq[srcFreq.length - 1]) return NaN;
+          let lo = 0, hi = srcFreq.length - 1;
+          while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (srcFreq[mid] <= f) lo = mid; else hi = mid; }
+          const dt = srcFreq[hi] - srcFreq[lo];
+          const frac = dt > 0 ? (f - srcFreq[lo]) / dt : 0;
+          return srcData[lo] + frac * (srcData[hi] - srcData[lo]);
+        });
         for (const snap of snaps) {
-          if (snap.freq && snap.exportMag) {
-            const snapData = freq.map(f => {
-              if (f < snap.freq![0] || f > snap.freq![snap.freq!.length - 1]) return NaN;
-              let lo = 0, hi = snap.freq!.length - 1;
-              while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (snap.freq![mid] <= f) lo = mid; else hi = mid; }
-              const dt = snap.freq![hi] - snap.freq![lo];
-              const frac = dt > 0 ? (f - snap.freq![lo]) / dt : 0;
-              return snap.exportMag![lo] + frac * (snap.exportMag![hi] - snap.exportMag![lo]);
-            });
+          if (!snap.freq || (!snap.exportMag && !snap.exportPhase)) continue;
+          if (snap.exportMag) {
             opts.series.push({ label: snap.label, stroke: snap.color, width: 1, dash: [4, 3], scale: "mag" });
-            expData.push(snapData);
+            expData.push(interpSnap(snap.freq, snap.exportMag));
+          }
+          if (snap.exportPhase) {
+            opts.series.push({ label: snap.label + " °", stroke: snap.color + "80", width: 1, dash: [4, 3], scale: "phase" });
+            expData.push(interpSnap(snap.freq, snap.exportPhase));
           }
         }
       }
-      try { chart = new uPlot(opts, expData as uPlot.AlignedData, containerRef); } catch (e) { console.error(e); }
+      try {
+        chart = new uPlot(opts, expData as uPlot.AlignedData, containerRef);
+        // Apply persisted visibility
+        if (!showExpModel()) chart.setSeries(1, { show: false });
+        if (!showExpFir()) chart.setSeries(2, { show: false });
+        if (!showExpModelPh()) chart.setSeries(3, { show: false });
+        if (!showExpFirPh()) chart.setSeries(4, { show: false });
+      } catch (e) { console.error(e); }
     } catch (e) {
       console.error("Export tab render failed:", e);
     }
@@ -4180,24 +4223,55 @@ export default function FrequencyPlot() {
         </div>
       </Show>
       <Show when={plotTab() === "export"}>
-        {/* Export legend — Model + FIR */}
+        {/* Export legend — Model + FIR (mag & phase) */}
         <div class="sum-vis-table">
           <table>
+            <thead><tr>
+              <td />
+              <td class="sum-col-header" onClick={() => {
+                const v = !(showExpModel() && showExpFir());
+                setShowExpModel(v); setShowExpFir(v); safeToggleSeries(1, v); safeToggleSeries(2, v);
+              }}>dB</td>
+              <td class="sum-col-header" onClick={() => {
+                const v = !(showExpModelPh() && showExpFirPh());
+                setShowExpModelPh(v); setShowExpFirPh(v); safeToggleSeries(3, v); safeToggleSeries(4, v);
+              }}>°</td>
+            </tr></thead>
             <tbody>
               <tr>
-                <td class="sum-row-header">MODEL</td>
+                <td class="sum-row-header" onClick={() => {
+                  const v = !(showExpModel() && showExpModelPh());
+                  setShowExpModel(v); setShowExpModelPh(v); safeToggleSeries(1, v); safeToggleSeries(3, v);
+                }}>MODEL</td>
                 <td class="sum-cell">
-                  <span class="legend-item">
+                  <button class={`legend-item ${showExpModel() ? "" : "legend-off"}`}
+                    onClick={() => { const v = !showExpModel(); setShowExpModel(v); safeToggleSeries(1, v); }}>
                     <span class="legend-swatch legend-swatch-dash" style={{ "border-color": exportColors().model }} />
-                  </span>
+                  </button>
+                </td>
+                <td class="sum-cell">
+                  <button class={`legend-item ${showExpModelPh() ? "" : "legend-off"}`}
+                    onClick={() => { const v = !showExpModelPh(); setShowExpModelPh(v); safeToggleSeries(3, v); }}>
+                    <span class="legend-swatch legend-swatch-dash" style={{ "border-color": exportColors().modelPhase }} />
+                  </button>
                 </td>
               </tr>
               <tr>
-                <td class="sum-row-header">FIR</td>
+                <td class="sum-row-header" onClick={() => {
+                  const v = !(showExpFir() && showExpFirPh());
+                  setShowExpFir(v); setShowExpFirPh(v); safeToggleSeries(2, v); safeToggleSeries(4, v);
+                }}>FIR</td>
                 <td class="sum-cell">
-                  <span class="legend-item">
+                  <button class={`legend-item ${showExpFir() ? "" : "legend-off"}`}
+                    onClick={() => { const v = !showExpFir(); setShowExpFir(v); safeToggleSeries(2, v); }}>
                     <span class="legend-swatch" style={{ "background-color": exportColors().fir, "border-color": exportColors().fir }} />
-                  </span>
+                  </button>
+                </td>
+                <td class="sum-cell">
+                  <button class={`legend-item ${showExpFirPh() ? "" : "legend-off"}`}
+                    onClick={() => { const v = !showExpFirPh(); setShowExpFirPh(v); safeToggleSeries(4, v); }}>
+                    <span class="legend-swatch legend-swatch-dash" style={{ "border-color": exportColors().firPhase }} />
+                  </button>
                 </td>
               </tr>
             </tbody>
