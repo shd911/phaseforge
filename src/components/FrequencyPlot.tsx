@@ -2247,6 +2247,12 @@ export default function FrequencyPlot() {
               cMag = cMag.map((v, i) => v + (xm[i] ?? 0));
               cPh = cPh.map((v, i) => v + (xp[i] ?? 0));
             }
+            // Gaussian min-phase: recompute phase from corrected magnitude via Hilbert
+            const gmpC = (f: any) => f && f.filter_type === "Gaussian" && !f.linear_phase;
+            if (sb.targetEnabled && (gmpC(sb.target.high_pass) || gmpC(sb.target.low_pass))) {
+              cPh = await invoke<number[]>("compute_minimum_phase", { freq: sbFreq, magnitude: cMag });
+              if (gen !== renderGen) return null;
+            }
             const r = await invoke<{ time: number[]; impulse: number[]; step: number[] }>("compute_impulse", {
               freq: sbFreq, magnitude: cMag, phase: cPh, sampleRate: sbSr,
             });
@@ -2285,6 +2291,12 @@ export default function FrequencyPlot() {
               if (gen !== renderGen) return;
               cMag = cMag.map((v, i) => v + (xm[i] ?? 0));
               cPh = cPh.map((v, i) => v + (xp[i] ?? 0));
+            }
+            // Gaussian min-phase: recompute phase from corrected magnitude via Hilbert
+            const gmpS = (f: any) => f && f.filter_type === "Gaussian" && !f.linear_phase;
+            if (sb.targetEnabled && (gmpS(sb.target.high_pass) || gmpS(sb.target.low_pass))) {
+              cPh = await invoke<number[]>("compute_minimum_phase", { freq: sbFreq, magnitude: cMag });
+              if (gen !== renderGen) return;
             }
             // Normalize by peak magnitude so bands contribute equally
             let peakMag = -Infinity;
@@ -2423,6 +2435,12 @@ export default function FrequencyPlot() {
               if (gen !== renderGen) return;
               corrMag = corrMag.map((v, i) => v + xm[i]);
               corrPh = corrPh.map((v, i) => v + xp[i]);
+            }
+            // Gaussian min-phase: recompute phase from corrected magnitude via Hilbert
+            const gmpCorr = (f: any) => f && f.filter_type === "Gaussian" && !f.linear_phase;
+            if (gmpCorr(band.target.high_pass) || gmpCorr(band.target.low_pass)) {
+              corrPh = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: corrMag });
+              if (gen !== renderGen) return;
             }
             corrResult = await invoke<{ time: number[]; impulse: number[]; step: number[] }>("compute_impulse", {
               freq, magnitude: corrMag, phase: corrPh, sampleRate: sr,
@@ -3122,6 +3140,12 @@ export default function FrequencyPlot() {
               (v: number, i: number) =>
                 v + (peqPhase ? peqPhase[i] : 0) + (xsPhase ? xsPhase[i] : 0)
             );
+            // Gaussian min-phase: recompute corrected phase from corrected magnitude via Hilbert
+            const gmpF = (f: any) => f && f.filter_type === "Gaussian" && !f.linear_phase;
+            if (gmpF(band.target.high_pass) || gmpF(band.target.low_pass)) {
+              fullCorrectedPhase = await invoke<number[]>("compute_minimum_phase", { freq: result.freq!, magnitude: fullCorrected });
+              if (gen !== renderGen) return;
+            }
             if (showPhase) {
               const phaseLabel = isHybrid ? "Corrected + XO" : "Corrected";
               uSeries.push({
@@ -3500,9 +3524,15 @@ export default function FrequencyPlot() {
 
             // Corrected phase = measurement phase + PEQ phase + XO phase
             if (rm.phase) {
-              const corrPhase = rm.phase.map(
+              let corrPhase = rm.phase.map(
                 (v: number, j: number) => v + (peqPhase ? peqPhase[j] : 0) + (xsPhase ? xsPhase[j] : 0)
               );
+              // Gaussian min-phase: recompute corrected phase from corrected magnitude via Hilbert
+              const gmpSF = (f: any) => f && f.filter_type === "Gaussian" && !f.linear_phase;
+              if (gmpSF(bands[i].target.high_pass) || gmpSF(bands[i].target.low_pass)) {
+                corrPhase = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: corrected });
+                if (gen !== renderGen) return;
+              }
               perBandCorrPhase.push(corrPhase);
             } else {
               perBandCorrPhase.push(null);
