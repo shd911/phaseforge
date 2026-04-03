@@ -1513,7 +1513,9 @@ export default function FrequencyPlot() {
   }
 
   // Fast PEQ update during drag — recompute PEQ + corrected in-place, no chart rebuild
+  let peqFastGen = 0;
   async function peqFastUpdate(band: BandState) {
+    const gen = ++peqFastGen;
     if (!chart || !band.peqBands?.length) return;
     const peqSi = chart.series.findIndex(s => s.label === "PEQ dB");
     if (peqSi < 0) return;
@@ -1527,7 +1529,7 @@ export default function FrequencyPlot() {
       const [pm] = await invoke<[number[], number[]]>("compute_peq_complex", {
         freq: Array.from(freq), bands: enabledBands,
       });
-      if (!chart) return;
+      if (!chart || gen !== peqFastGen) return;
 
       const newData = [...chart.data];
       newData[peqSi] = pm;
@@ -1595,12 +1597,6 @@ export default function FrequencyPlot() {
     // During PEQ drag: skip full rebuild, use fast in-place update
     if (dragging && chart && pTab === "freq" && !sumMode && band) {
       peqFastUpdate(band);
-      return;
-    }
-    // After PEQ drag ends: chart already shows correct PEQ via fast updates.
-    // Skip full rebuild to prevent visual jump. Full rebuild on next real change.
-    if (!dragging && peqDragJustEnded && chart && pTab === "freq" && !sumMode) {
-      peqDragJustEnded = false;
       return;
     }
 
@@ -3971,7 +3967,6 @@ export default function FrequencyPlot() {
   let peqDragBandId = "";
   let peqDragActive = false;
   let peqDragMoved = false; // true if mouse actually moved during drag
-  let peqDragJustEnded = false; // suppress one rebuild after drag ends
   let peqDragTimeout: ReturnType<typeof setTimeout> | null = null;
 
   function handlePeqMouseDown(e: MouseEvent) {
@@ -4058,11 +4053,17 @@ export default function FrequencyPlot() {
     window.removeEventListener("mousemove", handlePeqDragMove);
     window.removeEventListener("mouseup", handlePeqDragUp);
     if (peqDragMoved && peqDragActive && peqDragIdx >= 0) {
+      // Save scales before commit triggers rebuild
+      if (chart) {
+        const ms = chart.scales["mag"];
+        const xs = chart.scales["x"];
+        if (ms?.min != null && ms?.max != null) { persistedMagMin = ms.min; persistedMagMax = ms.max; }
+        if (xs?.min != null && xs?.max != null) { persistedXMin = xs.min; persistedXMax = xs.max; }
+      }
       const newIdx = commitPeqBand(peqDragBandId, peqDragIdx);
       setSelectedPeqIdx(newIdx);
     }
     if (peqDragMoved) {
-      peqDragJustEnded = true;
       if (peqDragTimeout) clearTimeout(peqDragTimeout);
       peqDragTimeout = setTimeout(() => setPeqDragging(false), 150);
     }
