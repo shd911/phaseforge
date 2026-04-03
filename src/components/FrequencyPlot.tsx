@@ -4151,14 +4151,10 @@ export default function FrequencyPlot() {
             );
           })()}
         </Show>
-        {/* IR/Step tab toggles */}
+        {/* IR/Step dB/Lin toggle */}
         <Show when={plotTab() === "ir" || plotTab() === "step"}>
           <span class="readout-sep" />
           <button class={`tb-btn ${irDbMode() ? "active" : ""}`} onClick={() => { setIrDbMode(!irDbMode()); irToggleRedraw(); }} style={{ "font-size": "9px", padding: "1px 4px" }}>{irDbMode() ? "dB" : "Lin"}</button>
-          <span class="readout-sep" />
-          <button class={`tb-btn ${showMeasIr() || showMeasStep() ? "active" : ""}`} onClick={() => toggleCategory("measurement")} style={{ "font-size": "9px", padding: "1px 4px" }}>Meas</button>
-          <button class={`tb-btn ${showTargetIr() || showTargetStep() ? "active" : ""}`} onClick={() => toggleCategory("target")} style={{ "font-size": "9px", padding: "1px 4px" }}>Tgt</button>
-          <button class={`tb-btn ${showCorrIr() || showCorrStep() ? "active" : ""}`} onClick={() => toggleCategory("corrected")} style={{ "font-size": "9px", padding: "1px 4px" }}>Corr</button>
         </Show>
       </div>
       {/* Unified visibility matrix — above plot, all modes */}
