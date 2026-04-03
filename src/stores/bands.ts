@@ -277,7 +277,11 @@ export function moveBand(fromIdx: number, toIdx: number) {
 
   const bands = [...state.bands].map(b => ({
     ...b,
-    target: { ...b.target },
+    target: {
+      ...b.target,
+      high_pass: b.target.high_pass ? unwrapFilterConfig(b.target.high_pass) : null,
+      low_pass: b.target.low_pass ? unwrapFilterConfig(b.target.low_pass) : null,
+    },
   }));
   const [moved] = bands.splice(fromIdx, 1);
   bands.splice(toIdx, 0, moved);
@@ -448,15 +452,16 @@ export function toggleBandLinked(bandId: string) {
     const lp = state.bands[idx].target.low_pass;
     const nextIdx = idx + 1;
     if (lp && state.bands[nextIdx].target.high_pass) {
-      const nextHp = state.bands[nextIdx].target.high_pass!;
+      const nextHp = unwrapFilterConfig(state.bands[nextIdx].target.high_pass!);
+      const lpPlain = unwrapFilterConfig(lp);
       setState("bands", nextIdx, "target", "high_pass", {
         ...nextHp,
-        freq_hz: lp.freq_hz,
-        filter_type: lp.filter_type,
-        order: lp.order,
-        shape: lp.shape,
-        linear_phase: lp.linear_phase,
-        q: lp.q,
+        freq_hz: lpPlain.freq_hz,
+        filter_type: lpPlain.filter_type,
+        order: lpPlain.order,
+        shape: lpPlain.shape,
+        linear_phase: lpPlain.linear_phase,
+        q: lpPlain.q,
       });
     }
   }
@@ -491,6 +496,19 @@ export function setBandTilt(bandId: string, dbPerOctave: number) {
   markDirty();
 }
 
+/** Unwrap a SolidJS store proxy FilterConfig into a plain object.
+ *  Prevents cross-contamination when spreading proxy objects inside setState. */
+function unwrapFilterConfig(f: import("../lib/types").FilterConfig): import("../lib/types").FilterConfig {
+  return {
+    filter_type: f.filter_type,
+    order: f.order,
+    freq_hz: f.freq_hz,
+    shape: f.shape,
+    linear_phase: f.linear_phase,
+    q: f.q,
+  };
+}
+
 export function setBandHighPass(bandId: string, config: import("../lib/types").FilterConfig | null) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
@@ -501,28 +519,31 @@ export function setBandHighPass(bandId: string, config: import("../lib/types").F
       config = { ...config, freq_hz: Math.round(lpFreq * 0.95) };
     }
   }
-  setState("bands", idx, "target", "high_pass", config);
-  // Автовключение таргета при включении фильтра
-  if (config && !state.bands[idx].targetEnabled) {
-    setState("bands", idx, "targetEnabled", true);
-  }
-  // Пропагация linked: HP → LP предыдущей полосы (freq + type + order, NOT linear_phase)
-  if (!_propagating && config && idx > 0 && state.bands[idx - 1].linkedToNext) {
-    const prevLp = state.bands[idx - 1].target.low_pass;
-    if (prevLp) {
-      _propagating = true;
-      try {
-        setState("bands", idx - 1, "target", "low_pass", {
-          ...prevLp,
-          freq_hz: config.freq_hz,
-          filter_type: config.filter_type,
-          order: config.order,
-          shape: config.shape,
-          q: config.q,
-        });
-      } finally { _propagating = false; }
+  batch(() => {
+    setState("bands", idx, "target", "high_pass", config);
+    // Автовключение таргета при включении фильтра
+    if (config && !state.bands[idx].targetEnabled) {
+      setState("bands", idx, "targetEnabled", true);
     }
-  }
+    // Пропагация linked: HP → LP предыдущей полосы (freq + type + order, NOT linear_phase)
+    if (!_propagating && config && idx > 0 && state.bands[idx - 1].linkedToNext) {
+      const prevLp = state.bands[idx - 1].target.low_pass;
+      if (prevLp) {
+        _propagating = true;
+        try {
+          const plain = unwrapFilterConfig(prevLp);
+          setState("bands", idx - 1, "target", "low_pass", {
+            ...plain,
+            freq_hz: config.freq_hz,
+            filter_type: config.filter_type,
+            order: config.order,
+            shape: config.shape,
+            q: config.q,
+          });
+        } finally { _propagating = false; }
+      }
+    }
+  });
   markDirty();
 }
 
@@ -536,27 +557,30 @@ export function setBandLowPass(bandId: string, config: import("../lib/types").Fi
       config = { ...config, freq_hz: Math.round(hpFreq * 1.05) };
     }
   }
-  setState("bands", idx, "target", "low_pass", config);
-  if (config && !state.bands[idx].targetEnabled) {
-    setState("bands", idx, "targetEnabled", true);
-  }
-  // Пропагация linked: LP → HP следующей полосы (freq + type + order, NOT linear_phase)
-  if (!_propagating && config && state.bands[idx].linkedToNext && idx < state.bands.length - 1) {
-    const nextHp = state.bands[idx + 1].target.high_pass;
-    if (nextHp) {
-      _propagating = true;
-      try {
-        setState("bands", idx + 1, "target", "high_pass", {
-          ...nextHp,
-          freq_hz: config.freq_hz,
-          filter_type: config.filter_type,
-          order: config.order,
-          shape: config.shape,
-          q: config.q,
-        });
-      } finally { _propagating = false; }
+  batch(() => {
+    setState("bands", idx, "target", "low_pass", config);
+    if (config && !state.bands[idx].targetEnabled) {
+      setState("bands", idx, "targetEnabled", true);
     }
-  }
+    // Пропагация linked: LP → HP следующей полосы (freq + type + order, NOT linear_phase)
+    if (!_propagating && config && state.bands[idx].linkedToNext && idx < state.bands.length - 1) {
+      const nextHp = state.bands[idx + 1].target.high_pass;
+      if (nextHp) {
+        _propagating = true;
+        try {
+          const plain = unwrapFilterConfig(nextHp);
+          setState("bands", idx + 1, "target", "high_pass", {
+            ...plain,
+            freq_hz: config.freq_hz,
+            filter_type: config.filter_type,
+            order: config.order,
+            shape: config.shape,
+            q: config.q,
+          });
+        } finally { _propagating = false; }
+      }
+    }
+  });
   markDirty();
 }
 

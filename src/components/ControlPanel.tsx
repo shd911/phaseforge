@@ -135,6 +135,21 @@ export default function ControlPanel(props: { rightPanel?: boolean }) {
 // Filters Tab
 // ---------------------------------------------------------------------------
 
+/** Deep-copy a FilterConfig from SolidJS store proxy to a plain object.
+ *  This breaks the proxy reference so that spread/read in event handlers
+ *  never accidentally subscribes to or cross-contaminates sibling paths. */
+function unwrapFilter(f: import("../lib/types").FilterConfig | null | undefined): import("../lib/types").FilterConfig | null {
+  if (!f) return null;
+  return {
+    filter_type: f.filter_type,
+    order: f.order,
+    freq_hz: f.freq_hz,
+    shape: f.shape,
+    linear_phase: f.linear_phase,
+    q: f.q,
+  };
+}
+
 function FiltersTab() {
   const band = () => activeBand();
   const target = () => band()?.target;
@@ -233,14 +248,14 @@ function FiltersTab() {
         {/* High-Pass (🔗 индикатор, если связан с LP предыдущей) */}
         <FilterBlock
           title="High-Pass"
-          config={target()?.high_pass ?? null}
+          config={unwrapFilter(target()?.high_pass)}
           linked={hpLinked()}
           onToggle={() => {
             const id = bandId();
             if (!id) return;
-            const cur = target()?.high_pass;
+            const cur = unwrapFilter(target()?.high_pass);
             if (cur) {
-              lastHP.set(id, { ...cur });
+              lastHP.set(id, cur);
               setBandHighPass(id, null);
             } else {
               setBandHighPass(id, lastHP.get(id) ?? { filter_type: "Butterworth", order: 2, freq_hz: 80, shape: null, linear_phase: false, q: null });
@@ -252,16 +267,16 @@ function FiltersTab() {
         {/* Low-Pass (🔗 кнопка, если не последняя полоса) */}
         <FilterBlock
           title="Low-Pass"
-          config={target()?.low_pass ?? null}
+          config={unwrapFilter(target()?.low_pass)}
           linked={linked()}
           canLink={!isLastBand()}
           onLinkToggle={() => { const id = bandId(); if (id) toggleBandLinked(id); }}
           onToggle={() => {
             const id = bandId();
             if (!id) return;
-            const cur = target()?.low_pass;
+            const cur = unwrapFilter(target()?.low_pass);
             if (cur) {
-              lastLP.set(id, { ...cur });
+              lastLP.set(id, cur);
               setBandLowPass(id, null);
             } else {
               setBandLowPass(id, lastLP.get(id) ?? { filter_type: "Butterworth", order: 2, freq_hz: 15000, shape: null, linear_phase: false, q: null });
@@ -299,6 +314,22 @@ function FilterBlock(props: FilterBlockProps) {
   const isGaussian = () => c()?.filter_type === "Gaussian";
   const isCustom = () => c()?.filter_type === "Custom";
 
+  /** Build a full FilterConfig from the current config, overriding specific fields.
+   *  Reads each field explicitly from the (already unwrapped) plain config object
+   *  to avoid any SolidJS proxy spread issues. */
+  const withOverride = (overrides: Partial<import("../lib/types").FilterConfig>): import("../lib/types").FilterConfig => {
+    const cur = c()!;
+    return {
+      filter_type: cur.filter_type,
+      order: cur.order,
+      freq_hz: cur.freq_hz,
+      shape: cur.shape,
+      linear_phase: cur.linear_phase,
+      q: cur.q,
+      ...overrides,
+    };
+  };
+
   return (
     <div class={`filter-block ${props.linked ? "fb-linked" : ""}`}>
       <div class="fb-header">
@@ -330,12 +361,13 @@ function FilterBlock(props: FilterBlockProps) {
               value={c()!.filter_type}
               onChange={(e) => {
                 const ft = e.currentTarget.value as FilterType;
+                if (ft === c()!.filter_type) return; // guard: SolidJS/WebKit programmatic set
                 if (ft === "Gaussian") {
-                  props.onChange({ ...c()!, filter_type: ft, shape: c()!.shape ?? 1.0, q: null });
+                  props.onChange(withOverride({ filter_type: ft, shape: c()!.shape ?? 1.0, q: null }));
                 } else if (ft === "Custom") {
-                  props.onChange({ ...c()!, filter_type: ft, shape: null, q: c()!.q ?? 0.707 });
+                  props.onChange(withOverride({ filter_type: ft, shape: null, q: c()!.q ?? 0.707 }));
                 } else {
-                  props.onChange({ ...c()!, filter_type: ft, shape: null, q: null });
+                  props.onChange(withOverride({ filter_type: ft, shape: null, q: null }));
                 }
               }}
             >
@@ -346,7 +378,7 @@ function FilterBlock(props: FilterBlockProps) {
             <label class="fb-label">Freq</label>
             <NumberInput
               value={c()!.freq_hz}
-              onChange={(v) => props.onChange({ ...c()!, freq_hz: v })}
+              onChange={(v) => props.onChange(withOverride({ freq_hz: v }))}
               min={10} max={20000} step={1} unit="Hz" freqMode
             />
           </div>
@@ -355,7 +387,7 @@ function FilterBlock(props: FilterBlockProps) {
               <label class="fb-label">Order</label>
               <NumberInput
                 value={c()!.order}
-                onChange={(v) => props.onChange({ ...c()!, order: v })}
+                onChange={(v) => props.onChange(withOverride({ order: v }))}
                 min={1} max={8} step={1} precision={0}
               />
             </div>
@@ -365,7 +397,7 @@ function FilterBlock(props: FilterBlockProps) {
               <label class="fb-label">M</label>
               <NumberInput
                 value={c()!.shape ?? 1.0}
-                onChange={(v) => props.onChange({ ...c()!, shape: v })}
+                onChange={(v) => props.onChange(withOverride({ shape: v }))}
                 min={0.5} max={10} step={0.1}
               />
             </div>
@@ -375,21 +407,18 @@ function FilterBlock(props: FilterBlockProps) {
               <label class="fb-label">Q</label>
               <NumberInput
                 value={c()!.q ?? 0.707}
-                onChange={(v) => props.onChange({ ...c()!, q: v })}
+                onChange={(v) => props.onChange(withOverride({ q: v }))}
                 min={0.1} max={5.0} step={0.01}
               />
             </div>
           </Show>
           <div class="fb-row">
             <label class="fb-label"></label>
-            <label class="fb-checkbox" title="Linear phase (magnitude only, no phase rotation)">
-              <input
-                type="checkbox"
-                checked={c()!.linear_phase}
-                onChange={(e) => props.onChange({ ...c()!, linear_phase: e.currentTarget.checked })}
-              />
+            <span class="fb-checkbox" title="Linear phase (magnitude only, no phase rotation)"
+              onClick={() => props.onChange(withOverride({ linear_phase: !c()!.linear_phase }))}>
+              <span class={`fb-check-box ${c()!.linear_phase ? "checked" : ""}`} />
               <span class="fb-check-label">Lin-φ</span>
-            </label>
+            </span>
           </div>
         </div>
         <Show when={isCustom()}>
