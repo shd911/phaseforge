@@ -3954,6 +3954,7 @@ export default function FrequencyPlot() {
   let peqDragIdx = -1; // index of PEQ band being dragged
   let peqDragBandId = "";
   let peqDragActive = false;
+  let peqDragMoved = false; // true if mouse actually moved during drag
   let peqDragTimeout: ReturnType<typeof setTimeout> | null = null;
 
   function handlePeqMouseDown(e: MouseEvent) {
@@ -4004,8 +4005,8 @@ export default function FrequencyPlot() {
       peqDragIdx = bestIdx;
       peqDragBandId = bd.id;
       peqDragActive = true;
+      peqDragMoved = false;
       setSelectedPeqIdx(bestIdx);
-      setPeqDragging(true);
       window.addEventListener("mousemove", handlePeqDragMove);
       window.addEventListener("mouseup", handlePeqDragUp);
     }
@@ -4013,6 +4014,7 @@ export default function FrequencyPlot() {
 
   function handlePeqDragMove(e: MouseEvent) {
     if (!peqDragActive || !chart || peqDragIdx < 0) return;
+    if (!peqDragMoved) { peqDragMoved = true; setPeqDragging(true); }
     const overEl = chart.over ?? containerRef;
     const rect = overEl?.getBoundingClientRect();
     if (!rect) return;
@@ -4038,15 +4040,25 @@ export default function FrequencyPlot() {
   function handlePeqDragUp() {
     window.removeEventListener("mousemove", handlePeqDragMove);
     window.removeEventListener("mouseup", handlePeqDragUp);
-    if (peqDragActive && peqDragIdx >= 0) {
-      const newIdx = commitPeqBand(peqDragBandId, peqDragIdx);
-      setSelectedPeqIdx(newIdx);
+    if (peqDragMoved) {
+      // Real drag occurred — commit and rebuild
+      if (chart) {
+        const ms = chart.scales["mag"];
+        const xs = chart.scales["x"];
+        if (ms?.min != null && ms?.max != null) { persistedMagMin = ms.min; persistedMagMax = ms.max; }
+        if (xs?.min != null && xs?.max != null) { persistedXMin = xs.min; persistedXMax = xs.max; }
+      }
+      if (peqDragActive && peqDragIdx >= 0) {
+        const newIdx = commitPeqBand(peqDragBandId, peqDragIdx);
+        setSelectedPeqIdx(newIdx);
+      }
+      if (peqDragTimeout) clearTimeout(peqDragTimeout);
+      peqDragTimeout = setTimeout(() => setPeqDragging(false), 150);
     }
+    // Click without move — no commit, no rebuild, just selection (already set in mousedown)
     peqDragActive = false;
     peqDragIdx = -1;
-    // Debounce end of drag — delay re-render
-    if (peqDragTimeout) clearTimeout(peqDragTimeout);
-    peqDragTimeout = setTimeout(() => setPeqDragging(false), 150);
+    peqDragMoved = false;
   }
 
   // Scroll wheel on chart → change Q of selected PEQ band
