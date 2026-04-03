@@ -1140,4 +1140,367 @@ mod tests {
         let (mag_dc, _) = shelf_response(10.0, 2000.0, 6.0, 0.707, false);
         assert!(mag_dc.abs() < 0.3, "High shelf DC should be ~0 dB, got {}", mag_dc);
     }
+
+    // -----------------------------------------------------------------------
+    // Phase behavior tests — verify linear_phase flag and filter type interactions
+    // -----------------------------------------------------------------------
+
+    /// Helper: evaluate target and return (magnitude, phase) at given test frequency
+    fn eval_at(target: &TargetCurve, f: f64) -> (f64, f64) {
+        let resp = evaluate(target, &[f]);
+        (resp.magnitude[0], resp.phase[0])
+    }
+
+    fn make_filter(ft: FilterType, order: u8, freq: f64, shape: Option<f64>, linear_phase: bool) -> FilterConfig {
+        FilterConfig { filter_type: ft, order, freq_hz: freq, shape, linear_phase, q: None }
+    }
+
+    fn target_with_hp(f: FilterConfig) -> TargetCurve {
+        TargetCurve {
+            reference_level_db: 0.0, tilt_db_per_octave: 0.0, tilt_ref_freq: 1000.0,
+            high_pass: Some(f), low_pass: None, low_shelf: None, high_shelf: None,
+        }
+    }
+
+    fn target_with_lp(f: FilterConfig) -> TargetCurve {
+        TargetCurve {
+            reference_level_db: 0.0, tilt_db_per_octave: 0.0, tilt_ref_freq: 1000.0,
+            high_pass: None, low_pass: Some(f), low_shelf: None, high_shelf: None,
+        }
+    }
+
+    fn target_with_hp_lp(hp: FilterConfig, lp: FilterConfig) -> TargetCurve {
+        TargetCurve {
+            reference_level_db: 0.0, tilt_db_per_octave: 0.0, tilt_ref_freq: 1000.0,
+            high_pass: Some(hp), low_pass: Some(lp), low_shelf: None, high_shelf: None,
+        }
+    }
+
+    // --- linear_phase = true → phase must be zero for ALL filter types ---
+
+    #[test]
+    fn linphase_butterworth_hp_phase_zero() {
+        let t = target_with_hp(make_filter(FilterType::Butterworth, 4, 100.0, None, true));
+        for &f in &[50.0, 100.0, 500.0, 1000.0] {
+            let (_, ph) = eval_at(&t, f);
+            assert!(ph.abs() < 1e-10, "BW HP lin-phase at {}Hz should be 0°, got {}", f, ph);
+        }
+    }
+
+    #[test]
+    fn linphase_linkwitz_riley_lp_phase_zero() {
+        let t = target_with_lp(make_filter(FilterType::LinkwitzRiley, 4, 2000.0, None, true));
+        for &f in &[500.0, 2000.0, 5000.0, 10000.0] {
+            let (_, ph) = eval_at(&t, f);
+            assert!(ph.abs() < 1e-10, "LR LP lin-phase at {}Hz should be 0°, got {}", f, ph);
+        }
+    }
+
+    #[test]
+    fn linphase_bessel_hp_phase_zero() {
+        let t = target_with_hp(make_filter(FilterType::Bessel, 2, 200.0, None, true));
+        for &f in &[100.0, 200.0, 1000.0] {
+            let (_, ph) = eval_at(&t, f);
+            assert!(ph.abs() < 1e-10, "Bessel HP lin-phase at {}Hz should be 0°, got {}", f, ph);
+        }
+    }
+
+    #[test]
+    fn linphase_gaussian_lp_phase_zero() {
+        let t = target_with_lp(make_filter(FilterType::Gaussian, 4, 3000.0, Some(2.0), true));
+        for &f in &[100.0, 3000.0, 10000.0] {
+            let (_, ph) = eval_at(&t, f);
+            assert!(ph.abs() < 1e-10, "Gaussian LP lin-phase at {}Hz should be 0°, got {}", f, ph);
+        }
+    }
+
+    #[test]
+    fn linphase_custom_q_hp_phase_zero() {
+        let t = target_with_hp(make_filter(FilterType::Custom, 2, 80.0, None, true));
+        for &f in &[40.0, 80.0, 500.0] {
+            let (_, ph) = eval_at(&t, f);
+            assert!(ph.abs() < 1e-10, "Custom HP lin-phase at {}Hz should be 0°, got {}", f, ph);
+        }
+    }
+
+    // --- linear_phase = false → analytical types must have non-zero phase near fc ---
+
+    #[test]
+    fn minphase_butterworth_hp_has_phase() {
+        let t = target_with_hp(make_filter(FilterType::Butterworth, 2, 100.0, None, false));
+        let (_, ph) = eval_at(&t, 100.0);
+        assert!(ph.abs() > 10.0, "BW2 HP min-phase at fc should have significant phase, got {}", ph);
+    }
+
+    #[test]
+    fn minphase_linkwitz_riley_lp_has_phase() {
+        // LR4 = BW2 squared → phase at fc = 2×(-90°) = -180° which wraps to ±180° or 0°
+        // Test at f > fc where phase is unambiguous
+        let t = target_with_lp(make_filter(FilterType::LinkwitzRiley, 4, 2000.0, None, false));
+        let (_, ph) = eval_at(&t, 4000.0);
+        assert!(ph.abs() > 10.0, "LR4 LP min-phase above fc should have significant phase, got {}", ph);
+    }
+
+    #[test]
+    fn minphase_bessel_hp_has_phase() {
+        let t = target_with_hp(make_filter(FilterType::Bessel, 4, 200.0, None, false));
+        let (_, ph) = eval_at(&t, 200.0);
+        assert!(ph.abs() > 10.0, "Bessel4 HP min-phase at fc should have significant phase, got {}", ph);
+    }
+
+    #[test]
+    fn minphase_custom_q_lp_has_phase() {
+        let mut f = make_filter(FilterType::Custom, 2, 5000.0, None, false);
+        f.q = Some(0.707);
+        let t = target_with_lp(f);
+        let (_, ph) = eval_at(&t, 5000.0);
+        assert!(ph.abs() > 10.0, "Custom LP min-phase at fc should have significant phase, got {}", ph);
+    }
+
+    // --- Gaussian min-phase = false → phase is STILL zero in evaluate() (Hilbert is external) ---
+
+    #[test]
+    fn gaussian_minphase_flag_still_zero_phase_in_evaluate() {
+        // Gaussian has no analytical phase — evaluate() always returns 0 for Gaussian
+        // Hilbert is applied externally by frontend
+        let t = target_with_hp(make_filter(FilterType::Gaussian, 4, 100.0, Some(2.0), false));
+        for &f in &[50.0, 100.0, 500.0, 1000.0] {
+            let (_, ph) = eval_at(&t, f);
+            assert!(ph.abs() < 1e-10,
+                "Gaussian HP in evaluate() should return 0° even with linear_phase=false at {}Hz, got {}", f, ph);
+        }
+    }
+
+    #[test]
+    fn gaussian_minphase_flag_magnitude_unchanged() {
+        // Magnitude should be identical regardless of linear_phase flag
+        let t_lin = target_with_lp(make_filter(FilterType::Gaussian, 4, 2000.0, Some(2.0), true));
+        let t_min = target_with_lp(make_filter(FilterType::Gaussian, 4, 2000.0, Some(2.0), false));
+        for &f in &[100.0, 2000.0, 5000.0, 10000.0] {
+            let (m_lin, _) = eval_at(&t_lin, f);
+            let (m_min, _) = eval_at(&t_min, f);
+            assert!((m_lin - m_min).abs() < 1e-10,
+                "Gaussian mag should be same for lin/min-phase at {}Hz: lin={} min={}", f, m_lin, m_min);
+        }
+    }
+
+    // --- Mixed filter types: HP and LP different types ---
+
+    #[test]
+    fn mixed_gaussian_hp_butterworth_lp() {
+        let t = target_with_hp_lp(
+            make_filter(FilterType::Gaussian, 4, 80.0, Some(2.0), false),
+            make_filter(FilterType::Butterworth, 4, 3000.0, None, false),
+        );
+        let freq = log_freq_grid(20.0, 20000.0, 500);
+        let resp = evaluate(&t, &freq);
+        // HP Gaussian: phase = 0 (no analytical)
+        // LP Butterworth: phase != 0 (analytical)
+        // So total phase should come only from Butterworth LP
+        let bw_only = target_with_lp(make_filter(FilterType::Butterworth, 4, 3000.0, None, false));
+        let resp_bw = evaluate(&bw_only, &freq);
+        for j in 0..freq.len() {
+            assert!((resp.phase[j] - resp_bw.phase[j]).abs() < 1e-6,
+                "Mixed Gauss HP + BW LP: phase should equal BW-only phase at {:.0}Hz", freq[j]);
+        }
+    }
+
+    #[test]
+    fn mixed_butterworth_hp_gaussian_lp() {
+        let t = target_with_hp_lp(
+            make_filter(FilterType::Butterworth, 2, 80.0, None, false),
+            make_filter(FilterType::Gaussian, 4, 5000.0, Some(2.0), false),
+        );
+        let freq = log_freq_grid(20.0, 20000.0, 500);
+        let resp = evaluate(&t, &freq);
+        // Phase should come only from Butterworth HP
+        let bw_only = target_with_hp(make_filter(FilterType::Butterworth, 2, 80.0, None, false));
+        let resp_bw = evaluate(&bw_only, &freq);
+        for j in 0..freq.len() {
+            assert!((resp.phase[j] - resp_bw.phase[j]).abs() < 1e-6,
+                "Mixed BW HP + Gauss LP: phase should equal BW-only phase at {:.0}Hz", freq[j]);
+        }
+    }
+
+    #[test]
+    fn mixed_linphase_hp_minphase_lp() {
+        // HP linear-phase (no phase) + LP min-phase (has phase) = only LP phase
+        let t = target_with_hp_lp(
+            make_filter(FilterType::Butterworth, 2, 80.0, None, true),
+            make_filter(FilterType::Butterworth, 4, 3000.0, None, false),
+        );
+        let freq = log_freq_grid(20.0, 20000.0, 500);
+        let resp = evaluate(&t, &freq);
+        let lp_only = target_with_lp(make_filter(FilterType::Butterworth, 4, 3000.0, None, false));
+        let resp_lp = evaluate(&lp_only, &freq);
+        for j in 0..freq.len() {
+            assert!((resp.phase[j] - resp_lp.phase[j]).abs() < 1e-6,
+                "Lin HP + Min LP: phase should equal LP-only at {:.0}Hz", freq[j]);
+        }
+    }
+
+    #[test]
+    fn mixed_minphase_hp_linphase_lp() {
+        // HP min-phase (has phase) + LP linear-phase (no phase) = only HP phase
+        let t = target_with_hp_lp(
+            make_filter(FilterType::LinkwitzRiley, 4, 80.0, None, false),
+            make_filter(FilterType::LinkwitzRiley, 4, 5000.0, None, true),
+        );
+        let freq = log_freq_grid(20.0, 20000.0, 500);
+        let resp = evaluate(&t, &freq);
+        let hp_only = target_with_hp(make_filter(FilterType::LinkwitzRiley, 4, 80.0, None, false));
+        let resp_hp = evaluate(&hp_only, &freq);
+        for j in 0..freq.len() {
+            assert!((resp.phase[j] - resp_hp.phase[j]).abs() < 1e-6,
+                "Min HP + Lin LP: phase should equal HP-only at {:.0}Hz", freq[j]);
+        }
+    }
+
+    // --- All orders for each filter type ---
+
+    #[test]
+    fn butterworth_all_orders_hp_phase_scales() {
+        // Phase at fc increases with order: ~45*N degrees
+        // But wrapped to [-180, 180], so for high orders phase wraps
+        for order in 1..=4u8 {
+            let t = target_with_hp(make_filter(FilterType::Butterworth, order, 1000.0, None, false));
+            let (_, ph) = eval_at(&t, 1000.0);
+            let expected = 45.0 * order as f64;
+            assert!(ph.abs() > expected * 0.4 && ph.abs() < expected * 1.6,
+                "BW{} HP phase at fc should be ~{}°, got {}°", order, expected, ph);
+        }
+    }
+
+    #[test]
+    fn linkwitz_riley_all_even_orders_lp_at_fc_minus_6db() {
+        // LR at fc should be -6 dB (not -3 dB like BW)
+        for order in [2, 4, 6, 8] {
+            let t = target_with_lp(make_filter(FilterType::LinkwitzRiley, order, 1000.0, None, false));
+            let (mag, _) = eval_at(&t, 1000.0);
+            assert!((mag - (-6.02)).abs() < 0.5,
+                "LR{} LP at fc should be ~-6dB, got {:.2}dB", order, mag);
+        }
+    }
+
+    // --- 4-band sum with min-phase (non-linear-phase) ---
+
+    #[test]
+    fn crossover_4band_sum_lr4_minphase() {
+        // LR with min-phase: coherent sum deviates because phase wrapping at ±180°
+        // creates destructive interference at crossover points in 4-band sum
+        let (dev, f) = check_4band_sum(
+            FilterType::LinkwitzRiley, 4, None, false,
+            &[100.0, 800.0, 4000.0],
+        );
+        eprintln!("LR4 min-phase: max dev = {:.4} dB @ {:.1} Hz", dev, f);
+        assert!(dev < 6.0, "LR4 min-phase: got {:.4} dB @ {:.1} Hz", dev, f);
+    }
+
+    #[test]
+    fn crossover_4band_sum_lr2_minphase() {
+        let (dev, f) = check_4band_sum(
+            FilterType::LinkwitzRiley, 2, None, false,
+            &[100.0, 800.0, 4000.0],
+        );
+        eprintln!("LR2 min-phase: max dev = {:.4} dB @ {:.1} Hz", dev, f);
+        assert!(dev < 2.0, "LR2 min-phase: got {:.4} dB @ {:.1} Hz", dev, f);
+    }
+
+    #[test]
+    fn crossover_4band_sum_bw2_minphase() {
+        // Butterworth is NOT power-complementary → significant deviation with phase
+        let (dev, f) = check_4band_sum(
+            FilterType::Butterworth, 2, None, false,
+            &[100.0, 800.0, 4000.0],
+        );
+        eprintln!("BW2 min-phase: max dev = {:.4} dB @ {:.1} Hz", dev, f);
+        assert!(dev < 25.0, "BW2 min-phase: got {:.4} dB @ {:.1} Hz", dev, f);
+    }
+
+    // --- Magnitude consistency: lin-phase and min-phase should have same magnitude ---
+
+    #[test]
+    fn magnitude_same_linphase_vs_minphase_butterworth() {
+        let freq = log_freq_grid(20.0, 20000.0, 200);
+        let t_lin = target_with_hp(make_filter(FilterType::Butterworth, 4, 100.0, None, true));
+        let t_min = target_with_hp(make_filter(FilterType::Butterworth, 4, 100.0, None, false));
+        let r_lin = evaluate(&t_lin, &freq);
+        let r_min = evaluate(&t_min, &freq);
+        for j in 0..freq.len() {
+            assert!((r_lin.magnitude[j] - r_min.magnitude[j]).abs() < 1e-10,
+                "BW4 HP mag should be same for lin/min at {:.0}Hz", freq[j]);
+        }
+    }
+
+    #[test]
+    fn magnitude_same_linphase_vs_minphase_linkwitz_riley() {
+        let freq = log_freq_grid(20.0, 20000.0, 200);
+        let t_lin = target_with_lp(make_filter(FilterType::LinkwitzRiley, 4, 3000.0, None, true));
+        let t_min = target_with_lp(make_filter(FilterType::LinkwitzRiley, 4, 3000.0, None, false));
+        let r_lin = evaluate(&t_lin, &freq);
+        let r_min = evaluate(&t_min, &freq);
+        for j in 0..freq.len() {
+            assert!((r_lin.magnitude[j] - r_min.magnitude[j]).abs() < 1e-10,
+                "LR4 LP mag should be same for lin/min at {:.0}Hz", freq[j]);
+        }
+    }
+
+    #[test]
+    fn magnitude_same_linphase_vs_minphase_bessel() {
+        let freq = log_freq_grid(20.0, 20000.0, 200);
+        let t_lin = target_with_hp(make_filter(FilterType::Bessel, 4, 200.0, None, true));
+        let t_min = target_with_hp(make_filter(FilterType::Bessel, 4, 200.0, None, false));
+        let r_lin = evaluate(&t_lin, &freq);
+        let r_min = evaluate(&t_min, &freq);
+        for j in 0..freq.len() {
+            assert!((r_lin.magnitude[j] - r_min.magnitude[j]).abs() < 1e-10,
+                "Bessel4 HP mag should be same for lin/min at {:.0}Hz", freq[j]);
+        }
+    }
+
+    // --- Cross-section (apply_filter) returns same as evaluate for filter-only targets ---
+
+    #[test]
+    fn cross_section_matches_evaluate_butterworth() {
+        let freq = log_freq_grid(20.0, 20000.0, 200);
+        let hp = make_filter(FilterType::Butterworth, 4, 100.0, None, false);
+        let lp = make_filter(FilterType::Butterworth, 4, 5000.0, None, false);
+        let t = target_with_hp_lp(hp.clone(), lp.clone());
+        let resp = evaluate(&t, &freq);
+
+        // Cross-section should give same magnitude and phase (since target has no tilt/shelf)
+        let mut xs_mag = vec![0.0; freq.len()];
+        let mut xs_phase = vec![0.0; freq.len()];
+        apply_filter(&mut xs_mag, &mut xs_phase, &freq, &hp, false);
+        apply_filter(&mut xs_mag, &mut xs_phase, &freq, &lp, true);
+
+        for j in 0..freq.len() {
+            assert!((resp.magnitude[j] - xs_mag[j]).abs() < 1e-6,
+                "XS mag should match evaluate at {:.0}Hz", freq[j]);
+            // Phase comparison must handle wrapping: 179.7° and -180.3° are the same
+            let mut ph_diff = (resp.phase[j] - xs_phase[j]).abs();
+            if ph_diff > 180.0 { ph_diff = 360.0 - ph_diff; }
+            assert!(ph_diff < 1.0,
+                "XS phase should match evaluate at {:.0}Hz: eval={:.1} xs={:.1}", freq[j], resp.phase[j], xs_phase[j]);
+        }
+    }
+
+    #[test]
+    fn cross_section_gaussian_always_zero_phase() {
+        let freq = log_freq_grid(20.0, 20000.0, 200);
+        let hp = make_filter(FilterType::Gaussian, 4, 100.0, Some(2.0), false);
+        let lp = make_filter(FilterType::Gaussian, 4, 5000.0, Some(2.0), false);
+        let mut xs_mag = vec![0.0; freq.len()];
+        let mut xs_phase = vec![0.0; freq.len()];
+        apply_filter(&mut xs_mag, &mut xs_phase, &freq, &hp, false);
+        apply_filter(&mut xs_mag, &mut xs_phase, &freq, &lp, true);
+
+        for j in 0..freq.len() {
+            assert!(xs_phase[j].abs() < 1e-10,
+                "Gaussian cross-section phase should always be 0 at {:.0}Hz, got {}", freq[j], xs_phase[j]);
+        }
+        // But magnitude should NOT be zero
+        let at_1k = freq.iter().position(|&f| f > 1000.0).unwrap();
+        assert!(xs_mag[at_1k].abs() < 0.5, "Gaussian XS passband should be ~0 dB, got {}", xs_mag[at_1k]);
+    }
 }
