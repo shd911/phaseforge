@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PhaseForge — DSP Pipeline</title>
+<style>
+  :root { --bg: #1a1a2e; --card: #16213e; --accent: #0f3460; --text: #e0e0e0; --dim: #8888a0; --hi: #53c9f0; --warn: #ffd700; --green: #22c55e; --red: #ef4444; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font: 15px/1.7 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); padding: 30px; max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 28px; color: var(--hi); margin-bottom: 8px; }
+  h2 { font-size: 22px; color: var(--hi); margin: 40px 0 16px; border-bottom: 1px solid var(--accent); padding-bottom: 6px; }
+  h3 { font-size: 17px; color: var(--warn); margin: 24px 0 10px; }
+  h4 { font-size: 15px; color: var(--green); margin: 16px 0 6px; }
+  p, li { color: var(--text); }
+  .subtitle { color: var(--dim); font-size: 14px; margin-bottom: 30px; }
+  .card { background: var(--card); border-radius: 10px; padding: 20px 24px; margin: 14px 0; border-left: 3px solid var(--accent); }
+  .card.warn { border-left-color: var(--warn); }
+  .card.green { border-left-color: var(--green); }
+  .card.red { border-left-color: var(--red); }
+  .formula { background: #0d1b2a; border-radius: 6px; padding: 10px 16px; font-family: 'Courier New', monospace; font-size: 14px; color: #c0d0e0; margin: 8px 0; overflow-x: auto; white-space: pre; }
+  .pipeline { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
+  .step { background: var(--accent); border-radius: 6px; padding: 6px 14px; font-size: 13px; color: var(--hi); }
+  .arrow { color: var(--dim); font-size: 18px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+  th { background: var(--accent); color: var(--hi); padding: 8px 12px; text-align: left; font-size: 13px; }
+  td { padding: 8px 12px; border-bottom: 1px solid #1e2d4a; font-size: 14px; }
+  tr:hover td { background: #1a2a44; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+  .tag-db { background: #1e3a5f; color: var(--hi); }
+  .tag-deg { background: #3a1e5f; color: #c084fc; }
+  .tag-lin { background: #1e4a3a; color: var(--green); }
+  .tag-ms { background: #4a3a1e; color: var(--warn); }
+  ul { padding-left: 20px; margin: 8px 0; }
+  li { margin: 4px 0; }
+  .note { color: var(--dim); font-size: 13px; font-style: italic; }
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 700px) { .compare { grid-template-columns: 1fr; } }
+  .toc { background: var(--card); border-radius: 10px; padding: 16px 24px; margin: 20px 0; }
+  .toc a { color: var(--hi); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .toc ol { padding-left: 20px; }
+  .toc li { margin: 4px 0; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<h1>PhaseForge — DSP Pipeline</h1>
+<p class="subtitle">Полное описание обработки сигнала: от загрузки замера до экспорта FIR-фильтра. Версия b99, 2026-04-02.</p>
+
+<div class="toc">
+<strong>Содержание</strong>
+<ol>
+  <li><a href="#measurement">Замер (Measurement)</a></li>
+  <li><a href="#target">Таргет (Target)</a></li>
+  <li><a href="#filters">Типы фильтров</a></li>
+  <li><a href="#peq">Параметрический эквалайзер (PEQ)</a></li>
+  <li><a href="#corrected">Скорректированная кривая (Corrected)</a></li>
+  <li><a href="#tabs">Отображение по вкладкам</a></li>
+  <li><a href="#sum">Режим суммирования (SUM)</a></li>
+  <li><a href="#fir">Генерация FIR-фильтра</a></li>
+  <li><a href="#gaussian">Особая обработка Gaussian</a></li>
+  <li><a href="#units">Единицы и соглашения</a></li>
+</ol>
+</div>
+
+<!-- ===== 1. MEASUREMENT ===== -->
+<h2 id="measurement">1. Замер (Measurement)</h2>
+
+<h3>1.1 Загрузка файла</h3>
+<div class="card">
+<p>Пользователь загружает текстовый файл замера в формате REW (.frd / .txt). Файл содержит три столбца:</p>
+<div class="formula">Частота (Гц)   Амплитуда (дБ)   Фаза (градусы, опционально)</div>
+<p>Данные сохраняются в полосу (Band) как массивы: <span class="tag tag-db">freq[]</span>, <span class="tag tag-db">magnitude[]</span>, <span class="tag tag-deg">phase[]</span>.</p>
+</div>
+
+<h3>1.2 Удаление задержки</h3>
+<div class="card">
+<p>Замер содержит задержку распространения звука (расстояние микрофон → динамик). Эта задержка проявляется как линейный наклон фазы. Программа автоматически находит и удаляет её:</p>
+<ol>
+  <li><strong>Метод 1 (при наличии sample rate):</strong> Вычисляет импульсную характеристику через обратное БПФ, находит пик — его позиция = задержка</li>
+  <li><strong>Метод 2 (робастный):</strong> Линейная регрессия фазы по частоте в полосе наилучшего отношения сигнал/шум. Наклон прямой = задержка</li>
+  <li><strong>Перекрёстная проверка:</strong> Если методы расходятся более чем на 50%, используется метод 2 (более устойчив для одиночных драйверов)</li>
+</ol>
+<p>Удаление задержки:</p>
+<div class="formula">фаза_новая[i] = фаза[i] - 360 &times; частота[i] &times; задержка_сек</div>
+<p>После удаления проверяется «перекомпенсация» — если избыточная групповая задержка > 0.2 мс, выдаётся предупреждение.</p>
+</div>
+
+<h3>1.3 Сглаживание</h3>
+<div class="card">
+<p>Амплитуда замера может быть сглажена перед отображением. Доступные режимы:</p>
+<ul>
+  <li><strong>Variable (ERB):</strong> Ширина окна адаптируется к частоте (узкое на НЧ, широкое на ВЧ) — имитирует восприятие человеческого уха</li>
+  <li><strong>Фиксированное:</strong> 1/3, 1/6, 1/12, 1/24 октавы — постоянная ширина в логарифмическом масштабе</li>
+</ul>
+<p class="note">Сглаживание влияет только на отображение, не на внутренние расчёты (PEQ, FIR и т.д. работают с исходными данными).</p>
+</div>
+
+<!-- ===== 2. TARGET ===== -->
+<h2 id="target">2. Таргет (Target)</h2>
+
+<div class="card">
+<p>Таргет — это желаемая АЧХ, к которой нужно привести динамик. Строится из нескольких компонентов, применяемых последовательно:</p>
+
+<div class="pipeline">
+  <span class="step">Базовый уровень (дБ)</span>
+  <span class="arrow">&rarr;</span>
+  <span class="step">Наклон (tilt)</span>
+  <span class="arrow">&rarr;</span>
+  <span class="step">ФВЧ (High-Pass)</span>
+  <span class="arrow">&rarr;</span>
+  <span class="step">ФНЧ (Low-Pass)</span>
+  <span class="arrow">&rarr;</span>
+  <span class="step">Низкочастотная полка</span>
+  <span class="arrow">&rarr;</span>
+  <span class="step">Высокочастотная полка</span>
+</div>
+</div>
+
+<h3>2.1 Базовый уровень</h3>
+<div class="card">
+<p>Начальная точка — горизонтальная прямая на заданном уровне (например, 0 дБ). Все остальные компоненты добавляются к ней.</p>
+</div>
+
+<h3>2.2 Наклон (Tilt)</h3>
+<div class="card">
+<p>Линейный наклон в логарифмическом масштабе частоты. Задаётся в дБ/октаву относительно опорной частоты (обычно 1000 Гц).</p>
+<div class="formula">амплитуда[i] += наклон &times; log2(частота[i] / опорная_частота)</div>
+<p>Типичные значения: от -3 до +3 дБ/октаву. Используется для компенсации нарастания мощности к ВЧ в помещении.</p>
+</div>
+
+<h3>2.3 Фильтры ВЧ и НЧ (High-Pass / Low-Pass)</h3>
+<div class="card">
+<p>Каждый фильтр вычисляет два массива:</p>
+<ul>
+  <li><span class="tag tag-db">Амплитуда (дБ)</span> — всегда вычисляется, определяет крутизну среза</li>
+  <li><span class="tag tag-deg">Фаза (градусы)</span> — зависит от типа фильтра и флага linear_phase</li>
+</ul>
+<p><strong>Флаг linear_phase = true:</strong> фаза = 0° на всех частотах. Фильтр воздействует только на амплитуду, не вращая фазу.</p>
+<p><strong>Флаг linear_phase = false:</strong> фаза вычисляется из аналитической передаточной функции (зависит от типа фильтра). Для Gaussian — особый случай (см. раздел 9).</p>
+</div>
+
+<h3>2.4 Полочные фильтры (Shelf)</h3>
+<div class="card">
+<p>Низкочастотная и высокочастотная полки добавляют усиление/ослабление ниже или выше заданной частоты. Реализованы как аналоговые фильтры 2-го порядка (формулы из RBJ Audio EQ Cookbook). Контролируются частотой, усилением (дБ) и добротностью Q.</p>
+</div>
+
+<h3>2.5 Итоговый таргет</h3>
+<div class="card">
+<p>Все компоненты складываются последовательно в дБ (амплитуда) и градусах (фаза). На выходе — кривая, описывающая желаемый отклик:</p>
+<div class="formula">Амплитуда_итого = базовый + наклон + ФВЧ + ФНЧ + полка_НЧ + полка_ВЧ
+Фаза_итого = 0 + 0 + фаза_ФВЧ + фаза_ФНЧ + фаза_полки_НЧ + фаза_полки_ВЧ</div>
+<p>Фаза оборачивается в диапазон [-180°, +180°] для отображения.</p>
+</div>
+
+<!-- ===== 3. FILTERS ===== -->
+<h2 id="filters">3. Типы фильтров</h2>
+
+<table>
+<thead>
+<tr><th>Тип</th><th>Крутизна</th><th>Фаза</th><th>Групповая задержка</th><th>Особенности</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>Butterworth</strong></td><td>-6N дБ/окт</td><td>Аналитическая (±45N° на fc)</td><td>Неравномерная, пик на fc</td><td>Максимально плоская АЧХ в полосе пропускания</td></tr>
+<tr><td><strong>Linkwitz-Riley</strong></td><td>-12N дБ/окт</td><td>2 &times; Butterworth</td><td>2 &times; Butterworth</td><td>Сумма LP + HP = 0 дБ (power-complementary). Стандарт кроссоверов</td></tr>
+<tr><td><strong>Bessel</strong></td><td>-6N дБ/окт</td><td>Аналитическая</td><td>Максимально плоская</td><td>Минимальный звон, лучший step-отклик</td></tr>
+<tr><td><strong>Gaussian</strong></td><td>Плавная</td><td>0° (нет аналитической)</td><td>—</td><td>LP + HP = 0 дБ при M &ge; 2. Для min-phase: Hilbert</td></tr>
+<tr><td><strong>Custom Q</strong></td><td>Зависит от Q</td><td>Аналитическая</td><td>Зависит от Q</td><td>Каскад биквадных секций с пользовательской добротностью</td></tr>
+</tbody>
+</table>
+
+<h3>Gaussian — подробнее</h3>
+<div class="card warn">
+<p>Gaussian фильтр определён на <strong>линейной</strong> шкале частот:</p>
+<div class="formula">H(f) = exp(-ln(2) &times; (f / fc) ^ (2M))</div>
+<p>Где M — коэффициент формы (1..10). На частоте среза fc: H = 0.5 (−6 дБ), как у Linkwitz-Riley.</p>
+<p><strong>Ключевое свойство:</strong> при M &ge; 2 сумма LP + HP = 1.0 (идеально плоская). Это делает Gaussian идеальным для кроссоверов.</p>
+<p><strong>Проблема:</strong> Для Gaussian нет аналитической формулы фазы в частотной области. Поэтому:</p>
+<ul>
+  <li>В режиме <strong>linear_phase</strong>: фаза = 0° (только амплитуда)</li>
+  <li>В режиме <strong>min-phase</strong>: фаза вычисляется через преобразование Гильберта от амплитуды</li>
+</ul>
+</div>
+
+<!-- ===== 4. PEQ ===== -->
+<h2 id="peq">4. Параметрический эквалайзер (PEQ)</h2>
+
+<div class="card">
+<p>PEQ — набор параметрических полос, каждая задаётся тремя параметрами:</p>
+<ul>
+  <li><strong>Частота (Гц)</strong> — центральная частота воздействия</li>
+  <li><strong>Усиление (дБ)</strong> — подъём (+) или срез (−)</li>
+  <li><strong>Добротность Q</strong> — ширина воздействия (выше Q = уже полоса)</li>
+</ul>
+<p>Каждая полоса реализована как цифровой биквадный фильтр 2-го порядка (IIR). Для каждой частоты замера вычисляется комплексная передаточная функция — из неё извлекаются амплитуда (дБ) и фаза (градусы).</p>
+<p>Результаты всех полос <strong>складываются</strong> (в дБ для амплитуды, в градусах для фазы).</p>
+</div>
+
+<h3>Автоматическая оптимизация PEQ</h3>
+<div class="card">
+<p>Алгоритм Левенберга-Марквардта (LMA) автоматически подбирает параметры PEQ-полос, минимизируя разницу между замером и таргетом:</p>
+<ol>
+  <li>Инициализация: грубый подбор полос по наибольшим отклонениям</li>
+  <li>Итеративная оптимизация: одновременная подстройка всех параметров (f, G, Q)</li>
+  <li>Ограничения: частота в пределах полосы, усиление ограничено, Q &isin; [0.5, 10]</li>
+</ol>
+<p><strong>Весовая функция:</strong> Более чувствительная в полосе 800–5000 Гц (зона максимальной чувствительности слуха), менее чувствительная выше LP-фильтра, нулевой вес на глубоких провалах (акустические нули не корректируются).</p>
+</div>
+
+<!-- ===== 5. CORRECTED ===== -->
+<h2 id="corrected">5. Скорректированная кривая (Corrected)</h2>
+
+<div class="card green">
+<p>Corrected = Замер + PEQ + Кроссовер. Показывает, как будет выглядеть отклик после коррекции.</p>
+
+<div class="pipeline">
+  <span class="step">Замер (mag, phase)</span>
+  <span class="arrow">&rarr;</span>
+  <span class="step">+ PEQ (mag, phase)</span>
+  <span class="arrow">&rarr;</span>
+  <span class="step">+ Кроссовер (mag, phase)</span>
+  <span class="arrow">=</span>
+  <span class="step">Corrected</span>
+</div>
+
+<p>Все сложения — в дБ для амплитуды и в градусах для фазы (эквивалент умножения комплексных спектров).</p>
+</div>
+
+<h3>5.1 Кроссовер (Cross-Section)</h3>
+<div class="card">
+<p>Функция <em>cross-section</em> вычисляет вклад <strong>только фильтров ВЧ/НЧ</strong> (без наклона, полок и базового уровня). Возвращает амплитуду и фазу фильтров.</p>
+<p><strong>Отличие от таргета:</strong></p>
+<table>
+<tr><th>Таргет (evaluate_target)</th><th>Кроссовер (cross-section)</th></tr>
+<tr><td>Все компоненты: наклон + полки + фильтры</td><td>Только ФВЧ + ФНЧ</td></tr>
+<tr><td>Абсолютный уровень (с базовым)</td><td>Относительный (добавляется к замеру)</td></tr>
+<tr><td>Для отображения таргетной кривой</td><td>Для расчёта corrected = замер + кроссовер</td></tr>
+</table>
+</div>
+
+<h3>5.2 Проблема Gaussian в Corrected</h3>
+<div class="card red">
+<p><strong>Текущее ограничение:</strong> Cross-section для Gaussian фильтров возвращает фазу = 0°, т.к. аналитическая фаза отсутствует. Это означает, что кривая Corrected не учитывает фазовый вклад Gaussian кроссовера в режиме min-phase.</p>
+<p>На вкладке <strong>Target</strong> эта проблема решена — используется преобразование Гильберта. Но в corrected path на вкладках IR/Step фаза кроссовера Gaussian = 0, что приводит к некорректной позиции импульса и степа.</p>
+</div>
+
+<!-- ===== 6. TABS ===== -->
+<h2 id="tabs">6. Отображение по вкладкам</h2>
+
+<h3>6.1 SPL / Freq — Амплитудно-частотная характеристика</h3>
+<div class="card">
+<p><strong>Левая ось Y:</strong> Амплитуда (дБ). <strong>Правая ось Y:</strong> Фаза (градусы, [-180°, +180°]).</p>
+<p>Кривые:</p>
+<ul>
+  <li><strong>Measurement</strong> — замер (сплошная) + фаза замера (штриховая)</li>
+  <li><strong>Target</strong> — таргет (сплошная) + фаза таргета (штриховая)</li>
+  <li><strong>Corrected</strong> — скорректированная (сплошная) + фаза скорректированной (штриховая)</li>
+</ul>
+<p>Все фазовые кривые обёрнуты в [-180°, +180°].</p>
+</div>
+
+<h3>6.2 IR / Step — Импульсная и переходная характеристики</h3>
+<div class="card">
+<p>Преобразование из частотной области во временну́ю через обратное БПФ:</p>
+
+<div class="pipeline">
+  <span class="step">Амплитуда + Фаза</span>
+  <span class="arrow">&rarr;</span>
+  <span class="step">Комплексный спектр</span>
+  <span class="arrow">&rarr;</span>
+  <span class="step">ОБПФ (IFFT)</span>
+  <span class="arrow">&rarr;</span>
+  <span class="step">Импульс</span>
+  <span class="arrow">&rarr;</span>
+  <span class="step">Кумулятивная сумма = Step</span>
+</div>
+
+<p><strong>Алгоритм:</strong></p>
+<ol>
+  <li>Выбор размера БПФ: N = max(4 &times; кол-во точек, 4096), округлённый до степени 2</li>
+  <li>Интерполяция амплитуды/фазы на линейную сетку частот (0 Гц → Найквист)</li>
+  <li>Построение комплексного спектра: H[k] = 10^(mag/20) &times; e^(j&times;phase)</li>
+  <li>Зеркальное отражение для сопряжённой симметрии (отрицательные частоты)</li>
+  <li>ОБПФ → импульс во временной области</li>
+  <li>Переупорядочивание: пик импульса выравнивается на t=0</li>
+  <li>Нормализация: пик = 100%</li>
+  <li>Step = кумулятивная сумма импульса, нормализованная по пику</li>
+</ol>
+<p><strong>Три кривые:</strong> Measurement IR/Step, Target IR/Step, Corrected IR/Step.</p>
+</div>
+
+<h3>6.3 GD — Групповая задержка</h3>
+<div class="card">
+<p>Групповая задержка — производная фазы по частоте (с обратным знаком):</p>
+<div class="formula">GD(f) = -(1 / 360) &times; d(фаза) / d(частота)   [секунды]</div>
+<p>Вычисляется численно (центральная разность). Фаза предварительно разворачивается (unwrap), чтобы избежать скачков на ±180°.</p>
+<p><strong>Три кривые:</strong> GD замера, GD таргета, GD скорректированной.</p>
+</div>
+
+<h3>6.4 Export — Модель vs FIR</h3>
+<div class="card">
+<p>Вкладка Export показывает сравнение идеальной модели и реализованного FIR-фильтра:</p>
+<ul>
+  <li><strong>Model dB / Model °</strong> — целевая амплитуда и фаза (таргет + PEQ, нормализованные)</li>
+  <li><strong>FIR dB / FIR °</strong> — реализованная АЧХ и фаза FIR-фильтра</li>
+</ul>
+<p><strong>Метрики:</strong> количество отсчётов (taps), частота дискретизации, тип окна, каузальность, pre-ringing, ошибка амплитуды, пульсации групповой задержки.</p>
+</div>
+
+<!-- ===== 7. SUM ===== -->
+<h2 id="sum">7. Режим суммирования (SUM)</h2>
+
+<div class="card">
+<p>В SUM-режиме несколько полос (Band) суммируются когерентно — с учётом фазы, как в реальной акустической системе.</p>
+
+<h4>Алгоритм когерентного суммирования:</h4>
+<ol>
+  <li>Для каждой полосы: нормализация амплитуды по пику (все полосы вносят равный вклад)</li>
+  <li>Перевод в прямоугольные координаты:
+    <div class="formula">Re[i] += A &times; cos(phase)
+Im[i] += A &times; sin(phase)
+где A = 10^((mag + offset) / 20)</div>
+  </li>
+  <li>Накопление Re и Im по всем полосам</li>
+  <li>Обратный перевод в амплитуду/фазу:
+    <div class="formula">mag_sum = 20 &times; log10(sqrt(Re&sup2; + Im&sup2;))
+phase_sum = atan2(Im, Re) &times; 180/&pi;</div>
+  </li>
+  <li>Вычисление IR/Step из суммарного спектра через ОБПФ</li>
+</ol>
+<p><strong>Суммируются отдельно:</strong> Σ замеров, Σ таргетов, Σ скорректированных.</p>
+</div>
+
+<!-- ===== 8. FIR ===== -->
+<h2 id="fir">8. Генерация FIR-фильтра</h2>
+
+<div class="card">
+<p>FIR (Finite Impulse Response) — конечный импульсный отклик, экспортируемый как WAV-файл для применения в DSP-процессоре.</p>
+
+<div class="pipeline">
+  <span class="step">Таргет (mag+phase)</span>
+  <span class="arrow">&rarr;</span>
+  <span class="step">+ PEQ</span>
+  <span class="arrow">&rarr;</span>
+  <span class="step">Модель</span>
+  <span class="arrow">&rarr;</span>
+  <span class="step">FIR engine</span>
+  <span class="arrow">&rarr;</span>
+  <span class="step">Импульс</span>
+  <span class="arrow">&rarr;</span>
+  <span class="step">WAV</span>
+</div>
+</div>
+
+<h3>8.1 Пайплайн FIR</h3>
+<div class="card">
+<ol>
+  <li><strong>Формирование целевой коррекции:</strong>
+    <ul>
+      <li>В полосе пропускания (между ФВЧ и ФНЧ): используется таргет</li>
+      <li>За пределами полосы: плавный переход к сглаженному замеру (сигмоидный бленд ±0.5 октавы)</li>
+    </ul>
+  </li>
+  <li><strong>Коррекция = таргет − замер</strong> (в дБ)</li>
+  <li><strong>Интерполяция</strong> на линейную сетку БПФ (0 → Найквист)</li>
+  <li><strong>Ограничения:</strong>
+    <ul>
+      <li>Максимальный подъём (max_boost_db) — ограничивает пиковую коррекцию</li>
+      <li>Шумовой порог (noise_floor_db) — обрезает коррекцию в шуме</li>
+      <li>Узкополосное ограничение — сглаживание 1/3 октавы, ограничение превышения над сглаженной кривой</li>
+    </ul>
+  </li>
+  <li><strong>Фаза:</strong>
+    <ul>
+      <li><strong>Min-phase:</strong> Гильберт от логарифма амплитуды коррекции → минимально-фазовая</li>
+      <li><strong>Linear-phase:</strong> Фаза = 0 (симметричный импульс)</li>
+      <li><strong>Hybrid:</strong> Коррекция (min-phase) + форма фильтра (linear-phase)</li>
+    </ul>
+  </li>
+  <li><strong>ОБПФ</strong> → временно́й импульс</li>
+  <li><strong>Оконная функция:</strong> Hann / Blackman / Kaiser — подавляет артефакты обрезки</li>
+  <li><strong>Итеративное уточнение:</strong> До 10 итераций — измерение отклонения реализованного FIR от цели, компенсация</li>
+  <li><strong>Нормализация:</strong> Пик реализованного спектра = 0 дБ</li>
+</ol>
+</div>
+
+<h3>8.2 Режимы фазы FIR</h3>
+<div class="compare">
+<div class="card">
+  <h4>Minimum-Phase</h4>
+  <ul>
+    <li>Каузальный (нет pre-ringing)</li>
+    <li>Полуокно (правая часть симметричного)</li>
+    <li>Минимальная задержка</li>
+    <li>Фаза зависит от амплитуды коррекции</li>
+  </ul>
+</div>
+<div class="card">
+  <h4>Linear-Phase</h4>
+  <ul>
+    <li>Симметричный импульс (pre-ringing = post-ringing)</li>
+    <li>Полное окно</li>
+    <li>Постоянная задержка = N/2 отсчётов</li>
+    <li>Нулевая фазовая ошибка</li>
+  </ul>
+</div>
+</div>
+
+<!-- ===== 9. GAUSSIAN ===== -->
+<h2 id="gaussian">9. Особая обработка Gaussian</h2>
+
+<div class="card warn">
+<p>Gaussian — единственный тип фильтра, для которого нет аналитической формулы фазы. Это требует особой обработки в разных частях программы:</p>
+
+<table>
+<thead><tr><th>Где</th><th>linear_phase = true</th><th>linear_phase = false (min-phase)</th></tr></thead>
+<tbody>
+<tr><td>Вычисление таргета</td><td>Фаза = 0°</td><td>Фаза = 0° (аналитической нет)</td></tr>
+<tr><td>Отображение фазы таргета</td><td>0°</td><td><strong>Гильберт от амплитуды таргета</strong></td></tr>
+<tr><td>Cross-section (corrected)</td><td>0°</td><td>0° <span style="color:var(--red)">(проблема!)</span></td></tr>
+<tr><td>FIR генерация</td><td>LinearPhase mode</td><td><strong>MinimumPhase mode + Гильберт</strong></td></tr>
+<tr><td>WAV экспорт</td><td>LinearPhase</td><td><strong>MinimumPhase + Гильберт</strong></td></tr>
+</tbody>
+</table>
+
+<p style="margin-top:12px"><strong>Известное ограничение (b99):</strong> Corrected IR/Step не получает фазу Gaussian min-phase от кроссовера, т.к. cross-section возвращает 0°. Это влияет на позицию и форму corrected step для басовых полос с Gaussian кроссовером.</p>
+</div>
+
+<h3>Преобразование Гильберта</h3>
+<div class="card">
+<p>Вычисляет минимально-фазовую характеристику из амплитуды:</p>
+<ol>
+  <li>Интерполяция амплитуды на линейную сетку БПФ</li>
+  <li>Ограничение динамического диапазона (80 дБ)</li>
+  <li>Вычисление ln(амплитуда_линейная)</li>
+  <li>БПФ → применение окна Гильберта (×2 для положительных частот, ×0 для отрицательных) → ОБПФ</li>
+  <li>Мнимая часть результата = минимально-фазовая характеристика (радианы)</li>
+  <li>Обратная интерполяция на логарифмическую сетку, перевод в градусы</li>
+</ol>
+</div>
+
+<!-- ===== 10. UNITS ===== -->
+<h2 id="units">10. Единицы и соглашения</h2>
+
+<table>
+<thead><tr><th>Величина</th><th>Единицы</th><th>Диапазон</th><th>Примечания</th></tr></thead>
+<tbody>
+<tr><td>Амплитуда</td><td><span class="tag tag-db">дБ</span></td><td>-200 ... +20</td><td>Относительно линейной 1.0 = 0 дБ</td></tr>
+<tr><td>Фаза</td><td><span class="tag tag-deg">градусы</span></td><td>-180 ... +180</td><td>Обёрнута (wrapped) по соглашению REW</td></tr>
+<tr><td>Частота</td><td>Гц</td><td>20 ... 20000</td><td>Логарифмическая шкала на графиках</td></tr>
+<tr><td>Групповая задержка</td><td><span class="tag tag-ms">мс</span></td><td>-5 ... +50</td><td>Из производной фазы</td></tr>
+<tr><td>Задержка</td><td>секунды</td><td>0 ... 0.1</td><td>Из наклона фазы</td></tr>
+<tr><td>Расстояние</td><td>метры</td><td>0 ... 34</td><td>задержка &times; 343 м/с</td></tr>
+<tr><td>Импульс / Step</td><td><span class="tag tag-lin">%</span></td><td>-100 ... 100</td><td>Нормализованы по пику</td></tr>
+<tr><td>PEQ Q</td><td>безразм.</td><td>0.5 ... 10</td><td>Добротность биквадного фильтра</td></tr>
+<tr><td>Gaussian M</td><td>безразм.</td><td>0.5 ... 10</td><td>Коэффициент формы</td></tr>
+<tr><td>FIR taps</td><td>отсчёты</td><td>512 ... 65536</td><td>Длина фильтра (степень 2)</td></tr>
+</tbody>
+</table>
+
+<div style="margin-top:40px; padding-top:20px; border-top:1px solid var(--accent); color:var(--dim); font-size:12px;">
+PhaseForge v0.1.0-b99 &mdash; Tauri 2 + Rust + SolidJS &mdash; DSP Pipeline Documentation
+</div>
+
+</body>
+</html>

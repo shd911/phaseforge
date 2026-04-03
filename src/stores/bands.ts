@@ -688,8 +688,9 @@ export function updatePeqBand(bandId: string, peqIdx: number, patch: Partial<Peq
 export function commitPeqBand(bandId: string, peqIdx: number): number {
   const idx = bandIndex(bandId);
   if (idx < 0) return peqIdx;
-  // No sort — manual bands stay at their position (top of list)
-  markDirty();
+  // Mark project dirty for save, but don't bump bandsVersion —
+  // PEQ drag already triggered fast updates, no need for full rebuild
+  if (!isDirty()) setIsDirty(true);
   return peqIdx;
 }
 

@@ -360,6 +360,8 @@ export default function FrequencyPlot() {
   const [showGdCorr, setShowGdCorr] = createSignal(true);
   // Export colors derived from band
   const [exportColors, setExportColors] = createSignal({ model: "#FF9F43", fir: "#38BDF8", modelPhase: "#9b8060", firPhase: "#1a6e8a" });
+  // Export loading indicator
+  const [exportComputing, setExportComputing] = createSignal(false);
   // Export legend visibility
   const [showExpModel, setShowExpModel] = createSignal(true);
   const [showExpFir, setShowExpFir] = createSignal(true);
@@ -930,23 +932,23 @@ export default function FrequencyPlot() {
     }
     // Discard non-positive X scales (from IR/GD linear chart) — log freq scale needs x > 0
     if (savedXMin != null && savedXMin <= 0) { savedXMin = null; savedXMax = null; }
-    if (chart) {
-      // Remove event listeners before destroying
-      if (chart.over) {
-        chart.over.removeEventListener("mousemove", handleXoMouseMove);
-        chart.over.removeEventListener("mousedown", handleXoMouseDown);
-        chart.over.removeEventListener("dblclick", handleXoDblClick);
-        chart.over.removeEventListener("dblclick", handlePeqDblClick);
-        chart.over.removeEventListener("mousedown", handlePeqMouseDown);
-        chart.over.removeEventListener("wheel", handlePeqWheel);
-        chart.over.removeEventListener("mousedown", handleZoomBoxDown);
-        chart.over.removeEventListener("contextmenu", handleContextMenu);
+    // Defer old chart cleanup — destroy AFTER new chart is created to avoid visual gap
+    const oldChart = chart;
+    if (oldChart) {
+      if (oldChart.over) {
+        oldChart.over.removeEventListener("mousemove", handleXoMouseMove);
+        oldChart.over.removeEventListener("mousedown", handleXoMouseDown);
+        oldChart.over.removeEventListener("dblclick", handleXoDblClick);
+        oldChart.over.removeEventListener("dblclick", handlePeqDblClick);
+        oldChart.over.removeEventListener("mousedown", handlePeqMouseDown);
+        oldChart.over.removeEventListener("wheel", handlePeqWheel);
+        oldChart.over.removeEventListener("mousedown", handleZoomBoxDown);
+        oldChart.over.removeEventListener("contextmenu", handleContextMenu);
       }
       window.removeEventListener("mousemove", handleZoomBoxMove);
       window.removeEventListener("mouseup", handleZoomBoxUp);
-      try { chart.destroy(); } catch (_) {}
-      chart = undefined;
     }
+    chart = undefined;
 
     const rect = containerRef.getBoundingClientRect();
     const w = Math.max(rect.width, 400);
@@ -1055,6 +1057,7 @@ export default function FrequencyPlot() {
         setScale: [
           (u: uPlot, key: string) => {
             if (key !== "x") return;
+            if (peqDragActive) return; // don't sync X during PEQ drag
             const s = u.scales["x"];
             if (s?.min != null && s?.max != null && s.min > 0) {
               setSharedXScale({ min: s.min, max: s.max });
@@ -1287,8 +1290,11 @@ export default function FrequencyPlot() {
     try {
       cacheOrigStrokes(input.uSeries);
       chart = new uPlot(opts, input.uData as uPlot.AlignedData, containerRef);
+      // Destroy old chart AFTER new one is in the DOM — no visual gap
+      if (oldChart) { try { oldChart.destroy(); } catch (_) {} }
     } catch (e) {
       console.error("uPlot error:", e);
+      if (oldChart) { try { oldChart.destroy(); } catch (_) {} }
     }
 
     // Update legend state (visibility was already applied to series before chart creation)
@@ -1562,7 +1568,8 @@ export default function FrequencyPlot() {
       }
       activePeqDots = { seriesIdx: peqSi, dataIndices: newDotIndices };
 
-      chart.setData(newData as uPlot.AlignedData);
+      chart.setData(newData as uPlot.AlignedData, false);
+      chart.redraw(false, false);
     } catch (_) {}
   }
 
@@ -1588,6 +1595,12 @@ export default function FrequencyPlot() {
     // During PEQ drag: skip full rebuild, use fast in-place update
     if (dragging && chart && pTab === "freq" && !sumMode && band) {
       peqFastUpdate(band);
+      return;
+    }
+    // After PEQ drag ends: chart already shows correct PEQ via fast updates.
+    // Skip full rebuild to prevent visual jump. Full rebuild on next real change.
+    if (!dragging && peqDragJustEnded && chart && pTab === "freq" && !sumMode) {
+      peqDragJustEnded = false;
       return;
     }
 
@@ -1660,11 +1673,12 @@ export default function FrequencyPlot() {
     const gen = ++renderGen;
     if (!band || !band.target) {
       try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
-      setShowLegend(false);
+      setShowLegend(false); setExportComputing(false);
       setCursorFreq("—"); setCursorSPL("—"); setCursorPhase("—");
       return;
     }
 
+    setExportComputing(true);
     try {
       const sr = exportSampleRate();
       const taps = exportTaps();
@@ -1878,8 +1892,10 @@ export default function FrequencyPlot() {
         if (!showExpModelPh()) chart.setSeries(3, { show: false });
         if (!showExpFirPh()) chart.setSeries(4, { show: false });
       } catch (e) { console.error(e); }
+      setExportComputing(false);
     } catch (e) {
       console.error("Export tab render failed:", e);
+      setExportComputing(false);
     }
   }
 
@@ -3955,6 +3971,7 @@ export default function FrequencyPlot() {
   let peqDragBandId = "";
   let peqDragActive = false;
   let peqDragMoved = false; // true if mouse actually moved during drag
+  let peqDragJustEnded = false; // suppress one rebuild after drag ends
   let peqDragTimeout: ReturnType<typeof setTimeout> | null = null;
 
   function handlePeqMouseDown(e: MouseEvent) {
@@ -4001,7 +4018,7 @@ export default function FrequencyPlot() {
 
     if (bestIdx >= 0) {
       e.preventDefault();
-      e.stopPropagation();
+      e.stopImmediatePropagation();
       peqDragIdx = bestIdx;
       peqDragBandId = bd.id;
       peqDragActive = true;
@@ -4040,18 +4057,12 @@ export default function FrequencyPlot() {
   function handlePeqDragUp() {
     window.removeEventListener("mousemove", handlePeqDragMove);
     window.removeEventListener("mouseup", handlePeqDragUp);
+    if (peqDragMoved && peqDragActive && peqDragIdx >= 0) {
+      const newIdx = commitPeqBand(peqDragBandId, peqDragIdx);
+      setSelectedPeqIdx(newIdx);
+    }
     if (peqDragMoved) {
-      // Real drag occurred — commit and rebuild
-      if (chart) {
-        const ms = chart.scales["mag"];
-        const xs = chart.scales["x"];
-        if (ms?.min != null && ms?.max != null) { persistedMagMin = ms.min; persistedMagMax = ms.max; }
-        if (xs?.min != null && xs?.max != null) { persistedXMin = xs.min; persistedXMax = xs.max; }
-      }
-      if (peqDragActive && peqDragIdx >= 0) {
-        const newIdx = commitPeqBand(peqDragBandId, peqDragIdx);
-        setSelectedPeqIdx(newIdx);
-      }
+      peqDragJustEnded = true;
       if (peqDragTimeout) clearTimeout(peqDragTimeout);
       peqDragTimeout = setTimeout(() => setPeqDragging(false), 150);
     }
@@ -4507,6 +4518,11 @@ export default function FrequencyPlot() {
       <div class="plot-body">
         <div class="plot-center">
           <div ref={containerRef} class="frequency-plot" />
+          <Show when={exportComputing()}>
+            <div class="plot-computing-overlay">
+              <span class="plot-computing-text">Computing FIR...</span>
+            </div>
+          </Show>
           <div class="axis-controls axis-controls-y axis-controls-y-left">
             <button class="axis-btn" onClick={() => zoomY(0.6)} title="Zoom In dB">+</button>
             <button class="axis-btn" onClick={() => scrollY(1)} title="Scroll Up dB">▲</button>
