@@ -323,6 +323,11 @@ function mapSettingsFromProject(s: ProjectSettings): PerMeasurementSettings {
   };
 }
 
+function cloneFilter(f: import("./types").FilterConfig | null | undefined): import("./types").FilterConfig | null {
+  if (!f) return null;
+  return { filter_type: f.filter_type, order: f.order, freq_hz: f.freq_hz, shape: f.shape, linear_phase: f.linear_phase, q: f.q };
+}
+
 function mapBandFromProject(b: ProjectBand, idx: number): BandState {
   return {
     id: b.id,
@@ -330,7 +335,11 @@ function mapBandFromProject(b: ProjectBand, idx: number): BandState {
     measurement: b.measurement,
     measurementFile: b.measurement_file ?? null,
     settings: b.settings ? mapSettingsFromProject(b.settings) : null,
-    target: b.target,
+    target: {
+      ...b.target,
+      high_pass: cloneFilter(b.target.high_pass),
+      low_pass: cloneFilter(b.target.low_pass),
+    },
     targetEnabled: b.target_enabled,
     inverted: b.inverted,
     linkedToNext: b.linked_to_next,

@@ -202,6 +202,11 @@ function bandIndex(id: string): number {
 }
 
 export function resetAppState(newState: AppState) {
+  // Deep clone filter configs to prevent shared references in SolidJS store
+  for (const b of newState.bands) {
+    if (b.target.high_pass) b.target.high_pass = { ...b.target.high_pass };
+    if (b.target.low_pass) b.target.low_pass = { ...b.target.low_pass };
+  }
   setState(reconcile(newState));
   clearAllExportSnapshots();
   clearAllFreqSnapshots();
@@ -512,6 +517,8 @@ function unwrapFilterConfig(f: import("../lib/types").FilterConfig): import("../
 export function setBandHighPass(bandId: string, config: import("../lib/types").FilterConfig | null) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
+  // Deep clone to prevent shared reference with LP in SolidJS store
+  if (config) config = unwrapFilterConfig(config);
   // Валидация: HP freq не может быть >= LP freq (enforce 5% minimum gap)
   if (config) {
     const lpFreq = state.bands[idx].target.low_pass?.freq_hz;
@@ -550,6 +557,8 @@ export function setBandHighPass(bandId: string, config: import("../lib/types").F
 export function setBandLowPass(bandId: string, config: import("../lib/types").FilterConfig | null) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
+  // Deep clone to prevent shared reference with HP in SolidJS store
+  if (config) config = unwrapFilterConfig(config);
   // Валидация: LP freq не может быть <= HP freq (enforce 5% minimum gap)
   if (config) {
     const hpFreq = state.bands[idx].target.high_pass?.freq_hz;
