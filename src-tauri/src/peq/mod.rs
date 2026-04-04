@@ -22,9 +22,8 @@ mod greedy;
 
 pub use types::*;
 pub use biquad::{apply_peq, peq_band_response, apply_peq_complex};
-pub(crate) use biquad::{peq_band_complex, peq_band_mag_db, biquad_peaking_mag_db};
-pub(crate) use lma::{LmaSolver, cholesky_solve_flat, compute_weights, compute_uniform_weights, apply_exclusion_zones, try_promote_to_shelves};
-pub(crate) use greedy::{greedy_fit_adaptive, estimate_q_from_peak_width, mark_exclusion_zone, find_peak_error_masked, merge_nearby_bands, compute_max_error_in_range};
+pub(crate) use lma::{LmaSolver, compute_weights, compute_uniform_weights, apply_exclusion_zones, try_promote_to_shelves};
+pub(crate) use greedy::{greedy_fit_adaptive, estimate_q_from_peak_width, mark_exclusion_zone, merge_nearby_bands, compute_max_error_in_range};
 
 use tracing::info;
 
@@ -429,6 +428,7 @@ pub fn auto_peq_above_lp(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::biquad::biquad_peaking_mag_db;
     use super::lma::cholesky_solve;
 
     fn make_log_freq(n: usize, f_min: f64, f_max: f64) -> Vec<f64> {

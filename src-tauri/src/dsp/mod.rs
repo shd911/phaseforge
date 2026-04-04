@@ -5,7 +5,7 @@ pub mod merge;
 mod interpolation;
 mod smoothing;
 
-pub use interpolation::{interpolate_linear_grid, interpolate_log_grid};
+pub use interpolation::{interpolate_linear_grid, interpolate_log_grid, interp_1d};
 pub use smoothing::{fractional_octave_smooth, variable_smoothing, SmoothingConfig};
 mod phase;
 pub use phase::minimum_phase_from_magnitude;

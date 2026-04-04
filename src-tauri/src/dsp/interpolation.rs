@@ -55,7 +55,7 @@ pub fn interpolate_linear_grid(
 }
 
 /// Simple linear interpolation with clamping to boundary values.
-fn interp_1d(x_data: &[f64], y_data: &[f64], x_query: &[f64]) -> Vec<f64> {
+pub fn interp_1d(x_data: &[f64], y_data: &[f64], x_query: &[f64]) -> Vec<f64> {
     x_query
         .iter()
         .map(|&xq| interp_single(x_data, y_data, xq))

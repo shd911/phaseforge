@@ -1,13 +1,11 @@
 // FIR correction engine: internal computation helpers
 
-use std::f64::consts::PI;
 
 use num_complex::Complex64;
 use tracing::info;
 
 use crate::dsp::fft::FftEngine;
 use crate::dsp::fractional_octave_smooth;
-use crate::error::AppError;
 
 use super::types::*;
 use super::windowing::*;
@@ -366,22 +364,4 @@ pub(crate) fn circular_shift_to_center(impulse: &mut Vec<f64>) {
 // Internal: linear interpolation helper (for mapping between grids)
 // ---------------------------------------------------------------------------
 
-/// Linear interpolation: map y_data defined on x_data onto x_query.
-/// Out-of-range values are clamped to boundary.
-pub(crate) fn interp_1d_simple(x_data: &[f64], y_data: &[f64], x_query: &[f64]) -> Vec<f64> {
-    x_query.iter().map(|&xq| {
-        if x_data.is_empty() { return 0.0; }
-        if xq <= x_data[0] { return y_data[0]; }
-        if xq >= x_data[x_data.len() - 1] { return y_data[y_data.len() - 1]; }
-        let idx = match x_data.binary_search_by(|v| v.partial_cmp(&xq).unwrap_or(std::cmp::Ordering::Equal)) {
-            Ok(i) => return y_data[i],
-            Err(i) => i,
-        };
-        let x0 = x_data[idx - 1];
-        let x1 = x_data[idx];
-        let y0 = y_data[idx - 1];
-        let y1 = y_data[idx];
-        let t = (xq - x0) / (x1 - x0);
-        y0 + t * (y1 - y0)
-    }).collect()
-}
+// interp_1d_simple removed — use crate::dsp::interp_1d instead

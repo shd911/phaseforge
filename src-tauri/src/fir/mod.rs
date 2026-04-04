@@ -371,8 +371,8 @@ pub fn generate_hybrid_fir(
     }
 
     // Interpolate realized curves back to original log-frequency grid
-    let realized_mag = interp_1d_simple(&lin_freq, &realized_mag_lin, meas_freq);
-    let realized_phase = interp_1d_simple(&lin_freq, &realized_phase_lin, meas_freq);
+    let realized_mag = crate::dsp::interp_1d(&lin_freq, &realized_mag_lin, meas_freq);
+    let realized_phase = crate::dsp::interp_1d(&lin_freq, &realized_phase_lin, meas_freq);
 
     // Build time axis in ms
     let dt_ms = 1000.0 / config.sample_rate;
@@ -710,8 +710,8 @@ pub fn generate_model_fir(
     }
 
     // 7. Interpolate realized back to original log-frequency grid
-    let realized_mag = interp_1d_simple(&lin_freq, &realized_mag_lin, freq);
-    let realized_phase = interp_1d_simple(&lin_freq, &realized_phase_lin, freq);
+    let realized_mag = crate::dsp::interp_1d(&lin_freq, &realized_mag_lin, freq);
+    let realized_phase = crate::dsp::interp_1d(&lin_freq, &realized_phase_lin, freq);
 
     // 8. Passband normalization: shift so peak of realized magnitude = 0 dB
     //    This works for any filter shape (narrow band, wide band, HP, LP, BP).
@@ -1028,11 +1028,11 @@ mod tests {
     }
 
     #[test]
-    fn test_interp_1d_simple() {
+    fn test_interp_1d() {
         let x = vec![1.0, 2.0, 3.0, 4.0];
         let y = vec![10.0, 20.0, 30.0, 40.0];
         let q = vec![0.5, 1.5, 2.5, 3.5, 5.0];
-        let result = interp_1d_simple(&x, &y, &q);
+        let result = crate::dsp::interp_1d(&x, &y, &q);
         assert!((result[0] - 10.0).abs() < 0.01); // clamped
         assert!((result[1] - 15.0).abs() < 0.01);
         assert!((result[2] - 25.0).abs() < 0.01);

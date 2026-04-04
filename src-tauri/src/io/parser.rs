@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use crate::error::AppError;
+use crate::phase::unwrap_phase;
 
 use super::{Measurement, MeasurementMetadata};
 
@@ -151,28 +152,7 @@ fn validate_frequency_order(freq: &[f64]) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Unwrap phase from ±180° wrapped to continuous.
-fn unwrap_phase(wrapped: &[f64]) -> Vec<f64> {
-    if wrapped.is_empty() {
-        return vec![];
-    }
-
-    let mut unwrapped = vec![wrapped[0]];
-
-    for i in 1..wrapped.len() {
-        let mut diff = wrapped[i] - wrapped[i - 1];
-        // Normalize to ±180°
-        while diff > 180.0 {
-            diff -= 360.0;
-        }
-        while diff <= -180.0 {
-            diff += 360.0;
-        }
-        unwrapped.push(unwrapped[i - 1] + diff);
-    }
-
-    unwrapped
-}
+// unwrap_phase removed — using crate::phase::unwrap_phase instead
 
 #[cfg(test)]
 mod tests {
