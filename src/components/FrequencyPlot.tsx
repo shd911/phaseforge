@@ -1735,18 +1735,13 @@ export default function FrequencyPlot() {
       // LinearPhase: all filters lin → symmetric FIR
       // MixedPhase: ONLY when Gaussian filters have MIXED lin/min phase (one lin + one min)
       // MinimumPhase: all non-linear, or all Gaussian min-phase → blanket Hilbert
-      const hasGaussMin = isGaussianMinPhase(target.high_pass) || isGaussianMinPhase(target.low_pass);
-      const hasGaussLin = (target.high_pass?.filter_type === "Gaussian" && target.high_pass?.linear_phase) ||
-                          (target.low_pass?.filter_type === "Gaussian" && target.low_pass?.linear_phase);
-      const isMixed = hasGaussMin && hasGaussLin; // one Gaussian lin + one Gaussian min
-      const phaseMode = allLinear ? "LinearPhase" : isMixed ? "MixedPhase" : "MinimumPhase";
-      const gaussFilters: { freq_hz: number; shape: number; is_lowpass: boolean }[] = [];
-      if (isGaussianMinPhase(target.high_pass)) gaussFilters.push({ freq_hz: target.high_pass!.freq_hz, shape: target.high_pass!.shape ?? 1.0, is_lowpass: false });
-      if (isGaussianMinPhase(target.low_pass)) gaussFilters.push({ freq_hz: target.low_pass!.freq_hz, shape: target.low_pass!.shape ?? 1.0, is_lowpass: true });
+      // FIR: LinearPhase (all lin) or MinimumPhase (any min-phase)
+      // MixedPhase per-filter Hilbert causes phase oscillations in FIR due to windowing
+      // artifacts — this is a physical limitation of single-FIR design.
+      // Per-filter Hilbert is for DISPLAY only (Model curve on SPL/GD/IR tabs).
       const firConfig = {
         taps, sample_rate: sr, max_boost_db: firMaxBoost(), noise_floor_db: firNoiseFloor(),
-        window: win, phase_mode: phaseMode,
-        gaussian_min_phase_filters: gaussFilters,
+        window: win, phase_mode: allLinear ? "LinearPhase" : "MinimumPhase",
         iterations: firIterations(), freq_weighting: firFreqWeighting(),
         narrowband_limit: firNarrowbandLimit(), nb_smoothing_oct: firNbSmoothingOct(),
         nb_max_excess_db: firNbMaxExcess(),
