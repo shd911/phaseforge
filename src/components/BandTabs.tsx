@@ -1,4 +1,5 @@
 import { createSignal, For, Show, onCleanup } from "solid-js";
+import { ask } from "@tauri-apps/plugin-dialog";
 import {
   appState,
   addBand,
@@ -119,11 +120,11 @@ export default function BandTabs() {
               <span
                 class="band-tab-close"
                 onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
+                onClick={async (e) => {
                   e.stopPropagation();
-                  if (window.confirm(`Delete band "${band.name}"?`)) {
-                    removeBand(band.id);
-                  }
+                  e.preventDefault();
+                  const confirmed = await ask(`Delete band "${band.name}"?`, { title: "Delete Band", kind: "warning" });
+                  if (confirmed) removeBand(band.id);
                 }}
                 title={`Delete ${band.name}`}
               >×</span>
