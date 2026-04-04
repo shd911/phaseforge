@@ -14,7 +14,7 @@ use crate::error::AppError;
 // Types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PhaseMode {
     MinimumPhase,
     LinearPhase,
@@ -1269,14 +1269,21 @@ pub fn generate_model_fir(
     );
 
     // 5. Phase for IFFT:
-    //    Target phase: zero if linear, Hilbert from magnitude if min-phase.
-    //    FIR phase_mode determines FIR causal behavior, NOT individual filter lin-phase flags.
-    //    Per-filter Gaussian Hilbert from frontend is for DISPLAY only — FIR always uses
-    //    blanket Hilbert from full magnitude for correct causal impulse response.
+    //    LinearPhase: zero phase (symmetric FIR)
+    //    MinimumPhase/HybridPhase: Hilbert from full magnitude (causal FIR)
+    //    MixedPhase + non-zero model_phase: use frontend-provided per-filter phase
+    //      (some filters lin-phase, some min-phase — frontend computes per-filter Hilbert)
+    //    MixedPhase + zero model_phase: fallback to LinearPhase
     //    PEQ phase: ALWAYS Hilbert (min-phase biquads)
-    //    Total phase = target_phase + PEQ_phase
     let target_phase_rad = if effective_linear {
         vec![0.0; n_bins]
+    } else if config.phase_mode == PhaseMode::MixedPhase && !is_zero_phase {
+        // Frontend provided per-filter Hilbert phase — interpolate to linear FFT grid
+        let (_, _, model_ph_opt) = interpolate_linear_grid(
+            freq, target_mag, Some(model_phase), n_bins, config.sample_rate,
+        );
+        let model_ph_deg = model_ph_opt.unwrap_or_else(|| vec![0.0; n_bins]);
+        model_ph_deg.iter().map(|&d| d.to_radians()).collect()
     } else {
         minimum_phase_from_magnitude(&lin_target, n_fft)
     };

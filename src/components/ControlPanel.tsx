@@ -1149,7 +1149,9 @@ function ExportTab() {
         max_boost_db: firMaxBoost(),
         noise_floor_db: firNoiseFloor(),
         window: win,
-        phase_mode: (isLin(b.target.high_pass) && isLin(b.target.low_pass)) ? "LinearPhase" : "MinimumPhase",
+        phase_mode: (isLin(b.target.high_pass) && isLin(b.target.low_pass)) ? "LinearPhase"
+          : (isGaussianMinPhase(b.target.high_pass) || isGaussianMinPhase(b.target.low_pass)) ? "MixedPhase"
+          : "MinimumPhase",
         iterations: firIterations(),
         freq_weighting: firFreqWeighting(),
         narrowband_limit: firNarrowbandLimit(),

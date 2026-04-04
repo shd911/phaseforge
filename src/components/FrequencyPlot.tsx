@@ -1738,9 +1738,14 @@ export default function FrequencyPlot() {
       // Generate FIR
       const isLin = (f: any) => !f || f.linear_phase;
       const allLinear = isLin(target.high_pass) && isLin(target.low_pass);
+      const hasGaussMin = isGaussianMinPhase(target.high_pass) || isGaussianMinPhase(target.low_pass);
+      // LinearPhase: all filters lin → symmetric FIR
+      // MixedPhase: has Gaussian min-phase → use frontend per-filter Hilbert
+      // MinimumPhase: no Gaussian min-phase, not all linear → Rust computes Hilbert
+      const phaseMode = allLinear ? "LinearPhase" : hasGaussMin ? "MixedPhase" : "MinimumPhase";
       const firConfig = {
         taps, sample_rate: sr, max_boost_db: firMaxBoost(), noise_floor_db: firNoiseFloor(),
-        window: win, phase_mode: allLinear ? "LinearPhase" : "MinimumPhase",
+        window: win, phase_mode: phaseMode,
         iterations: firIterations(), freq_weighting: firFreqWeighting(),
         narrowband_limit: firNarrowbandLimit(), nb_smoothing_oct: firNbSmoothingOct(),
         nb_max_excess_db: firNbMaxExcess(),
