@@ -1,5 +1,5 @@
 import { createSignal, createEffect, on, onCleanup, Show } from "solid-js";
-import type { FilterType, Measurement, MergeConfig, MergeResult, PeqBand, FirConfig, FirResult, WindowType, PhaseMode } from "../lib/types";
+import type { FilterType, FilterConfig, Measurement, MergeConfig, MergeResult, PeqBand, FirConfig, FirResult, WindowType, PhaseMode } from "../lib/types";
 import NumberInput from "./NumberInput";
 import { MEASUREMENT_COLORS } from "../lib/types";
 import {
@@ -1099,7 +1099,7 @@ function ExportTab() {
     const sr = exportSampleRate();
     const taps = exportTaps();
     const win = exportWindow();
-    const peqBands = b.peqBands?.filter((p: any) => p.enabled) ?? [];
+    const peqBands = b.peqBands?.filter((p: PeqBand) => p.enabled) ?? [];
 
     // 1. Evaluate pure target (HP/LP/shelf/tilt)
     const [freq, response] = await invoke<[number[], { magnitude: number[]; phase: number[] }]>(
@@ -1121,7 +1121,7 @@ function ExportTab() {
     }
 
     // 3. Generate FIR
-    const isLin = (f: any) => !f || f.linear_phase;
+    const isLin = (f: FilterConfig | null | undefined) => !f || f.linear_phase;
 
     const firResult = await invoke<{
       impulse: number[]; time_ms: number[]; realized_mag: number[];
@@ -1240,7 +1240,7 @@ function ExportTab() {
                 </span>
                 <Show when={b().peqBands.length > 0}>
                   <span style={{ "font-size": "10px", color: "var(--text-secondary)" }}>
-                    PEQ: {b().peqBands.filter((p: any) => p.enabled).length}
+                    PEQ: {b().peqBands.filter((p: PeqBand) => p.enabled).length}
                   </span>
                 </Show>
                 <button

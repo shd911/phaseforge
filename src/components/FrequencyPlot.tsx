@@ -3,7 +3,7 @@ import { createStore } from "solid-js/store";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { invoke } from "@tauri-apps/api/core";
-import type { Measurement, TargetResponse, FilterType } from "../lib/types";
+import type { Measurement, TargetResponse, FilterType, FilterConfig, PeqBand } from "../lib/types";
 import { appState, activeBand, isSum, activeTab, plotTab, setPlotTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, setPeqDragging, updatePeqBand, commitPeqBand, bandsVersion, exportSampleRate, exportTaps, exportWindow, firIterations, firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess, firMaxBoost, firNoiseFloor, exportMetrics, setExportMetrics, plotSnapshots, addPlotSnapshot, clearPlotSnapshots } from "../stores/bands";
 import type { SmoothingMode, BandState, FreqSnapshot } from "../stores/bands";
 import { needAutoFit, setNeedAutoFit } from "../App";
@@ -1097,7 +1097,7 @@ export default function FrequencyPlot() {
               const label = orig.label ?? `s${si}`;
 
               // Find short label from legend
-              const le = leg.find((e: any) => e.seriesIdx === si);
+              const le = leg.find((e: LegendEntry) => e.seriesIdx === si);
               vals.push({ label: le?.label ?? label, color, value: formatted });
 
               if (isMag && !firstSPL) firstSPL = formatted;
@@ -1444,7 +1444,7 @@ export default function FrequencyPlot() {
     const freq = chart.data[0];
     if (!freq || freq.length === 0) return;
 
-    const enabledBands = band.peqBands.filter((b: any) => b.enabled);
+    const enabledBands = band.peqBands.filter((b: PeqBand) => b.enabled);
     if (enabledBands.length === 0) return;
 
     try {
@@ -1602,7 +1602,7 @@ export default function FrequencyPlot() {
       const taps = exportTaps();
       const win = exportWindow();
       const target = JSON.parse(JSON.stringify(band.target));
-      const peqBands = band.peqBands?.filter((b: any) => b.enabled) ?? [];
+      const peqBands = band.peqBands?.filter((b: PeqBand) => b.enabled) ?? [];
 
       // Evaluate target
       const [freq, response] = await invoke<[number[], TargetResponse]>(
@@ -1629,7 +1629,7 @@ export default function FrequencyPlot() {
       if (gen !== renderGen) return;
 
       // Generate FIR
-      const isLin = (f: any) => !f || f.linear_phase;
+      const isLin = (f: FilterConfig | null | undefined) => !f || f.linear_phase;
       const allLinear = isLin(target.high_pass) && isLin(target.low_pass);
       // FIR phase mode:
       // LinearPhase: all filters lin → symmetric FIR
@@ -1929,7 +1929,7 @@ export default function FrequencyPlot() {
           try {
             let corrPh = [...phase];
             let corrMag = [...magnitude];
-            const peqBands = band.peqBands?.filter((p: any) => p.enabled) ?? [];
+            const peqBands = band.peqBands?.filter((p: PeqBand) => p.enabled) ?? [];
             if (peqBands.length > 0) {
               const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", { freq, bands: peqBands });
               if (gen !== renderGen) return;
@@ -2165,7 +2165,7 @@ export default function FrequencyPlot() {
             let cMag = [...sb.measurement!.magnitude];
             let cPh = [...sb.measurement!.phase!];
             const sbSr = sb.measurement!.sample_rate ?? 48000;
-            const peqBands = sb.peqBands?.filter((p: any) => p.enabled) ?? [];
+            const peqBands = sb.peqBands?.filter((p: PeqBand) => p.enabled) ?? [];
             if (peqBands.length > 0) {
               const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", { freq: sbFreq, bands: peqBands });
               if (gen !== renderGen) return null;
@@ -2209,7 +2209,7 @@ export default function FrequencyPlot() {
             let cPh = [...sb.measurement!.phase!];
             while (cMag.length < n) cMag.push(-200);
             while (cPh.length < n) cPh.push(0);
-            const peqBands = sb.peqBands?.filter((p: any) => p.enabled) ?? [];
+            const peqBands = sb.peqBands?.filter((p: PeqBand) => p.enabled) ?? [];
             if (peqBands.length > 0) {
               const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", { freq: sbFreq, bands: peqBands });
               if (gen !== renderGen) return;
@@ -2349,7 +2349,7 @@ export default function FrequencyPlot() {
             targetCurve.reference_level_db += n3 > 0 ? sum2 / n3 : 0;
             const tResp2 = await invoke<{ magnitude: number[]; phase: number[] }>("evaluate_target", { target: targetCurve, freq });
             if (gen !== renderGen) return;
-            const peqBands = band.peqBands.filter((p: any) => p.enabled);
+            const peqBands = band.peqBands.filter((p: PeqBand) => p.enabled);
             let corrMag = [...magnitude];
             let corrPh = [...phase];
             if (peqBands.length > 0) {
@@ -2985,7 +2985,7 @@ export default function FrequencyPlot() {
               // Shift PEQ response to sit at the zoomCenter baseline (will be normalized later)
               const peqOnly = pm.map((v: number) => v + zoomCenter);
               // Collect dot indices for PEQ band markers
-              const enabledBands = band.peqBands!.filter((b: any) => b.enabled);
+              const enabledBands = band.peqBands!.filter((b: PeqBand) => b.enabled);
               const dotIndices = new Set<number>();
               for (const pb of enabledBands) {
                 let bestIdx = 0, bestDist = Infinity;
