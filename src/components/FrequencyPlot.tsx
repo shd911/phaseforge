@@ -1733,10 +1733,13 @@ export default function FrequencyPlot() {
       const allLinear = isLin(target.high_pass) && isLin(target.low_pass);
       // FIR phase mode:
       // LinearPhase: all filters lin → symmetric FIR
-      // MixedPhase: has Gaussian min-phase → per-filter Hilbert on FFT grid in Rust
-      // MinimumPhase: non-Gaussian, not all linear → blanket Hilbert
+      // MixedPhase: ONLY when Gaussian filters have MIXED lin/min phase (one lin + one min)
+      // MinimumPhase: all non-linear, or all Gaussian min-phase → blanket Hilbert
       const hasGaussMin = isGaussianMinPhase(target.high_pass) || isGaussianMinPhase(target.low_pass);
-      const phaseMode = allLinear ? "LinearPhase" : hasGaussMin ? "MixedPhase" : "MinimumPhase";
+      const hasGaussLin = (target.high_pass?.filter_type === "Gaussian" && target.high_pass?.linear_phase) ||
+                          (target.low_pass?.filter_type === "Gaussian" && target.low_pass?.linear_phase);
+      const isMixed = hasGaussMin && hasGaussLin; // one Gaussian lin + one Gaussian min
+      const phaseMode = allLinear ? "LinearPhase" : isMixed ? "MixedPhase" : "MinimumPhase";
       const gaussFilters: { freq_hz: number; shape: number; is_lowpass: boolean }[] = [];
       if (isGaussianMinPhase(target.high_pass)) gaussFilters.push({ freq_hz: target.high_pass!.freq_hz, shape: target.high_pass!.shape ?? 1.0, is_lowpass: false });
       if (isGaussianMinPhase(target.low_pass)) gaussFilters.push({ freq_hz: target.low_pass!.freq_hz, shape: target.low_pass!.shape ?? 1.0, is_lowpass: true });

@@ -1137,9 +1137,14 @@ function ExportTab() {
         max_boost_db: firMaxBoost(),
         noise_floor_db: firNoiseFloor(),
         window: win,
-        phase_mode: (isLin(b.target.high_pass) && isLin(b.target.low_pass)) ? "LinearPhase"
-          : (isGaussianMinPhase(b.target.high_pass) || isGaussianMinPhase(b.target.low_pass)) ? "MixedPhase"
-          : "MinimumPhase",
+        phase_mode: (() => {
+          const allLin = isLin(b.target.high_pass) && isLin(b.target.low_pass);
+          if (allLin) return "LinearPhase";
+          const gMin = isGaussianMinPhase(b.target.high_pass) || isGaussianMinPhase(b.target.low_pass);
+          const gLin = (b.target.high_pass?.filter_type === "Gaussian" && b.target.high_pass?.linear_phase) ||
+                       (b.target.low_pass?.filter_type === "Gaussian" && b.target.low_pass?.linear_phase);
+          return (gMin && gLin) ? "MixedPhase" : "MinimumPhase";
+        })(),
         gaussian_min_phase_filters: [
           ...(isGaussianMinPhase(b.target.high_pass) ? [{ freq_hz: b.target.high_pass!.freq_hz, shape: b.target.high_pass!.shape ?? 1.0, is_lowpass: false }] : []),
           ...(isGaussianMinPhase(b.target.low_pass) ? [{ freq_hz: b.target.low_pass!.freq_hz, shape: b.target.low_pass!.shape ?? 1.0, is_lowpass: true }] : []),
