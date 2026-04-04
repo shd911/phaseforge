@@ -13,7 +13,32 @@ import { openCrossoverDialog, type CrossoverDialogData } from "./CrossoverDialog
 import {
   SUM_TARGET_COLOR, SUM_TARGET_PHASE_COLOR, SUM_CORRECTED_COLOR, SUM_MEAS_COLOR,
   FREQ_SNAP_COLORS, bandColorFamily, smoothingConfig, wrapPhase, fmtFreq, computeGroupDelay,
+  isGaussianMinPhase, gaussianFilterMagDb,
 } from "../lib/plot-helpers";
+
+// ---------------------------------------------------------------------------
+// Gaussian per-filter Hilbert: compute min-phase for each Gaussian filter
+// individually, and ADD to existing phase (don't replace the whole phase)
+// ---------------------------------------------------------------------------
+async function addGaussianMinPhase(
+  freq: number[],
+  phase: number[],
+  hp: import("../lib/types").FilterConfig | null | undefined,
+  lp: import("../lib/types").FilterConfig | null | undefined,
+): Promise<number[]> {
+  let result = phase;
+  if (isGaussianMinPhase(hp)) {
+    const hpMag = gaussianFilterMagDb(freq, hp!, false);
+    const hpPh = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: hpMag });
+    result = result.map((v, i) => v + hpPh[i]);
+  }
+  if (isGaussianMinPhase(lp)) {
+    const lpMag = gaussianFilterMagDb(freq, lp!, true);
+    const lpPh = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: lpMag });
+    result = result.map((v, i) => v + lpPh[i]);
+  }
+  return result;
+}
 
 // ---------------------------------------------------------------------------
 // Crossover point: band[i] LP ↔ band[i+1] HP
@@ -1501,12 +1526,9 @@ export default function FrequencyPlot() {
       }
     }
 
-    // Gaussian min-phase: compute phase from target magnitude via Hilbert
-    if (targetMag && targetPhase && freq) {
-      const gmp = (f: any) => f && f.filter_type === "Gaussian" && !f.linear_phase;
-      if (gmp(band.target.high_pass) || gmp(band.target.low_pass)) {
-        targetPhase = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: targetMag });
-      }
+    // Gaussian min-phase: compute Hilbert per-filter (not blanket on full magnitude)
+    if (targetPhase && freq && (isGaussianMinPhase(band.target.high_pass) || isGaussianMinPhase(band.target.low_pass))) {
+      targetPhase = await addGaussianMinPhase(freq, targetPhase, band.target.high_pass, band.target.low_pass);
     }
 
     return { measurement, targetMag, targetPhase, freq };
@@ -1691,10 +1713,9 @@ export default function FrequencyPlot() {
       const targetMag = response.magnitude;
       let modelPhase = response.phase;
 
-      // Gaussian min-phase: compute phase from magnitude via Hilbert (same as freq tab)
-      const gmp = (f: any) => f && f.filter_type === "Gaussian" && !f.linear_phase;
-      if (gmp(target.high_pass) || gmp(target.low_pass)) {
-        modelPhase = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: targetMag });
+      // Gaussian min-phase: per-filter Hilbert
+      if (isGaussianMinPhase(target.high_pass) || isGaussianMinPhase(target.low_pass)) {
+        modelPhase = await addGaussianMinPhase(freq, modelPhase, target.high_pass, target.low_pass);
         if (gen !== renderGen) return;
       }
 
@@ -1977,13 +1998,6 @@ export default function FrequencyPlot() {
         const measGd = computeGroupDelay(gdFreq, gdPhase);
         if (gen !== renderGen) return;
 
-        // Helper: check if band has Gaussian min-phase filter
-        const hasGaussMinPh = (b: any) => {
-          if (!b?.target) return false;
-          const gmp = (f: any) => f && f.filter_type === "Gaussian" && !f.linear_phase;
-          return gmp(b.target.high_pass) || gmp(b.target.low_pass);
-        };
-
         // Target GD (band mode only)
         let targetGdMs: number[] | null = null;
         if (!sumMode && band && band.targetEnabled) {
@@ -1992,8 +2006,8 @@ export default function FrequencyPlot() {
             const tResp = await invoke<{ magnitude: number[]; phase: number[] }>("evaluate_target", { target: targetCurve, freq });
             if (gen !== renderGen) return;
             let tPh = tResp.phase;
-            if (hasGaussMinPh(band)) {
-              tPh = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: tResp.magnitude });
+            if (isGaussianMinPhase(band.target.high_pass) || isGaussianMinPhase(band.target.low_pass)) {
+              tPh = await addGaussianMinPhase(freq, tPh, band.target.high_pass, band.target.low_pass);
               if (gen !== renderGen) return;
             }
             const tgd = computeGroupDelay(freq, tPh);
@@ -2022,9 +2036,9 @@ export default function FrequencyPlot() {
               corrPh = corrPh.map((v, i) => v + xp[i]);
               corrMag = corrMag.map((v, i) => v + xm[i]);
             }
-            // Gaussian min-phase: replace phase with Hilbert-derived from corrected magnitude
-            if (hasGaussMinPh(band)) {
-              corrPh = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: corrMag });
+            // Gaussian min-phase: add per-filter Hilbert-derived phase to corrected phase
+            if (isGaussianMinPhase(band.target.high_pass) || isGaussianMinPhase(band.target.low_pass)) {
+              corrPh = await addGaussianMinPhase(freq, corrPh, band.target.high_pass, band.target.low_pass);
               if (gen !== renderGen) return;
             }
             const cgd = computeGroupDelay(freq, corrPh);
@@ -2166,10 +2180,9 @@ export default function FrequencyPlot() {
               tMag = tMag.map((v: number, i: number) => v + xm[i]);
               tPh = tPh.map((v: number, i: number) => v + xp[i]);
             }
-            // Gaussian min-phase: replace zero phase with Hilbert-derived minimum phase
-            const hasGaussMinPh = (f: any) => f && f.filter_type === "Gaussian" && !f.linear_phase;
-            if (hasGaussMinPh(sb.target.high_pass) || hasGaussMinPh(sb.target.low_pass)) {
-              tPh = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: tMag });
+            // Gaussian min-phase: add per-filter Hilbert-derived minimum phase
+            if (isGaussianMinPhase(sb.target.high_pass) || isGaussianMinPhase(sb.target.low_pass)) {
+              tPh = await addGaussianMinPhase(freq, tPh, sb.target.high_pass, sb.target.low_pass);
               if (gen !== renderGen) return null;
             }
             const r = await invoke<{ time: number[]; impulse: number[]; step: number[] }>("compute_impulse", {
@@ -2259,10 +2272,9 @@ export default function FrequencyPlot() {
               cMag = cMag.map((v, i) => v + (xm[i] ?? 0));
               cPh = cPh.map((v, i) => v + (xp[i] ?? 0));
             }
-            // Gaussian min-phase: recompute phase from corrected magnitude via Hilbert
-            const gmpC = (f: any) => f && f.filter_type === "Gaussian" && !f.linear_phase;
-            if (sb.targetEnabled && (gmpC(sb.target.high_pass) || gmpC(sb.target.low_pass))) {
-              cPh = await invoke<number[]>("compute_minimum_phase", { freq: sbFreq, magnitude: cMag });
+            // Gaussian min-phase: add per-filter Hilbert-derived phase to corrected phase
+            if (sb.targetEnabled && (isGaussianMinPhase(sb.target.high_pass) || isGaussianMinPhase(sb.target.low_pass))) {
+              cPh = await addGaussianMinPhase(sbFreq, cPh, sb.target.high_pass, sb.target.low_pass);
               if (gen !== renderGen) return null;
             }
             const r = await invoke<{ time: number[]; impulse: number[]; step: number[] }>("compute_impulse", {
@@ -2304,10 +2316,9 @@ export default function FrequencyPlot() {
               cMag = cMag.map((v, i) => v + (xm[i] ?? 0));
               cPh = cPh.map((v, i) => v + (xp[i] ?? 0));
             }
-            // Gaussian min-phase: recompute phase from corrected magnitude via Hilbert
-            const gmpS = (f: any) => f && f.filter_type === "Gaussian" && !f.linear_phase;
-            if (sb.targetEnabled && (gmpS(sb.target.high_pass) || gmpS(sb.target.low_pass))) {
-              cPh = await invoke<number[]>("compute_minimum_phase", { freq: sbFreq, magnitude: cMag });
+            // Gaussian min-phase: add per-filter Hilbert-derived phase to corrected phase
+            if (sb.targetEnabled && (isGaussianMinPhase(sb.target.high_pass) || isGaussianMinPhase(sb.target.low_pass))) {
+              cPh = await addGaussianMinPhase(sbFreq, cPh, sb.target.high_pass, sb.target.low_pass);
               if (gen !== renderGen) return;
             }
             // Normalize by peak magnitude so bands contribute equally
@@ -2401,10 +2412,9 @@ export default function FrequencyPlot() {
             const tResp = await invoke<{ magnitude: number[]; phase: number[] }>("evaluate_target", { target: targetCurve, freq });
             if (gen !== renderGen) return;
             let tPh2 = tResp.phase;
-            // Gaussian min-phase: compute from combined magnitude
-            const hasGaussMinPh2 = (f: any) => f && f.filter_type === "Gaussian" && !f.linear_phase;
-            if (hasGaussMinPh2(band!.target.high_pass) || hasGaussMinPh2(band!.target.low_pass)) {
-              tPh2 = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: tResp.magnitude });
+            // Gaussian min-phase: add per-filter Hilbert-derived phase
+            if (isGaussianMinPhase(band!.target.high_pass) || isGaussianMinPhase(band!.target.low_pass)) {
+              tPh2 = await addGaussianMinPhase(freq, tPh2, band!.target.high_pass, band!.target.low_pass);
               if (gen !== renderGen) return;
             }
             targetResult = await invoke<{ time: number[]; impulse: number[]; step: number[] }>("compute_impulse", {
@@ -2448,10 +2458,9 @@ export default function FrequencyPlot() {
               corrMag = corrMag.map((v, i) => v + xm[i]);
               corrPh = corrPh.map((v, i) => v + xp[i]);
             }
-            // Gaussian min-phase: recompute phase from corrected magnitude via Hilbert
-            const gmpCorr = (f: any) => f && f.filter_type === "Gaussian" && !f.linear_phase;
-            if (gmpCorr(band.target.high_pass) || gmpCorr(band.target.low_pass)) {
-              corrPh = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: corrMag });
+            // Gaussian min-phase: add per-filter Hilbert-derived phase to corrected phase
+            if (isGaussianMinPhase(band.target.high_pass) || isGaussianMinPhase(band.target.low_pass)) {
+              corrPh = await addGaussianMinPhase(freq, corrPh, band.target.high_pass, band.target.low_pass);
               if (gen !== renderGen) return;
             }
             corrResult = await invoke<{ time: number[]; impulse: number[]; step: number[] }>("compute_impulse", {
@@ -3152,10 +3161,9 @@ export default function FrequencyPlot() {
               (v: number, i: number) =>
                 v + (peqPhase ? peqPhase[i] : 0) + (xsPhase ? xsPhase[i] : 0)
             );
-            // Gaussian min-phase: recompute corrected phase from corrected magnitude via Hilbert
-            const gmpF = (f: any) => f && f.filter_type === "Gaussian" && !f.linear_phase;
-            if (gmpF(band.target.high_pass) || gmpF(band.target.low_pass)) {
-              fullCorrectedPhase = await invoke<number[]>("compute_minimum_phase", { freq: result.freq!, magnitude: fullCorrected });
+            // Gaussian min-phase: add per-filter Hilbert-derived phase to corrected phase
+            if (isGaussianMinPhase(band.target.high_pass) || isGaussianMinPhase(band.target.low_pass)) {
+              fullCorrectedPhase = await addGaussianMinPhase(result.freq!, fullCorrectedPhase, band.target.high_pass, band.target.low_pass);
               if (gen !== renderGen) return;
             }
             if (showPhase) {
@@ -3539,10 +3547,9 @@ export default function FrequencyPlot() {
               let corrPhase = rm.phase.map(
                 (v: number, j: number) => v + (peqPhase ? peqPhase[j] : 0) + (xsPhase ? xsPhase[j] : 0)
               );
-              // Gaussian min-phase: recompute corrected phase from corrected magnitude via Hilbert
-              const gmpSF = (f: any) => f && f.filter_type === "Gaussian" && !f.linear_phase;
-              if (gmpSF(bands[i].target.high_pass) || gmpSF(bands[i].target.low_pass)) {
-                corrPhase = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: corrected });
+              // Gaussian min-phase: add per-filter Hilbert-derived phase to corrected phase
+              if (isGaussianMinPhase(bands[i].target.high_pass) || isGaussianMinPhase(bands[i].target.low_pass)) {
+                corrPhase = await addGaussianMinPhase(freq, corrPhase, bands[i].target.high_pass, bands[i].target.low_pass);
                 if (gen !== renderGen) return;
               }
               perBandCorrPhase.push(corrPhase);

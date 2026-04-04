@@ -55,6 +55,7 @@ import {
   firMaxBoost, firNoiseFloor, firIterations,
   firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess,
 } from "../stores/bands";
+import { isGaussianMinPhase, gaussianFilterMagDb } from "../lib/plot-helpers";
 import {
   tolerance, setTolerance,
   maxBands, setMaxBands,
@@ -1109,10 +1110,18 @@ function ExportTab() {
     const targetMag = response.magnitude;
     let modelPhase = response.phase;
 
-    // Gaussian min-phase: compute phase from magnitude via Hilbert
-    const gmp = (f: any) => f && f.filter_type === "Gaussian" && !f.linear_phase;
-    if (gmp(b.target.high_pass) || gmp(b.target.low_pass)) {
-      modelPhase = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: targetMag });
+    // Gaussian min-phase: per-filter Hilbert
+    if (isGaussianMinPhase(b.target.high_pass) || isGaussianMinPhase(b.target.low_pass)) {
+      if (isGaussianMinPhase(b.target.high_pass)) {
+        const hpMag = gaussianFilterMagDb(freq, b.target.high_pass!, false);
+        const hpPh = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: hpMag });
+        modelPhase = modelPhase.map((v: number, i: number) => v + hpPh[i]);
+      }
+      if (isGaussianMinPhase(b.target.low_pass)) {
+        const lpMag = gaussianFilterMagDb(freq, b.target.low_pass!, true);
+        const lpPh = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: lpMag });
+        modelPhase = modelPhase.map((v: number, i: number) => v + lpPh[i]);
+      }
     }
 
     // 2. Compute PEQ contribution separately (PEQ always min-phase)

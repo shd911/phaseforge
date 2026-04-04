@@ -1,5 +1,44 @@
 // Plot helpers — shared utilities for unified plot
 import type { SmoothingMode } from "../stores/bands";
+import type { FilterConfig } from "./types";
+
+// --- Gaussian min-phase helpers ---
+
+/** Check if a filter is Gaussian with min-phase (not linear-phase) */
+export function isGaussianMinPhase(f: FilterConfig | null | undefined): boolean {
+  return !!f && f.filter_type === "Gaussian" && !f.linear_phase;
+}
+
+/** Compute Gaussian LP magnitude in dB for a frequency array.
+ *  H_LP(f) = exp(-ln(2) * (f/fc)^(2M)), converted to dB. */
+export function gaussianLpMagDb(freq: number[], fc: number, m: number): number[] {
+  const ln2 = Math.LN2;
+  return freq.map(f => {
+    if (f <= 0) return 0;
+    const ratio = f / fc;
+    const lin = Math.exp(-ln2 * Math.pow(ratio, 2 * m));
+    return lin > 1e-20 ? 20 * Math.log10(lin) : -400;
+  });
+}
+
+/** Compute individual Gaussian filter magnitude in dB (HP or LP). */
+export function gaussianFilterMagDb(freq: number[], f: FilterConfig, isLowPass: boolean): number[] {
+  const fc = f.freq_hz;
+  const m = f.shape ?? 1.0;
+  return isLowPass ? gaussianLpMagDb(freq, fc, m) : gaussianHpMagDb(freq, fc, m);
+}
+
+/** Compute Gaussian HP magnitude in dB: HP = 1 - LP. */
+export function gaussianHpMagDb(freq: number[], fc: number, m: number): number[] {
+  const ln2 = Math.LN2;
+  return freq.map(f => {
+    if (f <= 0) return -400;
+    const ratio = f / fc;
+    const lpLin = Math.exp(-ln2 * Math.pow(ratio, 2 * m));
+    const hpLin = 1 - lpLin;
+    return hpLin > 1e-20 ? 20 * Math.log10(hpLin) : -400;
+  });
+}
 
 // --- Color constants ---
 export const SUM_TARGET_COLOR = "#FFD700";
