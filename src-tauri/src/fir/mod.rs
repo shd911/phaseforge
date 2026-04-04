@@ -1269,25 +1269,15 @@ pub fn generate_model_fir(
     );
 
     // 5. Phase for IFFT:
-    //    Target phase: use model_phase from frontend if non-zero (per-filter Gaussian Hilbert),
-    //    otherwise compute Hilbert from magnitude.
+    //    Target phase: zero if linear, Hilbert from magnitude if min-phase.
+    //    FIR phase_mode determines FIR causal behavior, NOT individual filter lin-phase flags.
+    //    Per-filter Gaussian Hilbert from frontend is for DISPLAY only — FIR always uses
+    //    blanket Hilbert from full magnitude for correct causal impulse response.
     //    PEQ phase: ALWAYS Hilbert (min-phase biquads)
     //    Total phase = target_phase + PEQ_phase
     let target_phase_rad = if effective_linear {
         vec![0.0; n_bins]
-    } else if !is_zero_phase {
-        // Frontend provided per-filter Gaussian Hilbert phase — interpolate to linear grid and ADD to
-        // Hilbert from non-Gaussian magnitude. This way Gaussian gets per-filter phase while
-        // non-Gaussian filters get standard Hilbert.
-        let hilbert_from_mag = minimum_phase_from_magnitude(&lin_target, n_fft);
-        let (_, _, model_ph_opt) = interpolate_linear_grid(
-            freq, target_mag, Some(model_phase), n_bins, config.sample_rate,
-        );
-        let model_ph_deg = model_ph_opt.unwrap_or_else(|| vec![0.0; n_bins]);
-        // Use model_phase directly (it already contains the correct per-filter Hilbert)
-        model_ph_deg.iter().map(|&d| d.to_radians()).collect()
     } else {
-        // No frontend phase — compute Hilbert from full magnitude (all non-Gaussian min-phase)
         minimum_phase_from_magnitude(&lin_target, n_fft)
     };
 
@@ -1877,18 +1867,11 @@ mod tests {
                 let response = target::evaluate(&target_curve, &freq);
 
                 // Generate model FIR (no PEQ, no measurement correction)
-                // For non-Gaussian filters, pass zero phase (FIR engine computes Hilbert internally).
-                // For Gaussian, frontend provides per-filter Hilbert — but test uses linear-phase mode.
-                let model_phase = if *linear {
-                    response.phase.clone()  // linear-phase: phase=0 anyway
-                } else {
-                    vec![0.0; freq.len()]   // min-phase: let FIR engine compute Hilbert
-                };
                 let result = generate_model_fir(
                     &freq,
                     &response.magnitude,
                     &[],
-                    &model_phase,
+                    &response.phase,
                     &fir_config,
                 )
                 .unwrap_or_else(|e| panic!("{}/{}: generate_model_fir failed: {}", ft_name, band_name, e));
