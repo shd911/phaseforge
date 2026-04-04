@@ -1342,8 +1342,16 @@ pub fn generate_model_fir(
         for (i, w) in window.iter().enumerate() {
             impulse[i] *= w;
         }
+    } else if config.phase_mode == PhaseMode::MixedPhase && !config.gaussian_min_phase_filters.is_empty() {
+        // MixedPhase: impulse is NOT fully causal (phase doesn't match full magnitude).
+        // Find peak, shift to center, apply full window — like linear-phase but with asymmetric energy.
+        circular_shift_to_center(&mut impulse);
+        let window = generate_window(n_fft, &config.window);
+        for (i, w) in window.iter().enumerate() {
+            impulse[i] *= w;
+        }
     } else {
-        // Causal impulse (min-phase or model-phase): half window
+        // Causal impulse (min-phase): half window
         let half_win = generate_half_window(n_fft, &config.window);
         for (i, w) in half_win.iter().enumerate() {
             impulse[i] *= w;
@@ -2070,5 +2078,301 @@ mod tests {
         let rms = (mid_phases_both.iter().map(|p| p * p).sum::<f64>() / mid_phases_both.len() as f64).sqrt();
         println!("Case 3 (HP+LP): midband phase RMS = {:.2}°", rms);
         assert!(rms < 25.0, "HP+LP midband phase RMS={:.2}° too large", rms);
+    }
+
+    #[test]
+    fn test_fir_matches_model_magnitude() {
+        // Test that FIR realized_mag matches the target Model magnitude
+        // for Gaussian filters across all 4 phase combinations.
+        // Key insight: changing lin-phase vs min-phase should ONLY affect PHASE,
+        // not MAGNITUDE. If FIR magnitude changes with phase mode, there's a bug.
+
+        let n = 256;
+        let freq: Vec<f64> = (0..n)
+            .map(|i| {
+                let t = i as f64 / (n - 1) as f64;
+                (20.0_f64.ln() + t * (20000.0_f64.ln() - 20.0_f64.ln())).exp()
+            })
+            .collect();
+
+        let fc_hp = 200.0;
+        let fc_lp = 2000.0;
+        let shape = 2.0;
+        let ln2 = 2.0_f64.ln();
+
+        // Build Gaussian bandpass target magnitude
+        let target_mag: Vec<f64> = freq.iter().map(|&f| {
+            let hp_ratio = if fc_hp > 0.0 { f / fc_hp } else { 0.0 };
+            let hp_lin = 1.0 - (-ln2 * hp_ratio.powf(2.0 * shape)).exp();
+            let lp_ratio = if fc_lp > 0.0 { f / fc_lp } else { 0.0 };
+            let lp_lin = (-ln2 * lp_ratio.powf(2.0 * shape)).exp();
+            let lin = hp_lin * lp_lin;
+            if lin > 1e-20 { 20.0 * lin.log10() } else { -400.0 }
+        }).collect();
+
+        let phase_zero = vec![0.0; n];
+
+        let base_config = FirConfig {
+            taps: 16384,
+            sample_rate: 48000.0,
+            max_boost_db: 24.0,
+            noise_floor_db: -150.0,
+            window: WindowType::Blackman,
+            phase_mode: PhaseMode::LinearPhase,
+            iterations: 0,
+            freq_weighting: false,
+            narrowband_limit: false,
+            nb_smoothing_oct: 0.333,
+            nb_max_excess_db: 6.0,
+            gaussian_min_phase_filters: vec![],
+        };
+
+        // Passband indices: 350-1200 Hz
+        let passband_indices: Vec<usize> = freq.iter().enumerate()
+            .filter(|(_, &f)| f >= 350.0 && f <= 1200.0)
+            .map(|(i, _)| i)
+            .collect();
+        assert!(!passband_indices.is_empty(), "No passband frequencies found");
+
+        // Compute target mag in passband (for reference)
+        let target_passband: Vec<f64> = passband_indices.iter()
+            .map(|&i| target_mag[i])
+            .collect();
+
+        // Define the 4 phase combinations
+        struct PhaseCase {
+            name: &'static str,
+            phase_mode: PhaseMode,
+            min_phase_filters: Vec<GaussianFilterInfo>,
+        }
+
+        let cases = vec![
+            PhaseCase {
+                name: "HP=lin, LP=lin",
+                phase_mode: PhaseMode::LinearPhase,
+                min_phase_filters: vec![],
+            },
+            PhaseCase {
+                name: "HP=min, LP=lin",
+                phase_mode: PhaseMode::MixedPhase,
+                min_phase_filters: vec![
+                    GaussianFilterInfo { freq_hz: fc_hp, shape, is_lowpass: false },
+                ],
+            },
+            PhaseCase {
+                name: "HP=lin, LP=min",
+                phase_mode: PhaseMode::MixedPhase,
+                min_phase_filters: vec![
+                    GaussianFilterInfo { freq_hz: fc_lp, shape, is_lowpass: true },
+                ],
+            },
+            PhaseCase {
+                name: "HP=min, LP=min",
+                phase_mode: PhaseMode::MixedPhase,
+                min_phase_filters: vec![
+                    GaussianFilterInfo { freq_hz: fc_hp, shape, is_lowpass: false },
+                    GaussianFilterInfo { freq_hz: fc_lp, shape, is_lowpass: true },
+                ],
+            },
+        ];
+
+        // Store passband realized_mag for each case (for cross-comparison)
+        let mut all_passband_mags: Vec<(String, Vec<f64>)> = Vec::new();
+
+        for case in &cases {
+            let config = FirConfig {
+                phase_mode: case.phase_mode.clone(),
+                gaussian_min_phase_filters: case.min_phase_filters.clone(),
+                ..base_config.clone()
+            };
+
+            let result = generate_model_fir(&freq, &target_mag, &[], &phase_zero, &config).unwrap();
+
+            // Compare realized_mag vs target_mag in passband
+            let realized_passband: Vec<f64> = passband_indices.iter()
+                .map(|&i| result.realized_mag[i])
+                .collect();
+
+            let errors: Vec<f64> = realized_passband.iter()
+                .zip(target_passband.iter())
+                .map(|(&r, &t)| (r - t).abs())
+                .collect();
+
+            let max_err = errors.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            let rms_err = (errors.iter().map(|e| e * e).sum::<f64>() / errors.len() as f64).sqrt();
+
+            // Find frequency of max error
+            let max_err_idx = errors.iter().enumerate()
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .map(|(i, _)| i)
+                .unwrap();
+            let max_err_freq = freq[passband_indices[max_err_idx]];
+
+            println!(
+                "[{}] max_err={:.3} dB @ {:.0} Hz, rms_err={:.3} dB",
+                case.name, max_err, max_err_freq, rms_err
+            );
+
+            // Print a few sample points for diagnostics
+            for &idx in &[0, passband_indices.len() / 4, passband_indices.len() / 2, 3 * passband_indices.len() / 4, passband_indices.len() - 1] {
+                let fi = passband_indices[idx];
+                println!(
+                    "  f={:.0} Hz: target={:.2} dB, realized={:.2} dB, err={:.3} dB",
+                    freq[fi], target_mag[fi], result.realized_mag[fi], errors[idx]
+                );
+            }
+
+            assert!(
+                max_err < 1.0,
+                "[{}] max passband error {:.3} dB >= 1.0 dB @ {:.0} Hz",
+                case.name, max_err, max_err_freq
+            );
+            assert!(
+                rms_err < 0.5,
+                "[{}] RMS passband error {:.3} dB >= 0.5 dB",
+                case.name, rms_err
+            );
+
+            all_passband_mags.push((case.name.to_string(), realized_passband));
+        }
+
+        // Cross-compare all cases: magnitude should be nearly identical
+        // (changing phase mode should NOT change magnitude)
+        println!("\n--- Cross-comparison of passband magnitudes ---");
+        let ref_name = &all_passband_mags[0].0;
+        let ref_mag = &all_passband_mags[0].1;
+
+        for (name, mag) in &all_passband_mags[1..] {
+            let cross_errors: Vec<f64> = mag.iter()
+                .zip(ref_mag.iter())
+                .map(|(&a, &b)| (a - b).abs())
+                .collect();
+            let cross_max = cross_errors.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            let cross_rms = (cross_errors.iter().map(|e| e * e).sum::<f64>() / cross_errors.len() as f64).sqrt();
+
+            let cross_max_idx = cross_errors.iter().enumerate()
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .map(|(i, _)| i)
+                .unwrap();
+            let cross_max_freq = freq[passband_indices[cross_max_idx]];
+
+            println!(
+                "[{} vs {}] max_diff={:.3} dB @ {:.0} Hz, rms_diff={:.3} dB",
+                ref_name, name, cross_max, cross_max_freq, cross_rms
+            );
+
+            assert!(
+                cross_max < 1.0,
+                "[{} vs {}] cross-case max diff {:.3} dB >= 1.0 dB @ {:.0} Hz",
+                ref_name, name, cross_max, cross_max_freq
+            );
+            assert!(
+                cross_rms < 0.5,
+                "[{} vs {}] cross-case RMS diff {:.3} dB >= 0.5 dB",
+                ref_name, name, cross_rms
+            );
+        }
+    }
+
+    /// E2E test: FIR realized_mag must match target_mag in passband for ALL phase modes.
+    /// This catches the half-window-on-non-causal-impulse bug (88 dB error).
+    #[test]
+    fn test_fir_magnitude_matches_target_all_phase_modes() {
+        let n = 512;
+        let freq: Vec<f64> = (0..n).map(|i| {
+            let t = i as f64 / (n - 1) as f64;
+            (20.0_f64.ln() + t * (20000.0_f64.ln() - 20.0_f64.ln())).exp()
+        }).collect();
+        let fc_hp = 200.0;
+        let fc_lp = 2000.0;
+        let shape = 2.0;
+        let pb_lo = 350.0;
+        let pb_hi = 1200.0;
+
+        // Compute bandpass target magnitude
+        let ln2 = 2.0_f64.ln();
+        let target_mag: Vec<f64> = freq.iter().map(|&f| {
+            let r_lp: f64 = f / fc_lp;
+            let r_hp: f64 = f / fc_hp;
+            let lp = (-ln2 * r_lp.powf(2.0 * shape)).exp();
+            let hp = 1.0 - (-ln2 * r_hp.powf(2.0 * shape)).exp();
+            let bp = hp * lp;
+            if bp > 1e-20 { 20.0 * bp.log10() } else { -400.0 }
+        }).collect();
+
+        let cases: Vec<(&str, PhaseMode, Vec<GaussianFilterInfo>)> = vec![
+            ("LinearPhase", PhaseMode::LinearPhase, vec![]),
+            ("MinimumPhase", PhaseMode::MinimumPhase, vec![]),
+            ("MixedPhase HP-only", PhaseMode::MixedPhase, vec![
+                GaussianFilterInfo { freq_hz: fc_hp, shape, is_lowpass: false },
+            ]),
+            ("MixedPhase LP-only", PhaseMode::MixedPhase, vec![
+                GaussianFilterInfo { freq_hz: fc_lp, shape, is_lowpass: true },
+            ]),
+            ("MixedPhase HP+LP", PhaseMode::MixedPhase, vec![
+                GaussianFilterInfo { freq_hz: fc_hp, shape, is_lowpass: false },
+                GaussianFilterInfo { freq_hz: fc_lp, shape, is_lowpass: true },
+            ]),
+        ];
+
+        println!("\n=== FIR Magnitude Match Test (E2E) ===");
+        for (name, mode, gauss_filters) in &cases {
+            let config = FirConfig {
+                taps: 65536,
+                sample_rate: 48000.0,
+                max_boost_db: 24.0,
+                noise_floor_db: -150.0,
+                window: WindowType::Blackman,
+                phase_mode: mode.clone(),
+                iterations: 0,
+                freq_weighting: false,
+                narrowband_limit: false,
+                nb_smoothing_oct: 0.333,
+                nb_max_excess_db: 6.0,
+                gaussian_min_phase_filters: gauss_filters.clone(),
+            };
+
+            let zero_phase = vec![0.0; n];
+            let result = generate_model_fir(&freq, &target_mag, &[], &zero_phase, &config)
+                .unwrap_or_else(|e| panic!("{}: generate_model_fir failed: {}", name, e));
+
+            // Normalize target same as FIR engine does
+            let norm_target: Vec<f64> = target_mag.iter().map(|&v| v - result.norm_db).collect();
+
+            // Compute passband error
+            let mut max_err = 0.0_f64;
+            let mut max_err_freq = 0.0;
+            let mut sum_sq = 0.0;
+            let mut count = 0;
+            for i in 0..freq.len() {
+                if freq[i] >= pb_lo && freq[i] <= pb_hi {
+                    let err = (result.realized_mag[i] - norm_target[i]).abs();
+                    if err > max_err {
+                        max_err = err;
+                        max_err_freq = freq[i];
+                    }
+                    sum_sq += err * err;
+                    count += 1;
+                }
+            }
+            let rms_err = if count > 0 { (sum_sq / count as f64).sqrt() } else { 0.0 };
+
+            println!(
+                "{}: maxErr={:.2}dB@{:.0}Hz, RMS={:.2}dB, norm_db={:.2}",
+                name, max_err, max_err_freq, rms_err, result.norm_db
+            );
+
+            assert!(
+                max_err < 3.0,
+                "{}: magnitude error {:.2} dB @ {:.0} Hz exceeds 3 dB threshold. \
+                 This likely means half-window was applied to non-causal impulse.",
+                name, max_err, max_err_freq
+            );
+            assert!(
+                rms_err < 1.0,
+                "{}: RMS magnitude error {:.2} dB exceeds 1 dB threshold.",
+                name, rms_err
+            );
+        }
     }
 }
