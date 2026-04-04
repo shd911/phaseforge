@@ -544,7 +544,7 @@ export function setBandHighPass(bandId: string, config: import("../lib/types").F
     if (config && !state.bands[idx].targetEnabled) {
       setState("bands", idx, "targetEnabled", true);
     }
-    // Пропагация linked: HP → LP предыдущей полосы (freq + type + order, NOT linear_phase)
+    // Пропагация linked: HP → LP предыдущей полосы (freq + type + order + linear_phase)
     if (!_propagating && config && idx > 0 && state.bands[idx - 1].linkedToNext) {
       const prevLp = state.bands[idx - 1].target.low_pass;
       if (prevLp) {
@@ -558,6 +558,7 @@ export function setBandHighPass(bandId: string, config: import("../lib/types").F
             filter_type: config.filter_type,
             order: config.order,
             shape: config.shape,
+            linear_phase: config.linear_phase,
             q: config.q,
           });
         } finally { _propagating = false; }
@@ -588,7 +589,7 @@ export function setBandLowPass(bandId: string, config: import("../lib/types").Fi
     if (config && !state.bands[idx].targetEnabled) {
       setState("bands", idx, "targetEnabled", true);
     }
-    // Пропагация linked: LP → HP следующей полосы (freq + type + order, NOT linear_phase)
+    // Пропагация linked: LP → HP следующей полосы (freq + type + order + linear_phase)
     if (!_propagating && config && state.bands[idx].linkedToNext && idx < state.bands.length - 1) {
       const nextHp = state.bands[idx + 1].target.high_pass;
       if (nextHp) {
@@ -602,6 +603,7 @@ export function setBandLowPass(bandId: string, config: import("../lib/types").Fi
             filter_type: config.filter_type,
             order: config.order,
             shape: config.shape,
+            linear_phase: config.linear_phase,
             q: config.q,
           });
         } finally { _propagating = false; }
