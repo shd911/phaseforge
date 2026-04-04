@@ -6,8 +6,10 @@
  */
 import { describe, it, expect } from "vitest";
 import { createRoot } from "solid-js";
+import { unwrap } from "solid-js/store";
 import {
   appState,
+  addBand,
   setBandHighPass,
   setBandLowPass,
 } from "./bands";
@@ -205,6 +207,51 @@ describe("HP/LP linear_phase isolation", () => {
 
       expect(appState.bands[0].target.high_pass?.linear_phase).toBe(false);
       expect(appState.bands[0].target.low_pass?.linear_phase).toBe(true);
+
+      dispose();
+    });
+  });
+
+  it("set-null-first fix: HP and LP internal nodes are never shared", () => {
+    createRoot((dispose) => {
+      const bandId = appState.bands[0].id;
+
+      // Set both HP and LP identically
+      setBandHighPass(bandId, makeGaussianFilter(500, true));
+      setBandLowPass(bandId, makeGaussianFilter(500, true));
+
+      // Verify internal nodes are separate (not shared reference)
+      const raw = unwrap(appState);
+      expect(raw.bands[0].target.high_pass).not.toBe(raw.bands[0].target.low_pass);
+
+      // Change HP — LP must not change
+      const hp = appState.bands[0].target.high_pass!;
+      setBandHighPass(bandId, {
+        filter_type: hp.filter_type,
+        order: hp.order,
+        freq_hz: hp.freq_hz,
+        shape: hp.shape,
+        linear_phase: false,
+        q: hp.q,
+      });
+
+      expect(appState.bands[0].target.high_pass?.linear_phase).toBe(false);
+      expect(appState.bands[0].target.low_pass?.linear_phase).toBe(true);
+      dispose();
+    });
+  });
+
+  it("after addBand + assignDefaultTargets: HP/LP nodes are separate", () => {
+    createRoot((dispose) => {
+      addBand(); // triggers assignDefaultTargets
+
+      const raw = unwrap(appState);
+      for (let i = 0; i < raw.bands.length; i++) {
+        const t = raw.bands[i].target;
+        if (t.high_pass && t.low_pass) {
+          expect(t.high_pass).not.toBe(t.low_pass);
+        }
+      }
 
       dispose();
     });

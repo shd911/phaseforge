@@ -109,7 +109,10 @@ function assignDefaultTargets(bands: BandState[]) {
     if (bands[i].measurement) continue;
     const hp = i > 0 ? { ...DEFAULT_FILTER, freq_hz: xovers[i - 1] } : null;
     const lp = i < n - 1 ? { ...DEFAULT_FILTER, freq_hz: xovers[i] } : null;
+    // Force fresh store nodes by setting null first (prevents shared-node bug)
+    setState("bands", i, "target", "high_pass", null);
     setState("bands", i, "target", "high_pass", hp);
+    setState("bands", i, "target", "low_pass", null);
     setState("bands", i, "target", "low_pass", lp);
     setState("bands", i, "targetEnabled", true);
     // Link to next band
@@ -459,6 +462,7 @@ export function toggleBandLinked(bandId: string) {
     if (lp && state.bands[nextIdx].target.high_pass) {
       const nextHp = unwrapFilterConfig(state.bands[nextIdx].target.high_pass!);
       const lpPlain = unwrapFilterConfig(lp);
+      setState("bands", nextIdx, "target", "high_pass", null);
       setState("bands", nextIdx, "target", "high_pass", {
         ...nextHp,
         freq_hz: lpPlain.freq_hz,
@@ -527,6 +531,14 @@ export function setBandHighPass(bandId: string, config: import("../lib/types").F
     }
   }
   batch(() => {
+    // Force SolidJS to create a fresh store node by setting to null first.
+    // Without this, SolidJS uses mergeStoreNode (in-place update) which
+    // preserves shared internal nodes — if HP and LP ever point to the same
+    // underlying object, changing one changes both (SolidJS store bug).
+    // Setting null → object forces setProperty (fresh node) path.
+    if (config && state.bands[idx].target.high_pass != null) {
+      setState("bands", idx, "target", "high_pass", null);
+    }
     setState("bands", idx, "target", "high_pass", config);
     // Автовключение таргета при включении фильтра
     if (config && !state.bands[idx].targetEnabled) {
@@ -539,6 +551,7 @@ export function setBandHighPass(bandId: string, config: import("../lib/types").F
         _propagating = true;
         try {
           const plain = unwrapFilterConfig(prevLp);
+          setState("bands", idx - 1, "target", "low_pass", null);
           setState("bands", idx - 1, "target", "low_pass", {
             ...plain,
             freq_hz: config.freq_hz,
@@ -567,6 +580,10 @@ export function setBandLowPass(bandId: string, config: import("../lib/types").Fi
     }
   }
   batch(() => {
+    // Force fresh store node — see comment in setBandHighPass
+    if (config && state.bands[idx].target.low_pass != null) {
+      setState("bands", idx, "target", "low_pass", null);
+    }
     setState("bands", idx, "target", "low_pass", config);
     if (config && !state.bands[idx].targetEnabled) {
       setState("bands", idx, "targetEnabled", true);
@@ -578,6 +595,7 @@ export function setBandLowPass(bandId: string, config: import("../lib/types").Fi
         _propagating = true;
         try {
           const plain = unwrapFilterConfig(nextHp);
+          setState("bands", idx + 1, "target", "high_pass", null);
           setState("bands", idx + 1, "target", "high_pass", {
             ...plain,
             freq_hz: config.freq_hz,
