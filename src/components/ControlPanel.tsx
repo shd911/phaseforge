@@ -55,7 +55,7 @@ import {
   firMaxBoost, firNoiseFloor, firIterations,
   firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess,
 } from "../stores/bands";
-import { isGaussianMinPhase } from "../lib/plot-helpers";
+import { isGaussianMinPhase, gaussianFilterMagDb } from "../lib/plot-helpers";
 import {
   tolerance, setTolerance,
   maxBands, setMaxBands,
@@ -1137,7 +1137,13 @@ function ExportTab() {
         max_boost_db: firMaxBoost(),
         noise_floor_db: firNoiseFloor(),
         window: win,
-        phase_mode: (isLin(b.target.high_pass) && isLin(b.target.low_pass)) ? "LinearPhase" : "MinimumPhase",
+        phase_mode: (isLin(b.target.high_pass) && isLin(b.target.low_pass)) ? "LinearPhase"
+          : (isGaussianMinPhase(b.target.high_pass) || isGaussianMinPhase(b.target.low_pass)) ? "MixedPhase"
+          : "MinimumPhase",
+        gaussian_min_phase_filters: [
+          ...(isGaussianMinPhase(b.target.high_pass) ? [{ freq_hz: b.target.high_pass!.freq_hz, shape: b.target.high_pass!.shape ?? 1.0, is_lowpass: false }] : []),
+          ...(isGaussianMinPhase(b.target.low_pass) ? [{ freq_hz: b.target.low_pass!.freq_hz, shape: b.target.low_pass!.shape ?? 1.0, is_lowpass: true }] : []),
+        ],
         iterations: firIterations(),
         freq_weighting: firFreqWeighting(),
         narrowband_limit: firNarrowbandLimit(),

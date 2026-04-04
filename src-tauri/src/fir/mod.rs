@@ -1343,9 +1343,13 @@ pub fn generate_model_fir(
             impulse[i] *= w;
         }
     } else if config.phase_mode == PhaseMode::MixedPhase && !config.gaussian_min_phase_filters.is_empty() {
-        // MixedPhase: impulse is NOT fully causal (phase doesn't match full magnitude).
-        // Find peak, shift to center, apply full window — like linear-phase but with asymmetric energy.
-        circular_shift_to_center(&mut impulse);
+        // MixedPhase: impulse is neither fully causal nor symmetric.
+        // Find the peak, shift it to center, apply full window.
+        let peak_idx = impulse.iter().enumerate()
+            .max_by(|(_, a), (_, b)| a.abs().partial_cmp(&b.abs()).unwrap())
+            .map(|(i, _)| i).unwrap_or(0);
+        let shift = (n_fft / 2).wrapping_sub(peak_idx) % n_fft;
+        impulse.rotate_right(shift);
         let window = generate_window(n_fft, &config.window);
         for (i, w) in window.iter().enumerate() {
             impulse[i] *= w;

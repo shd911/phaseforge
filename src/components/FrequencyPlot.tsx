@@ -1731,12 +1731,19 @@ export default function FrequencyPlot() {
       // Generate FIR
       const isLin = (f: any) => !f || f.linear_phase;
       const allLinear = isLin(target.high_pass) && isLin(target.low_pass);
-      // FIR phase mode: LinearPhase (all lin) or MinimumPhase (any min)
-      // Per-filter Hilbert is for DISPLAY only (Model curve) — FIR uses blanket Hilbert
-      // because single FIR can't realize mixed phase without passband artifacts
+      // FIR phase mode:
+      // LinearPhase: all filters lin → symmetric FIR
+      // MixedPhase: has Gaussian min-phase → per-filter Hilbert on FFT grid in Rust
+      // MinimumPhase: non-Gaussian, not all linear → blanket Hilbert
+      const hasGaussMin = isGaussianMinPhase(target.high_pass) || isGaussianMinPhase(target.low_pass);
+      const phaseMode = allLinear ? "LinearPhase" : hasGaussMin ? "MixedPhase" : "MinimumPhase";
+      const gaussFilters: { freq_hz: number; shape: number; is_lowpass: boolean }[] = [];
+      if (isGaussianMinPhase(target.high_pass)) gaussFilters.push({ freq_hz: target.high_pass!.freq_hz, shape: target.high_pass!.shape ?? 1.0, is_lowpass: false });
+      if (isGaussianMinPhase(target.low_pass)) gaussFilters.push({ freq_hz: target.low_pass!.freq_hz, shape: target.low_pass!.shape ?? 1.0, is_lowpass: true });
       const firConfig = {
         taps, sample_rate: sr, max_boost_db: firMaxBoost(), noise_floor_db: firNoiseFloor(),
-        window: win, phase_mode: allLinear ? "LinearPhase" : "MinimumPhase",
+        window: win, phase_mode: phaseMode,
+        gaussian_min_phase_filters: gaussFilters,
         iterations: firIterations(), freq_weighting: firFreqWeighting(),
         narrowband_limit: firNarrowbandLimit(), nb_smoothing_oct: firNbSmoothingOct(),
         nb_max_excess_db: firNbMaxExcess(),
