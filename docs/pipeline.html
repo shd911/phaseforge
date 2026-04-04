@@ -46,7 +46,7 @@
 <body>
 
 <h1>PhaseForge — DSP Pipeline</h1>
-<p class="subtitle">Полное описание обработки сигнала: от загрузки замера до экспорта FIR-фильтра. Версия b99, 2026-04-02.</p>
+<p class="subtitle">Полное описание обработки сигнала: от загрузки замера до экспорта FIR-фильтра. Версия b101, 2026-04-05.</p>
 
 <div class="toc">
 <strong>Содержание</strong>
@@ -424,7 +424,7 @@ phase_sum = atan2(Im, Re) &times; 180/&pi;</div>
 </tbody>
 </table>
 
-<p style="margin-top:12px"><strong>Известное ограничение (b99):</strong> Corrected IR/Step не получает фазу Gaussian min-phase от кроссовера, т.к. cross-section возвращает 0°. Это влияет на позицию и форму corrected step для басовых полос с Gaussian кроссовером.</p>
+<p style="margin-top:12px"><strong>Известное ограничение (b99→b101):</strong> Corrected IR/Step не получает фазу Gaussian min-phase от кроссовера, т.к. cross-section возвращает 0°. Это влияет на позицию и форму corrected step для басовых полос с Gaussian кроссовером.</p>
 </div>
 
 <h3>Преобразование Гильберта</h3>
@@ -460,7 +460,7 @@ phase_sum = atan2(Im, Re) &times; 180/&pi;</div>
 </table>
 
 <div style="margin-top:40px; padding-top:20px; border-top:1px solid var(--accent); color:var(--dim); font-size:12px;">
-PhaseForge v0.1.0-b99 &mdash; Tauri 2 + Rust + SolidJS &mdash; DSP Pipeline Documentation
+PhaseForge v0.1.0-b101 &mdash; Tauri 2 + Rust + SolidJS &mdash; DSP Pipeline Documentation
 </div>
 
 </body>
