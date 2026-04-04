@@ -118,6 +118,7 @@ export default function BandTabs() {
             <Show when={appState.bands.length > 1}>
               <span
                 class="band-tab-close"
+                onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
                   if (window.confirm(`Delete band "${band.name}"?`)) {
