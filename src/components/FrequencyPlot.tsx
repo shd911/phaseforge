@@ -1713,9 +1713,16 @@ export default function FrequencyPlot() {
       const targetMag = response.magnitude;
       let modelPhase = response.phase;
 
-      // Gaussian min-phase: per-filter Hilbert
+      // Gaussian min-phase: per-filter Hilbert (for display)
       if (isGaussianMinPhase(target.high_pass) || isGaussianMinPhase(target.low_pass)) {
         modelPhase = await addGaussianMinPhase(freq, modelPhase, target.high_pass, target.low_pass);
+        if (gen !== renderGen) return;
+      }
+
+      // Gaussian-only phase for FIR engine (without analytical phase from non-Gaussian filters)
+      let firModelPhase = new Array(freq.length).fill(0);
+      if (isGaussianMinPhase(target.high_pass) || isGaussianMinPhase(target.low_pass)) {
+        firModelPhase = await addGaussianMinPhase(freq, firModelPhase, target.high_pass, target.low_pass);
         if (gen !== renderGen) return;
       }
 
@@ -1739,7 +1746,7 @@ export default function FrequencyPlot() {
         nb_max_excess_db: firNbMaxExcess(),
       };
       const firResult = await invoke<{ realized_mag: number[]; realized_phase: number[]; impulse: number[]; time_ms: number[]; norm_db: number; causality: number; taps: number; sample_rate: number }>(
-        "generate_model_fir", { freq, targetMag, peqMag: peqMagArr, modelPhase, config: firConfig },
+        "generate_model_fir", { freq, targetMag, peqMag: peqMagArr, modelPhase: firModelPhase, config: firConfig },
       );
       if (gen !== renderGen) return;
 

@@ -1108,20 +1108,17 @@ function ExportTab() {
     );
 
     const targetMag = response.magnitude;
-    let modelPhase = response.phase;
-
-    // Gaussian min-phase: per-filter Hilbert
-    if (isGaussianMinPhase(b.target.high_pass) || isGaussianMinPhase(b.target.low_pass)) {
-      if (isGaussianMinPhase(b.target.high_pass)) {
-        const hpMag = gaussianFilterMagDb(freq, b.target.high_pass!, false);
-        const hpPh = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: hpMag });
-        modelPhase = modelPhase.map((v: number, i: number) => v + hpPh[i]);
-      }
-      if (isGaussianMinPhase(b.target.low_pass)) {
-        const lpMag = gaussianFilterMagDb(freq, b.target.low_pass!, true);
-        const lpPh = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: lpMag });
-        modelPhase = modelPhase.map((v: number, i: number) => v + lpPh[i]);
-      }
+    // Gaussian-only phase for FIR engine (without analytical phase from non-Gaussian)
+    let firModelPhase = new Array(freq.length).fill(0);
+    if (isGaussianMinPhase(b.target.high_pass)) {
+      const hpMag = gaussianFilterMagDb(freq, b.target.high_pass!, false);
+      const hpPh = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: hpMag });
+      firModelPhase = firModelPhase.map((v: number, i: number) => v + hpPh[i]);
+    }
+    if (isGaussianMinPhase(b.target.low_pass)) {
+      const lpMag = gaussianFilterMagDb(freq, b.target.low_pass!, true);
+      const lpPh = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: lpMag });
+      firModelPhase = firModelPhase.map((v: number, i: number) => v + lpPh[i]);
     }
 
     // 2. Compute PEQ contribution separately (PEQ always min-phase)
@@ -1133,7 +1130,6 @@ function ExportTab() {
         sampleRate: sr,
       });
       peqMagArr = peqMag;
-      modelPhase = modelPhase.map((v: number, i: number) => v + peqPhase[i]);
     }
 
     // 3. Generate FIR
@@ -1146,7 +1142,7 @@ function ExportTab() {
       freq,
       targetMag,
       peqMag: peqMagArr,
-      modelPhase,
+      modelPhase: firModelPhase,
       config: {
         taps,
         sample_rate: sr,
