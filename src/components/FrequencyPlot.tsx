@@ -1719,13 +1719,6 @@ export default function FrequencyPlot() {
         if (gen !== renderGen) return;
       }
 
-      // Gaussian-only phase for FIR engine (without analytical phase from non-Gaussian filters)
-      let firModelPhase = new Array(freq.length).fill(0);
-      if (isGaussianMinPhase(target.high_pass) || isGaussianMinPhase(target.low_pass)) {
-        firModelPhase = await addGaussianMinPhase(freq, firModelPhase, target.high_pass, target.low_pass);
-        if (gen !== renderGen) return;
-      }
-
       // PEQ contribution
       let peqMagArr: number[] = [];
       if (peqBands.length > 0) {
@@ -1738,25 +1731,18 @@ export default function FrequencyPlot() {
       // Generate FIR
       const isLin = (f: any) => !f || f.linear_phase;
       const allLinear = isLin(target.high_pass) && isLin(target.low_pass);
-      const hasGaussMin = isGaussianMinPhase(target.high_pass) || isGaussianMinPhase(target.low_pass);
-      // LinearPhase: all filters lin → symmetric FIR
-      // MixedPhase: has Gaussian min-phase → use frontend per-filter Hilbert
-      // MinimumPhase: no Gaussian min-phase, not all linear → Rust computes Hilbert
-      const phaseMode = allLinear ? "LinearPhase" : hasGaussMin ? "MixedPhase" : "MinimumPhase";
-      // Build gaussian_min_phase_filters for MixedPhase FIR
-      const gaussFilters: { freq_hz: number; shape: number; is_lowpass: boolean }[] = [];
-      if (isGaussianMinPhase(target.high_pass)) gaussFilters.push({ freq_hz: target.high_pass!.freq_hz, shape: target.high_pass!.shape ?? 1.0, is_lowpass: false });
-      if (isGaussianMinPhase(target.low_pass)) gaussFilters.push({ freq_hz: target.low_pass!.freq_hz, shape: target.low_pass!.shape ?? 1.0, is_lowpass: true });
+      // FIR phase mode: LinearPhase (all lin) or MinimumPhase (any min)
+      // Per-filter Hilbert is for DISPLAY only (Model curve) — FIR uses blanket Hilbert
+      // because single FIR can't realize mixed phase without passband artifacts
       const firConfig = {
         taps, sample_rate: sr, max_boost_db: firMaxBoost(), noise_floor_db: firNoiseFloor(),
-        window: win, phase_mode: phaseMode,
+        window: win, phase_mode: allLinear ? "LinearPhase" : "MinimumPhase",
         iterations: firIterations(), freq_weighting: firFreqWeighting(),
         narrowband_limit: firNarrowbandLimit(), nb_smoothing_oct: firNbSmoothingOct(),
         nb_max_excess_db: firNbMaxExcess(),
-        gaussian_min_phase_filters: gaussFilters,
       };
       const firResult = await invoke<{ realized_mag: number[]; realized_phase: number[]; impulse: number[]; time_ms: number[]; norm_db: number; causality: number; taps: number; sample_rate: number }>(
-        "generate_model_fir", { freq, targetMag, peqMag: peqMagArr, modelPhase: firModelPhase, config: firConfig },
+        "generate_model_fir", { freq, targetMag, peqMag: peqMagArr, modelPhase: new Array(freq.length).fill(0), config: firConfig },
       );
       if (gen !== renderGen) return;
 

@@ -55,7 +55,7 @@ import {
   firMaxBoost, firNoiseFloor, firIterations,
   firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess,
 } from "../stores/bands";
-import { isGaussianMinPhase, gaussianFilterMagDb } from "../lib/plot-helpers";
+import { isGaussianMinPhase } from "../lib/plot-helpers";
 import {
   tolerance, setTolerance,
   maxBands, setMaxBands,
@@ -1108,18 +1108,6 @@ function ExportTab() {
     );
 
     const targetMag = response.magnitude;
-    // Gaussian-only phase for FIR engine (without analytical phase from non-Gaussian)
-    let firModelPhase = new Array(freq.length).fill(0);
-    if (isGaussianMinPhase(b.target.high_pass)) {
-      const hpMag = gaussianFilterMagDb(freq, b.target.high_pass!, false);
-      const hpPh = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: hpMag });
-      firModelPhase = firModelPhase.map((v: number, i: number) => v + hpPh[i]);
-    }
-    if (isGaussianMinPhase(b.target.low_pass)) {
-      const lpMag = gaussianFilterMagDb(freq, b.target.low_pass!, true);
-      const lpPh = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: lpMag });
-      firModelPhase = firModelPhase.map((v: number, i: number) => v + lpPh[i]);
-    }
 
     // 2. Compute PEQ contribution separately (PEQ always min-phase)
     let peqMagArr: number[] = [];
@@ -1142,25 +1130,19 @@ function ExportTab() {
       freq,
       targetMag,
       peqMag: peqMagArr,
-      modelPhase: firModelPhase,
+      modelPhase: new Array(freq.length).fill(0),
       config: {
         taps,
         sample_rate: sr,
         max_boost_db: firMaxBoost(),
         noise_floor_db: firNoiseFloor(),
         window: win,
-        phase_mode: (isLin(b.target.high_pass) && isLin(b.target.low_pass)) ? "LinearPhase"
-          : (isGaussianMinPhase(b.target.high_pass) || isGaussianMinPhase(b.target.low_pass)) ? "MixedPhase"
-          : "MinimumPhase",
+        phase_mode: (isLin(b.target.high_pass) && isLin(b.target.low_pass)) ? "LinearPhase" : "MinimumPhase",
         iterations: firIterations(),
         freq_weighting: firFreqWeighting(),
         narrowband_limit: firNarrowbandLimit(),
         nb_smoothing_oct: firNbSmoothingOct(),
         nb_max_excess_db: firNbMaxExcess(),
-        gaussian_min_phase_filters: [
-          ...(isGaussianMinPhase(b.target.high_pass) ? [{ freq_hz: b.target.high_pass!.freq_hz, shape: b.target.high_pass!.shape ?? 1.0, is_lowpass: false }] : []),
-          ...(isGaussianMinPhase(b.target.low_pass) ? [{ freq_hz: b.target.low_pass!.freq_hz, shape: b.target.low_pass!.shape ?? 1.0, is_lowpass: true }] : []),
-        ],
       },
     });
 
