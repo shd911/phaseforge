@@ -189,8 +189,8 @@ fn compute_minimum_phase(
         let f_lin = nyquist * k as f64 / (n_bins - 1) as f64;
         if f_lin <= freq[0] {
             lin_mag[k] = clamped[0];
-        } else if f_lin >= *freq.last().unwrap() {
-            lin_mag[k] = *clamped.last().unwrap();
+        } else if f_lin >= *freq.last().expect("freq non-empty (checked at line 176)") {
+            lin_mag[k] = *clamped.last().expect("clamped same len as freq");
         } else {
             let mut lo = 0usize;
             let mut hi = n - 1;

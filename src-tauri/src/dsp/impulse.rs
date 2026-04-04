@@ -40,7 +40,7 @@ pub fn compute_impulse_response(
     // Interpolate measurement onto linear grid: 0 Hz to Nyquist
     let (_grid_freq, grid_mag, grid_phase_opt) =
         interpolate_linear_grid(freq, magnitude, Some(phase), n_bins, sample_rate);
-    let grid_phase = grid_phase_opt.unwrap();
+    let grid_phase = grid_phase_opt.expect("phase must be present when Some(phase) was passed");
 
     // Build complex spectrum for positive frequencies
     let mut spectrum: Vec<Complex64> = Vec::with_capacity(fft_size);
@@ -84,7 +84,7 @@ pub fn compute_impulse_response(
     let peak_idx = impulse_raw
         .iter()
         .enumerate()
-        .max_by(|(_, a), (_, b)| a.abs().partial_cmp(&b.abs()).unwrap())
+        .max_by(|(_, a), (_, b)| a.abs().partial_cmp(&b.abs()).unwrap_or(std::cmp::Ordering::Equal))
         .map(|(i, _)| i)
         .unwrap_or(0);
 

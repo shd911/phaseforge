@@ -64,16 +64,16 @@ pub fn merge_nf_ff(
     }
 
     // Common frequency range (intersection)
+    // Safety: .last() is safe here — emptiness is checked above at lines 60-64
+    let nf_last = *nf.freq.last().expect("nf.freq non-empty (checked above)");
+    let ff_last = *ff.freq.last().expect("ff.freq non-empty (checked above)");
     let f_min = nf.freq[0].max(ff.freq[0]).max(1.0); // at least 1 Hz
-    let f_max = nf.freq.last().unwrap().min(*ff.freq.last().unwrap());
+    let f_max = nf_last.min(ff_last);
     if f_min >= f_max {
         return Err(AppError::Dsp {
             message: format!(
                 "No frequency overlap between NF ({:.0}–{:.0} Hz) and FF ({:.0}–{:.0} Hz)",
-                nf.freq[0],
-                nf.freq.last().unwrap(),
-                ff.freq[0],
-                ff.freq.last().unwrap()
+                nf.freq[0], nf_last, ff.freq[0], ff_last
             ),
         });
     }
@@ -83,11 +83,11 @@ pub fn merge_nf_ff(
     // Interpolate both onto shared log grid
     let (grid_freq, nf_mag, nf_ph_opt) =
         interpolate_log_grid(&nf.freq, &nf.magnitude, Some(nf_phase), n_points, f_min, f_max);
-    let nf_ph = nf_ph_opt.unwrap();
+    let nf_ph = nf_ph_opt.expect("nf phase must be present when Some(nf_phase) was passed");
 
     let (_, ff_mag, ff_ph_opt) =
         interpolate_log_grid(&ff.freq, &ff.magnitude, Some(ff_phase), n_points, f_min, f_max);
-    let ff_ph = ff_ph_opt.unwrap();
+    let ff_ph = ff_ph_opt.expect("ff phase must be present when Some(ff_phase) was passed");
 
     // --- Baffle step correction (applied to NF before level matching) ---
     let (nf_mag, nf_ph) = if let Some(ref baffle_config) = config.baffle {

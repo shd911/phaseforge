@@ -1193,7 +1193,7 @@ fn interp_1d_simple(x_data: &[f64], y_data: &[f64], x_query: &[f64]) -> Vec<f64>
         if x_data.is_empty() { return 0.0; }
         if xq <= x_data[0] { return y_data[0]; }
         if xq >= x_data[x_data.len() - 1] { return y_data[y_data.len() - 1]; }
-        let idx = match x_data.binary_search_by(|v| v.partial_cmp(&xq).unwrap()) {
+        let idx = match x_data.binary_search_by(|v| v.partial_cmp(&xq).unwrap_or(std::cmp::Ordering::Equal)) {
             Ok(i) => return y_data[i],
             Err(i) => i,
         };
