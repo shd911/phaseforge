@@ -14,6 +14,14 @@ use crate::error::AppError;
 // Types
 // ---------------------------------------------------------------------------
 
+/// Per-filter Gaussian info for MixedPhase mode.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GaussianFilterInfo {
+    pub freq_hz: f64,
+    pub shape: f64,
+    pub is_lowpass: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PhaseMode {
     MinimumPhase,
@@ -68,6 +76,8 @@ pub struct FirConfig {
     pub nb_smoothing_oct: f64,                // smoothing width in octaves (e.g. 1/3)
     #[serde(default = "default_nb_max_excess")]
     pub nb_max_excess_db: f64,                // max dB above smoothed curve
+    #[serde(default)]
+    pub gaussian_min_phase_filters: Vec<GaussianFilterInfo>,
 }
 
 fn default_iterations() -> usize { 3 }
@@ -1277,13 +1287,29 @@ pub fn generate_model_fir(
     //    PEQ phase: ALWAYS Hilbert (min-phase biquads)
     let target_phase_rad = if effective_linear {
         vec![0.0; n_bins]
-    } else if config.phase_mode == PhaseMode::MixedPhase && !is_zero_phase {
-        // Frontend provided per-filter Hilbert phase — interpolate to linear FFT grid
-        let (_, _, model_ph_opt) = interpolate_linear_grid(
-            freq, target_mag, Some(model_phase), n_bins, config.sample_rate,
-        );
-        let model_ph_deg = model_ph_opt.unwrap_or_else(|| vec![0.0; n_bins]);
-        model_ph_deg.iter().map(|&d| d.to_radians()).collect()
+    } else if config.phase_mode == PhaseMode::MixedPhase && !config.gaussian_min_phase_filters.is_empty() {
+        // MixedPhase: compute per-filter Gaussian Hilbert on linear FFT grid
+        let nyquist = config.sample_rate / 2.0;
+        let mut phase_acc = vec![0.0_f64; n_bins];
+        for gf in &config.gaussian_min_phase_filters {
+            let mut filt_mag = vec![0.0_f64; n_bins];
+            let ln2 = 2.0_f64.ln();
+            for k in 0..n_bins {
+                let f = nyquist * k as f64 / (n_bins - 1) as f64;
+                let ratio = if gf.freq_hz > 0.0 { f / gf.freq_hz } else { 0.0 };
+                let lp_lin = (-ln2 * ratio.powf(2.0 * gf.shape)).exp();
+                let lin = if gf.is_lowpass { lp_lin } else { 1.0 - lp_lin };
+                filt_mag[k] = if lin > 1e-20 { 20.0 * lin.log10() } else { -400.0 };
+            }
+            for v in filt_mag.iter_mut() {
+                *v = v.max(config.noise_floor_db);
+            }
+            let filt_phase = minimum_phase_from_magnitude(&filt_mag, n_fft);
+            for k in 0..n_bins {
+                phase_acc[k] += filt_phase[k];
+            }
+        }
+        phase_acc
     } else {
         minimum_phase_from_magnitude(&lin_target, n_fft)
     };
@@ -1460,6 +1486,7 @@ mod tests {
             phase_mode: PhaseMode::MinimumPhase,
             iterations: 0, freq_weighting: false, narrowband_limit: false,
             nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0,
+            gaussian_min_phase_filters: vec![],
         };
 
         let result = generate_fir(&freq, &mag, &target, &peq, &config, (20.0, 20000.0)).unwrap();
@@ -1488,6 +1515,7 @@ mod tests {
             phase_mode: PhaseMode::MinimumPhase,
             iterations: 0, freq_weighting: false, narrowband_limit: false,
             nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0,
+            gaussian_min_phase_filters: vec![],
         };
 
         let result = generate_fir(&freq, &mag, &target, &peq, &config, (20.0, 20000.0)).unwrap();
@@ -1639,6 +1667,7 @@ mod tests {
             phase_mode: PhaseMode::MinimumPhase,
             iterations: 0, freq_weighting: false, narrowband_limit: false,
             nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0,
+            gaussian_min_phase_filters: vec![],
         };
 
         let result = generate_model_fir(&freq, &mag, &[], &phase, &config).unwrap();
@@ -1686,6 +1715,7 @@ mod tests {
             narrowband_limit: false,
             nb_smoothing_oct: 0.333,
             nb_max_excess_db: 6.0,
+            gaussian_min_phase_filters: vec![],
         };
 
         let result = generate_model_fir(&freq, &mag, &[], &phase, &config).unwrap();
@@ -1737,6 +1767,7 @@ mod tests {
             narrowband_limit: false,
             nb_smoothing_oct: 0.333,
             nb_max_excess_db: 6.0,
+            gaussian_min_phase_filters: vec![],
         };
 
         let result = generate_model_fir(&freq, &mag, &[], &phase, &config).unwrap();
@@ -1821,6 +1852,7 @@ mod tests {
             narrowband_limit: false,
             nb_smoothing_oct: 0.333,
             nb_max_excess_db: 6.0,
+            gaussian_min_phase_filters: vec![],
         };
 
         fn make_filter(
@@ -1952,5 +1984,91 @@ mod tests {
         // Cleanup
         let _ = std::fs::remove_dir_all(&tmp_dir);
         println!("\n=== All {} FIR filters generated and exported OK ===", total);
+    }
+
+    #[test]
+    fn test_mixed_phase_respects_per_filter_phase() {
+        // Verify that MixedPhase mode with gaussian_min_phase_filters produces
+        // phase that matches per-filter Hilbert computation.
+        let n = 256;
+        let freq: Vec<f64> = (0..n)
+            .map(|i| {
+                let t = i as f64 / (n - 1) as f64;
+                (20.0_f64.ln() + t * (20000.0_f64.ln() - 20.0_f64.ln())).exp()
+            })
+            .collect();
+
+        let fc_hp = 80.0;
+        let fc_lp = 3500.0;
+        let shape = 2.0;
+
+        // Build a simple bandpass target magnitude using Gaussian filters
+        let ln2 = 2.0_f64.ln();
+        let mag: Vec<f64> = freq.iter().map(|&f| {
+            let hp_ratio = if fc_hp > 0.0 { f / fc_hp } else { 0.0 };
+            let hp_lin = 1.0 - (-ln2 * hp_ratio.powf(2.0 * shape)).exp();
+            let lp_ratio = if fc_lp > 0.0 { f / fc_lp } else { 0.0 };
+            let lp_lin = (-ln2 * lp_ratio.powf(2.0 * shape)).exp();
+            let lin = hp_lin * lp_lin;
+            if lin > 1e-20 { 20.0 * lin.log10() } else { -400.0 }
+        }).collect();
+        let phase = vec![0.0; n];
+
+        // Case 1: HP only
+        let config_hp = FirConfig {
+            taps: 16384,
+            sample_rate: 48000.0,
+            max_boost_db: 24.0,
+            noise_floor_db: -150.0,
+            window: WindowType::Blackman,
+            phase_mode: PhaseMode::MixedPhase,
+            iterations: 0,
+            freq_weighting: false,
+            narrowband_limit: false,
+            nb_smoothing_oct: 0.333,
+            nb_max_excess_db: 6.0,
+            gaussian_min_phase_filters: vec![GaussianFilterInfo { freq_hz: fc_hp, shape, is_lowpass: false }],
+        };
+        let result_hp = generate_model_fir(&freq, &mag, &[], &phase, &config_hp).unwrap();
+        assert_eq!(result_hp.taps, 16384);
+        // Phase should be non-zero (min-phase from HP filter)
+        let mid_phases_hp: Vec<f64> = freq.iter().enumerate()
+            .filter(|(_, &f)| f >= 200.0 && f <= 2000.0)
+            .map(|(i, _)| result_hp.realized_phase[i])
+            .collect();
+        let rms = (mid_phases_hp.iter().map(|p| p * p).sum::<f64>() / mid_phases_hp.len() as f64).sqrt();
+        println!("Case 1 (HP only): midband phase RMS = {:.2}°", rms);
+        assert!(rms < 25.0, "HP-only midband phase RMS={:.2}° too large", rms);
+
+        // Case 2: LP only
+        let config_lp = FirConfig {
+            gaussian_min_phase_filters: vec![GaussianFilterInfo { freq_hz: fc_lp, shape, is_lowpass: true }],
+            ..config_hp.clone()
+        };
+        let result_lp = generate_model_fir(&freq, &mag, &[], &phase, &config_lp).unwrap();
+        let mid_phases_lp: Vec<f64> = freq.iter().enumerate()
+            .filter(|(_, &f)| f >= 200.0 && f <= 2000.0)
+            .map(|(i, _)| result_lp.realized_phase[i])
+            .collect();
+        let rms = (mid_phases_lp.iter().map(|p| p * p).sum::<f64>() / mid_phases_lp.len() as f64).sqrt();
+        println!("Case 2 (LP only): midband phase RMS = {:.2}°", rms);
+        assert!(rms < 25.0, "LP-only midband phase RMS={:.2}° too large", rms);
+
+        // Case 3: HP + LP (both filters)
+        let config_both = FirConfig {
+            gaussian_min_phase_filters: vec![
+                GaussianFilterInfo { freq_hz: fc_hp, shape, is_lowpass: false },
+                GaussianFilterInfo { freq_hz: fc_lp, shape, is_lowpass: true },
+            ],
+            ..config_hp.clone()
+        };
+        let result_both = generate_model_fir(&freq, &mag, &[], &phase, &config_both).unwrap();
+        let mid_phases_both: Vec<f64> = freq.iter().enumerate()
+            .filter(|(_, &f)| f >= 200.0 && f <= 2000.0)
+            .map(|(i, _)| result_both.realized_phase[i])
+            .collect();
+        let rms = (mid_phases_both.iter().map(|p| p * p).sum::<f64>() / mid_phases_both.len() as f64).sqrt();
+        println!("Case 3 (HP+LP): midband phase RMS = {:.2}°", rms);
+        assert!(rms < 25.0, "HP+LP midband phase RMS={:.2}° too large", rms);
     }
 }

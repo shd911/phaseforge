@@ -1157,6 +1157,10 @@ function ExportTab() {
         narrowband_limit: firNarrowbandLimit(),
         nb_smoothing_oct: firNbSmoothingOct(),
         nb_max_excess_db: firNbMaxExcess(),
+        gaussian_min_phase_filters: [
+          ...(isGaussianMinPhase(b.target.high_pass) ? [{ freq_hz: b.target.high_pass!.freq_hz, shape: b.target.high_pass!.shape ?? 1.0, is_lowpass: false }] : []),
+          ...(isGaussianMinPhase(b.target.low_pass) ? [{ freq_hz: b.target.low_pass!.freq_hz, shape: b.target.low_pass!.shape ?? 1.0, is_lowpass: true }] : []),
+        ],
       },
     });
 

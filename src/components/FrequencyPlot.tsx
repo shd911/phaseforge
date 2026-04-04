@@ -1743,12 +1743,17 @@ export default function FrequencyPlot() {
       // MixedPhase: has Gaussian min-phase → use frontend per-filter Hilbert
       // MinimumPhase: no Gaussian min-phase, not all linear → Rust computes Hilbert
       const phaseMode = allLinear ? "LinearPhase" : hasGaussMin ? "MixedPhase" : "MinimumPhase";
+      // Build gaussian_min_phase_filters for MixedPhase FIR
+      const gaussFilters: { freq_hz: number; shape: number; is_lowpass: boolean }[] = [];
+      if (isGaussianMinPhase(target.high_pass)) gaussFilters.push({ freq_hz: target.high_pass!.freq_hz, shape: target.high_pass!.shape ?? 1.0, is_lowpass: false });
+      if (isGaussianMinPhase(target.low_pass)) gaussFilters.push({ freq_hz: target.low_pass!.freq_hz, shape: target.low_pass!.shape ?? 1.0, is_lowpass: true });
       const firConfig = {
         taps, sample_rate: sr, max_boost_db: firMaxBoost(), noise_floor_db: firNoiseFloor(),
         window: win, phase_mode: phaseMode,
         iterations: firIterations(), freq_weighting: firFreqWeighting(),
         narrowband_limit: firNarrowbandLimit(), nb_smoothing_oct: firNbSmoothingOct(),
         nb_max_excess_db: firNbMaxExcess(),
+        gaussian_min_phase_filters: gaussFilters,
       };
       const firResult = await invoke<{ realized_mag: number[]; realized_phase: number[]; impulse: number[]; time_ms: number[]; norm_db: number; causality: number; taps: number; sample_rate: number }>(
         "generate_model_fir", { freq, targetMag, peqMag: peqMagArr, modelPhase: firModelPhase, config: firConfig },
