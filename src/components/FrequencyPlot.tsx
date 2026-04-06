@@ -4,7 +4,7 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { invoke } from "@tauri-apps/api/core";
 import type { Measurement, TargetResponse, FilterType, FilterConfig, PeqBand } from "../lib/types";
-import { appState, activeBand, isSum, activeTab, plotTab, setPlotTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, setPeqDragging, updatePeqBand, commitPeqBand, bandsVersion, exportSampleRate, exportTaps, exportWindow, firIterations, firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess, firMaxBoost, firNoiseFloor, exportMetrics, setExportMetrics, plotSnapshots, addPlotSnapshot, clearPlotSnapshots } from "../stores/bands";
+import { appState, activeBand, isSum, activeTab, plotTab, setPlotTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, setPeqDragging, updatePeqBand, commitPeqBand, bandsVersion, exportSampleRate, exportTaps, exportWindow, firIterations, firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess, firMaxBoost, firNoiseFloor, exportMetrics, setExportMetrics, plotSnapshots, addPlotSnapshot, clearPlotSnapshots, setAlignmentDelay } from "../stores/bands";
 import type { SmoothingMode, BandState, FreqSnapshot } from "../stores/bands";
 import { needAutoFit, setNeedAutoFit } from "../App";
 import { computeFloorBounce } from "../lib/floor-bounce";
@@ -3486,6 +3486,14 @@ export default function FrequencyPlot() {
             uData.push(corrected);
             legend.push({ label: bands[i].name + " corr+XO", color, dash: false, visible: true, seriesIdx: sIdx, category: "corrected" });
             sIdx++;
+
+            if (showPhase && perBandCorrPhase[i]) {
+              const phColor = bandColorFamily(bands[i].color).corrected + "60";
+              uSeries.push({ label: bands[i].name + " corr°", stroke: phColor, width: 1, dash: [4, 3], scale: "phase" });
+              uData.push(wrapPhase(perBandCorrPhase[i]!));
+              legend.push({ label: bands[i].name + " corr°", color: phColor, dash: true, visible: false, seriesIdx: sIdx, category: "corrected" });
+              sIdx++;
+            }
           } catch (e) {
             console.warn("SUM corrected failed for band", bands[i].name, e);
             perBandCorrected.push(null);
@@ -3499,11 +3507,13 @@ export default function FrequencyPlot() {
           const enabledNorm: number[][] = [];
           const enabledPhase: number[][] = [];
           const enabledInverted: boolean[] = [];
+          const enabledBandIdx: number[] = [];
           for (let i = 0; i < bands.length; i++) {
             if (perBandTargetNorm[i]) {
               enabledNorm.push(perBandTargetNorm[i]!);
               enabledPhase.push(perBandTargetNormPhase[i] ?? Array.from({ length: freq.length }, () => 0));
               enabledInverted.push(bands[i].inverted);
+              enabledBandIdx.push(i);
             }
           }
           if (enabledNorm.length > 0) {
@@ -3516,9 +3526,10 @@ export default function FrequencyPlot() {
               const mag = enabledNorm[n];
               const ph = enabledPhase[n];
               const sign = enabledInverted[n] ? -1 : 1;
+              const alignDelay = bands[enabledBandIdx[n]].alignmentDelay ?? 0;
               for (let j = 0; j < freq.length; j++) {
                 const amp = Math.pow(10, mag[j] / 20) * sign;
-                const phRad = ph[j] * Math.PI / 180;
+                const phRad = (ph[j] + 360 * freq[j] * alignDelay) * Math.PI / 180;
                 sumRe[j] += amp * Math.cos(phRad);
                 sumIm[j] += amp * Math.sin(phRad);
               }
@@ -3563,9 +3574,10 @@ export default function FrequencyPlot() {
               const corr = perBandCorrected[ci]!;
               const corrPh = perBandCorrPhase[ci]!;
               const sign = bands[ci].inverted ? -1 : 1;
+              const alignDelay = bands[ci].alignmentDelay ?? 0;
               for (let j = 0; j < nPts; j++) {
                 const amp = Math.pow(10, corr[j] / 20) * sign;
-                const phRad = corrPh[j] * Math.PI / 180;
+                const phRad = (corrPh[j] + 360 * freq[j] * alignDelay) * Math.PI / 180;
                 sumRe[j] += amp * Math.cos(phRad);
                 sumIm[j] += amp * Math.sin(phRad);
               }
@@ -3636,9 +3648,10 @@ export default function FrequencyPlot() {
           for (const mi of measIndices) {
             const rm = resampled[mi]!;
             const sign = bands[mi].inverted ? -1 : 1;
+            const alignDelay = bands[mi].alignmentDelay ?? 0;
             for (let j = 0; j < nPts; j++) {
               const amp = Math.pow(10, rm.magnitude[j] / 20) * sign;
-              const phRad = rm.phase![j] * Math.PI / 180;
+              const phRad = (rm.phase![j] + 360 * freq[j] * alignDelay) * Math.PI / 180;
               sumRe[j] += amp * Math.cos(phRad);
               sumIm[j] += amp * Math.sin(phRad);
             }
@@ -4381,6 +4394,36 @@ export default function FrequencyPlot() {
                           style={{ "font-size": "9px", padding: "1px 6px" }}
                         >Step</button>
                       </td>
+                    </tr>
+                  </Show>
+                  <Show when={plotTab() === "freq"}>
+                    <tr>
+                      <td class="sum-row-header">DELAY <span style={{ "font-size": "9px", "font-weight": "normal", color: "var(--text-muted)" }}>ms</span></td>
+                      <For each={bandNames()}>
+                        {(bName) => {
+                          const band = () => appState.bands.find(b => b.name === bName);
+                          return (
+                            <td class="sum-cell">
+                              <Show when={band()} fallback={<span />}>
+                                {(b) => (
+                                  <input
+                                    type="number"
+                                    class="delay-input"
+                                    step="0.01"
+                                    placeholder="0.00"
+                                    value={((b().alignmentDelay ?? 0) * 1000).toFixed(2)}
+                                    onChange={(e) => {
+                                      const v = parseFloat(e.currentTarget.value);
+                                      if (!isNaN(v)) setAlignmentDelay(b().id, v / 1000);
+                                    }}
+                                  />
+                                )}
+                              </Show>
+                            </td>
+                          );
+                        }}
+                      </For>
+                      <td class="sum-cell-empty" />
                     </tr>
                   </Show>
                 </tbody>

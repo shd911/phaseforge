@@ -583,6 +583,20 @@ body {
 .sum-vis-table td {
   vertical-align: middle;
 }
+.delay-input {
+  width: 60px;
+  font-size: 10px;
+  font-family: var(--mono);
+  text-align: center;
+  padding: 1px 2px;
+  height: 18px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  outline: none;
+}
+.delay-input:focus { border-color: var(--border-focus); }
 
 .plot-body {
   display: flex;
