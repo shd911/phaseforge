@@ -447,11 +447,23 @@ body {
 
 .legend-swatch {
   display: inline-block;
-  width: 10px;
-  height: 10px;
+  width: 11px;
+  height: 11px;
   border-radius: 2px;
-  border: 2px solid;
+  border: 1.5px solid;
   flex-shrink: 0;
+  position: relative;
+}
+.legend-item:not(.legend-off) .legend-swatch:not(.legend-swatch-dash)::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 0px;
+  width: 4px;
+  height: 7px;
+  border: solid white;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
 }
 .legend-swatch-dash {
   border-style: dashed;
