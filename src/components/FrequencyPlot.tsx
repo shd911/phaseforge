@@ -4416,6 +4416,14 @@ export default function FrequencyPlot() {
                                       const v = parseFloat(e.currentTarget.value);
                                       if (!isNaN(v)) setAlignmentDelay(b().id, v / 1000);
                                     }}
+                                    onWheel={(e) => {
+                                      e.preventDefault();
+                                      const step = e.shiftKey ? 0.1 : 0.01;
+                                      const cur = (b().alignmentDelay ?? 0) * 1000;
+                                      const delta = e.deltaY < 0 ? step : -step;
+                                      setAlignmentDelay(b().id, (cur + delta) / 1000);
+                                      e.currentTarget.value = ((cur + delta)).toFixed(2);
+                                    }}
                                   />
                                 )}
                               </Show>
