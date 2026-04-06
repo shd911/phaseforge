@@ -535,14 +535,26 @@ body {
 }
 .sum-cell-dot {
   display: inline-block;
-  width: 10px;
-  height: 10px;
+  width: 11px;
+  height: 11px;
   border-radius: 2px;
-  border: 2px solid;
-  transition: background 0.15s;
+  border: 1.5px solid;
+  position: relative;
+  transition: background 0.15s, border-color 0.15s;
 }
 .sum-cell-dot:not(.on) {
   background: transparent !important;
+}
+.sum-cell-dot.on::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 0px;
+  width: 4px;
+  height: 7px;
+  border: solid white;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
 }
 /* Row header (category name) */
 .sum-vis-table .sum-row-header {
