@@ -999,8 +999,24 @@ export default function FrequencyPlot() {
         label: yLabel, scale: "mag", stroke: "#9b9ba6",
         grid: { stroke: "rgba(255,255,255,0.12)" },
         ticks: { stroke: "rgba(255,255,255,0.20)" },
-        values: (_u: uPlot, vals: number[]) => vals.map((v) => (v == null ? "" : v.toFixed(0))),
-        size: 50,
+        values: (_u: uPlot, vals: number[]) => {
+          if (!vals || vals.length < 2) return vals.map(v => v == null ? "" : v.toFixed(0));
+          // Adaptive decimals: increase precision until no duplicate labels
+          for (let dec = 0; dec <= 2; dec++) {
+            const labels = vals.map(v => v == null ? "" : v.toFixed(dec));
+            const nonEmpty = labels.filter(s => s !== "");
+            if (new Set(nonEmpty).size === nonEmpty.length) return labels;
+          }
+          // Still duplicates at 2 decimals — hide duplicates, keep first occurrence
+          const labels = vals.map(v => v == null ? "" : v.toFixed(2));
+          const seen = new Set<string>();
+          return labels.map(s => {
+            if (s === "" || seen.has(s)) return "";
+            seen.add(s);
+            return s;
+          });
+        },
+        size: 55,
       },
       {
         label: "Phase (\u00B0)", scale: "phase", side: 1, stroke: "#9b9ba6",
@@ -3428,7 +3444,7 @@ export default function FrequencyPlot() {
             const corrected = rm.magnitude.map(
               (v: number, j: number) => v + (peqMag ? peqMag[j] : 0) + (xsMag ? xsMag[j] : 0)
             );
-            // Normalize per-band corrected to its target in passband (b82.07)
+            // Per-band normalization: align corrected to target in passband
             if (tMag) {
               const hpF = bands[i].target.high_pass?.freq_hz ?? 20;
               const lpF = bands[i].target.low_pass?.freq_hz ?? 20000;
@@ -3540,6 +3556,7 @@ export default function FrequencyPlot() {
             (ci) => perBandCorrPhase[ci] && perBandCorrPhase[ci]!.length === nPts
           );
           if (hasAllPhaseCorr) {
+            // Coherent sum of all corrected bands
             const sumRe = new Float64Array(nPts);
             const sumIm = new Float64Array(nPts);
             for (const ci of corrIndices) {
@@ -3556,26 +3573,12 @@ export default function FrequencyPlot() {
             const sumCorrDb = new Array(nPts);
             const sumCorrPhase = new Array(nPts);
             for (let j = 0; j < nPts; j++) {
-              const re = sumRe[j];
-              const im = sumIm[j];
-              const amplitude = Math.sqrt(re * re + im * im);
+              const amplitude = Math.sqrt(sumRe[j] * sumRe[j] + sumIm[j] * sumIm[j]);
               sumCorrDb[j] = amplitude > 0 ? 20 * Math.log10(amplitude) : -200;
-              sumCorrPhase[j] = Math.atan2(im, re) * 180 / Math.PI;
+              sumCorrPhase[j] = Math.atan2(sumIm[j], sumRe[j]) * 180 / Math.PI;
             }
-            // Normalize Σ corrected to Σ target in passband 200–2000 Hz (b82.07)
-            if (sumTargetArr) {
-              let dSum = 0, dN = 0;
-              for (let j = 0; j < nPts; j++) {
-                if (freq[j] >= 200 && freq[j] <= 2000) {
-                  dSum += sumTargetArr[j] - sumCorrDb[j];
-                  dN++;
-                }
-              }
-              const corrOff = dN > 0 ? dSum / dN : 0;
-              if (Math.abs(corrOff) > 0.01) {
-                for (let j = 0; j < nPts; j++) sumCorrDb[j] += corrOff;
-              }
-            }
+            // No Σ offset — per-band normalization already aligns each band to its target.
+            // Σ corrected is the pure coherent sum, showing real acoustic behavior (b101).
             uSeries.push({ label: "\u03A3 corr", stroke: SUM_CORRECTED_COLOR, width: 3, scale: "mag" });
             uData.push(sumCorrDb);
             legend.push({ label: "\u03A3 corrected", color: SUM_CORRECTED_COLOR, dash: false, visible: true, seriesIdx: sIdx, category: "corrected" });

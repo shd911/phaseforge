@@ -756,6 +756,22 @@ body {
 }
 .right-panel .filter-block {
   width: auto;
+  overflow: hidden;
+}
+.right-panel .fb-grid {
+  grid-template-columns: 1fr 1fr;
+}
+.right-panel .num-field {
+  width: 42px;
+}
+.right-panel .num-unit {
+  min-width: 12px;
+}
+.right-panel .fb-label {
+  min-width: 26px;
+}
+.right-panel .fb-select {
+  min-width: 0;
 }
 .fb-grid {
   display: grid;
