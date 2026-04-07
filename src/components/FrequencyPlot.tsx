@@ -1863,9 +1863,13 @@ export default function FrequencyPlot() {
     // All bands for per-band curves (including excluded from sum)
     const allBands = allWithPhase;
 
-    // Read alignment delays synchronously (store proxy safe — before any await)
+    // Read alignment delays synchronously via direct index access (store proxy safe)
     const irDelayMap = new Map<string, number>();
-    for (const b of allWithPhase) irDelayMap.set(b.name, b.alignmentDelay ?? 0);
+    for (let i = 0; i < appState.bands.length; i++) {
+      const name = appState.bands[i].name;
+      const delay = appState.bands[i].alignmentDelay;
+      irDelayMap.set(name, typeof delay === "number" ? delay : 0);
+    }
 
     if (allBands.length === 0) {
       try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
