@@ -4408,6 +4408,11 @@ export default function FrequencyPlot() {
                       <For each={bandNames()}>
                         {(bName) => {
                           const band = () => appState.bands.find(b => b.name === bName);
+                          let delayTimer: ReturnType<typeof setTimeout> | null = null;
+                          const commitDelay = (id: string, ms: number) => {
+                            if (delayTimer) clearTimeout(delayTimer);
+                            delayTimer = setTimeout(() => setAlignmentDelay(id, ms / 1000), 200);
+                          };
                           return (
                             <td class="sum-cell">
                               <Show when={band()} fallback={<span />}>
@@ -4420,15 +4425,16 @@ export default function FrequencyPlot() {
                                     value={((b().alignmentDelay ?? 0) * 1000).toFixed(2)}
                                     onChange={(e) => {
                                       const v = parseFloat(e.currentTarget.value);
-                                      if (!isNaN(v)) setAlignmentDelay(b().id, v / 1000);
+                                      if (!isNaN(v)) commitDelay(b().id, v);
                                     }}
                                     onWheel={(e) => {
                                       e.preventDefault();
                                       const step = e.shiftKey ? 0.1 : 0.01;
                                       const cur = (b().alignmentDelay ?? 0) * 1000;
                                       const delta = e.deltaY < 0 ? step : -step;
-                                      setAlignmentDelay(b().id, (cur + delta) / 1000);
-                                      e.currentTarget.value = ((cur + delta)).toFixed(2);
+                                      const newVal = cur + delta;
+                                      e.currentTarget.value = newVal.toFixed(2);
+                                      commitDelay(b().id, newVal);
                                     }}
                                   />
                                 )}
