@@ -466,7 +466,7 @@ body {
   font-size: 10px;
   line-height: 11px;
   text-align: center;
-  color: inherit;
+  color: #fff;
 }
 .legend-swatch-dash {
   border-style: dashed;
@@ -569,7 +569,7 @@ body {
   font-size: 10px;
   line-height: 11px;
   text-align: center;
-  color: inherit;
+  color: #fff;
 }
 /* Row header (category name) */
 .sum-vis-table .sum-row-header {
