@@ -1852,10 +1852,12 @@ export default function FrequencyPlot() {
     }));
 
     // Collect bands with phase data (phase must be non-empty array)
-    // Deep clone to avoid SolidJS store proxy issues in async context
-    const allWithPhase: BandState[] = sumMode
-      ? JSON.parse(JSON.stringify(appState.bands.filter(b => b.measurement?.phase && b.measurement.phase.length > 0)))
-      : (band?.measurement?.phase && band.measurement.phase.length > 0 ? [JSON.parse(JSON.stringify(band))] : []);
+    const allWithPhase = sumMode
+      ? appState.bands.filter(b => b.measurement?.phase && b.measurement.phase.length > 0)
+      : (band?.measurement?.phase && band.measurement.phase.length > 0 ? [band] : []);
+    // Read alignment delays synchronously BEFORE any await (store proxy safe)
+    const delayMap = new Map<string, number>();
+    for (const b of allWithPhase) delayMap.set(b.name, b.alignmentDelay ?? 0);
     // In SUM mode, filter by band visibility from legend matrix (for coherent sum only)
     const excluded = untrack(() => irExcludedBands());
     const bands = sumMode
@@ -2027,7 +2029,7 @@ export default function FrequencyPlot() {
         for (let i = 0; i < allBands.length; i++) {
           const r = measResults[i];
           if (!r) continue;
-          const delayMs = (allBands[i].alignmentDelay ?? 0) * 1000;
+          const delayMs = (delayMap.get(allBands[i].name) ?? 0) * 1000;
           measBands.push({
             bandName: allBands[i].name,
             bandColor: allBands[i].color,
@@ -2050,7 +2052,7 @@ export default function FrequencyPlot() {
           }
           const offset = -peakMag;
           const sign = sb.inverted ? -1 : 1;
-          const alignDelay = sb.alignmentDelay ?? 0;
+          const alignDelay = delayMap.get(sb.name) ?? 0;
           for (let j = 0; j < n; j++) {
             const amp = Math.pow(10, ((mag[j] ?? -200) + offset) / 20) * sign;
             const phRad = ((sb.measurement!.phase![j] ?? 0) + 360 * freq[j] * alignDelay) * Math.PI / 180;
@@ -2116,7 +2118,7 @@ export default function FrequencyPlot() {
               freq, magnitude: tMag, phase: tPh, sampleRate: sr,
             });
             if (gen !== renderGen) return null;
-            const delayMs = (sb.alignmentDelay ?? 0) * 1000;
+            const delayMs = (delayMap.get(sb.name) ?? 0) * 1000;
             return { bandName: sb.name, bandColor: sb.color, timeMs: r.time.map(t => t * 1000 + delayMs), impulse: r.impulse, step: r.step } as IrBandData;
           } catch (_) { return null; }
         });
@@ -2154,7 +2156,7 @@ export default function FrequencyPlot() {
             }
             const tOffset = -tPeakMag;
             const sign = sb.inverted ? -1 : 1;
-            const alignDelay = sb.alignmentDelay ?? 0;
+            const alignDelay = delayMap.get(sb.name) ?? 0;
             for (let j = 0; j < n; j++) {
               const amp = Math.pow(10, ((tMag[j] ?? -200) + tOffset) / 20) * sign;
               const phRad = ((tPh[j] ?? 0) + 360 * freq[j] * alignDelay) * Math.PI / 180;
@@ -2210,7 +2212,7 @@ export default function FrequencyPlot() {
               freq: sbFreq, magnitude: cMag, phase: cPh, sampleRate: sbSr,
             });
             if (gen !== renderGen) return null;
-            const delayMs = (sb.alignmentDelay ?? 0) * 1000;
+            const delayMs = (delayMap.get(sb.name) ?? 0) * 1000;
             return { bandName: sb.name, bandColor: sb.color, timeMs: r.time.map(t => t * 1000 + delayMs), impulse: r.impulse, step: r.step } as IrBandData;
           } catch (_) { return null; }
         });
@@ -2258,7 +2260,7 @@ export default function FrequencyPlot() {
             }
             const offset = -peakMag;
             const sign = sb.inverted ? -1 : 1;
-            const alignDelay = sb.alignmentDelay ?? 0;
+            const alignDelay = delayMap.get(sb.name) ?? 0;
             for (let j = 0; j < n; j++) {
               const amp = Math.pow(10, ((cMag[j] ?? -200) + offset) / 20) * sign;
               const phRad = ((cPh[j] ?? 0) + 360 * freq[j] * alignDelay) * Math.PI / 180;
@@ -2462,7 +2464,7 @@ export default function FrequencyPlot() {
     for (let i = 0; i < refBand.impulse.length; i++) {
       if (Math.abs(refBand.impulse[i]) > refPeakVal) { refPeakVal = Math.abs(refBand.impulse[i]); refPeakIdx = i; }
     }
-    const refDelayMs = (allBands[0]?.alignmentDelay ?? 0) * 1000;
+    const refDelayMs = (delayMap.get(allBands[0]?.name ?? "") ?? 0) * 1000;
     const refPeakT = (refBand.timeMs[refPeakIdx] ?? 0) - refDelayMs; // subtract ref band's own delay
     const timeMs = refBand.timeMs.map(t => t - refPeakT);
 
