@@ -21,7 +21,7 @@ serde_json = "1.0"
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tauri = { version = "2.10.0", features = [] }
+tauri = { version = "2.10.0", features = ["devtools"] }
 tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
 rustfft = "6"
