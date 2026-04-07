@@ -1563,9 +1563,10 @@ export default function FrequencyPlot() {
       irUserXScale = null;
       irUserYScale = null;
     }
-    // On freq tab: don't destroy here — renderChart will replace seamlessly (no flash gap)
-    // On other tabs: destroy immediately
-    if (pTab !== "freq") {
+    // On freq/ir/step tabs: don't destroy here — render functions handle chart lifecycle
+    // (renderChart replaces seamlessly, renderIrStepChart uses setData fast path)
+    // On other tabs (gd, export): destroy immediately
+    if (pTab !== "freq" && pTab !== "ir" && pTab !== "step") {
       try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
     }
 
