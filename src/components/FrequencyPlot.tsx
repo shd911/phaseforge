@@ -2442,11 +2442,11 @@ export default function FrequencyPlot() {
     hpFreq: number,
     irCfg: { db: boolean; masking: boolean },
   ) {
-    try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
     if (!containerRef) return;
     const rect = containerRef.getBoundingClientRect();
     const w = Math.max(rect.width, 400);
     const h = Math.max(rect.height, 200);
+
     const isDb = irCfg.db;
     const inSum = isSum();
     const toDb = (v: number) => { const a = Math.abs(v); return a > 1e-8 ? 20 * Math.log10(a / 100) : -200; };
@@ -2788,6 +2788,16 @@ export default function FrequencyPlot() {
         }],
       },
     };
+    // Fast path: if chart exists and series count matches, update data only (no flicker)
+    if (chart && chart.series.length === uSeries.length) {
+      try {
+        chart.setData(uDataArr as uPlot.AlignedData, false);
+        setLegendEntries(irLegend);
+        return;
+      } catch (_) { /* fall through to full rebuild */ }
+    }
+    // Full rebuild
+    try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
     try {
       chart = new uPlot(opts, uDataArr as uPlot.AlignedData, containerRef);
       // Restore user zoom if saved (irCurYMin/Max already set from data or saved scale)
