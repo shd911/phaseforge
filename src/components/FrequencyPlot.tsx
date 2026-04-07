@@ -4402,7 +4402,7 @@ export default function FrequencyPlot() {
                       </td>
                     </tr>
                   </Show>
-                  <Show when={plotTab() === "freq"}>
+                  <Show when={plotTab() === "freq" || plotTab() === "ir" || plotTab() === "step"}>
                     <tr>
                       <td class="sum-row-header">DELAY <span style={{ "font-size": "9px", "font-weight": "normal", color: "var(--text-muted)" }}>ms</span></td>
                       <For each={bandNames()}>
