@@ -1563,16 +1563,9 @@ export default function FrequencyPlot() {
       irUserXScale = null;
       irUserYScale = null;
     }
-    // Destroy chart when switching between different chart types.
-    // Keep chart alive only when re-rendering the SAME tab type (for setData fast path).
-    const isIrStepTab = pTab === "ir" || pTab === "step";
-    const chartIsIrStep = chartIsIr; // from detection above
-    if (pTab === "freq" && chartIsMag) {
-      // freq→freq re-render: keep chart (renderChart replaces seamlessly)
-    } else if (isIrStepTab && chartIsIrStep) {
-      // ir/step→ir/step re-render: keep chart (setData fast path)
-    } else {
-      // Different tab type or unknown: destroy
+    // On freq tab: don't destroy here — renderChart will replace seamlessly (no flash gap)
+    // On other tabs: destroy immediately
+    if (pTab !== "freq") {
       try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
     }
 
