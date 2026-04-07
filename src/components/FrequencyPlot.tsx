@@ -1855,9 +1855,6 @@ export default function FrequencyPlot() {
     const allWithPhase = sumMode
       ? appState.bands.filter(b => b.measurement?.phase && b.measurement.phase.length > 0)
       : (band?.measurement?.phase && band.measurement.phase.length > 0 ? [band] : []);
-    // Read alignment delays synchronously BEFORE any await (store proxy safe)
-    const delayMap = new Map<string, number>();
-    for (const b of allWithPhase) delayMap.set(b.name, b.alignmentDelay ?? 0);
     // In SUM mode, filter by band visibility from legend matrix (for coherent sum only)
     const excluded = untrack(() => irExcludedBands());
     const bands = sumMode
@@ -2029,7 +2026,7 @@ export default function FrequencyPlot() {
         for (let i = 0; i < allBands.length; i++) {
           const r = measResults[i];
           if (!r) continue;
-          const delayMs = (delayMap.get(allBands[i].name) ?? 0) * 1000;
+          const delayMs = (allBands[i].alignmentDelay ?? 0) * 1000;
           measBands.push({
             bandName: allBands[i].name,
             bandColor: allBands[i].color,
@@ -2052,7 +2049,7 @@ export default function FrequencyPlot() {
           }
           const offset = -peakMag;
           const sign = sb.inverted ? -1 : 1;
-          const alignDelay = delayMap.get(sb.name) ?? 0;
+          const alignDelay = sb.alignmentDelay ?? 0;
           for (let j = 0; j < n; j++) {
             const amp = Math.pow(10, ((mag[j] ?? -200) + offset) / 20) * sign;
             const phRad = ((sb.measurement!.phase![j] ?? 0) + 360 * freq[j] * alignDelay) * Math.PI / 180;
@@ -2118,7 +2115,7 @@ export default function FrequencyPlot() {
               freq, magnitude: tMag, phase: tPh, sampleRate: sr,
             });
             if (gen !== renderGen) return null;
-            const delayMs = (delayMap.get(sb.name) ?? 0) * 1000;
+            const delayMs = (sb.alignmentDelay ?? 0) * 1000;
             return { bandName: sb.name, bandColor: sb.color, timeMs: r.time.map(t => t * 1000 + delayMs), impulse: r.impulse, step: r.step } as IrBandData;
           } catch (_) { return null; }
         });
@@ -2156,7 +2153,7 @@ export default function FrequencyPlot() {
             }
             const tOffset = -tPeakMag;
             const sign = sb.inverted ? -1 : 1;
-            const alignDelay = delayMap.get(sb.name) ?? 0;
+            const alignDelay = sb.alignmentDelay ?? 0;
             for (let j = 0; j < n; j++) {
               const amp = Math.pow(10, ((tMag[j] ?? -200) + tOffset) / 20) * sign;
               const phRad = ((tPh[j] ?? 0) + 360 * freq[j] * alignDelay) * Math.PI / 180;
@@ -2212,7 +2209,7 @@ export default function FrequencyPlot() {
               freq: sbFreq, magnitude: cMag, phase: cPh, sampleRate: sbSr,
             });
             if (gen !== renderGen) return null;
-            const delayMs = (delayMap.get(sb.name) ?? 0) * 1000;
+            const delayMs = (sb.alignmentDelay ?? 0) * 1000;
             return { bandName: sb.name, bandColor: sb.color, timeMs: r.time.map(t => t * 1000 + delayMs), impulse: r.impulse, step: r.step } as IrBandData;
           } catch (_) { return null; }
         });
@@ -2260,7 +2257,7 @@ export default function FrequencyPlot() {
             }
             const offset = -peakMag;
             const sign = sb.inverted ? -1 : 1;
-            const alignDelay = delayMap.get(sb.name) ?? 0;
+            const alignDelay = sb.alignmentDelay ?? 0;
             for (let j = 0; j < n; j++) {
               const amp = Math.pow(10, ((cMag[j] ?? -200) + offset) / 20) * sign;
               const phRad = ((cPh[j] ?? 0) + 360 * freq[j] * alignDelay) * Math.PI / 180;
@@ -2445,11 +2442,11 @@ export default function FrequencyPlot() {
     hpFreq: number,
     irCfg: { db: boolean; masking: boolean },
   ) {
+    try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
     if (!containerRef) return;
     const rect = containerRef.getBoundingClientRect();
     const w = Math.max(rect.width, 400);
     const h = Math.max(rect.height, 200);
-
     const isDb = irCfg.db;
     const inSum = isSum();
     const toDb = (v: number) => { const a = Math.abs(v); return a > 1e-8 ? 20 * Math.log10(a / 100) : -200; };
@@ -2458,14 +2455,12 @@ export default function FrequencyPlot() {
     // Reference time axis: first measurement band's timeMs, aligned so IR peak = t=0
     const refBand = measBands[0];
     if (!refBand) return;
-    // Find ref band's peak — use ORIGINAL peak position (without alignment delay)
-    // so that delay offsets remain visible relative to the natural peak
+    // Find ref band's peak for time alignment
     let refPeakIdx = 0, refPeakVal = 0;
     for (let i = 0; i < refBand.impulse.length; i++) {
       if (Math.abs(refBand.impulse[i]) > refPeakVal) { refPeakVal = Math.abs(refBand.impulse[i]); refPeakIdx = i; }
     }
-    const refDelayMs = (delayMap.get(allBands[0]?.name ?? "") ?? 0) * 1000;
-    const refPeakT = (refBand.timeMs[refPeakIdx] ?? 0) - refDelayMs; // subtract ref band's own delay
+    const refPeakT = refBand.timeMs[refPeakIdx] ?? 0;
     const timeMs = refBand.timeMs.map(t => t - refPeakT);
 
     // Peak is now at t=0, view centered around it
@@ -2503,28 +2498,14 @@ export default function FrequencyPlot() {
     const applyDb = (data: number[]): number[] => isDb ? data.map(toDb) : data;
     const emptyData = timeMs.map(() => NaN);
 
-    // Align IR peak to t=0, preserving alignment delay offset relative to reference peak
-    const alignPeakToRef = (bd: IrBandData, refPeakTime: number): IrBandData => {
-      let pkIdx = 0, pkVal = 0;
-      for (let i = 0; i < bd.impulse.length; i++) {
-        if (Math.abs(bd.impulse[i]) > pkVal) { pkVal = Math.abs(bd.impulse[i]); pkIdx = i; }
-      }
-      const peakT = bd.timeMs[pkIdx] ?? 0;
-      // Shift so that this band's peak sits at (peakT - refPeakTime)
-      // If alignmentDelay was applied to timeMs, the peak position already includes it,
-      // so subtracting refPeakTime centers the reference band at t=0
-      // while other bands keep their delay offset visible
-      return { ...bd, timeMs: bd.timeMs.map(t => t - refPeakTime) };
-    };
-
-    // Legacy: align peak to zero (for single band mode)
+    // Align IR peak to t=0 for min-phase targets/corrected
     const alignPeakToZero = (bd: IrBandData): IrBandData => {
       let pkIdx = 0, pkVal = 0;
       for (let i = 0; i < bd.impulse.length; i++) {
         if (Math.abs(bd.impulse[i]) > pkVal) { pkVal = Math.abs(bd.impulse[i]); pkIdx = i; }
       }
       const peakT = bd.timeMs[pkIdx] ?? 0;
-      if (Math.abs(peakT) < 0.01) return bd;
+      if (Math.abs(peakT) < 0.01) return bd; // already at 0
       return { ...bd, timeMs: bd.timeMs.map(t => t - peakT) };
     };
 
@@ -2566,37 +2547,32 @@ export default function FrequencyPlot() {
       sIdx++;
     };
 
-    // --- Measurement per-band ---
-    // In SUM mode: align all bands relative to reference (first band) peak.
-    // Alignment delay offsets remain visible as time shifts.
+    // --- Measurement per-band (align IR peak to t=0) ---
     for (const rawBd of measBands) {
+      const bd = alignPeakToZero(rawBd);
       if (inSum) {
-        const bd = alignPeakToRef(rawBd, refPeakT);
         const cf = bandColorFamily(bd.bandColor);
         addIrStepPair(bd.bandName, stripAlpha(cf.meas), stripAlpha(cf.measPhase), bd.timeMs, bd.impulse, bd.step, 1.5, "measurement", false);
       } else {
-        const bd = alignPeakToZero(rawBd);
         const cf = bandColorFamily(bd.bandColor);
         addIrStepPair("Measurement", stripAlpha(cf.meas), stripAlpha(cf.measPhase), bd.timeMs, bd.impulse, bd.step, 1.5, "measurement", false);
+        // Save LINEAR data for snapshot capture (pre-dB, peak-aligned)
         lastIrMeasData.timeMs = [...bd.timeMs]; lastIrMeasData.impulse = [...bd.impulse]; lastIrMeasData.step = [...bd.step];
       }
     }
-    // Measurement sum (align to ref peak)
+    // Measurement sum (align peak to t=0)
     if (measSum) {
-      const ms = inSum
-        ? alignPeakToRef({ bandName: "", bandColor: "", ...measSum }, refPeakT)
-        : alignPeakToZero({ bandName: "", bandColor: "", ...measSum });
+      const ms = alignPeakToZero({ bandName: "", bandColor: "", ...measSum });
       addIrStepPair("\u03A3 meas", sumClr.measIr, sumClr.measStep, ms.timeMs, ms.impulse, ms.step, 2, "measurement", false);
     }
 
-    // --- Target per-band ---
+    // --- Target per-band (align IR peak to t=0) ---
     for (const rawBd of targetBands) {
+      const bd = alignPeakToZero(rawBd);
       if (inSum) {
-        const bd = alignPeakToRef(rawBd, refPeakT);
         const cf = bandColorFamily(bd.bandColor);
         addIrStepPair(bd.bandName + " tgt", cf.target, cf.targetPhase, bd.timeMs, bd.impulse, bd.step, 1.5, "target", true);
       } else {
-        const bd = alignPeakToZero(rawBd);
         const cf = bandColorFamily(bd.bandColor);
         addIrStepPair("Target", cf.target, cf.targetPhase, bd.timeMs, bd.impulse, bd.step, 2, "target", true);
         lastIrTargetData.timeMs = [...bd.timeMs]; lastIrTargetData.impulse = [...bd.impulse]; lastIrTargetData.step = [...bd.step];
@@ -2605,22 +2581,19 @@ export default function FrequencyPlot() {
     if (!inSum && targetBands.length === 0) {
       lastIrTargetData.timeMs = []; lastIrTargetData.impulse = []; lastIrTargetData.step = [];
     }
-    // Target sum
+    // Target sum (align peak to t=0)
     if (targetSum) {
-      const ts = inSum
-        ? alignPeakToRef({ bandName: "", bandColor: "", ...targetSum }, refPeakT)
-        : alignPeakToZero({ bandName: "", bandColor: "", ...targetSum });
+      const ts = alignPeakToZero({ bandName: "", bandColor: "", ...targetSum });
       addIrStepPair("\u03A3 target", sumClr.targetIr, sumClr.targetStep, ts.timeMs, ts.impulse, ts.step, 2, "target", true);
     }
 
-    // --- Corrected per-band ---
+    // --- Corrected per-band (align IR peak to t=0) ---
     for (const rawBd of corrBands) {
+      const bd = alignPeakToZero(rawBd);
       if (inSum) {
-        const bd = alignPeakToRef(rawBd, refPeakT);
         const cf = bandColorFamily(bd.bandColor);
         addIrStepPair(bd.bandName + " corr+XO", cf.corrected, cf.correctedPhase, bd.timeMs, bd.impulse, bd.step, 1.5, "corrected", false);
       } else {
-        const bd = alignPeakToZero(rawBd);
         const cf = bandColorFamily(bd.bandColor);
         addIrStepPair("Corrected", cf.corrected, cf.correctedPhase, bd.timeMs, bd.impulse, bd.step, 2, "corrected", false);
         lastIrCorrData.timeMs = [...bd.timeMs]; lastIrCorrData.impulse = [...bd.impulse]; lastIrCorrData.step = [...bd.step];
@@ -2629,11 +2602,9 @@ export default function FrequencyPlot() {
     if (!inSum && corrBands.length === 0) {
       lastIrCorrData.timeMs = []; lastIrCorrData.impulse = []; lastIrCorrData.step = [];
     }
-    // Corrected sum
+    // Corrected sum (align peak to t=0)
     if (corrSum) {
-      const cs = inSum
-        ? alignPeakToRef({ bandName: "", bandColor: "", ...corrSum }, refPeakT)
-        : alignPeakToZero({ bandName: "", bandColor: "", ...corrSum });
+      const cs = alignPeakToZero({ bandName: "", bandColor: "", ...corrSum });
       addIrStepPair("\u03A3 corrected", sumClr.corrIr, sumClr.corrStep, cs.timeMs, cs.impulse, cs.step, 2, "corrected", false);
     }
 
@@ -2817,16 +2788,6 @@ export default function FrequencyPlot() {
         }],
       },
     };
-    // Fast path: if chart exists and series count matches, update data only (no flicker)
-    if (chart && chart.series.length === uSeries.length) {
-      try {
-        chart.setData(uDataArr as uPlot.AlignedData, false);
-        setLegendEntries(irLegend);
-        return;
-      } catch (_) { /* fall through to full rebuild */ }
-    }
-    // Full rebuild
-    try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
     try {
       chart = new uPlot(opts, uDataArr as uPlot.AlignedData, containerRef);
       // Restore user zoom if saved (irCurYMin/Max already set from data or saved scale)
@@ -4447,11 +4408,6 @@ export default function FrequencyPlot() {
                       <For each={bandNames()}>
                         {(bName) => {
                           const band = () => appState.bands.find(b => b.name === bName);
-                          let delayTimer: ReturnType<typeof setTimeout> | null = null;
-                          const commitDelay = (id: string, ms: number) => {
-                            if (delayTimer) clearTimeout(delayTimer);
-                            delayTimer = setTimeout(() => setAlignmentDelay(id, ms / 1000), 200);
-                          };
                           return (
                             <td class="sum-cell">
                               <Show when={band()} fallback={<span />}>
@@ -4464,16 +4420,15 @@ export default function FrequencyPlot() {
                                     value={((b().alignmentDelay ?? 0) * 1000).toFixed(2)}
                                     onChange={(e) => {
                                       const v = parseFloat(e.currentTarget.value);
-                                      if (!isNaN(v)) commitDelay(b().id, v);
+                                      if (!isNaN(v)) setAlignmentDelay(b().id, v / 1000);
                                     }}
                                     onWheel={(e) => {
                                       e.preventDefault();
                                       const step = e.shiftKey ? 0.1 : 0.01;
                                       const cur = (b().alignmentDelay ?? 0) * 1000;
                                       const delta = e.deltaY < 0 ? step : -step;
-                                      const newVal = cur + delta;
-                                      e.currentTarget.value = newVal.toFixed(2);
-                                      commitDelay(b().id, newVal);
+                                      setAlignmentDelay(b().id, (cur + delta) / 1000);
+                                      e.currentTarget.value = ((cur + delta)).toFixed(2);
                                     }}
                                   />
                                 )}
