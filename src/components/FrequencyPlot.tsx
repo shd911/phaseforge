@@ -1863,12 +1863,14 @@ export default function FrequencyPlot() {
     // All bands for per-band curves (including excluded from sum)
     const allBands = allWithPhase;
 
-    // Read alignment delays synchronously via direct index access (store proxy safe)
-    const irDelayMap = new Map<string, number>();
+    // Read alignment delays synchronously as plain array (store proxy safe)
+    const irDelays: number[] = [];
+    const irDelayByName: Record<string, number> = {};
     for (let i = 0; i < appState.bands.length; i++) {
-      const name = appState.bands[i].name;
-      const delay = appState.bands[i].alignmentDelay;
-      irDelayMap.set(name, typeof delay === "number" ? delay : 0);
+      const d = appState.bands[i].alignmentDelay;
+      const v = typeof d === "number" ? d : 0;
+      irDelays.push(v);
+      irDelayByName[appState.bands[i].name] = v;
     }
 
     if (allBands.length === 0) {
@@ -2034,7 +2036,7 @@ export default function FrequencyPlot() {
         for (let i = 0; i < allBands.length; i++) {
           const r = measResults[i];
           if (!r) continue;
-          const delayMs = (irDelayMap.get(allBands[i].name) ?? 0) * 1000;
+          const delayMs = (irDelayByName[allBands[i].name] ?? 0) * 1000;
           measBands.push({
             bandName: allBands[i].name,
             bandColor: allBands[i].color,
@@ -2046,21 +2048,25 @@ export default function FrequencyPlot() {
 
         // Coherent sum measurement — normalize each band to 0 dB avg before summing
         // so that per-band impulses (each peaked at 100%) contribute equally
+        // Pre-read all data synchronously (store proxy safe)
+        const bandData = bands.map(sb => ({
+          mag: [...sb.measurement!.magnitude],
+          phase: [...sb.measurement!.phase!],
+          inverted: sb.inverted,
+          delay: irDelayByName[sb.name] ?? 0,
+        }));
         const sumRe = new Float64Array(n);
         const sumIm = new Float64Array(n);
-        for (const sb of bands) {
-          const mag = sb.measurement!.magnitude;
-          // Normalize by peak magnitude so each band contributes equally
+        for (const bd of bandData) {
           let peakMag = -Infinity;
-          for (let j = 0; j < mag.length; j++) {
-            if ((mag[j] ?? -200) > peakMag) peakMag = mag[j] ?? -200;
+          for (let j = 0; j < bd.mag.length; j++) {
+            if ((bd.mag[j] ?? -200) > peakMag) peakMag = bd.mag[j] ?? -200;
           }
           const offset = -peakMag;
-          const sign = sb.inverted ? -1 : 1;
-          const alignDelay = irDelayMap.get(sb.name) ?? 0;
+          const sign = bd.inverted ? -1 : 1;
           for (let j = 0; j < n; j++) {
-            const amp = Math.pow(10, ((mag[j] ?? -200) + offset) / 20) * sign;
-            const phRad = ((sb.measurement!.phase![j] ?? 0) + 360 * freq[j] * alignDelay) * Math.PI / 180;
+            const amp = Math.pow(10, ((bd.mag[j] ?? -200) + offset) / 20) * sign;
+            const phRad = ((bd.phase[j] ?? 0) + 360 * freq[j] * bd.delay) * Math.PI / 180;
             sumRe[j] += amp * Math.cos(phRad);
             sumIm[j] += amp * Math.sin(phRad);
           }
@@ -2123,7 +2129,7 @@ export default function FrequencyPlot() {
               freq, magnitude: tMag, phase: tPh, sampleRate: sr,
             });
             if (gen !== renderGen) return null;
-            const delayMs = (irDelayMap.get(sb.name) ?? 0) * 1000;
+            const delayMs = (irDelayByName[sb.name] ?? 0) * 1000;
             return { bandName: sb.name, bandColor: sb.color, timeMs: r.time.map(t => t * 1000 + delayMs), impulse: r.impulse, step: r.step } as IrBandData;
           } catch (_) { return null; }
         });
@@ -2161,7 +2167,7 @@ export default function FrequencyPlot() {
             }
             const tOffset = -tPeakMag;
             const sign = sb.inverted ? -1 : 1;
-            const alignDelay = irDelayMap.get(sb.name) ?? 0;
+            const alignDelay = irDelayByName[sb.name] ?? 0;
             for (let j = 0; j < n; j++) {
               const amp = Math.pow(10, ((tMag[j] ?? -200) + tOffset) / 20) * sign;
               const phRad = ((tPh[j] ?? 0) + 360 * freq[j] * alignDelay) * Math.PI / 180;
@@ -2217,7 +2223,7 @@ export default function FrequencyPlot() {
               freq: sbFreq, magnitude: cMag, phase: cPh, sampleRate: sbSr,
             });
             if (gen !== renderGen) return null;
-            const delayMs = (irDelayMap.get(sb.name) ?? 0) * 1000;
+            const delayMs = (irDelayByName[sb.name] ?? 0) * 1000;
             return { bandName: sb.name, bandColor: sb.color, timeMs: r.time.map(t => t * 1000 + delayMs), impulse: r.impulse, step: r.step } as IrBandData;
           } catch (_) { return null; }
         });
@@ -2265,7 +2271,7 @@ export default function FrequencyPlot() {
             }
             const offset = -peakMag;
             const sign = sb.inverted ? -1 : 1;
-            const alignDelay = irDelayMap.get(sb.name) ?? 0;
+            const alignDelay = irDelayByName[sb.name] ?? 0;
             for (let j = 0; j < n; j++) {
               const amp = Math.pow(10, ((cMag[j] ?? -200) + offset) / 20) * sign;
               const phRad = ((cPh[j] ?? 0) + 360 * freq[j] * alignDelay) * Math.PI / 180;
