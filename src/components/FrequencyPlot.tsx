@@ -1852,9 +1852,10 @@ export default function FrequencyPlot() {
     }));
 
     // Collect bands with phase data (phase must be non-empty array)
-    const allWithPhase = sumMode
-      ? appState.bands.filter(b => b.measurement?.phase && b.measurement.phase.length > 0)
-      : (band?.measurement?.phase && band.measurement.phase.length > 0 ? [band] : []);
+    // Deep clone to avoid SolidJS store proxy issues in async context
+    const allWithPhase: BandState[] = sumMode
+      ? JSON.parse(JSON.stringify(appState.bands.filter(b => b.measurement?.phase && b.measurement.phase.length > 0)))
+      : (band?.measurement?.phase && band.measurement.phase.length > 0 ? [JSON.parse(JSON.stringify(band))] : []);
     // In SUM mode, filter by band visibility from legend matrix (for coherent sum only)
     const excluded = untrack(() => irExcludedBands());
     const bands = sumMode
@@ -2455,12 +2456,14 @@ export default function FrequencyPlot() {
     // Reference time axis: first measurement band's timeMs, aligned so IR peak = t=0
     const refBand = measBands[0];
     if (!refBand) return;
-    // Find ref band's peak for time alignment
+    // Find ref band's peak — use ORIGINAL peak position (without alignment delay)
+    // so that delay offsets remain visible relative to the natural peak
     let refPeakIdx = 0, refPeakVal = 0;
     for (let i = 0; i < refBand.impulse.length; i++) {
       if (Math.abs(refBand.impulse[i]) > refPeakVal) { refPeakVal = Math.abs(refBand.impulse[i]); refPeakIdx = i; }
     }
-    const refPeakT = refBand.timeMs[refPeakIdx] ?? 0;
+    const refDelayMs = (allBands[0]?.alignmentDelay ?? 0) * 1000;
+    const refPeakT = (refBand.timeMs[refPeakIdx] ?? 0) - refDelayMs; // subtract ref band's own delay
     const timeMs = refBand.timeMs.map(t => t - refPeakT);
 
     // Peak is now at t=0, view centered around it
