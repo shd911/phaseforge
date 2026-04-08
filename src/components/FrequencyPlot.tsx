@@ -2323,7 +2323,7 @@ export default function FrequencyPlot() {
           return hp && hp < min ? hp : min;
         }, 20);
 
-        // Save IR data for snapshot capture (pre-aligned to peak=0)
+        // Save IR data for snapshot capture
         // Priority: corrected → target → measurement
         {
           const src = corrSum ?? (corrBands.length > 0 ? corrBands[0] : null)
@@ -2446,7 +2446,7 @@ export default function FrequencyPlot() {
         // HP freq for masking zone
         const hpFreq = band?.target?.high_pass?.freq_hz ?? 20;
 
-        // Save IR data for snapshot capture (pre-aligned to peak=0)
+        // Save IR data for snapshot capture
         // Priority: corrected → target → measurement
         {
           const src = corrBands.length > 0 ? corrBands[0]
@@ -2488,19 +2488,17 @@ export default function FrequencyPlot() {
     const toDb = (v: number) => { const a = Math.abs(v); return a > 1e-8 ? 20 * Math.log10(a / 100) : -200; };
     const stripAlpha = (c: string) => c.length === 9 ? c.slice(0, 7) : c;
 
-    // Reference time axis: first measurement band's timeMs, aligned so IR peak = t=0
+    // Reference time axis: first measurement band's raw timeMs (no peak alignment)
     const refBand = measBands[0];
     if (!refBand) return;
-    // Find ref band's peak for time alignment
+    const timeMs = [...refBand.timeMs];
+
+    // Find peak time for view centering only (no shifting)
     let refPeakIdx = 0, refPeakVal = 0;
     for (let i = 0; i < refBand.impulse.length; i++) {
       if (Math.abs(refBand.impulse[i]) > refPeakVal) { refPeakVal = Math.abs(refBand.impulse[i]); refPeakIdx = i; }
     }
-    const refPeakT = refBand.timeMs[refPeakIdx] ?? 0;
-    const timeMs = refBand.timeMs.map(t => t - refPeakT);
-
-    // Peak is now at t=0, view centered around it
-    const peakTimeMs = 0;
+    const peakTimeMs = refBand.timeMs[refPeakIdx] ?? 0;
     const xViewMin = peakTimeMs - 30;
     const xViewMax = peakTimeMs + 30;
     // Set mutable X range (used by range function, zoomX, scrollX)
@@ -2533,22 +2531,6 @@ export default function FrequencyPlot() {
 
     const applyDb = (data: number[]): number[] => isDb ? data.map(toDb) : data;
     const emptyData = timeMs.map(() => NaN);
-
-    // Align IR peak to t=0 (single-band mode)
-    const alignPeakToZero = (bd: IrBandData): IrBandData => {
-      let pkIdx = 0, pkVal = 0;
-      for (let i = 0; i < bd.impulse.length; i++) {
-        if (Math.abs(bd.impulse[i]) > pkVal) { pkVal = Math.abs(bd.impulse[i]); pkIdx = i; }
-      }
-      const peakT = bd.timeMs[pkIdx] ?? 0;
-      if (Math.abs(peakT) < 0.01) return bd;
-      return { ...bd, timeMs: bd.timeMs.map(t => t - peakT) };
-    };
-
-    // SUM mode: align all bands to same reference time (refPeakT), preserving delay offsets
-    const alignToRef = (bd: IrBandData): IrBandData => {
-      return { ...bd, timeMs: bd.timeMs.map(t => t - refPeakT) };
-    };
 
     // Build series + data + legend
     const uSeries: uPlot.Series[] = [{}];
@@ -2590,33 +2572,29 @@ export default function FrequencyPlot() {
 
     // --- Measurement per-band ---
     for (const rawBd of measBands) {
-      const bd = inSum ? alignToRef(rawBd) : alignPeakToZero(rawBd);
       if (inSum) {
-        const cf = bandColorFamily(bd.bandColor);
-        addIrStepPair(bd.bandName, stripAlpha(cf.meas), stripAlpha(cf.measPhase), bd.timeMs, bd.impulse, bd.step, 1.5, "measurement", false);
+        const cf = bandColorFamily(rawBd.bandColor);
+        addIrStepPair(rawBd.bandName, stripAlpha(cf.meas), stripAlpha(cf.measPhase), rawBd.timeMs, rawBd.impulse, rawBd.step, 1.5, "measurement", false);
       } else {
-        const cf = bandColorFamily(bd.bandColor);
-        addIrStepPair("Measurement", stripAlpha(cf.meas), stripAlpha(cf.measPhase), bd.timeMs, bd.impulse, bd.step, 1.5, "measurement", false);
-        // Save LINEAR data for snapshot capture (pre-dB, peak-aligned)
-        lastIrMeasData.timeMs = [...bd.timeMs]; lastIrMeasData.impulse = [...bd.impulse]; lastIrMeasData.step = [...bd.step];
+        const cf = bandColorFamily(rawBd.bandColor);
+        addIrStepPair("Measurement", stripAlpha(cf.meas), stripAlpha(cf.measPhase), rawBd.timeMs, rawBd.impulse, rawBd.step, 1.5, "measurement", false);
+        lastIrMeasData.timeMs = [...rawBd.timeMs]; lastIrMeasData.impulse = [...rawBd.impulse]; lastIrMeasData.step = [...rawBd.step];
       }
     }
     // Measurement sum
     if (measSum) {
-      const ms = inSum ? alignToRef({ bandName: "", bandColor: "", ...measSum }) : alignPeakToZero({ bandName: "", bandColor: "", ...measSum });
-      addIrStepPair("\u03A3 meas", sumClr.measIr, sumClr.measStep, ms.timeMs, ms.impulse, ms.step, 2, "measurement", false);
+      addIrStepPair("\u03A3 meas", sumClr.measIr, sumClr.measStep, measSum.timeMs, measSum.impulse, measSum.step, 2, "measurement", false);
     }
 
     // --- Target per-band ---
     for (const rawBd of targetBands) {
-      const bd = inSum ? alignToRef(rawBd) : alignPeakToZero(rawBd);
       if (inSum) {
-        const cf = bandColorFamily(bd.bandColor);
-        addIrStepPair(bd.bandName + " tgt", cf.target, cf.targetPhase, bd.timeMs, bd.impulse, bd.step, 1.5, "target", true);
+        const cf = bandColorFamily(rawBd.bandColor);
+        addIrStepPair(rawBd.bandName + " tgt", cf.target, cf.targetPhase, rawBd.timeMs, rawBd.impulse, rawBd.step, 1.5, "target", true);
       } else {
-        const cf = bandColorFamily(bd.bandColor);
-        addIrStepPair("Target", cf.target, cf.targetPhase, bd.timeMs, bd.impulse, bd.step, 2, "target", true);
-        lastIrTargetData.timeMs = [...bd.timeMs]; lastIrTargetData.impulse = [...bd.impulse]; lastIrTargetData.step = [...bd.step];
+        const cf = bandColorFamily(rawBd.bandColor);
+        addIrStepPair("Target", cf.target, cf.targetPhase, rawBd.timeMs, rawBd.impulse, rawBd.step, 2, "target", true);
+        lastIrTargetData.timeMs = [...rawBd.timeMs]; lastIrTargetData.impulse = [...rawBd.impulse]; lastIrTargetData.step = [...rawBd.step];
       }
     }
     if (!inSum && targetBands.length === 0) {
@@ -2624,20 +2602,18 @@ export default function FrequencyPlot() {
     }
     // Target sum
     if (targetSum) {
-      const ts = inSum ? alignToRef({ bandName: "", bandColor: "", ...targetSum }) : alignPeakToZero({ bandName: "", bandColor: "", ...targetSum });
-      addIrStepPair("\u03A3 target", sumClr.targetIr, sumClr.targetStep, ts.timeMs, ts.impulse, ts.step, 2, "target", true);
+      addIrStepPair("\u03A3 target", sumClr.targetIr, sumClr.targetStep, targetSum.timeMs, targetSum.impulse, targetSum.step, 2, "target", true);
     }
 
     // --- Corrected per-band ---
     for (const rawBd of corrBands) {
-      const bd = inSum ? alignToRef(rawBd) : alignPeakToZero(rawBd);
       if (inSum) {
-        const cf = bandColorFamily(bd.bandColor);
-        addIrStepPair(bd.bandName + " corr+XO", cf.corrected, cf.correctedPhase, bd.timeMs, bd.impulse, bd.step, 1.5, "corrected", false);
+        const cf = bandColorFamily(rawBd.bandColor);
+        addIrStepPair(rawBd.bandName + " corr+XO", cf.corrected, cf.correctedPhase, rawBd.timeMs, rawBd.impulse, rawBd.step, 1.5, "corrected", false);
       } else {
-        const cf = bandColorFamily(bd.bandColor);
-        addIrStepPair("Corrected", cf.corrected, cf.correctedPhase, bd.timeMs, bd.impulse, bd.step, 2, "corrected", false);
-        lastIrCorrData.timeMs = [...bd.timeMs]; lastIrCorrData.impulse = [...bd.impulse]; lastIrCorrData.step = [...bd.step];
+        const cf = bandColorFamily(rawBd.bandColor);
+        addIrStepPair("Corrected", cf.corrected, cf.correctedPhase, rawBd.timeMs, rawBd.impulse, rawBd.step, 2, "corrected", false);
+        lastIrCorrData.timeMs = [...rawBd.timeMs]; lastIrCorrData.impulse = [...rawBd.impulse]; lastIrCorrData.step = [...rawBd.step];
       }
     }
     if (!inSum && corrBands.length === 0) {
@@ -2645,8 +2621,7 @@ export default function FrequencyPlot() {
     }
     // Corrected sum
     if (corrSum) {
-      const cs = inSum ? alignToRef({ bandName: "", bandColor: "", ...corrSum }) : alignPeakToZero({ bandName: "", bandColor: "", ...corrSum });
-      addIrStepPair("\u03A3 corrected", sumClr.corrIr, sumClr.corrStep, cs.timeMs, cs.impulse, cs.step, 2, "corrected", false);
+      addIrStepPair("\u03A3 corrected", sumClr.corrIr, sumClr.corrStep, corrSum.timeMs, corrSum.impulse, corrSum.step, 2, "corrected", false);
     }
 
     // IR/Step snapshots — data stored in LINEAR units, apply dB conversion via same pipeline as live data
