@@ -806,8 +806,10 @@ export function setBandColor(bandId: string, color: string) {
 export function setAlignmentDelay(bandId: string, seconds: number) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
-  setState("bands", idx, "alignmentDelay", seconds);
-  markDirty();
+  batch(() => {
+    setState("bands", idx, "alignmentDelay", seconds);
+    markDirty();
+  });
 }
 
 // ---------------------------------------------------------------------------

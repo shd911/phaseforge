@@ -1864,14 +1864,16 @@ export default function FrequencyPlot() {
     const allBands = allWithPhase;
 
     // Read alignment delays synchronously as plain array (store proxy safe)
-    const irDelays: number[] = [];
+    // untrack: prevent creating tracking dependency on .alignmentDelay
+    // (effect is already triggered by bandsVersion signal from markDirty)
     const irDelayByName: Record<string, number> = {};
-    for (let i = 0; i < appState.bands.length; i++) {
-      const d = appState.bands[i].alignmentDelay;
-      const v = typeof d === "number" ? d : 0;
-      irDelays.push(v);
-      irDelayByName[appState.bands[i].name] = v;
-    }
+    untrack(() => {
+      for (let i = 0; i < appState.bands.length; i++) {
+        const d = appState.bands[i].alignmentDelay;
+        const v = typeof d === "number" ? d : 0;
+        irDelayByName[appState.bands[i].name] = v;
+      }
+    });
 
     if (allBands.length === 0) {
       try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
@@ -1883,6 +1885,7 @@ export default function FrequencyPlot() {
     try {
       // For GD: compute from phase directly (no IPC needed)
       if (mode === "gd") {
+        if (bands.length === 0) return;
         const b = bands[0];
         const freq = [...b.measurement!.freq];
         const phase = [...b.measurement!.phase!];
@@ -1897,9 +1900,10 @@ export default function FrequencyPlot() {
           const sumIm = new Float64Array(n);
           for (const sb of bands) {
             const sign = sb.inverted ? -1 : 1;
+            const gdDelay = irDelayByName[sb.name] ?? 0;
             for (let j = 0; j < n; j++) {
               const amp = Math.pow(10, (sb.measurement!.magnitude[j] ?? -200) / 20) * sign;
-              const phRad = (sb.measurement!.phase![j] ?? 0) * Math.PI / 180;
+              const phRad = ((sb.measurement!.phase![j] ?? 0) + 360 * freq[j] * gdDelay) * Math.PI / 180;
               sumRe[j] += amp * Math.cos(phRad);
               sumIm[j] += amp * Math.sin(phRad);
             }
@@ -2055,6 +2059,7 @@ export default function FrequencyPlot() {
           inverted: sb.inverted,
           delay: irDelayByName[sb.name] ?? 0,
         }));
+
         const sumRe = new Float64Array(n);
         const sumIm = new Float64Array(n);
         for (const bd of bandData) {
@@ -2140,21 +2145,29 @@ export default function FrequencyPlot() {
         // Coherent sum target (COMMON reference for all bands)
         let targetSum: { timeMs: number[]; impulse: number[]; step: number[] } | null = null;
         try {
+          // Pre-read band data synchronously (store proxy safe)
+          const tgtSumData = bands.map(sb => ({
+            targetEnabled: sb.targetEnabled,
+            target: JSON.parse(JSON.stringify(sb.target)),
+            inverted: sb.inverted,
+            delay: irDelayByName[sb.name] ?? 0,
+          }));
+
           const tgtRe = new Float64Array(n);
           const tgtIm = new Float64Array(n);
           let anyTarget = false;
-          for (const sb of bands) {
-            if (!sb.targetEnabled) continue;
+          for (const bd of tgtSumData) {
+            if (!bd.targetEnabled) continue;
             anyTarget = true;
-            const tc = JSON.parse(JSON.stringify(sb.target));
+            const tc = { ...bd.target };
             tc.reference_level_db += commonRef;
             const tResp = await invoke<{ magnitude: number[]; phase: number[] }>("evaluate_target", { target: tc, freq });
             if (gen !== renderGen) return;
             let tMag = tResp.magnitude;
             let tPh = tResp.phase;
-            if (sb.target.high_pass || sb.target.low_pass) {
+            if (bd.target.high_pass || bd.target.low_pass) {
               const [xm, xp] = await invoke<[number[], number[], number]>("compute_cross_section", {
-                freq, highPass: sb.target.high_pass, lowPass: sb.target.low_pass,
+                freq, highPass: bd.target.high_pass, lowPass: bd.target.low_pass,
               });
               if (gen !== renderGen) return;
               tMag = tMag.map((v: number, i: number) => v + xm[i]);
@@ -2166,11 +2179,10 @@ export default function FrequencyPlot() {
               if ((tMag[j] ?? -200) > tPeakMag) tPeakMag = tMag[j] ?? -200;
             }
             const tOffset = -tPeakMag;
-            const sign = sb.inverted ? -1 : 1;
-            const alignDelay = irDelayByName[sb.name] ?? 0;
+            const sign = bd.inverted ? -1 : 1;
             for (let j = 0; j < n; j++) {
               const amp = Math.pow(10, ((tMag[j] ?? -200) + tOffset) / 20) * sign;
-              const phRad = ((tPh[j] ?? 0) + 360 * freq[j] * alignDelay) * Math.PI / 180;
+              const phRad = ((tPh[j] ?? 0) + 360 * freq[j] * bd.delay) * Math.PI / 180;
               tgtRe[j] += amp * Math.cos(phRad);
               tgtIm[j] += amp * Math.sin(phRad);
             }
@@ -2234,34 +2246,44 @@ export default function FrequencyPlot() {
         // Coherent sum corrected
         let corrSum: { timeMs: number[]; impulse: number[]; step: number[] } | null = null;
         try {
+          // Pre-read band data synchronously (store proxy safe)
+          const corrSumData = bands.map(sb => ({
+            freq: [...sb.measurement!.freq],
+            magnitude: [...sb.measurement!.magnitude],
+            phase: [...sb.measurement!.phase!],
+            targetEnabled: sb.targetEnabled,
+            target: JSON.parse(JSON.stringify(sb.target)),
+            peqBands: sb.peqBands ? JSON.parse(JSON.stringify(sb.peqBands.filter((p: PeqBand) => p.enabled))) : [],
+            inverted: sb.inverted,
+            delay: irDelayByName[sb.name] ?? 0,
+          }));
+
           const corrRe = new Float64Array(n);
           const corrIm = new Float64Array(n);
           let anyCorrected = false;
-          for (const sb of bands) {
-            anyCorrected = true;
-            const sbFreq = [...sb.measurement!.freq];
-            let cMag = [...sb.measurement!.magnitude];
-            let cPh = [...sb.measurement!.phase!];
+          for (const bd of corrSumData) {
+            const sbFreq = bd.freq;
+            let cMag = [...bd.magnitude];
+            let cPh = [...bd.phase];
             while (cMag.length < n) cMag.push(-200);
             while (cPh.length < n) cPh.push(0);
-            const peqBands = sb.peqBands?.filter((p: PeqBand) => p.enabled) ?? [];
-            if (peqBands.length > 0) {
-              const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", { freq: sbFreq, bands: peqBands });
+            if (bd.peqBands.length > 0) {
+              const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", { freq: sbFreq, bands: bd.peqBands });
               if (gen !== renderGen) return;
               cMag = cMag.map((v, i) => v + (pm[i] ?? 0));
               cPh = cPh.map((v, i) => v + (pp[i] ?? 0));
             }
-            if (sb.targetEnabled && (sb.target.high_pass || sb.target.low_pass)) {
+            if (bd.targetEnabled && (bd.target.high_pass || bd.target.low_pass)) {
               const [xm, xp] = await invoke<[number[], number[], number]>("compute_cross_section", {
-                freq: sbFreq, highPass: sb.target.high_pass, lowPass: sb.target.low_pass,
+                freq: sbFreq, highPass: bd.target.high_pass, lowPass: bd.target.low_pass,
               });
               if (gen !== renderGen) return;
               cMag = cMag.map((v, i) => v + (xm[i] ?? 0));
               cPh = cPh.map((v, i) => v + (xp[i] ?? 0));
             }
             // Gaussian min-phase: add per-filter Hilbert-derived phase to corrected phase
-            if (sb.targetEnabled && (isGaussianMinPhase(sb.target.high_pass) || isGaussianMinPhase(sb.target.low_pass))) {
-              cPh = await addGaussianMinPhase(sbFreq, cPh, sb.target.high_pass, sb.target.low_pass);
+            if (bd.targetEnabled && (isGaussianMinPhase(bd.target.high_pass) || isGaussianMinPhase(bd.target.low_pass))) {
+              cPh = await addGaussianMinPhase(sbFreq, cPh, bd.target.high_pass, bd.target.low_pass);
               if (gen !== renderGen) return;
             }
             // Normalize by peak magnitude so bands contribute equally
@@ -2270,14 +2292,14 @@ export default function FrequencyPlot() {
               if ((cMag[j] ?? -200) > peakMag) peakMag = cMag[j] ?? -200;
             }
             const offset = -peakMag;
-            const sign = sb.inverted ? -1 : 1;
-            const alignDelay = irDelayByName[sb.name] ?? 0;
+            const sign = bd.inverted ? -1 : 1;
             for (let j = 0; j < n; j++) {
               const amp = Math.pow(10, ((cMag[j] ?? -200) + offset) / 20) * sign;
-              const phRad = ((cPh[j] ?? 0) + 360 * freq[j] * alignDelay) * Math.PI / 180;
+              const phRad = ((cPh[j] ?? 0) + 360 * (sbFreq[j] ?? freq[j]) * bd.delay) * Math.PI / 180;
               corrRe[j] += amp * Math.cos(phRad);
               corrIm[j] += amp * Math.sin(phRad);
             }
+            anyCorrected = true;
           }
           if (anyCorrected) {
             const cMagSum: number[] = [];
