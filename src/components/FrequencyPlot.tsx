@@ -4180,7 +4180,7 @@ export default function FrequencyPlot() {
                   <button class="tb-btn" onClick={clearSnapshots} title="Clear all snapshots">CLR</button>
                 )}
                 {snaps.length > 0 && (
-                  <span style={{ "font-size": "9px", "color": "#8b8b96", "margin-left": "4px" }}>
+                  <span style={{ "font-size": "var(--fs-xs)", "color": "#8b8b96", "margin-left": "4px" }}>
                     {snaps.map(s => (
                       <span style={{ color: s.color, "margin-right": "6px" }}>{"\u2588"} {s.label}</span>
                     ))}
@@ -4193,7 +4193,7 @@ export default function FrequencyPlot() {
         {/* IR/Step dB/Lin toggle */}
         <Show when={plotTab() === "ir" || plotTab() === "step"}>
           <span class="readout-sep" />
-          <button class={`tb-btn ${irDbMode() ? "active" : ""}`} onClick={() => { setIrDbMode(!irDbMode()); irToggleRedraw(); }} style={{ "font-size": "9px", padding: "1px 4px" }}>{irDbMode() ? "dB" : "Lin"}</button>
+          <button class={`tb-btn ${irDbMode() ? "active" : ""}`} onClick={() => { setIrDbMode(!irDbMode()); irToggleRedraw(); }} style={{ "font-size": "var(--fs-xs)", padding: "1px 4px" }}>{irDbMode() ? "dB" : "Lin"}</button>
         </Show>
       </div>
       {/* Unified visibility matrix — above plot, all modes */}
@@ -4250,7 +4250,7 @@ export default function FrequencyPlot() {
                     <td class="sum-cell" colspan="2">
                       <button class={`legend-item ${irShowMasking() ? "" : "legend-off"}`} onClick={() => { setIrShowMasking(!irShowMasking()); irToggleRedraw(); }}>
                         <span class="legend-swatch" style={{ "background-color": irShowMasking() ? "rgba(34,197,94,0.5)" : "transparent", "border-color": "rgba(34,197,94,0.5)" }} />
-                        <span class="legend-text" style={{ "font-size": "9px" }}>Pre-ringing</span>
+                        <span class="legend-text" style={{ "font-size": "var(--fs-xs)" }}>Pre-ringing</span>
                       </button>
                     </td>
                   </tr>
@@ -4347,7 +4347,7 @@ export default function FrequencyPlot() {
           {(m) => (
             <div class="export-metrics" style={{
               display: "flex", "flex-wrap": "wrap", gap: "6px 14px",
-              padding: "3px 8px", "font-size": "10px", color: "#b0b0bc",
+              padding: "3px 8px", "font-size": "var(--fs-sm)", color: "#b0b0bc",
               "border-top": "1px solid #2a2a35",
             }}>
               <span>{m().taps} taps</span>
@@ -4470,12 +4470,12 @@ export default function FrequencyPlot() {
                         <button
                           class={`tb-btn ${legendEntries.some(e => e.label.endsWith(" IR") && e.visible) ? "active" : ""}`}
                           onClick={() => toggleAllIrOrStep("IR")}
-                          style={{ "font-size": "9px", padding: "1px 6px", "margin-right": "4px" }}
+                          style={{ "font-size": "var(--fs-xs)", padding: "1px 6px", "margin-right": "4px" }}
                         >IR</button>
                         <button
                           class={`tb-btn ${legendEntries.some(e => e.label.endsWith(" Step") && e.visible) ? "active" : ""}`}
                           onClick={() => toggleAllIrOrStep("Step")}
-                          style={{ "font-size": "9px", padding: "1px 6px" }}
+                          style={{ "font-size": "var(--fs-xs)", padding: "1px 6px" }}
                         >Step</button>
                       </td>
                     </tr>
