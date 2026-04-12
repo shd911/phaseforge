@@ -1,4 +1,4 @@
-import { createEffect, createSignal, onCleanup, onMount, For, Show, untrack } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount, For, Show, untrack, batch } from "solid-js";
 import { createStore } from "solid-js/store";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
@@ -16,6 +16,7 @@ import {
   isGaussianMinPhase, gaussianFilterMagDb,
 } from "../lib/plot-helpers";
 import { addGaussianMinPhase, evaluateBand } from "../lib/band-evaluation";
+import { computeAutoAlign } from "../lib/auto-align";
 
 // ---------------------------------------------------------------------------
 // Crossover point: band[i] LP ↔ band[i+1] HP
@@ -715,11 +716,11 @@ export default function FrequencyPlot() {
         // IR/Step: match all entries for this band name (IR+Step for meas/tgt/corr)
         if (e.label === colName + " IR" || e.label === colName + " Step"
           || e.label === colName + " tgt IR" || e.label === colName + " tgt Step"
-          || e.label === colName + " corr+XO IR" || e.label === colName + " corr+XO Step") matching.push(i);
+          || (e.label.startsWith(colName + " corr+XO") && e.label.endsWith(" IR")) || (e.label.startsWith(colName + " corr+XO") && e.label.endsWith(" Step"))) matching.push(i);
       } else {
         if (e.label === colName || e.label === colName + " \u00B0"
           || e.label === colName + " tgt"
-          || e.label === colName + " corr+XO" || e.label === colName + " corr+XO \u00B0") matching.push(i);
+          || e.label.startsWith(colName + " corr+XO") || e.label === colName + " corr+XO \u00B0") matching.push(i);
       }
     }
     if (matching.length === 0 && !(isSum() && onIrStep && colName !== "\u03A3")) return;
@@ -799,11 +800,11 @@ export default function FrequencyPlot() {
           // IR/Step: match per-band IR entry
           if (cat === "measurement" && e.label === colName + " IR") return e;
           if (cat === "target" && e.label === colName + " tgt IR") return e;
-          if (cat === "corrected" && e.label === colName + " corr+XO IR") return e;
+          if (cat === "corrected" && e.label.startsWith(colName + " corr+XO") && e.label.endsWith(" IR")) return e;
         } else {
           if (cat === "measurement" && e.label === colName) return e;
           if (cat === "target" && e.label === colName + " tgt") return e;
-          if (cat === "corrected" && e.label === colName + " corr+XO") return e;
+          if (cat === "corrected" && e.label.startsWith(colName + " corr+XO") && !e.label.endsWith(" \u00B0")) return e;
         }
       }
     }
@@ -2609,7 +2610,11 @@ export default function FrequencyPlot() {
     for (const rawBd of corrBands) {
       if (inSum) {
         const cf = bandColorFamily(rawBd.bandColor);
-        addIrStepPair(rawBd.bandName + " corr+XO", cf.corrected, cf.correctedPhase, rawBd.timeMs, rawBd.impulse, rawBd.step, 1.5, "corrected", false);
+        const bdDelay = untrack(() => appState.bands.find(b => b.name === rawBd.bandName)?.alignmentDelay ?? 0);
+        const dlSuffix = Math.abs(bdDelay) > 1e-6
+          ? ` [${bdDelay >= 0 ? "+" : ""}${(bdDelay * 1000).toFixed(2)} ms]`
+          : "";
+        addIrStepPair(rawBd.bandName + " corr+XO" + dlSuffix, cf.corrected, cf.correctedPhase, rawBd.timeMs, rawBd.impulse, rawBd.step, 1.5, "corrected", false);
       } else {
         const cf = bandColorFamily(rawBd.bandColor);
         addIrStepPair("Corrected", cf.corrected, cf.correctedPhase, rawBd.timeMs, rawBd.impulse, rawBd.step, 2, "corrected", false);
@@ -3504,9 +3509,13 @@ export default function FrequencyPlot() {
             }
 
             const color = bandColorFamily(bands[i].color).corrected;
+            const alignDelayCurr = bands[i].alignmentDelay ?? 0;
+            const delaySuffix = Math.abs(alignDelayCurr) > 1e-6
+              ? ` [${alignDelayCurr >= 0 ? "+" : ""}${(alignDelayCurr * 1000).toFixed(2)} ms]`
+              : "";
             uSeries.push({ label: bands[i].name + " corr+XO", stroke: color, width: 2, scale: "mag" });
             uData.push(corrected);
-            legend.push({ label: bands[i].name + " corr+XO", color, dash: false, visible: true, seriesIdx: sIdx, category: "corrected" });
+            legend.push({ label: bands[i].name + " corr+XO" + delaySuffix, color, dash: false, visible: true, seriesIdx: sIdx, category: "corrected" });
             sIdx++;
 
             if (showPhase && perBandCorrPhase[i]) {
@@ -4345,6 +4354,11 @@ export default function FrequencyPlot() {
                                 <Show when={isIrTab()} fallback={(() => {
                                   // SPL: single swatch per cell
                                   const entry = () => findCellEntry(col, cat);
+                                  const noPeq = () => {
+                                    if (cat !== "corrected" || col === "\u03A3") return false;
+                                    const b = appState.bands.find(bb => bb.name === col);
+                                    return b ? (!b.peqBands || b.peqBands.length === 0) : false;
+                                  };
                                   return (
                                     <Show when={entry()} fallback={<td class="sum-cell-empty" />}>
                                       {(e) => {
@@ -4354,6 +4368,9 @@ export default function FrequencyPlot() {
                                             <button class={`legend-item ${e().visible ? "" : "legend-off"}`} onClick={() => { const i = idx(); if (i >= 0) toggleLegendEntry(i); }}>
                                               <span class={`legend-swatch ${e().dash ? "legend-swatch-dash" : ""}`} style={{ "background-color": e().dash ? "transparent" : e().color, "border-color": e().color }} />
                                             </button>
+                                            <Show when={noPeq()}>
+                                              <span title="No PEQ optimization" style={{ color: "#ef4444", "font-size": "9px", "font-weight": "bold", "margin-left": "1px" }}>!</span>
+                                            </Show>
                                           </td>
                                         );
                                       }}
@@ -4366,6 +4383,11 @@ export default function FrequencyPlot() {
                                     const irE = () => pair().ir;
                                     const stE = () => pair().step;
                                     const hasAny = () => irE() || stE();
+                                    const noPeqIr = () => {
+                                      if (cat !== "corrected" || col === "\u03A3") return false;
+                                      const b = appState.bands.find(bb => bb.name === col);
+                                      return b ? (!b.peqBands || b.peqBands.length === 0) : false;
+                                    };
                                     return (
                                       <Show when={hasAny()} fallback={<td class="sum-cell-empty" />}>
                                         <td class="sum-cell" style={{ "white-space": "nowrap" }}>
@@ -4388,6 +4410,9 @@ export default function FrequencyPlot() {
                                                 </button>
                                               );
                                             }}
+                                          </Show>
+                                          <Show when={noPeqIr()}>
+                                            <span title="No PEQ optimization" style={{ color: "#ef4444", "font-size": "9px", "font-weight": "bold", "margin-left": "1px" }}>!</span>
                                           </Show>
                                         </td>
                                       </Show>
@@ -4458,7 +4483,53 @@ export default function FrequencyPlot() {
                           );
                         }}
                       </For>
-                      <td class="sum-cell-empty" />
+                      {(() => {
+                        const allPeqReady = () => {
+                          const xoBands = appState.bands.filter(
+                            b => b.measurement?.phase && b.measurement.phase.length > 0
+                              && b.targetEnabled && (b.target.high_pass || b.target.low_pass)
+                          );
+                          return xoBands.length >= 2 && xoBands.every(b => b.peqBands && b.peqBands.length > 0);
+                        };
+                        return (
+                          <td class="sum-cell-empty" style={{ "text-align": "center" }}>
+                            <button
+                              class="auto-align-btn"
+                              title={allPeqReady()
+                                ? "Auto-compute alignment delays (gradient descent)"
+                                : "Requires PEQ optimization on all crossover bands"}
+                              disabled={!allPeqReady()}
+                              onClick={async () => {
+                                if (!allPeqReady()) {
+                                  console.warn("Auto-align requires PEQ optimization on all bands");
+                                  return;
+                                }
+                                const bands = appState.bands.filter(
+                                  b => b.measurement?.phase && b.measurement.phase.length > 0
+                                );
+                                if (bands.length < 2) return;
+                                const plainBands = JSON.parse(JSON.stringify(bands));
+                                const result = await computeAutoAlign(plainBands);
+                                batch(() => {
+                                  for (const [id, delay] of Object.entries(result.delays)) {
+                                    setAlignmentDelay(id, delay);
+                                  }
+                                });
+                              }}
+                              style={{
+                                "font-size": "9px",
+                                padding: "1px 6px",
+                                cursor: allPeqReady() ? "pointer" : "not-allowed",
+                                opacity: allPeqReady() ? 1 : 0.4,
+                                background: "var(--bg-secondary)",
+                                color: "var(--text-primary)",
+                                border: "1px solid var(--border-color)",
+                                "border-radius": "3px",
+                              }}
+                            >AUTO</button>
+                          </td>
+                        );
+                      })()}
                     </tr>
                   </Show>
                 </tbody>
