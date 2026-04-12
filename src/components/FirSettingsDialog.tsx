@@ -158,8 +158,8 @@ export default function FirSettingsDialog() {
           <div class="xo-hint">Correction below this level is ignored. Raise if measurement is noisy</div>
 
           <div class="xo-buttons">
-            <button class="xo-btn" onClick={handleCancel}>Cancel</button>
-            <button class="xo-btn xo-btn-apply" onClick={handleApply}>Apply</button>
+            <button class="dlg-btn" onClick={handleCancel}>Cancel</button>
+            <button class="dlg-btn dlg-btn-primary" onClick={handleApply}>Apply</button>
           </div>
         </div>
       </div>

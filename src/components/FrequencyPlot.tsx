@@ -4127,7 +4127,7 @@ export default function FrequencyPlot() {
                   <button class="tb-btn" onClick={clearSnapshots} title="Clear all snapshots">CLR</button>
                 )}
                 {snaps.length > 0 && (
-                  <span style={{ "font-size": "9px", "color": "#8b8b96", "margin-left": "4px" }}>
+                  <span style={{ "font-size": "var(--fs-xs)", "color": "#8b8b96", "margin-left": "4px" }}>
                     {snaps.map(s => (
                       <span style={{ color: s.color, "margin-right": "6px" }}>{"\u2588"} {s.label}</span>
                     ))}
@@ -4140,7 +4140,7 @@ export default function FrequencyPlot() {
         {/* IR/Step dB/Lin toggle */}
         <Show when={plotTab() === "ir" || plotTab() === "step"}>
           <span class="readout-sep" />
-          <button class={`tb-btn ${irDbMode() ? "active" : ""}`} onClick={() => { setIrDbMode(!irDbMode()); irToggleRedraw(); }} style={{ "font-size": "9px", padding: "1px 4px" }}>{irDbMode() ? "dB" : "Lin"}</button>
+          <button class={`tb-btn tb-btn-xs ${irDbMode() ? "active" : ""}`} onClick={() => { setIrDbMode(!irDbMode()); irToggleRedraw(); }}>{irDbMode() ? "dB" : "Lin"}</button>
         </Show>
       </div>
       {/* Unified visibility matrix — above plot, all modes */}
@@ -4197,7 +4197,7 @@ export default function FrequencyPlot() {
                     <td class="sum-cell" colspan="2">
                       <button class={`legend-item ${irShowMasking() ? "" : "legend-off"}`} onClick={() => { setIrShowMasking(!irShowMasking()); irToggleRedraw(); }}>
                         <span class="legend-swatch" style={{ "background-color": irShowMasking() ? "rgba(34,197,94,0.5)" : "transparent", "border-color": "rgba(34,197,94,0.5)" }} />
-                        <span class="legend-text" style={{ "font-size": "9px" }}>Pre-ringing</span>
+                        <span class="legend-text" style={{ "font-size": "var(--fs-xs)" }}>Pre-ringing</span>
                       </button>
                     </td>
                   </tr>
@@ -4294,7 +4294,7 @@ export default function FrequencyPlot() {
           {(m) => (
             <div class="export-metrics" style={{
               display: "flex", "flex-wrap": "wrap", gap: "6px 14px",
-              padding: "3px 8px", "font-size": "10px", color: "#b0b0bc",
+              padding: "3px 8px", "font-size": "var(--fs-sm)", color: "#b0b0bc",
               "border-top": "1px solid #2a2a35",
             }}>
               <span>{m().taps} taps</span>
@@ -4369,7 +4369,7 @@ export default function FrequencyPlot() {
                                               <span class={`legend-swatch ${e().dash ? "legend-swatch-dash" : ""}`} style={{ "background-color": e().dash ? "transparent" : e().color, "border-color": e().color }} />
                                             </button>
                                             <Show when={noPeq()}>
-                                              <span title="No PEQ optimization" style={{ color: "#ef4444", "font-size": "9px", "font-weight": "bold", "margin-left": "1px" }}>!</span>
+                                              <span title="No PEQ optimization" style={{ color: "#ef4444", "font-size": "var(--fs-xs)", "font-weight": "bold", "margin-left": "1px" }}>!</span>
                                             </Show>
                                           </td>
                                         );
@@ -4412,7 +4412,7 @@ export default function FrequencyPlot() {
                                             }}
                                           </Show>
                                           <Show when={noPeqIr()}>
-                                            <span title="No PEQ optimization" style={{ color: "#ef4444", "font-size": "9px", "font-weight": "bold", "margin-left": "1px" }}>!</span>
+                                            <span title="No PEQ optimization" style={{ color: "#ef4444", "font-size": "var(--fs-xs)", "font-weight": "bold", "margin-left": "1px" }}>!</span>
                                           </Show>
                                         </td>
                                       </Show>
@@ -4431,21 +4431,20 @@ export default function FrequencyPlot() {
                       <td class="sum-row-header">VIEW</td>
                       <td colspan={cols().length} style={{ "text-align": "center" }}>
                         <button
-                          class={`tb-btn ${legendEntries.some(e => e.label.endsWith(" IR") && e.visible) ? "active" : ""}`}
+                          class={`tb-btn tb-btn-sm ${legendEntries.some(e => e.label.endsWith(" IR") && e.visible) ? "active" : ""}`}
                           onClick={() => toggleAllIrOrStep("IR")}
-                          style={{ "font-size": "9px", padding: "1px 6px", "margin-right": "4px" }}
+                          style={{ "margin-right": "4px" }}
                         >IR</button>
                         <button
-                          class={`tb-btn ${legendEntries.some(e => e.label.endsWith(" Step") && e.visible) ? "active" : ""}`}
+                          class={`tb-btn tb-btn-sm ${legendEntries.some(e => e.label.endsWith(" Step") && e.visible) ? "active" : ""}`}
                           onClick={() => toggleAllIrOrStep("Step")}
-                          style={{ "font-size": "9px", padding: "1px 6px" }}
                         >Step</button>
                       </td>
                     </tr>
                   </Show>
                   <Show when={plotTab() === "freq" || plotTab() === "ir" || plotTab() === "step"}>
                     <tr>
-                      <td class="sum-row-header">DELAY <span style={{ "font-size": "9px", "font-weight": "normal", color: "var(--text-muted)" }}>ms</span></td>
+                      <td class="sum-row-header">DELAY <span style={{ "font-size": "var(--fs-xs)", "font-weight": "normal", color: "var(--text-muted)" }}>ms</span></td>
                       <For each={bandNames()}>
                         {(bName) => {
                           const band = () => appState.bands.find(b => b.name === bName);
@@ -4516,15 +4515,10 @@ export default function FrequencyPlot() {
                                   }
                                 });
                               }}
+                              class={`tb-btn tb-btn-sm`}
                               style={{
-                                "font-size": "9px",
-                                padding: "1px 6px",
                                 cursor: allPeqReady() ? "pointer" : "not-allowed",
                                 opacity: allPeqReady() ? 1 : 0.4,
-                                background: "var(--bg-secondary)",
-                                color: "var(--text-primary)",
-                                border: "1px solid var(--border-color)",
-                                "border-radius": "3px",
                               }}
                             >AUTO</button>
                           </td>

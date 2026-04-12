@@ -63,9 +63,9 @@ export default function ProjectNameDialog() {
           </Show>
 
           <div class="pn-buttons">
-            <button class="pn-btn pn-btn-cancel" onClick={handleCancel}>Cancel</button>
+            <button class="dlg-btn" onClick={handleCancel}>Cancel</button>
             <button
-              class="pn-btn pn-btn-create"
+              class="dlg-btn dlg-btn-primary"
               onClick={handleCreate}
               disabled={!name().trim()}
             >{isSaveAs() ? "Save" : "Create"}</button>

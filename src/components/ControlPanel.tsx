@@ -288,7 +288,7 @@ function FiltersTab() {
 
 
         {/* Export Target — rightmost in the row */}
-        <button class="tb-btn" style={{ "font-size": "10px", padding: "4px 10px", "align-self": "flex-start", "margin-left": "auto" }} onClick={handleExportTarget}>
+        <button class="tb-btn tb-btn-sm" style={{ "align-self": "flex-start", "margin-left": "auto" }} onClick={handleExportTarget}>
           Export Target
         </button>
       </div>
@@ -665,7 +665,7 @@ function MeasurementsTab() {
                       }}
                       min={0} max={50} step={0.01} precision={2}
                     />
-                    <span style={{ "font-size": "9px", color: "#8b8b96", "margin-left": "2px" }}>ms</span>
+                    <span style={{ "font-size": "var(--fs-xs)", color: "#8b8b96", "margin-left": "2px" }}>ms</span>
                   </span>
                 </Show>
               </td>
@@ -873,7 +873,7 @@ function PeqTab() {
       <Show when={band()?.measurement}>
         <div class="peq-exclusion-section">
           <div class="peq-sidebar-header">
-            <span class="fb-title" style={{ "font-size": "11px" }}>Exclude</span>
+            <span class="fb-title" style={{ "font-size": "var(--fs-base)" }}>Exclude</span>
             <button class="peq-add-btn" onClick={() => { const b = band(); if (b) addExclusionZone(b.id, { startHz: 100, endHz: 200 }); }} title="Add exclusion zone">+</button>
           </div>
           <Show when={(band()?.exclusionZones?.length ?? 0) > 0}>
@@ -896,7 +896,7 @@ function PeqTab() {
       {/* Manual PEQ — blue */}
       <div class="peq-manual-section">
         <div class="peq-sidebar-header">
-          <span class="fb-title" style={{ "font-size": "11px" }}>Manual</span>
+          <span class="fb-title" style={{ "font-size": "var(--fs-base)" }}>Manual</span>
           <button class="peq-add-btn" onClick={() => {
             const b = band();
             if (b) {
@@ -931,7 +931,7 @@ function PeqTab() {
       <Show when={band()?.measurement}>
         <div class="peq-auto-section">
           <div class="peq-sidebar-header">
-            <span class="fb-title" style={{ "font-size": "11px" }}>Auto Optimizer</span>
+            <span class="fb-title" style={{ "font-size": "var(--fs-base)" }}>Auto Optimizer</span>
           </div>
           <div class="peq-grid">
             <div class="fb-row"><label class="fb-label">Tolerance</label><NumberInput value={tolerance()} onChange={setTolerance} min={0.5} max={3.0} step={0.1} unit="dB" /></div>
@@ -1235,11 +1235,11 @@ function ExportTab() {
                 <span class="export-phase-badge" style={{ color: bandPhaseColor(b()) }}>
                   {bandPhaseLabel(b())}
                 </span>
-                <span style={{ "font-size": "10px", color: "var(--text-secondary)", "font-family": "var(--mono)" }}>
+                <span style={{ "font-size": "var(--fs-sm)", color: "var(--text-secondary)", "font-family": "var(--mono)" }}>
                   {formatFilterInfo(b())}
                 </span>
                 <Show when={b().peqBands.length > 0}>
-                  <span style={{ "font-size": "10px", color: "var(--text-secondary)" }}>
+                  <span style={{ "font-size": "var(--fs-sm)", color: "var(--text-secondary)" }}>
                     PEQ: {b().peqBands.filter((p: PeqBand) => p.enabled).length}
                   </span>
                 </Show>

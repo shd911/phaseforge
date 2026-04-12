@@ -240,11 +240,11 @@ export default function MergeDialog(props: MergeDialogProps) {
 
         {/* Footer */}
         <div class="merge-footer">
-          <button class="tb-btn" onClick={props.onClose}>
+          <button class="dlg-btn" onClick={props.onClose}>
             Cancel
           </button>
           <button
-            class="tb-btn primary"
+            class="dlg-btn dlg-btn-primary"
             disabled={!nfPath() || !ffPath() || merging()}
             onClick={handleMerge}
           >
