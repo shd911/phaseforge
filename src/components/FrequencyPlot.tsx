@@ -13,7 +13,7 @@ import { openCrossoverDialog, type CrossoverDialogData } from "./CrossoverDialog
 import {
   SUM_TARGET_COLOR, SUM_TARGET_PHASE_COLOR, SUM_CORRECTED_COLOR, SUM_MEAS_COLOR,
   FREQ_SNAP_COLORS, bandColorFamily, smoothingConfig, wrapPhase, fmtFreq, computeGroupDelay,
-  isGaussianMinPhase, gaussianFilterMagDb,
+  isGaussianMinPhase, gaussianFilterMagDb, unwrapDegrees,
   PEQ_COLOR, PEQ_HOVER_COLOR, PEQ_DRAG_COLOR, PEQ_BASE_COLOR,
   FIR_COLOR, CORRECTED_COLOR, MEAS_DEFAULT_COLOR,
   STATUS_GOOD, STATUS_WARN, STATUS_BAD,
@@ -3498,10 +3498,11 @@ export default function FrequencyPlot() {
             perBandCorrected.push(corrected);
 
             // Corrected phase = measurement phase + PEQ phase + XO phase
+            // unwrapDegrees ensures wrapped PEQ/XO phase adds correctly to unwrapped meas phase
             if (rm.phase) {
-              let corrPhase = rm.phase.map(
+              let corrPhase = unwrapDegrees(rm.phase.map(
                 (v: number, j: number) => v + (peqPhase ? peqPhase[j] : 0) + (xsPhase ? xsPhase[j] : 0)
-              );
+              ));
               // Gaussian min-phase: add per-filter Hilbert-derived phase to corrected phase
               if (isGaussianMinPhase(bands[i].target.high_pass) || isGaussianMinPhase(bands[i].target.low_pass)) {
                 corrPhase = await addGaussianMinPhase(freq, corrPhase, bands[i].target.high_pass, bands[i].target.low_pass);
@@ -3599,27 +3600,27 @@ export default function FrequencyPlot() {
         const corrIndices = perBandCorrected.map((c, i) => c ? i : -1).filter(i => i >= 0);
         if (corrIndices.length > 0) {
           const hasAllPhaseCorr = corrIndices.every(
-            (ci) => perBandCorrPhase[ci] && perBandCorrPhase[ci]!.length === nPts
+            (ci) => perBandCorrPhase[ci] && perBandCorrPhase[ci]!.length === freq.length
           );
           if (hasAllPhaseCorr) {
             // Coherent sum of all corrected bands
-            const sumRe = new Float64Array(nPts);
-            const sumIm = new Float64Array(nPts);
+            const sumRe = new Float64Array(freq.length);
+            const sumIm = new Float64Array(freq.length);
             for (const ci of corrIndices) {
               const corr = perBandCorrected[ci]!;
               const corrPh = perBandCorrPhase[ci]!;
               const sign = bands[ci].inverted ? -1 : 1;
               const alignDelay = bands[ci].alignmentDelay ?? 0;
-              for (let j = 0; j < nPts; j++) {
+              for (let j = 0; j < freq.length; j++) {
                 const amp = Math.pow(10, corr[j] / 20) * sign;
                 const phRad = (corrPh[j] + 360 * freq[j] * alignDelay) * Math.PI / 180;
                 sumRe[j] += amp * Math.cos(phRad);
                 sumIm[j] += amp * Math.sin(phRad);
               }
             }
-            const sumCorrDb = new Array(nPts);
-            const sumCorrPhase = new Array(nPts);
-            for (let j = 0; j < nPts; j++) {
+            const sumCorrDb = new Array(freq.length);
+            const sumCorrPhase = new Array(freq.length);
+            for (let j = 0; j < freq.length; j++) {
               const amplitude = Math.sqrt(sumRe[j] * sumRe[j] + sumIm[j] * sumIm[j]);
               sumCorrDb[j] = amplitude > 0 ? 20 * Math.log10(amplitude) : -200;
               sumCorrPhase[j] = Math.atan2(sumIm[j], sumRe[j]) * 180 / Math.PI;
@@ -3689,25 +3690,25 @@ export default function FrequencyPlot() {
       // --- Суммарный замер (когерентное сложение с учётом фазы и инверсии) ---
       if (showMag && measIndices.length > 0) {
         const hasAllPhase = measIndices.every(
-          (mi) => resampled[mi]!.phase && resampled[mi]!.phase!.length === nPts
+          (mi) => resampled[mi]!.phase && resampled[mi]!.phase!.length === freq.length
         );
         if (hasAllPhase) {
-          const sumRe = new Float64Array(nPts);
-          const sumIm = new Float64Array(nPts);
+          const sumRe = new Float64Array(freq.length);
+          const sumIm = new Float64Array(freq.length);
           for (const mi of measIndices) {
             const rm = resampled[mi]!;
             const sign = bands[mi].inverted ? -1 : 1;
             const alignDelay = bands[mi].alignmentDelay ?? 0;
-            for (let j = 0; j < nPts; j++) {
+            for (let j = 0; j < freq.length; j++) {
               const amp = Math.pow(10, rm.magnitude[j] / 20) * sign;
               const phRad = (rm.phase![j] + 360 * freq[j] * alignDelay) * Math.PI / 180;
               sumRe[j] += amp * Math.cos(phRad);
               sumIm[j] += amp * Math.sin(phRad);
             }
           }
-          const sumMagDb = new Array(nPts);
-          const sumPhase = new Array(nPts);
-          for (let j = 0; j < nPts; j++) {
+          const sumMagDb = new Array(freq.length);
+          const sumPhase = new Array(freq.length);
+          for (let j = 0; j < freq.length; j++) {
             const re = sumRe[j];
             const im = sumIm[j];
             const amplitude = Math.sqrt(re * re + im * im);
@@ -3722,12 +3723,6 @@ export default function FrequencyPlot() {
           if (showPhase) {
             uSeries.push({ label: "\u03A3 °", stroke: SUM_MEAS_COLOR, width: 1.5, dash: [6, 3], scale: "phase" });
             const sumPhaseDisplay = new Array(nPts);
-            let avgDelayAt1k = 0, avgDelayAt10k = 0;
-            let idx1k = 0, idx10k = 0;
-            for (let j = 0; j < nPts; j++) {
-              if (Math.abs(freq[j] - 1000) < Math.abs(freq[idx1k] - 1000)) idx1k = j;
-              if (Math.abs(freq[j] - 10000) < Math.abs(freq[idx10k] - 10000)) idx10k = j;
-            }
             for (let j = 0; j < nPts; j++) {
               let weightedDelay = 0;
               let totalPower = 0;
@@ -3740,10 +3735,7 @@ export default function FrequencyPlot() {
               }
               const avgDelay = totalPower > 1e-30 ? weightedDelay / totalPower : 0;
               sumPhaseDisplay[j] = sumPhase[j] - 360 * freq[j] * avgDelay;
-              if (j === idx1k) avgDelayAt1k = avgDelay;
-              if (j === idx10k) avgDelayAt10k = avgDelay;
             }
-            console.log(`[SUM] phase compensation: weighted delay at 1kHz=${(avgDelayAt1k*1000).toFixed(3)}ms, at 10kHz=${(avgDelayAt10k*1000).toFixed(3)}ms`);
             uData.push(wrapPhase(sumPhaseDisplay));
             legend.push({ label: "\u03A3 meas °", color: SUM_MEAS_COLOR, dash: true, visible: true, seriesIdx: sIdx, category: "measurement" });
             sIdx++;
@@ -4168,9 +4160,9 @@ export default function FrequencyPlot() {
                   <button class="tb-btn" onClick={clearSnapshots} title="Clear all snapshots">CLR</button>
                 )}
                 {snaps.length > 0 && (
-                  <span style={{ "font-size": "var(--fs-xs)", "color": "#8b8b96", "margin-left": "4px" }}>
+                  <span style={{ "font-size": "var(--fs-xs)", "color": "#8b8b96", "margin-left": "var(--space-xs)" }}>
                     {snaps.map(s => (
-                      <span style={{ color: s.color, "margin-right": "6px" }}>{"\u2588"} {s.label}</span>
+                      <span style={{ color: s.color, "margin-right": "var(--space-sm)" }}>{"\u2588"} {s.label}</span>
                     ))}
                   </span>
                 )}
@@ -4458,7 +4450,7 @@ export default function FrequencyPlot() {
                                             {(e) => {
                                               const idx = () => legendEntries.findIndex(le => le.seriesIdx === e().seriesIdx);
                                               return (
-                                                <button class={`legend-item ${e().visible ? "" : "legend-off"}`} onClick={() => { const i = idx(); if (i >= 0) toggleLegendEntry(i); }} style={{ padding: "1px 2px" }}>
+                                                <button class={`legend-item ${e().visible ? "" : "legend-off"}`} onClick={() => { const i = idx(); if (i >= 0) toggleLegendEntry(i); }} style={{ padding: "1px var(--space-xxs)" }}>
                                                   <span class="legend-swatch" style={{ "background-color": e().visible ? e().color : "transparent", "border-color": e().color }} />
                                                 </button>
                                               );
@@ -4468,7 +4460,7 @@ export default function FrequencyPlot() {
                                             {(e) => {
                                               const idx = () => legendEntries.findIndex(le => le.seriesIdx === e().seriesIdx);
                                               return (
-                                                <button class={`legend-item ${e().visible ? "" : "legend-off"}`} onClick={() => { const i = idx(); if (i >= 0) toggleLegendEntry(i); }} style={{ padding: "1px 2px" }}>
+                                                <button class={`legend-item ${e().visible ? "" : "legend-off"}`} onClick={() => { const i = idx(); if (i >= 0) toggleLegendEntry(i); }} style={{ padding: "1px var(--space-xxs)" }}>
                                                   <span class="legend-swatch legend-swatch-dash" style={{ "border-color": e().color, "background-color": e().visible ? e().color : "transparent" }} />
                                                 </button>
                                               );
@@ -4496,7 +4488,7 @@ export default function FrequencyPlot() {
                         <button
                           class={`tb-btn tb-btn-sm ${legendEntries.some(e => e.label.endsWith(" IR") && e.visible) ? "active" : ""}`}
                           onClick={() => toggleAllIrOrStep("IR")}
-                          style={{ "margin-right": "4px" }}
+                          style={{ "margin-right": "var(--space-xs)" }}
                         >IR</button>
                         <button
                           class={`tb-btn tb-btn-sm ${legendEntries.some(e => e.label.endsWith(" Step") && e.visible) ? "active" : ""}`}

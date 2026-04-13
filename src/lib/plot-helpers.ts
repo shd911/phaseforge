@@ -2,6 +2,23 @@
 import type { SmoothingMode } from "../stores/bands";
 import type { FilterConfig } from "./types";
 
+/**
+ * Unwrap a phase array (in degrees) so adjacent samples differ by < 180°.
+ * Needed when adding wrapped PEQ/XO phase to unwrapped measurement phase.
+ */
+export function unwrapDegrees(ph: number[]): number[] {
+  if (ph.length === 0) return ph;
+  const out = [ph[0]];
+  let offset = 0;
+  for (let i = 1; i < ph.length; i++) {
+    let d = ph[i] - ph[i - 1];
+    while (d > 180) { offset -= 360; d -= 360; }
+    while (d < -180) { offset += 360; d += 360; }
+    out.push(ph[i] + offset);
+  }
+  return out;
+}
+
 // --- Gaussian min-phase helpers ---
 
 /** Check if a filter is Gaussian with min-phase (not linear-phase) */

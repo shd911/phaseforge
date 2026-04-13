@@ -665,7 +665,7 @@ function MeasurementsTab() {
                       }}
                       min={0} max={50} step={0.01} precision={2}
                     />
-                    <span style={{ "font-size": "var(--fs-xs)", color: "#8b8b96", "margin-left": "2px" }}>ms</span>
+                    <span style={{ "font-size": "var(--fs-xs)", color: "#8b8b96", "margin-left": "var(--space-xxs)" }}>ms</span>
                   </span>
                 </Show>
               </td>
@@ -944,7 +944,7 @@ function PeqTab() {
             {peqRangeMode() === "auto" ? (
               <div class="fb-row"><label class="fb-label" title="Don't place PEQ where target is this many dB below reference level">Floor dB</label><NumberInput value={peqFloor()} onChange={setPeqFloor} min={0} max={120} step={1} precision={0} /></div>
             ) : (
-              <div class="fb-row"><label class="fb-label">Hz</label><NumberInput value={peqDirectLow()} onChange={setPeqDirectLow} min={20} max={20000} step={10} precision={0} /><span style={{ margin: "0 2px", color: "#8b8b96" }}>–</span><NumberInput value={peqDirectHigh()} onChange={setPeqDirectHigh} min={20} max={20000} step={10} precision={0} /></div>
+              <div class="fb-row"><label class="fb-label">Hz</label><NumberInput value={peqDirectLow()} onChange={setPeqDirectLow} min={20} max={20000} step={10} precision={0} /><span style={{ margin: "0 var(--space-xxs)", color: "#8b8b96" }}>–</span><NumberInput value={peqDirectHigh()} onChange={setPeqDirectHigh} min={20} max={20000} step={10} precision={0} /></div>
             )}
           </div>
           <div class="peq-buttons-row">
@@ -1228,7 +1228,7 @@ function ExportTab() {
           ))}
         </select>
 
-        <div style={{ "margin-left": "auto", display: "flex", "align-items": "center", gap: "6px" }}>
+        <div style={{ "margin-left": "auto", display: "flex", "align-items": "center", gap: "var(--space-sm)" }}>
           <Show when={band()}>
             {(b) => (
               <>
@@ -1245,7 +1245,7 @@ function ExportTab() {
                 </Show>
                 <button
                   class="tb-btn primary"
-                  style={{ padding: "4px 10px" }}
+                  style={{ padding: "var(--space-xs) var(--space-lg)" }}
                   disabled={exporting()}
                   onClick={handleExport}
                 >
@@ -1258,7 +1258,7 @@ function ExportTab() {
       </div>
 
       <Show when={exportError()}>
-        <div class="align-status" style={{ color: STATUS_BAD, padding: "4px 8px" }}>
+        <div class="align-status" style={{ color: STATUS_BAD, padding: "var(--space-xs) var(--space-md)" }}>
           {exportError()}
         </div>
       </Show>
