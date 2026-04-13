@@ -55,7 +55,7 @@ import {
   firMaxBoost, firNoiseFloor, firIterations,
   firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess,
 } from "../stores/bands";
-import { isGaussianMinPhase, gaussianFilterMagDb } from "../lib/plot-helpers";
+import { isGaussianMinPhase, gaussianFilterMagDb, CORRECTED_COLOR, PEQ_COLOR, STATUS_BAD } from "../lib/plot-helpers";
 import {
   tolerance, setTolerance,
   maxBands, setMaxBands,
@@ -342,10 +342,10 @@ function FilterBlock(props: FilterBlockProps) {
               class={`fb-link-btn ${props.linked ? "on" : ""}`}
               onClick={(e) => { e.stopPropagation(); props.onLinkToggle!(); }}
               title={props.linked ? "Unlink from next band" : "Link to next band"}
-            ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={props.linked ? "#22c55e" : "#ef4444"} stroke-width="2.5" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
+            ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={props.linked ? CORRECTED_COLOR : STATUS_BAD} stroke-width="2.5" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
           </Show>
           <Show when={!props.canLink && props.linked}>
-            <span class="fb-link-indicator" title="Linked to adjacent band"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>
+            <span class="fb-link-indicator" title="Linked to adjacent band"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={CORRECTED_COLOR} stroke-width="2.5" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>
           </Show>
         </span>
         <button
@@ -1065,7 +1065,7 @@ function ExportTab() {
 
   const bandPhaseColor = (b: BandState) => {
     if (exportHybridPhase() && b.measurement) return "#60A5FA"; // blue for hybrid
-    return bandPhaseIsLinear(b) ? "#22C55E" : "#FF9F43";
+    return bandPhaseIsLinear(b) ? CORRECTED_COLOR : PEQ_COLOR;
   };
 
   function formatFilterInfo(b: BandState): string {
@@ -1258,7 +1258,7 @@ function ExportTab() {
       </div>
 
       <Show when={exportError()}>
-        <div class="align-status" style={{ color: "#EF4444", padding: "4px 8px" }}>
+        <div class="align-status" style={{ color: STATUS_BAD, padding: "4px 8px" }}>
           {exportError()}
         </div>
       </Show>

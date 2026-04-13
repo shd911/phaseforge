@@ -50,6 +50,19 @@
   --btn-pad-base: 3px 10px;
   --btn-pad-md: 5px 14px;
   --btn-pad-lg: 8px 16px;
+
+  /* Semantic status colors */
+  --status-good: #22C55E;
+  --status-warn: #FFD700;
+  --status-bad: #EF4444;
+
+  /* Curve type colors (non-band-specific) */
+  --color-peq: #FF9F43;
+  --color-peq-hover: #FFA726;
+  --color-peq-drag: #FFC107;
+  --color-peq-base: #FF9800;
+  --color-fir: #38BDF8;
+  --color-corrected: #22C55E;
 }
 
 * {

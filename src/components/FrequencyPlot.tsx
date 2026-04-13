@@ -14,6 +14,10 @@ import {
   SUM_TARGET_COLOR, SUM_TARGET_PHASE_COLOR, SUM_CORRECTED_COLOR, SUM_MEAS_COLOR,
   FREQ_SNAP_COLORS, bandColorFamily, smoothingConfig, wrapPhase, fmtFreq, computeGroupDelay,
   isGaussianMinPhase, gaussianFilterMagDb,
+  PEQ_COLOR, PEQ_HOVER_COLOR, PEQ_DRAG_COLOR, PEQ_BASE_COLOR,
+  FIR_COLOR, CORRECTED_COLOR, MEAS_DEFAULT_COLOR,
+  STATUS_GOOD, STATUS_WARN, STATUS_BAD,
+  DEFAULT_IR_COLORS, DEFAULT_GD_COLORS, DEFAULT_EXPORT_COLORS,
 } from "../lib/plot-helpers";
 import { addGaussianMinPhase, evaluateBand } from "../lib/band-evaluation";
 import { computeAutoAlign } from "../lib/auto-align";
@@ -353,16 +357,16 @@ export default function FrequencyPlot() {
   const [irRenderTrigger, setIrRenderTrigger] = createSignal(0);
 
   // IR/Step colors derived from band — updated on each render
-  const defaultIrColors = { measIr: "#4A9EFF", measStep: "#4A9EFF80", targetIr: "#FFD700", targetStep: "#FFD700A0", corrIr: "#22C55E", corrStep: "#22C55E80" };
+  const defaultIrColors = DEFAULT_IR_COLORS;
   const [irColors, setIrColors] = createSignal(defaultIrColors);
   // GD colors and visibility
-  const defaultGdColors = { meas: "#F59E0B", target: "#FFD700", corr: "#22C55E" };
+  const defaultGdColors = DEFAULT_GD_COLORS;
   const [gdColors, setGdColors] = createSignal(defaultGdColors);
   const [showGdMeas, setShowGdMeas] = createSignal(true);
   const [showGdTarget, setShowGdTarget] = createSignal(true);
   const [showGdCorr, setShowGdCorr] = createSignal(true);
   // Export colors derived from band
-  const [exportColors, setExportColors] = createSignal({ model: "#FF9F43", fir: "#38BDF8", modelPhase: "#9b8060", firPhase: "#1a6e8a" });
+  const [exportColors, setExportColors] = createSignal(DEFAULT_EXPORT_COLORS);
   // Export loading indicator
   const [exportComputing, setExportComputing] = createSignal(false);
   // Export legend visibility
@@ -1195,7 +1199,7 @@ export default function FrequencyPlot() {
 
               const isSel = i === selIdx;
               ctx.save();
-              ctx.strokeStyle = isSel ? "#FF9F43" : "rgba(255,159,67,0.35)";
+              ctx.strokeStyle = isSel ? PEQ_COLOR : "rgba(255,159,67,0.35)";
               ctx.lineWidth = isSel ? 2 : 1;
               ctx.setLineDash(isSel ? [6, 4] : [4, 4]);
               ctx.beginPath();
@@ -1205,7 +1209,7 @@ export default function FrequencyPlot() {
 
               if (isSel) {
                 ctx.setLineDash([]);
-                ctx.fillStyle = "#FF9F43";
+                ctx.fillStyle = PEQ_COLOR;
                 ctx.font = `${Math.round(10 * dpr)}px sans-serif`;
                 ctx.textAlign = "center";
                 const label = pb.freq_hz >= 1000 ? (pb.freq_hz / 1000).toFixed(1) + "k" : Math.round(pb.freq_hz).toString();
@@ -1247,7 +1251,7 @@ export default function FrequencyPlot() {
               cy = Math.max(plotTop + radius + 2, Math.min(plotBottom - radius - 2, cy));
 
               // Vertical dashed line
-              ctx.strokeStyle = isDrg ? "#FFC107" : isHov ? "#FFA726" : "#FF9800";
+              ctx.strokeStyle = isDrg ? PEQ_DRAG_COLOR : isHov ? PEQ_HOVER_COLOR : PEQ_BASE_COLOR;
               ctx.lineWidth = isDrg ? 2 : 1.5;
               ctx.setLineDash([6, 4]);
               ctx.beginPath();
@@ -1257,7 +1261,7 @@ export default function FrequencyPlot() {
 
               // Circle marker at dB level
               ctx.setLineDash([]);
-              ctx.fillStyle = isDrg ? "#FFC107" : isHov ? "#FFA726" : "#FF9800";
+              ctx.fillStyle = isDrg ? PEQ_DRAG_COLOR : isHov ? PEQ_HOVER_COLOR : PEQ_BASE_COLOR;
               ctx.strokeStyle = "#1e1e24";
               ctx.lineWidth = 2 * dpr;
               ctx.beginPath();
@@ -1266,7 +1270,7 @@ export default function FrequencyPlot() {
               ctx.stroke();
 
               // Frequency label above marker
-              ctx.fillStyle = isDrg ? "#FFC107" : isHov ? "#FFA726" : "#FF9800";
+              ctx.fillStyle = isDrg ? PEQ_DRAG_COLOR : isHov ? PEQ_HOVER_COLOR : PEQ_BASE_COLOR;
               ctx.font = `bold ${Math.round(11 * dpr)}px sans-serif`;
               ctx.textAlign = "center";
               ctx.fillText(fmtCrossoverFreq(f), cx, cy - radius - 6 * dpr);
@@ -1294,7 +1298,7 @@ export default function FrequencyPlot() {
               const r = 4 * dpr;
               ctx.beginPath();
               ctx.arc(cx, cy, r, 0, 2 * Math.PI);
-              ctx.fillStyle = "#FF9F43";
+              ctx.fillStyle = PEQ_COLOR;
               ctx.fill();
               ctx.strokeStyle = "#fff";
               ctx.lineWidth = 1.5 * dpr;
@@ -1729,7 +1733,7 @@ export default function FrequencyPlot() {
       });
 
       // Derive colors from band
-      const bandColor = band.color ?? "#FF9F43";
+      const bandColor = band.color ?? PEQ_COLOR;
       const ecf = bandColorFamily(bandColor);
       const expClr = { model: ecf.target, fir: ecf.corrected, modelPhase: ecf.targetPhase, firPhase: ecf.correctedPhase };
       setExportColors(expClr);
@@ -1986,7 +1990,7 @@ export default function FrequencyPlot() {
         }
 
         // GD colors from band
-        const bandColor = (!sumMode && band) ? band.color : "#F59E0B";
+        const bandColor = (!sumMode && band) ? band.color : DEFAULT_GD_COLORS.meas;
         const cf = bandColorFamily(bandColor);
         const stripAlpha = (c: string) => c.length === 9 ? c.slice(0, 7) : c;
         const gdClr = { meas: stripAlpha(cf.meas), target: cf.target, corr: cf.corrected };
@@ -2541,9 +2545,9 @@ export default function FrequencyPlot() {
 
     // SUM-specific colors
     const sumClr = {
-      measIr: "#4A9EFF", measStep: "#2563EB",
-      targetIr: "#FFD700", targetStep: "#F59E0B",
-      corrIr: "#22C55E", corrStep: "#16A34A",
+      measIr: MEAS_DEFAULT_COLOR, measStep: "#2563EB",
+      targetIr: SUM_TARGET_COLOR, targetStep: DEFAULT_IR_COLORS.targetStep,
+      corrIr: CORRECTED_COLOR, corrStep: "#16A34A",
     };
 
     // Helper: add IR+Step series for a band or sum
@@ -3040,11 +3044,11 @@ export default function FrequencyPlot() {
               }
               const peqSIdx = sIdx;
               uSeries.push({
-                label: "PEQ dB", stroke: "#FF9F43", width: 1.5, scale: "mag",
+                label: "PEQ dB", stroke: PEQ_COLOR, width: 1.5, scale: "mag",
                 points: { show: false },
               });
               uData.push(peqOnly);
-              legend.push({ label: "PEQ", color: "#FF9F43", dash: false, visible: true, seriesIdx: sIdx, category: "peq" });
+              legend.push({ label: "PEQ", color: PEQ_COLOR, dash: false, visible: true, seriesIdx: sIdx, category: "peq" });
               sIdx++;
               peqDotsInfo = { seriesIdx: peqSIdx, dataIndices: dotIndices };
               activePeqDots = peqDotsInfo;
@@ -4301,16 +4305,16 @@ export default function FrequencyPlot() {
               <span>{m().sampleRate / 1000}k</span>
               <span>{m().window}</span>
               <span>{m().phaseLabel}</span>
-              <span style={{ color: m().causality >= 95 ? "#22C55E" : m().causality >= 80 ? "#FFD700" : "#EF4444" }}>
+              <span style={{ color: m().causality >= 95 ? STATUS_GOOD : m().causality >= 80 ? STATUS_WARN : STATUS_BAD }}>
                 Causal: {m().causality}%
               </span>
               <Show when={m().preRingMs > 0}>
                 <span>Pre-ring: {m().preRingMs} ms</span>
               </Show>
-              <span style={{ color: m().maxMagErr <= 0.5 ? "#22C55E" : m().maxMagErr <= 1.5 ? "#FFD700" : "#EF4444" }}>
+              <span style={{ color: m().maxMagErr <= 0.5 ? STATUS_GOOD : m().maxMagErr <= 1.5 ? STATUS_WARN : STATUS_BAD }}>
                 Mag err: {m().maxMagErr} dB
               </span>
-              <span style={{ color: m().gdRippleMs <= 1 ? "#22C55E" : m().gdRippleMs <= 3 ? "#FFD700" : "#EF4444" }}>
+              <span style={{ color: m().gdRippleMs <= 1 ? STATUS_GOOD : m().gdRippleMs <= 3 ? STATUS_WARN : STATUS_BAD }}>
                 GD ripple: {m().gdRippleMs} ms
               </span>
               <Show when={m().peqCount > 0}>
@@ -4369,7 +4373,7 @@ export default function FrequencyPlot() {
                                               <span class={`legend-swatch ${e().dash ? "legend-swatch-dash" : ""}`} style={{ "background-color": e().dash ? "transparent" : e().color, "border-color": e().color }} />
                                             </button>
                                             <Show when={noPeq()}>
-                                              <span title="No PEQ optimization" style={{ color: "#ef4444", "font-size": "var(--fs-xs)", "font-weight": "bold", "margin-left": "1px" }}>!</span>
+                                              <span title="No PEQ optimization" style={{ color: STATUS_BAD, "font-size": "var(--fs-xs)", "font-weight": "bold", "margin-left": "1px" }}>!</span>
                                             </Show>
                                           </td>
                                         );
@@ -4412,7 +4416,7 @@ export default function FrequencyPlot() {
                                             }}
                                           </Show>
                                           <Show when={noPeqIr()}>
-                                            <span title="No PEQ optimization" style={{ color: "#ef4444", "font-size": "var(--fs-xs)", "font-weight": "bold", "margin-left": "1px" }}>!</span>
+                                            <span title="No PEQ optimization" style={{ color: STATUS_BAD, "font-size": "var(--fs-xs)", "font-weight": "bold", "margin-left": "1px" }}>!</span>
                                           </Show>
                                         </td>
                                       </Show>

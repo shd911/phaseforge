@@ -177,12 +177,12 @@ export interface FirModelResult {
 
 // Colors for multi-measurement overlay
 export const MEASUREMENT_COLORS = [
-  "#7B9FCC", // steel blue
-  "#CC8866", // clay
-  "#9B85C0", // dusty purple
-  "#C07070", // dusty rose
-  "#7BAAB0", // grey teal
-  "#BBA050", // dark ochre
-  "#B878A0", // muted plum
-  "#8090B0", // slate
+  "#4A9EFF", // bright blue (like REW default)
+  "#FF6B6B", // coral red
+  "#A855F7", // vivid purple
+  "#22C55E", // green
+  "#F59E0B", // amber
+  "#EC4899", // pink
+  "#06B6D4", // cyan
+  "#8B5CF6", // violet
 ];
