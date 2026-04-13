@@ -3633,7 +3633,21 @@ export default function FrequencyPlot() {
             // Σ corrected phase
             if (showPhase) {
               uSeries.push({ label: "\u03A3 corr °", stroke: SUM_CORRECTED_COLOR, width: 1.5, dash: [6, 3], scale: "phase" });
-              uData.push(wrapPhase(sumCorrPhase));
+              const sumCorrPhaseDisplay = new Array(freq.length);
+              for (let j = 0; j < freq.length; j++) {
+                let weightedDelay = 0;
+                let totalPower = 0;
+                for (let i = 0; i < bands.length; i++) {
+                  if (!perBandCorrected[i]) continue;
+                  const power = Math.pow(10, perBandCorrected[i]![j] / 10);
+                  const alignDelay = bands[i].alignmentDelay ?? 0;
+                  weightedDelay += power * alignDelay;
+                  totalPower += power;
+                }
+                const avgDelay = totalPower > 1e-30 ? weightedDelay / totalPower : 0;
+                sumCorrPhaseDisplay[j] = sumCorrPhase[j] - 360 * freq[j] * avgDelay;
+              }
+              uData.push(wrapPhase(sumCorrPhaseDisplay));
               legend.push({ label: "\u03A3 corr °", color: SUM_CORRECTED_COLOR, dash: true, visible: true, seriesIdx: sIdx, category: "corrected" });
               sIdx++;
             }
@@ -3707,7 +3721,30 @@ export default function FrequencyPlot() {
           // Σ measurement phase
           if (showPhase) {
             uSeries.push({ label: "\u03A3 °", stroke: SUM_MEAS_COLOR, width: 1.5, dash: [6, 3], scale: "phase" });
-            uData.push(wrapPhase(sumPhase));
+            const sumPhaseDisplay = new Array(nPts);
+            let avgDelayAt1k = 0, avgDelayAt10k = 0;
+            let idx1k = 0, idx10k = 0;
+            for (let j = 0; j < nPts; j++) {
+              if (Math.abs(freq[j] - 1000) < Math.abs(freq[idx1k] - 1000)) idx1k = j;
+              if (Math.abs(freq[j] - 10000) < Math.abs(freq[idx10k] - 10000)) idx10k = j;
+            }
+            for (let j = 0; j < nPts; j++) {
+              let weightedDelay = 0;
+              let totalPower = 0;
+              for (const mi of measIndices) {
+                const rm = resampled[mi]!;
+                const power = Math.pow(10, rm.magnitude[j] / 10);
+                const alignDelay = bands[mi].alignmentDelay ?? 0;
+                weightedDelay += power * alignDelay;
+                totalPower += power;
+              }
+              const avgDelay = totalPower > 1e-30 ? weightedDelay / totalPower : 0;
+              sumPhaseDisplay[j] = sumPhase[j] - 360 * freq[j] * avgDelay;
+              if (j === idx1k) avgDelayAt1k = avgDelay;
+              if (j === idx10k) avgDelayAt10k = avgDelay;
+            }
+            console.log(`[SUM] phase compensation: weighted delay at 1kHz=${(avgDelayAt1k*1000).toFixed(3)}ms, at 10kHz=${(avgDelayAt10k*1000).toFixed(3)}ms`);
+            uData.push(wrapPhase(sumPhaseDisplay));
             legend.push({ label: "\u03A3 meas °", color: SUM_MEAS_COLOR, dash: true, visible: true, seriesIdx: sIdx, category: "measurement" });
             sIdx++;
           }
