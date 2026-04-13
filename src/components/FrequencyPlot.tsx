@@ -3588,7 +3588,7 @@ export default function FrequencyPlot() {
               if (showPhase) {
                 uSeries.push({ label: "\u03A3 tgt \u00B0", stroke: SUM_TARGET_PHASE_COLOR, width: 1.5, dash: [4, 4], scale: "phase" });
                 uData.push(wrapPhase(stPhase));
-                legend.push({ label: "\u03A3 target \u00B0", color: SUM_TARGET_PHASE_COLOR, dash: true, visible: false, seriesIdx: sIdx, category: "target" });
+                legend.push({ label: "\u03A3 target \u00B0", color: SUM_TARGET_PHASE_COLOR, dash: true, visible: true, seriesIdx: sIdx, category: "target" });
                 sIdx++;
               }
             }
@@ -3634,7 +3634,7 @@ export default function FrequencyPlot() {
             if (showPhase) {
               uSeries.push({ label: "\u03A3 corr °", stroke: SUM_CORRECTED_COLOR, width: 1.5, dash: [6, 3], scale: "phase" });
               uData.push(wrapPhase(sumCorrPhase));
-              legend.push({ label: "\u03A3 corr °", color: SUM_CORRECTED_COLOR, dash: true, visible: false, seriesIdx: sIdx, category: "corrected" });
+              legend.push({ label: "\u03A3 corr °", color: SUM_CORRECTED_COLOR, dash: true, visible: true, seriesIdx: sIdx, category: "corrected" });
               sIdx++;
             }
           } else {
@@ -3708,7 +3708,7 @@ export default function FrequencyPlot() {
           if (showPhase) {
             uSeries.push({ label: "\u03A3 °", stroke: SUM_MEAS_COLOR, width: 1.5, dash: [6, 3], scale: "phase" });
             uData.push(wrapPhase(sumPhase));
-            legend.push({ label: "\u03A3 meas °", color: SUM_MEAS_COLOR, dash: true, visible: false, seriesIdx: sIdx, category: "measurement" });
+            legend.push({ label: "\u03A3 meas °", color: SUM_MEAS_COLOR, dash: true, visible: true, seriesIdx: sIdx, category: "measurement" });
             sIdx++;
           }
         } else {
@@ -4333,12 +4333,34 @@ export default function FrequencyPlot() {
             const cols = () => [...bandNames(), "\u03A3"];
             const categories: ("target" | "measurement" | "corrected")[] = ["target", "measurement", "corrected"];
             const catLabels: Record<string, string> = { target: "TARGETS", measurement: "MEAS", corrected: "CORR+XO" };
-            const catColors: Record<string, string> = { target: "#AAB4C0", measurement: "#8898A8", corrected: "#B0C0D0" };
+            const catColors: Record<string, string> = { target: SUM_TARGET_COLOR, measurement: SUM_MEAS_COLOR, corrected: SUM_CORRECTED_COLOR };
             return (
               <table>
                 <thead><tr>
                   <th class="sum-corner" />
-                  <For each={cols()}>{(col) => <th onClick={() => toggleColumn(col)} title={`Toggle all ${col}`}>{col}</th>}</For>
+                  <For each={cols()}>{(col) => {
+                    const band = () => col === "\u03A3" ? null : appState.bands.find(b => b.name === col);
+                    const hasPeq = () => {
+                      const b = band();
+                      return b ? (b.peqBands && b.peqBands.length > 0) : false;
+                    };
+                    const hasXo = () => {
+                      const b = band();
+                      return b ? (b.target.high_pass || b.target.low_pass) : false;
+                    };
+                    return (
+                      <th onClick={() => toggleColumn(col)} title={`Toggle all ${col}`}>
+                        {col}
+                        <Show when={band() && hasXo()}>
+                          <span
+                            class="opt-dot"
+                            style={{ background: hasPeq() ? "var(--status-good)" : "var(--status-bad)" }}
+                            title={hasPeq() ? "PEQ optimized" : "Not optimized"}
+                          />
+                        </Show>
+                      </th>
+                    );
+                  }}</For>
                 </tr></thead>
                 <tbody>
                   <For each={categories}>

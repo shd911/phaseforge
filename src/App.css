@@ -645,6 +645,14 @@ body {
   margin-right: 4px;
   vertical-align: middle;
 }
+.opt-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-left: 4px;
+  vertical-align: middle;
+}
 /* Cell button inside table */
 .sum-vis-table .legend-item {
   padding: 1px 4px;
@@ -652,6 +660,13 @@ body {
 }
 .sum-vis-table td {
   vertical-align: middle;
+}
+.sum-vis-table tbody tr:hover {
+  background: var(--bg-hover);
+}
+.sum-vis-table thead th:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 .delay-input {
   width: 60px;
