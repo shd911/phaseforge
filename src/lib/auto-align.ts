@@ -1,13 +1,14 @@
 /**
  * Auto-align delays for multi-band crossover systems.
  *
- * Algorithm: for each adjacent pair of bands with overlapping crossovers,
- * compute the delay offset that maximizes the coherent sum amplitude
- * in the crossover region. Uses gradient descent on the cost function
- * (negative sum amplitude at crossover frequencies).
+ * Algorithm: HF→LF sequential optimization.
+ * The highest-frequency band (tweeter) is the reference (delay = 0).
+ * Each subsequent lower band is adjusted to maximize coherent sum
+ * amplitude at the crossover with its upper neighbour.
  *
- * The first band is the reference (delay = 0); subsequent bands are
- * adjusted relative to it.
+ * If a lower band needs negative delay (should arrive earlier),
+ * the absolute value is propagated as positive delay to all
+ * higher bands, keeping all delays >= 0.
  */
 
 import { invoke } from "@tauri-apps/api/core";
@@ -25,23 +26,22 @@ export interface AlignResult {
  * @returns delays in seconds per band id
  */
 export async function computeAutoAlign(bands: BandState[]): Promise<AlignResult> {
-  // Filter bands with measurement + phase data, sorted by crossover frequency
+  // Filter bands with measurement + phase data
   const validBands = bands.filter(
     b => b.measurement?.phase && b.measurement.phase.length > 0
   );
 
   if (validBands.length < 2) {
-    // Nothing to align
     const delays: Record<string, number> = {};
     for (const b of validBands) delays[b.id] = 0;
     return { delays };
   }
 
-  // Sort bands by HP frequency, with bandIndex fallback for stability
+  // Sort bands HF→LF: highest HP frequency first (tweeter first)
   const sorted = [...validBands].sort((a, b) => {
     const aHP = a.target?.high_pass?.freq_hz ?? 0;
     const bHP = b.target?.high_pass?.freq_hz ?? 0;
-    if (aHP !== bHP) return aHP - bHP;
+    if (aHP !== bHP) return bHP - aHP;  // descending by HP freq
     return bands.indexOf(a) - bands.indexOf(b);
   });
 
@@ -77,7 +77,6 @@ export async function computeAutoAlign(bands: BandState[]): Promise<AlignResult>
       ph = ph.map((v, i) => v + (xp[i] ?? 0));
     }
 
-    // Pad/trim to nPts
     while (mag.length < nPts) { mag.push(-200); ph.push(0); }
 
     return { id: b.id, name: b.name, mag, ph, freq: [...b.measurement!.freq] };
@@ -85,46 +84,47 @@ export async function computeAutoAlign(bands: BandState[]): Promise<AlignResult>
 
   const bandData = await Promise.all(bandDataPromises);
 
-  // Find crossover regions between adjacent bands
-  const crossoverRegions: { loIdx: number; hiIdx: number; freqRange: [number, number] }[] = [];
+  // Find crossover regions between adjacent bands (HF→LF order)
+  // sorted[i] = higher freq, sorted[i+1] = lower freq
+  const crossoverRegions: { refIdx: number; optIdx: number; freqRange: [number, number] }[] = [];
   for (let i = 0; i < sorted.length - 1; i++) {
-    const lpFreq = sorted[i].target?.low_pass?.freq_hz;
-    const hpFreq = sorted[i + 1].target?.high_pass?.freq_hz;
+    const hpFreq = sorted[i].target?.high_pass?.freq_hz;
+    const lpFreq = sorted[i + 1].target?.low_pass?.freq_hz;
     if (lpFreq && hpFreq) {
       const xoFreq = (lpFreq + hpFreq) / 2;
-      // Crossover region: ±0.5 octave around crossover point
-      const fLo = xoFreq / 1.4142; // ÷√2
-      const fHi = xoFreq * 1.4142; // ×√2
-      crossoverRegions.push({ loIdx: i, hiIdx: i + 1, freqRange: [fLo, fHi] });
+      const fLo = xoFreq / 1.4142;
+      const fHi = xoFreq * 1.4142;
+      crossoverRegions.push({ refIdx: i, optIdx: i + 1, freqRange: [fLo, fHi] });
     }
   }
 
-  // Initialize delays: first band = 0, rest optimized
+  // Initialize delays: HF band = 0 (reference)
   const delays = new Array(sorted.length).fill(0);
 
-  // Optimize each pair sequentially (each depends on the previous result)
+  // Optimize sequentially HF→LF
   for (const xo of crossoverRegions) {
     const bestDelay = optimizePairDelay(
-      freq, bandData, delays, xo.loIdx, xo.hiIdx, xo.freqRange
+      freq, bandData, delays, xo.refIdx, xo.optIdx, xo.freqRange
     );
-    delays[xo.hiIdx] = bestDelay;
+
+    if (bestDelay >= 0) {
+      // Positive delay: lower band needs more delay — just assign
+      delays[xo.optIdx] = bestDelay;
+    } else {
+      // Negative delay: lower band should be EARLIER than upper bands
+      // → propagate |bestDelay| to ALL already-processed bands (indices 0..optIdx-1)
+      const shift = -bestDelay; // positive amount to add
+      for (let k = 0; k < xo.optIdx; k++) {
+        delays[k] += shift;
+      }
+      delays[xo.optIdx] = 0;
+    }
   }
 
-  // Build result map
+  // Build result map (all delays guaranteed >= 0)
   const result: Record<string, number> = {};
   for (let i = 0; i < sorted.length; i++) {
-    result[sorted[i].id] = delays[i];
-  }
-
-  // Normalize: shift all delays so minimum = 0 (only positive delays are physical)
-  let minDelay = Infinity;
-  for (const d of Object.values(result)) {
-    if (d < minDelay) minDelay = d;
-  }
-  if (minDelay !== 0 && isFinite(minDelay)) {
-    for (const k of Object.keys(result)) {
-      result[k] = Math.round((result[k] - minDelay) * 1e6) / 1e6;
-    }
+    result[sorted[i].id] = Math.round(delays[i] * 1e6) / 1e6;
   }
 
   return { delays: result };
