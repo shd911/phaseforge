@@ -19,6 +19,21 @@ export interface AlignResult {
   delays: Record<string, number>;
 }
 
+/** Linear interpolation on log-frequency scale. Returns NaN outside source range. */
+function interpOnGrid(srcFreq: number[], srcData: number[], dstFreq: number[]): number[] {
+  return dstFreq.map(f => {
+    if (f < srcFreq[0] || f > srcFreq[srcFreq.length - 1]) return NaN;
+    let lo = 0, hi = srcFreq.length - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (srcFreq[mid] <= f) lo = mid; else hi = mid;
+    }
+    const dt = srcFreq[hi] - srcFreq[lo];
+    const frac = dt > 0 ? (f - srcFreq[lo]) / dt : 0;
+    return srcData[lo] + frac * (srcData[hi] - srcData[lo]);
+  });
+}
+
 /**
  * Compute optimal alignment delays for all bands.
  *
@@ -45,10 +60,19 @@ export async function computeAutoAlign(bands: BandState[]): Promise<AlignResult>
     return bands.indexOf(a) - bands.indexOf(b);
   });
 
-  // Use the common frequency grid from first band
-  const refBand = sorted[0];
+  // Use the frequency grid with widest coverage (lowest start freq, most points)
+  let refBand = sorted[0];
+  for (const b of sorted) {
+    if (b.measurement!.freq.length > refBand.measurement!.freq.length) {
+      refBand = b;
+    } else if (b.measurement!.freq.length === refBand.measurement!.freq.length
+      && b.measurement!.freq[0] < refBand.measurement!.freq[0]) {
+      refBand = b;
+    }
+  }
   const freq = [...refBand.measurement!.freq];
   const nPts = freq.length;
+  console.log(`[auto-align] using freq grid from "${refBand.name}": ${nPts} points, ${freq[0].toFixed(1)}-${freq[freq.length-1].toFixed(1)} Hz`);
 
   // Get corrected magnitude + phase for each band (measurement + PEQ + crossover)
   const bandDataPromises = sorted.map(async (b) => {
@@ -77,12 +101,32 @@ export async function computeAutoAlign(bands: BandState[]): Promise<AlignResult>
       ph = ph.map((v, i) => v + (xp[i] ?? 0));
     }
 
-    while (mag.length < nPts) { mag.push(-200); ph.push(0); }
-
     return { id: b.id, name: b.name, mag, ph, freq: [...b.measurement!.freq] };
   });
 
   const bandData = await Promise.all(bandDataPromises);
+
+  // Interpolate all bands onto common freq grid
+  for (const bd of bandData) {
+    if (bd.freq.length !== nPts || bd.freq[0] !== freq[0]) {
+      const interpMag = interpOnGrid(bd.freq, bd.mag, freq);
+      const interpPh = interpOnGrid(bd.freq, bd.ph, freq);
+      // Replace with interpolated data; NaN → -200 dB / 0°
+      bd.mag = interpMag.map(v => isNaN(v) ? -200 : v);
+      bd.ph = interpPh.map(v => isNaN(v) ? 0 : v);
+      bd.freq = [...freq];
+      console.log(`[auto-align] interpolated "${bd.name}" onto common grid (${nPts} pts)`);
+    } else {
+      console.log(`[auto-align] "${bd.name}" already on common grid`);
+    }
+  }
+
+  console.log("[auto-align] sorted bands (HF→LF):", sorted.map(b => ({
+    name: b.name,
+    hp: b.target?.high_pass?.freq_hz ?? "none",
+    lp: b.target?.low_pass?.freq_hz ?? "none",
+    targetEnabled: b.targetEnabled,
+  })));
 
   // Find crossover regions between adjacent bands (HF→LF order)
   // sorted[i] = higher freq, sorted[i+1] = lower freq
@@ -95,6 +139,9 @@ export async function computeAutoAlign(bands: BandState[]): Promise<AlignResult>
       const fLo = xoFreq / 1.4142;
       const fHi = xoFreq * 1.4142;
       crossoverRegions.push({ refIdx: i, optIdx: i + 1, freqRange: [fLo, fHi] });
+      console.log(`[auto-align] XO pair: ${sorted[i].name} (HP=${hpFreq}) ↔ ${sorted[i+1].name} (LP=${lpFreq}), range=${fLo.toFixed(0)}-${fHi.toFixed(0)} Hz`);
+    } else {
+      console.log(`[auto-align] SKIP pair: ${sorted[i].name} (HP=${sorted[i].target?.high_pass?.freq_hz}) ↔ ${sorted[i+1].name} (LP=${sorted[i+1].target?.low_pass?.freq_hz})`);
     }
   }
 
@@ -110,6 +157,7 @@ export async function computeAutoAlign(bands: BandState[]): Promise<AlignResult>
     if (bestDelay >= 0) {
       // Positive delay: lower band needs more delay — just assign
       delays[xo.optIdx] = bestDelay;
+      console.log(`[auto-align] pair ${sorted[xo.refIdx].name}↔${sorted[xo.optIdx].name}: raw=${bestDelay.toFixed(6)}s, delays now=`, [...delays].map(d => (d*1000).toFixed(3)+"ms"));
     } else {
       // Negative delay: lower band should be EARLIER than upper bands
       // → propagate |bestDelay| to ALL already-processed bands (indices 0..optIdx-1)
@@ -118,6 +166,7 @@ export async function computeAutoAlign(bands: BandState[]): Promise<AlignResult>
         delays[k] += shift;
       }
       delays[xo.optIdx] = 0;
+      console.log(`[auto-align] pair ${sorted[xo.refIdx].name}↔${sorted[xo.optIdx].name}: raw=${bestDelay.toFixed(6)}s, delays now=`, [...delays].map(d => (d*1000).toFixed(3)+"ms"));
     }
   }
 
@@ -126,6 +175,11 @@ export async function computeAutoAlign(bands: BandState[]): Promise<AlignResult>
   for (let i = 0; i < sorted.length; i++) {
     result[sorted[i].id] = Math.round(delays[i] * 1e6) / 1e6;
   }
+
+  console.log("[auto-align] FINAL delays:", Object.entries(result).map(([id, d]) => {
+    const b = sorted.find(s => s.id === id);
+    return `${b?.name ?? id}: ${(d*1000).toFixed(3)}ms`;
+  }));
 
   return { delays: result };
 }
