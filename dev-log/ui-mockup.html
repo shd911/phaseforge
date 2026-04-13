@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PhaseForge UI Mockup — Standardized</title>
+<style>
+  /* ═══════════════════════════════════════════════════════════════
+     DESIGN TOKENS — единый источник правды
+     ═══════════════════════════════════════════════════════════════ */
+  :root {
+    /* Backgrounds */
+    --bg-app:      #1a1a22;
+    --bg-panel:    #22222c;
+    --bg-surface:  #2a2a36;
+    --bg-input:    #181820;
+    --bg-hover:    #32323e;
+
+    /* Text — 3 уровня */
+    --text-1:      #d8d8de;  /* primary */
+    --text-2:      #8a8a98;  /* secondary */
+    --text-3:      #55556a;  /* muted */
+
+    /* Accent */
+    --accent:      #4a90d9;
+    --accent-hover:#5da3e8;
+    --accent-dim:  #3a6fa0;
+
+    /* Semantic */
+    --danger:      #e05555;
+    --success:     #4ade80;
+    --warning:     #e0a040;
+    --target-gold: #ffd700;
+
+    /* Borders */
+    --border:      #363646;
+    --border-focus:#4a90d9;
+
+    /* Typography — 3 размера */
+    --font-sm:   10px;
+    --font-md:   11px;
+    --font-lg:   12px;
+    --mono:  "SF Mono", "Menlo", "Monaco", "Consolas", monospace;
+    --sans:  -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", sans-serif;
+
+    /* Spacing scale */
+    --sp-1: 2px;
+    --sp-2: 4px;
+    --sp-3: 8px;
+    --sp-4: 12px;
+    --sp-5: 16px;
+    --sp-6: 24px;
+
+    /* Band colors */
+    --band-1: #4a8fd9;  /* blue — woofer */
+    --band-2: #d97a4a;  /* orange — mid */
+    --band-3: #d94a7a;  /* pink — HF */
+    --band-4: #9a4ad9;  /* purple — SHF */
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: var(--sans);
+    font-size: var(--font-md);
+    color: var(--text-1);
+    background: var(--bg-app);
+    overflow: hidden;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     HEADER BAR
+     ═══════════════════════════════════════════════════════════════ */
+  .header {
+    display: flex; align-items: center; gap: var(--sp-3);
+    height: 36px;
+    padding: 0 var(--sp-4);
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+  }
+  .header-title {
+    font-size: var(--font-lg); font-weight: 600; color: var(--text-2);
+    font-family: var(--mono); letter-spacing: 0.5px;
+  }
+  .header-title span { color: var(--text-3); font-weight: 400; }
+
+  /* Band tabs */
+  .band-tabs { display: flex; gap: 1px; margin-left: var(--sp-4); }
+  .band-tab {
+    padding: var(--sp-1) var(--sp-4);
+    font-size: var(--font-md); font-weight: 500;
+    color: var(--text-2);
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-bottom: none;
+    border-radius: 4px 4px 0 0;
+    cursor: pointer;
+    transition: all 0.15s;
+    position: relative;
+    white-space: nowrap;
+  }
+  .band-tab:hover { color: var(--text-1); background: var(--bg-hover); }
+  .band-tab.active {
+    color: #fff; background: var(--bg-app);
+    border-color: var(--accent);
+    border-bottom: 1px solid var(--bg-app);
+  }
+  .band-tab .band-dot {
+    display: inline-block; width: 6px; height: 6px;
+    border-radius: 50%; margin-right: 6px; vertical-align: middle;
+  }
+
+  /* Action buttons in header */
+  .header-actions { margin-left: auto; display: flex; gap: var(--sp-2); }
+
+  /* ═══════════════════════════════════════════════════════════════
+     BUTTONS — единая система
+     ═══════════════════════════════════════════════════════════════ */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    gap: var(--sp-2);
+    font-family: var(--sans);
+    font-size: var(--font-md);
+    font-weight: 500;
+    padding: var(--sp-1) var(--sp-3);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--bg-panel);
+    color: var(--text-2);
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+    height: 24px;
+  }
+  .btn:hover { background: var(--bg-hover); color: var(--text-1); }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn.primary:hover { background: var(--accent-hover); }
+  .btn.danger { border-color: var(--danger); color: var(--danger); }
+  .btn.danger:hover { background: var(--danger); color: #fff; }
+  .btn.success { border-color: var(--success); color: var(--success); }
+  .btn.sm { height: 20px; font-size: var(--font-sm); padding: 0 var(--sp-2); }
+  .btn.active { background: var(--accent-dim); color: #fff; border-color: var(--accent); }
+  .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  /* ═══════════════════════════════════════════════════════════════
+     MAIN LAYOUT
+     ═══════════════════════════════════════════════════════════════ */
+  .main {
+    display: flex; height: calc(100vh - 36px);
+  }
+  .plot-area {
+    flex: 1; display: flex; flex-direction: column;
+    min-width: 0;
+  }
+  .right-panel {
+    width: 260px; flex-shrink: 0;
+    background: var(--bg-panel);
+    border-left: 1px solid var(--border);
+    overflow-y: auto;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     PLOT TABS (SPL / IR/Step / GD / Export)
+     ═══════════════════════════════════════════════════════════════ */
+  .plot-tabs {
+    display: flex; gap: 0;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+    padding: 0 var(--sp-3);
+  }
+  .plot-tab {
+    padding: var(--sp-2) var(--sp-5);
+    font-size: var(--font-md); font-weight: 500;
+    color: var(--text-2);
+    border: none; background: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .plot-tab:hover { color: var(--text-1); }
+  .plot-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* ═══════════════════════════════════════════════════════════════
+     CURSOR INFO BAR
+     ═══════════════════════════════════════════════════════════════ */
+  .cursor-bar {
+    display: flex; align-items: center; gap: var(--sp-4);
+    padding: var(--sp-1) var(--sp-3);
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+    font-family: var(--mono); font-size: var(--font-sm);
+    color: var(--text-2);
+    height: 22px;
+  }
+  .cursor-bar .cv { margin-right: var(--sp-3); }
+  .cursor-bar .cv-label { color: var(--text-3); }
+  .cursor-bar .cv-val { color: var(--text-1); margin-left: 3px; }
+  .cursor-bar .band-val { margin-left: var(--sp-4); }
+
+  /* ═══════════════════════════════════════════════════════════════
+     SUM MATRIX (legend table)
+     ═══════════════════════════════════════════════════════════════ */
+  .sum-matrix {
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+    padding: var(--sp-2) var(--sp-3);
+    overflow-x: auto;
+  }
+  .sum-matrix table {
+    width: 100%; border-collapse: collapse;
+    font-family: var(--mono); font-size: var(--font-sm);
+  }
+  .sum-matrix th {
+    padding: var(--sp-1) var(--sp-3);
+    color: var(--text-2); font-weight: 500;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    font-size: var(--font-sm);
+  }
+  .sum-matrix td {
+    padding: var(--sp-1) var(--sp-3);
+    text-align: center;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+  .sum-matrix .row-label {
+    text-align: left; font-weight: 600;
+    color: var(--text-2); text-transform: uppercase;
+    letter-spacing: 0.3px;
+    cursor: pointer;
+    min-width: 70px;
+  }
+  .sum-matrix .row-label:hover { color: var(--text-1); }
+
+  /* Checkbox-dot in matrix */
+  .matrix-dot {
+    display: inline-block; width: 12px; height: 12px;
+    border: 1.5px solid; border-radius: 2px;
+    vertical-align: middle; cursor: pointer;
+    transition: all 0.15s;
+    position: relative;
+  }
+  .matrix-dot.on { background: currentColor; }
+  .matrix-dot.on::after {
+    content: "✓"; position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9px; color: #fff; font-weight: bold;
+  }
+  .matrix-dot.dash { border-style: dashed; }
+  .matrix-dot:hover { opacity: 0.8; }
+
+  /* Delay input row */
+  .delay-input {
+    width: 52px; height: 18px;
+    font-family: var(--mono); font-size: var(--font-sm);
+    text-align: center;
+    padding: 0 var(--sp-1);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    background: var(--bg-input);
+    color: var(--text-1);
+    outline: none;
+  }
+  .delay-input:focus { border-color: var(--border-focus); }
+
+  /* Sigma column */
+  .sigma-col { color: var(--success); font-weight: 600; }
+
+  /* Optimization indicator */
+  .opt-indicator {
+    display: inline-block; width: 6px; height: 6px;
+    border-radius: 50%; margin-left: 3px; vertical-align: middle;
+  }
+  .opt-indicator.ok { background: var(--success); }
+  .opt-indicator.missing { background: var(--danger); }
+
+  /* ═══════════════════════════════════════════════════════════════
+     GRAPH AREA (mockup)
+     ═══════════════════════════════════════════════════════════════ */
+  .graph-container {
+    flex: 1; position: relative;
+    background: var(--bg-app);
+    overflow: hidden;
+  }
+  .graph-mockup {
+    width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .graph-mockup svg { width: 100%; height: 100%; }
+
+  /* Axis controls */
+  .axis-controls {
+    position: absolute; left: var(--sp-2); top: 50%;
+    transform: translateY(-50%);
+    display: flex; flex-direction: column; gap: 1px;
+  }
+  .axis-btn {
+    width: 22px; height: 20px;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    background: rgba(26, 26, 34, 0.85);
+    color: var(--text-2);
+    font-size: var(--font-md);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s;
+  }
+  .axis-btn:hover { background: var(--bg-hover); color: var(--text-1); }
+
+  /* Crossover markers */
+  .xover-marker {
+    position: absolute; top: 0; bottom: 0;
+    width: 1px; border-left: 1px dashed var(--warning);
+    opacity: 0.5;
+  }
+  .xover-label {
+    position: absolute; top: 4px;
+    transform: translateX(-50%);
+    background: var(--warning);
+    color: #000; font-size: 9px; font-weight: 600;
+    padding: 1px 4px; border-radius: 8px;
+    font-family: var(--mono);
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     RIGHT PANEL — Filter controls
+     ═══════════════════════════════════════════════════════════════ */
+  .panel-section {
+    border-bottom: 1px solid var(--border);
+    padding: var(--sp-3);
+  }
+  .panel-title {
+    font-size: var(--font-sm); font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    color: var(--accent); margin-bottom: var(--sp-3);
+  }
+
+  /* Filter block */
+  .filter-block {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: var(--sp-2) var(--sp-3);
+    margin-bottom: var(--sp-2);
+  }
+  .filter-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: var(--sp-2);
+  }
+  .filter-title {
+    font-size: var(--font-md); font-weight: 600;
+    color: var(--text-2); text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .filter-toggle {
+    display: inline-flex; align-items: center; gap: var(--sp-2);
+  }
+
+  /* Toggle switch (on/off) */
+  .toggle {
+    width: 28px; height: 14px;
+    border-radius: 7px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    position: relative; cursor: pointer;
+    transition: all 0.2s;
+  }
+  .toggle.on { background: var(--accent-dim); border-color: var(--accent); }
+  .toggle::after {
+    content: ""; position: absolute;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--text-2);
+    top: 1px; left: 1px;
+    transition: all 0.2s;
+  }
+  .toggle.on::after { left: 15px; background: #fff; }
+
+  /* Filter grid */
+  .filter-grid {
+    display: grid;
+    grid-template-columns: 40px 1fr;
+    gap: var(--sp-1) var(--sp-2);
+    align-items: center;
+  }
+  .filter-label {
+    font-size: var(--font-md);
+    color: var(--text-2);
+  }
+  .filter-input {
+    width: 100%; height: 22px;
+    font-family: var(--mono); font-size: var(--font-md);
+    text-align: right;
+    padding: 0 var(--sp-2);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    background: var(--bg-input);
+    color: var(--text-1);
+    outline: none;
+  }
+  .filter-input:focus { border-color: var(--border-focus); }
+  .filter-select {
+    width: 100%; height: 22px;
+    font-family: var(--sans); font-size: var(--font-md);
+    padding: 0 var(--sp-2);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    background: var(--bg-input);
+    color: var(--text-1);
+    cursor: pointer; outline: none;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     PEQ TABLE
+     ═══════════════════════════════════════════════════════════════ */
+  .peq-section { padding: var(--sp-3); }
+  .peq-table {
+    width: 100%; border-collapse: collapse;
+    font-family: var(--mono); font-size: var(--font-sm);
+  }
+  .peq-table th {
+    padding: var(--sp-1) var(--sp-2);
+    color: var(--text-3); font-weight: 500;
+    text-align: center; font-size: 9px;
+    text-transform: uppercase; letter-spacing: 0.3px;
+    border-bottom: 1px solid var(--border);
+  }
+  .peq-table td {
+    padding: var(--sp-1) var(--sp-2);
+    text-align: center;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+  .peq-input {
+    width: 44px; height: 18px;
+    font-family: var(--mono); font-size: var(--font-sm);
+    text-align: right; padding: 0 var(--sp-1);
+    border: 1px solid var(--border); border-radius: 2px;
+    background: var(--bg-input); color: var(--text-1);
+    outline: none;
+  }
+  .peq-input:focus { border-color: var(--border-focus); }
+  .peq-input.boost { color: var(--warning); }
+  .peq-input.cut { color: var(--accent); }
+  .peq-check { accent-color: var(--accent); cursor: pointer; }
+
+  /* ═══════════════════════════════════════════════════════════════
+     STATUS BAR (bottom)
+     ═══════════════════════════════════════════════════════════════ */
+  .status-bar {
+    height: 22px;
+    display: flex; align-items: center;
+    padding: 0 var(--sp-3);
+    background: var(--bg-panel);
+    border-top: 1px solid var(--border);
+    font-size: var(--font-sm); color: var(--text-3);
+    font-family: var(--mono);
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     SCROLLBAR
+     ═══════════════════════════════════════════════════════════════ */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
+</style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════════════════
+     HEADER
+     ════════════════════════════════════════════════════════════════ -->
+<div class="header">
+  <div class="header-title">PhaseForge <span>v0.1.0-b102</span></div>
+  <div class="band-tabs">
+    <div class="band-tab">
+      <span class="band-dot" style="background:var(--band-1)"></span>4WAY
+    </div>
+    <div class="band-tab">
+      <span class="band-dot" style="background:var(--band-1)"></span>Band 1
+    </div>
+    <div class="band-tab">
+      <span class="band-dot" style="background:var(--band-2)"></span>Band 3
+    </div>
+    <div class="band-tab">
+      <span class="band-dot" style="background:var(--band-3)"></span>Band 4
+    </div>
+    <div class="band-tab">
+      <span class="band-dot" style="background:var(--band-4)"></span>Band 5
+    </div>
+    <div class="band-tab active" style="border-color:var(--success)">
+      <span style="color:var(--success);font-weight:700">&Sigma;</span>
+    </div>
+  </div>
+  <div class="header-actions">
+    <button class="btn">Standard</button>
+    <button class="btn primary">Hybrid</button>
+    <button class="btn">Settings</button>
+    <button class="btn success">Optimize All</button>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════
+     MAIN AREA
+     ════════════════════════════════════════════════════════════════ -->
+<div class="main">
+  <div class="plot-area">
+
+    <!-- Plot tabs -->
+    <div class="plot-tabs">
+      <button class="plot-tab active">SPL</button>
+      <button class="plot-tab">IR/Step</button>
+      <button class="plot-tab">GD</button>
+      <button class="plot-tab">Export</button>
+    </div>
+
+    <!-- Cursor info -->
+    <div class="cursor-bar">
+      <span class="cv"><span class="cv-label">Freq:</span><span class="cv-val">1.00 kHz</span></span>
+      <span class="band-val" style="color:var(--band-1)">-2.1 dBr</span>
+      <span class="band-val" style="color:var(--band-2)">-0.8 dBr</span>
+      <span class="band-val" style="color:var(--band-3)">-45.2 dBr</span>
+      <span class="band-val" style="color:var(--band-4)">-98.1 dBr</span>
+      <span class="band-val" style="color:var(--success)">-0.3 dBr</span>
+    </div>
+
+    <!-- SUM Matrix -->
+    <div class="sum-matrix">
+      <table>
+        <thead><tr>
+          <th></th>
+          <th style="color:var(--band-1)">Band 1</th>
+          <th style="color:var(--band-2)">Band 3</th>
+          <th style="color:var(--band-3)">Band 4</th>
+          <th style="color:var(--band-4)">Band 5</th>
+          <th class="sigma-col">&Sigma;</th>
+        </tr></thead>
+        <tbody>
+          <!-- TARGETS row -->
+          <tr>
+            <td class="row-label">Targets</td>
+            <td><span class="matrix-dot dash on" style="color:var(--band-1)"></span></td>
+            <td><span class="matrix-dot dash on" style="color:var(--band-2)"></span></td>
+            <td><span class="matrix-dot dash" style="color:var(--band-3)"></span></td>
+            <td><span class="matrix-dot dash" style="color:var(--band-4)"></span></td>
+            <td><span class="matrix-dot dash on" style="color:var(--target-gold)"></span></td>
+          </tr>
+          <!-- MEAS row -->
+          <tr>
+            <td class="row-label">Meas</td>
+            <td><span class="matrix-dot" style="color:var(--band-1)"></span></td>
+            <td><span class="matrix-dot" style="color:var(--band-2)"></span></td>
+            <td><span class="matrix-dot" style="color:var(--band-3)"></span></td>
+            <td><span class="matrix-dot" style="color:var(--band-4)"></span></td>
+            <td><span class="matrix-dot" style="color:var(--text-2)"></span></td>
+          </tr>
+          <!-- CORR+XO row -->
+          <tr>
+            <td class="row-label">Corr+XO</td>
+            <td>
+              <span class="matrix-dot on" style="color:var(--band-1)"></span>
+              <span class="opt-indicator ok" title="PEQ optimized"></span>
+            </td>
+            <td>
+              <span class="matrix-dot on" style="color:var(--band-2)"></span>
+              <span class="opt-indicator ok" title="PEQ optimized"></span>
+            </td>
+            <td>
+              <span class="matrix-dot on" style="color:var(--band-3)"></span>
+              <span class="opt-indicator ok" title="PEQ optimized"></span>
+            </td>
+            <td>
+              <span class="matrix-dot on" style="color:var(--band-4)"></span>
+              <span class="opt-indicator ok" title="PEQ optimized"></span>
+            </td>
+            <td><span class="matrix-dot on" style="color:var(--success)"></span></td>
+          </tr>
+          <!-- DELAY row -->
+          <tr>
+            <td class="row-label" style="display:flex;align-items:center;gap:4px;">
+              Delay
+              <span style="font-size:9px;font-weight:400;color:var(--text-3)">ms</span>
+            </td>
+            <td><input class="delay-input" value="0.00"></td>
+            <td><input class="delay-input" value="0.12"></td>
+            <td><input class="delay-input" value="0.00"></td>
+            <td><input class="delay-input" value="0.10"></td>
+            <td><button class="btn sm" title="Auto-align: gradient descent LF→HF">AUTO</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Graph area (SVG mockup) -->
+    <div class="graph-container">
+      <svg viewBox="0 0 1000 500" preserveAspectRatio="none">
+        <!-- Grid -->
+        <defs>
+          <pattern id="grid" width="100" height="50" patternUnits="userSpaceOnUse">
+            <path d="M 100 0 L 0 0 0 50" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+        <rect width="1000" height="500" fill="url(#grid)"/>
+
+        <!-- 0 dB reference line -->
+        <line x1="0" y1="150" x2="1000" y2="150" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+
+        <!-- Crossover markers -->
+        <line x1="200" y1="0" x2="200" y2="500" stroke="var(--warning)" stroke-width="1" stroke-dasharray="4,4" opacity="0.4"/>
+        <line x1="500" y1="0" x2="500" y2="500" stroke="var(--warning)" stroke-width="1" stroke-dasharray="4,4" opacity="0.4"/>
+        <line x1="700" y1="0" x2="700" y2="500" stroke="var(--warning)" stroke-width="1" stroke-dasharray="4,4" opacity="0.4"/>
+
+        <!-- Σ target (gold dashed) -->
+        <path d="M 30,150 Q 100,148 200,150 Q 400,149 500,150 Q 700,151 900,152 L 970,153"
+              fill="none" stroke="var(--target-gold)" stroke-width="2" stroke-dasharray="8,4" opacity="0.8"/>
+
+        <!-- Band 1 — woofer (blue, rolls off) -->
+        <path d="M 30,160 Q 80,155 150,150 Q 200,150 250,160 Q 350,220 400,350 L 500,480"
+              fill="none" stroke="var(--band-1)" stroke-width="1.5" opacity="0.7"/>
+
+        <!-- Band 3 — mid (orange, bandpass) -->
+        <path d="M 100,480 Q 150,350 200,180 Q 230,155 300,150 Q 400,148 500,150 Q 550,155 600,200 Q 650,300 700,450"
+              fill="none" stroke="var(--band-2)" stroke-width="1.5" opacity="0.7"/>
+
+        <!-- Band 4 — HF (pink, HP) -->
+        <path d="M 350,480 Q 450,350 500,220 Q 550,170 600,155 Q 700,148 800,150 Q 850,155 900,180 L 970,250"
+              fill="none" stroke="var(--band-3)" stroke-width="1.5" opacity="0.7"/>
+
+        <!-- Band 5 — SHF (purple, HP) -->
+        <path d="M 550,480 Q 630,350 700,200 Q 740,165 800,153 Q 900,148 950,150 L 970,152"
+              fill="none" stroke="var(--band-4)" stroke-width="1.5" opacity="0.7"/>
+
+        <!-- Σ corrected (bright green, thick) -->
+        <path d="M 30,153 Q 100,150 200,151 Q 300,149 400,150 Q 500,151 600,150 Q 700,152 800,151 Q 900,153 970,155"
+              fill="none" stroke="var(--success)" stroke-width="2.5"/>
+
+        <!-- Axis labels -->
+        <text x="30" y="495" fill="var(--text-3)" font-size="10" font-family="SF Mono, monospace">20</text>
+        <text x="195" y="495" fill="var(--text-3)" font-size="10" font-family="SF Mono, monospace">100</text>
+        <text x="495" y="495" fill="var(--text-3)" font-size="10" font-family="SF Mono, monospace">1k</text>
+        <text x="700" y="495" fill="var(--text-3)" font-size="10" font-family="SF Mono, monospace">5k</text>
+        <text x="950" y="495" fill="var(--text-3)" font-size="10" font-family="SF Mono, monospace">20k</text>
+
+        <text x="5" y="155" fill="var(--text-3)" font-size="10" font-family="SF Mono, monospace">0</text>
+        <text x="5" y="255" fill="var(--text-3)" font-size="10" font-family="SF Mono, monospace">-10</text>
+        <text x="5" y="355" fill="var(--text-3)" font-size="10" font-family="SF Mono, monospace">-20</text>
+        <text x="5" y="105" fill="var(--text-3)" font-size="10" font-family="SF Mono, monospace">5</text>
+
+        <!-- Y axis label -->
+        <text x="10" y="20" fill="var(--text-2)" font-size="11" font-family="SF Mono, monospace">dBr</text>
+
+        <!-- Crossover labels -->
+        <circle cx="200" cy="155" r="8" fill="var(--warning)"/>
+        <text x="200" y="159" fill="#000" font-size="8" font-weight="bold" text-anchor="middle" font-family="SF Mono, monospace">100</text>
+        <circle cx="500" cy="155" r="8" fill="var(--warning)"/>
+        <text x="500" y="159" fill="#000" font-size="8" font-weight="bold" text-anchor="middle" font-family="SF Mono, monospace">800</text>
+        <circle cx="700" cy="155" r="8" fill="var(--warning)"/>
+        <text x="700" y="159" fill="#000" font-size="8" font-weight="bold" text-anchor="middle" font-family="SF Mono, monospace">2.2k</text>
+      </svg>
+
+      <!-- Y-axis buttons -->
+      <div class="axis-controls">
+        <button class="axis-btn">+</button>
+        <button class="axis-btn">&uarr;</button>
+        <button class="axis-btn">&darr;</button>
+        <button class="axis-btn">-</button>
+        <button class="axis-btn" style="margin-top:4px;font-size:9px">FIT</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       RIGHT PANEL
+       ══════════════════════════════════════════════════════════════ -->
+  <div class="right-panel">
+
+    <!-- HIGH PASS -->
+    <div class="panel-section">
+      <div class="panel-title">Target — Band 1</div>
+      <div class="filter-block">
+        <div class="filter-header">
+          <span class="filter-title">High-Pass</span>
+          <div class="filter-toggle">
+            <div class="toggle"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- LOW PASS -->
+      <div class="filter-block">
+        <div class="filter-header">
+          <span class="filter-title">Low-Pass</span>
+          <div class="filter-toggle">
+            <div class="toggle on"></div>
+          </div>
+        </div>
+        <div class="filter-grid">
+          <span class="filter-label">Type</span>
+          <select class="filter-select">
+            <option>Linkwitz-Riley</option>
+            <option>Butterworth</option>
+            <option>Bessel</option>
+            <option>Gaussian</option>
+          </select>
+          <span class="filter-label">Freq</span>
+          <input class="filter-input" value="100">
+          <span class="filter-label">Order</span>
+          <select class="filter-select">
+            <option>4 (24 dB/oct)</option>
+            <option>2 (12 dB/oct)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- SHELVES -->
+      <div class="filter-block">
+        <div class="filter-header">
+          <span class="filter-title">Tilt</span>
+        </div>
+        <div class="filter-grid">
+          <span class="filter-label">Slope</span>
+          <input class="filter-input" value="-1.0">
+          <span class="filter-label">Ref</span>
+          <input class="filter-input" value="1000">
+        </div>
+      </div>
+    </div>
+
+    <!-- PEQ -->
+    <div class="peq-section">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--sp-3)">
+        <span class="panel-title" style="margin:0">PEQ</span>
+        <div style="display:flex;gap:var(--sp-2)">
+          <button class="btn sm">+ Band</button>
+          <button class="btn sm primary">Auto-fit</button>
+        </div>
+      </div>
+      <table class="peq-table">
+        <thead><tr>
+          <th></th>
+          <th>Freq</th>
+          <th>Gain</th>
+          <th>Q</th>
+          <th>Type</th>
+        </tr></thead>
+        <tbody>
+          <tr>
+            <td><input type="checkbox" class="peq-check" checked></td>
+            <td><input class="peq-input" value="62"></td>
+            <td><input class="peq-input cut" value="-3.2"></td>
+            <td><input class="peq-input" value="2.1"></td>
+            <td style="font-size:9px;color:var(--text-2)">PK</td>
+          </tr>
+          <tr>
+            <td><input type="checkbox" class="peq-check" checked></td>
+            <td><input class="peq-input" value="148"></td>
+            <td><input class="peq-input boost" value="+1.8"></td>
+            <td><input class="peq-input" value="1.4"></td>
+            <td style="font-size:9px;color:var(--text-2)">PK</td>
+          </tr>
+          <tr>
+            <td><input type="checkbox" class="peq-check" checked></td>
+            <td><input class="peq-input" value="315"></td>
+            <td><input class="peq-input cut" value="-2.1"></td>
+            <td><input class="peq-input" value="3.0"></td>
+            <td style="font-size:9px;color:var(--text-2)">PK</td>
+          </tr>
+          <tr>
+            <td><input type="checkbox" class="peq-check"></td>
+            <td><input class="peq-input" value="1200"></td>
+            <td><input class="peq-input boost" value="+0.5"></td>
+            <td><input class="peq-input" value="1.0"></td>
+            <td style="font-size:9px;color:var(--text-2)">HS</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Status bar -->
+<div class="status-bar">
+  4 bands — SUM view &nbsp;&nbsp;|&nbsp;&nbsp; b102 &nbsp;&nbsp;|&nbsp;&nbsp; 4way (modified)
+</div>
+
+</body>
+</html>
