@@ -92,6 +92,8 @@ pub struct BandData {
     pub exclusion_zones: Vec<serde_json::Value>,
     #[serde(default)]
     pub color: Option<String>,
+    #[serde(default)]
+    pub alignment_delay: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

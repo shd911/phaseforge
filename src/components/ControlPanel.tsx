@@ -1,5 +1,5 @@
 import { createSignal, createEffect, on, onCleanup, Show } from "solid-js";
-import type { FilterType, Measurement, MergeConfig, MergeResult, PeqBand, FirConfig, FirResult, WindowType, PhaseMode } from "../lib/types";
+import type { FilterType, FilterConfig, Measurement, MergeConfig, MergeResult, PeqBand, FirConfig, FirResult, WindowType, PhaseMode } from "../lib/types";
 import NumberInput from "./NumberInput";
 import { MEASUREMENT_COLORS } from "../lib/types";
 import {
@@ -55,7 +55,7 @@ import {
   firMaxBoost, firNoiseFloor, firIterations,
   firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess,
 } from "../stores/bands";
-import { isGaussianMinPhase, gaussianFilterMagDb } from "../lib/plot-helpers";
+import { isGaussianMinPhase, gaussianFilterMagDb, CORRECTED_COLOR, PEQ_COLOR, STATUS_BAD } from "../lib/plot-helpers";
 import {
   tolerance, setTolerance,
   maxBands, setMaxBands,
@@ -288,7 +288,7 @@ function FiltersTab() {
 
 
         {/* Export Target — rightmost in the row */}
-        <button class="tb-btn" style={{ "font-size": "10px", padding: "4px 10px", "align-self": "flex-start", "margin-left": "auto" }} onClick={handleExportTarget}>
+        <button class="tb-btn tb-btn-sm" style={{ "align-self": "flex-start", "margin-left": "auto" }} onClick={handleExportTarget}>
           Export Target
         </button>
       </div>
@@ -342,10 +342,10 @@ function FilterBlock(props: FilterBlockProps) {
               class={`fb-link-btn ${props.linked ? "on" : ""}`}
               onClick={(e) => { e.stopPropagation(); props.onLinkToggle!(); }}
               title={props.linked ? "Unlink from next band" : "Link to next band"}
-            ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={props.linked ? "#22c55e" : "#ef4444"} stroke-width="2.5" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
+            ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={props.linked ? CORRECTED_COLOR : STATUS_BAD} stroke-width="2.5" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
           </Show>
           <Show when={!props.canLink && props.linked}>
-            <span class="fb-link-indicator" title="Linked to adjacent band"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>
+            <span class="fb-link-indicator" title="Linked to adjacent band"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={CORRECTED_COLOR} stroke-width="2.5" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>
           </Show>
         </span>
         <button
@@ -665,7 +665,7 @@ function MeasurementsTab() {
                       }}
                       min={0} max={50} step={0.01} precision={2}
                     />
-                    <span style={{ "font-size": "9px", color: "#8b8b96", "margin-left": "2px" }}>ms</span>
+                    <span style={{ "font-size": "var(--fs-xs)", color: "#8b8b96", "margin-left": "var(--space-xxs)" }}>ms</span>
                   </span>
                 </Show>
               </td>
@@ -873,7 +873,7 @@ function PeqTab() {
       <Show when={band()?.measurement}>
         <div class="peq-exclusion-section">
           <div class="peq-sidebar-header">
-            <span class="fb-title" style={{ "font-size": "11px" }}>Exclude</span>
+            <span class="fb-title" style={{ "font-size": "var(--fs-base)" }}>Exclude</span>
             <button class="peq-add-btn" onClick={() => { const b = band(); if (b) addExclusionZone(b.id, { startHz: 100, endHz: 200 }); }} title="Add exclusion zone">+</button>
           </div>
           <Show when={(band()?.exclusionZones?.length ?? 0) > 0}>
@@ -896,7 +896,7 @@ function PeqTab() {
       {/* Manual PEQ — blue */}
       <div class="peq-manual-section">
         <div class="peq-sidebar-header">
-          <span class="fb-title" style={{ "font-size": "11px" }}>Manual</span>
+          <span class="fb-title" style={{ "font-size": "var(--fs-base)" }}>Manual</span>
           <button class="peq-add-btn" onClick={() => {
             const b = band();
             if (b) {
@@ -931,7 +931,7 @@ function PeqTab() {
       <Show when={band()?.measurement}>
         <div class="peq-auto-section">
           <div class="peq-sidebar-header">
-            <span class="fb-title" style={{ "font-size": "11px" }}>Auto Optimizer</span>
+            <span class="fb-title" style={{ "font-size": "var(--fs-base)" }}>Auto Optimizer</span>
           </div>
           <div class="peq-grid">
             <div class="fb-row"><label class="fb-label">Tolerance</label><NumberInput value={tolerance()} onChange={setTolerance} min={0.5} max={3.0} step={0.1} unit="dB" /></div>
@@ -944,7 +944,7 @@ function PeqTab() {
             {peqRangeMode() === "auto" ? (
               <div class="fb-row"><label class="fb-label" title="Don't place PEQ where target is this many dB below reference level">Floor dB</label><NumberInput value={peqFloor()} onChange={setPeqFloor} min={0} max={120} step={1} precision={0} /></div>
             ) : (
-              <div class="fb-row"><label class="fb-label">Hz</label><NumberInput value={peqDirectLow()} onChange={setPeqDirectLow} min={20} max={20000} step={10} precision={0} /><span style={{ margin: "0 2px", color: "#8b8b96" }}>–</span><NumberInput value={peqDirectHigh()} onChange={setPeqDirectHigh} min={20} max={20000} step={10} precision={0} /></div>
+              <div class="fb-row"><label class="fb-label">Hz</label><NumberInput value={peqDirectLow()} onChange={setPeqDirectLow} min={20} max={20000} step={10} precision={0} /><span style={{ margin: "0 var(--space-xxs)", color: "#8b8b96" }}>–</span><NumberInput value={peqDirectHigh()} onChange={setPeqDirectHigh} min={20} max={20000} step={10} precision={0} /></div>
             )}
           </div>
           <div class="peq-buttons-row">
@@ -1065,7 +1065,7 @@ function ExportTab() {
 
   const bandPhaseColor = (b: BandState) => {
     if (exportHybridPhase() && b.measurement) return "#60A5FA"; // blue for hybrid
-    return bandPhaseIsLinear(b) ? "#22C55E" : "#FF9F43";
+    return bandPhaseIsLinear(b) ? CORRECTED_COLOR : PEQ_COLOR;
   };
 
   function formatFilterInfo(b: BandState): string {
@@ -1099,7 +1099,7 @@ function ExportTab() {
     const sr = exportSampleRate();
     const taps = exportTaps();
     const win = exportWindow();
-    const peqBands = b.peqBands?.filter((p: any) => p.enabled) ?? [];
+    const peqBands = b.peqBands?.filter((p: PeqBand) => p.enabled) ?? [];
 
     // 1. Evaluate pure target (HP/LP/shelf/tilt)
     const [freq, response] = await invoke<[number[], { magnitude: number[]; phase: number[] }]>(
@@ -1121,7 +1121,7 @@ function ExportTab() {
     }
 
     // 3. Generate FIR
-    const isLin = (f: any) => !f || f.linear_phase;
+    const isLin = (f: FilterConfig | null | undefined) => !f || f.linear_phase;
 
     const firResult = await invoke<{
       impulse: number[]; time_ms: number[]; realized_mag: number[];
@@ -1228,24 +1228,24 @@ function ExportTab() {
           ))}
         </select>
 
-        <div style={{ "margin-left": "auto", display: "flex", "align-items": "center", gap: "6px" }}>
+        <div style={{ "margin-left": "auto", display: "flex", "align-items": "center", gap: "var(--space-sm)" }}>
           <Show when={band()}>
             {(b) => (
               <>
                 <span class="export-phase-badge" style={{ color: bandPhaseColor(b()) }}>
                   {bandPhaseLabel(b())}
                 </span>
-                <span style={{ "font-size": "10px", color: "var(--text-secondary)", "font-family": "var(--mono)" }}>
+                <span style={{ "font-size": "var(--fs-sm)", color: "var(--text-secondary)", "font-family": "var(--mono)" }}>
                   {formatFilterInfo(b())}
                 </span>
                 <Show when={b().peqBands.length > 0}>
-                  <span style={{ "font-size": "10px", color: "var(--text-secondary)" }}>
-                    PEQ: {b().peqBands.filter((p: any) => p.enabled).length}
+                  <span style={{ "font-size": "var(--fs-sm)", color: "var(--text-secondary)" }}>
+                    PEQ: {b().peqBands.filter((p: PeqBand) => p.enabled).length}
                   </span>
                 </Show>
                 <button
                   class="tb-btn primary"
-                  style={{ padding: "4px 10px" }}
+                  style={{ padding: "var(--space-xs) var(--space-lg)" }}
                   disabled={exporting()}
                   onClick={handleExport}
                 >
@@ -1258,7 +1258,7 @@ function ExportTab() {
       </div>
 
       <Show when={exportError()}>
-        <div class="align-status" style={{ color: "#EF4444", padding: "4px 8px" }}>
+        <div class="align-status" style={{ color: STATUS_BAD, padding: "var(--space-xs) var(--space-md)" }}>
           {exportError()}
         </div>
       </Show>

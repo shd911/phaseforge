@@ -2,6 +2,23 @@
 import type { SmoothingMode } from "../stores/bands";
 import type { FilterConfig } from "./types";
 
+/**
+ * Unwrap a phase array (in degrees) so adjacent samples differ by < 180°.
+ * Needed when adding wrapped PEQ/XO phase to unwrapped measurement phase.
+ */
+export function unwrapDegrees(ph: number[]): number[] {
+  if (ph.length === 0) return ph;
+  const out = [ph[0]];
+  let offset = 0;
+  for (let i = 1; i < ph.length; i++) {
+    let d = ph[i] - ph[i - 1];
+    while (d > 180) { offset -= 360; d -= 360; }
+    while (d < -180) { offset += 360; d += 360; }
+    out.push(ph[i] + offset);
+  }
+  return out;
+}
+
 // --- Gaussian min-phase helpers ---
 
 /** Check if a filter is Gaussian with min-phase (not linear-phase) */
@@ -46,6 +63,34 @@ export const SUM_TARGET_PHASE_COLOR = "#B8960A";
 export const SUM_CORRECTED_COLOR = "#4ADE80";
 export const SUM_MEAS_COLOR = "#94A3B8";
 export const FREQ_SNAP_COLORS = ["#808080", "#A855F7", "#EC4899", "#14B8A6"];
+
+// --- Curve type colors ---
+export const PEQ_COLOR = "#FF9F43";
+export const PEQ_HOVER_COLOR = "#FFA726";
+export const PEQ_DRAG_COLOR = "#FFC107";
+export const PEQ_BASE_COLOR = "#FF9800";
+export const FIR_COLOR = "#38BDF8";
+export const CORRECTED_COLOR = "#22C55E";
+export const MEAS_DEFAULT_COLOR = "#4A9EFF";
+
+// --- Status thresholds use CSS vars, but fallback for canvas ---
+export const STATUS_GOOD = "#22C55E";
+export const STATUS_WARN = "#FFD700";
+export const STATUS_BAD = "#EF4444";
+
+// --- Default IR/GD colors (single-band mode) ---
+export const DEFAULT_IR_COLORS = {
+  measIr: "#4A9EFF", measStep: "#4A9EFF80",
+  targetIr: "#FFD700", targetStep: "#F59E0B",
+  corrIr: "#22C55E", corrStep: "#22C55E80"
+};
+export const DEFAULT_GD_COLORS = {
+  meas: "#F59E0B", target: "#FFD700", corr: "#22C55E"
+};
+export const DEFAULT_EXPORT_COLORS = {
+  model: "#FF9F43", fir: "#38BDF8",
+  modelPhase: "#9b8060", firPhase: "#1a6e8a"
+};
 
 // --- HSL color utilities ---
 export function hexToHsl(hex: string): [number, number, number] {

@@ -47,6 +47,7 @@ export interface BandState {
   firResult: FirResult | null; // результат генерации FIR
   crossNormDb: number; // normalization estimate from cross-section peak (dB)
   color: string; // user-assigned curve color
+  alignmentDelay: number; // seconds, visual-only SUM phase alignment delay
 }
 
 export interface AppState {
@@ -138,6 +139,7 @@ export function createBand(num: number): BandState {
     firResult: null,
     crossNormDb: 0,
     color: MEASUREMENT_COLORS[(num - 1) % MEASUREMENT_COLORS.length],
+    alignmentDelay: 0,
   };
 }
 
@@ -798,6 +800,16 @@ export function setBandColor(bandId: string, color: string) {
   if (idx < 0) return;
   setState("bands", idx, "color", color);
   markDirty();
+}
+
+/** Set per-band alignment delay (seconds). Visual-only, used in SUM phase alignment. */
+export function setAlignmentDelay(bandId: string, seconds: number) {
+  const idx = bandIndex(bandId);
+  if (idx < 0) return;
+  batch(() => {
+    setState("bands", idx, "alignmentDelay", seconds);
+    markDirty();
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -180,6 +180,7 @@ interface ProjectBand {
   peq_bands: any[]; // PeqBand already snake_case
   exclusion_zones?: any[]; // ExclusionZone { startHz, endHz }
   color?: string;
+  alignment_delay?: number;
 }
 
 interface ProjectSettings {
@@ -253,6 +254,7 @@ function mapBandToProject(b: BandState): ProjectBand {
     peq_bands: b.peqBands, // PeqBand fields already snake_case
     exclusion_zones: b.exclusionZones.length > 0 ? b.exclusionZones : undefined,
     color: b.color,
+    alignment_delay: b.alignmentDelay ?? 0,
   };
 }
 
@@ -348,6 +350,7 @@ function mapBandFromProject(b: ProjectBand, idx: number): BandState {
     firResult: null, // FIR not saved — recomputed
     crossNormDb: 0,
     color: b.color ?? MEASUREMENT_COLORS[idx % MEASUREMENT_COLORS.length],
+    alignmentDelay: b.alignment_delay ?? 0,
   };
 }
 

@@ -55,7 +55,7 @@ pub fn interpolate_linear_grid(
 }
 
 /// Simple linear interpolation with clamping to boundary values.
-fn interp_1d(x_data: &[f64], y_data: &[f64], x_query: &[f64]) -> Vec<f64> {
+pub fn interp_1d(x_data: &[f64], y_data: &[f64], x_query: &[f64]) -> Vec<f64> {
     x_query
         .iter()
         .map(|&xq| interp_single(x_data, y_data, xq))
@@ -99,7 +99,7 @@ fn interp_single(x_data: &[f64], y_data: &[f64], xq: f64) -> f64 {
     }
 
     // Binary search for the interval
-    let idx = match x_data.binary_search_by(|v| v.partial_cmp(&xq).unwrap()) {
+    let idx = match x_data.binary_search_by(|v| v.partial_cmp(&xq).unwrap_or(std::cmp::Ordering::Equal)) {
         Ok(i) => return y_data[i],
         Err(i) => i,
     };

@@ -33,10 +33,10 @@ export default function WelcomeDialog() {
           <div class="welcome-subtitle">DSP Room & Speaker Correction</div>
 
           <div class="welcome-actions">
-            <button class="welcome-btn welcome-btn-primary" onClick={() => newProject()}>
+            <button class="dlg-btn dlg-btn-lg dlg-btn-primary" onClick={() => newProject()}>
               New Project
             </button>
-            <button class="welcome-btn" onClick={() => loadProject()}>
+            <button class="dlg-btn dlg-btn-lg" onClick={() => loadProject()}>
               Open Project
             </button>
           </div>
