@@ -141,6 +141,13 @@ const MAX_VERSION: u32 = 2;
 #[tauri::command]
 pub fn save_project(path: String, project: ProjectFile) -> Result<(), String> {
     info!("save_project: {}", path);
+    // Security check: prevent path traversal
+    let p = std::path::Path::new(&path);
+    for component in p.components() {
+        if matches!(component, std::path::Component::ParentDir) {
+            return Err("path traversal detected: '..' not allowed in save path".into());
+        }
+    }
     let json = serde_json::to_string_pretty(&project)
         .map_err(|e| format!("Serialization error: {e}"))?;
     std::fs::write(&path, json)
@@ -173,7 +180,19 @@ pub fn load_project(path: String) -> Result<ProjectFile, String> {
 /// Create a project folder: `parent_dir/project_name/`
 #[tauri::command]
 pub fn create_project_folder(parent_dir: String, project_name: String) -> Result<String, String> {
-    let folder = std::path::PathBuf::from(&parent_dir).join(&project_name);
+    // Sanitize project_name: extract only the filename, reject path traversal attempts
+    let safe_name = std::path::Path::new(&project_name)
+        .file_name()
+        .ok_or("invalid project name: cannot be empty or contain '..'")?
+        .to_string_lossy()
+        .to_string();
+
+    // Additional check: ensure no ".." in the sanitized name
+    if safe_name.contains("..") {
+        return Err("invalid project name: contains '..'".into());
+    }
+
+    let folder = std::path::PathBuf::from(&parent_dir).join(&safe_name);
     if folder.exists() {
         return Err(format!("Folder already exists: {}", folder.display()));
     }
