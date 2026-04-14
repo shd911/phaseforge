@@ -45,7 +45,7 @@ export async function applySmoothing(m: Measurement, mode: SmoothingMode): Promi
 // ---------------------------------------------------------------------------
 // Helper: evaluate a single band (target + measurement + Gaussian min-phase)
 // ---------------------------------------------------------------------------
-export async function evaluateBand(band: BandState, _showPhase: boolean): Promise<{
+export async function evaluateBand(band: BandState): Promise<{
   measurement: Measurement | null;
   targetMag: number[] | null;
   targetPhase: number[] | null;

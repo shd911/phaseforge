@@ -132,6 +132,11 @@ function sanitizeFileName(raw: string): string {
   return name;
 }
 
+/** Check that a path does not contain traversal components. */
+function isSafePath(p: string): boolean {
+  return !p.split("/").includes("..") && !p.split("\\").includes("..");
+}
+
 // ---------------------------------------------------------------------------
 // Build project data: AppState (camelCase) → ProjectFile (snake_case)
 // ---------------------------------------------------------------------------
@@ -385,6 +390,10 @@ async function restoreState(project: ProjectFile, projDir: string | null) {
             return p; // fallback to original
           };
           try {
+            // Validate paths before resolving
+            if (!isSafePath(ms.nfPath)) throw new Error(`path traversal detected in nfPath: ${ms.nfPath}`);
+            if (!isSafePath(ms.ffPath)) throw new Error(`path traversal detected in ffPath: ${ms.ffPath}`);
+
             const nfPath = await resolveFile(ms.nfPath);
             const ffPath = await resolveFile(ms.ffPath);
             console.log(`[Restore] Re-merge band "${band.name}": NF=${nfPath}, FF=${ffPath}`);
@@ -437,14 +446,18 @@ async function restoreState(project: ProjectFile, projDir: string | null) {
         if (band.measurement && band.settings?.delay_removed && band.measurement.phase) {
           try {
             const m = band.measurement;
-            const [newPhase, delay, distance] = await invoke<[number[], number, number]>(
-              "remove_measurement_delay",
-              { freq: m.freq, magnitude: m.magnitude, phase: m.phase, sampleRate: m.sample_rate }
-            );
-            band.settings.originalPhase = [...m.phase];
-            band.measurement.phase = newPhase;
-            band.settings.delay_seconds = delay;
-            band.settings.distance_meters = distance;
+            if (!m.phase || m.phase.length === 0) {
+              console.warn('[IO] skipping remove_measurement_delay: phase is null or empty');
+            } else {
+              const [newPhase, delay, distance] = await invoke<[number[], number, number]>(
+                "remove_measurement_delay",
+                { freq: m.freq, magnitude: m.magnitude, phase: m.phase, sampleRate: m.sample_rate }
+              );
+              band.settings.originalPhase = [...m.phase];
+              band.measurement.phase = newPhase;
+              band.settings.delay_seconds = delay;
+              band.settings.distance_meters = distance;
+            }
           } catch (_) {
             band.settings.delay_removed = false;
           }

@@ -2933,7 +2933,7 @@ export default function FrequencyPlot() {
     const gen = ++renderGen;
     zoomCenter = 0; // reset before async — will be recalculated from measurement
     try {
-      const result = await evaluateBand(band, showPhase);
+      const result = await evaluateBand(band);
       if (gen !== renderGen) return; // stale render, discard
 
       if (!result.freq) {
@@ -3272,7 +3272,7 @@ export default function FrequencyPlot() {
     const bands: BandState[] = JSON.parse(JSON.stringify(appState.bands));
 
     try {
-      const results = await Promise.all(bands.map((b) => evaluateBand(b, showPhase)));
+      const results = await Promise.all(bands.map((b) => evaluateBand(b)));
       if (gen !== renderGen) return; // stale render, discard
 
       // Определяем общую частотную сетку (максимальное число точек, самый широкий диапазон)
@@ -3311,6 +3311,7 @@ export default function FrequencyPlot() {
           "interpolate_log",
           { freq: commonFreq, magnitude: commonFreq.map(() => 0), phase: null, nPoints: nPts, fMin, fMax }
         );
+        if (gen !== renderGen) return;
         freq = newFreq;
       } else {
         freq = commonFreq;
@@ -3352,6 +3353,7 @@ export default function FrequencyPlot() {
             })
           )
         );
+        if (gen !== renderGen) return;
         for (let i = 0; i < interpTasks.length; i++) {
           const t = interpTasks[i];
           const result = interpResults[i];
@@ -3403,6 +3405,7 @@ export default function FrequencyPlot() {
         const response = await invoke<TargetResponse>("evaluate_target", {
           target: curveWithRef, freq,
         });
+        if (gen !== renderGen) return;
         perBandTargetMags.push(response.magnitude);
 
         // Normalized response = response with ref_level=0, which is just response.magnitude - totalRef
@@ -3485,6 +3488,7 @@ export default function FrequencyPlot() {
               : Promise.resolve(null);
 
             const [peqResult, xsResult] = await Promise.all([peqPromise, xsPromise]);
+            if (gen !== renderGen) return;
 
             let peqMag: number[] | null = null;
             let peqPhase: number[] | null = null;

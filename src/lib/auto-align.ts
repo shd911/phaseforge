@@ -49,6 +49,10 @@ export async function computeAutoAlign(bands: BandState[]): Promise<AlignResult>
   );
 
   if (validBands.length < 2) {
+    // Reset alignment delay for ALL bands before returning
+    for (const b of bands) {
+      b.alignmentDelay = 0;
+    }
     const delays: Record<string, number> = {};
     for (const b of validBands) delays[b.id] = 0;
     return { delays };
@@ -87,8 +91,14 @@ export async function computeAutoAlign(bands: BandState[]): Promise<AlignResult>
         freq: [...b.measurement!.freq],
         bands: JSON.parse(JSON.stringify(peqBands)),
       });
-      mag = mag.map((v, i) => v + (pm[i] ?? 0));
-      ph = unwrapDegrees(ph.map((v, i) => v + (pp[i] ?? 0)));
+      if (!pm || pm.length !== mag.length) {
+        console.warn('[AA] peq response length mismatch, skipping PEQ');
+      } else {
+        mag = mag.map((v, i) => v + pm[i]);
+        if (pp && pp.length === ph.length) {
+          ph = unwrapDegrees(ph.map((v, i) => v + pp[i]));
+        }
+      }
     }
 
     // Apply crossover filters
@@ -98,8 +108,14 @@ export async function computeAutoAlign(bands: BandState[]): Promise<AlignResult>
         highPass: b.target.high_pass ? JSON.parse(JSON.stringify(b.target.high_pass)) : null,
         lowPass: b.target.low_pass ? JSON.parse(JSON.stringify(b.target.low_pass)) : null,
       });
-      mag = mag.map((v, i) => v + (xm[i] ?? 0));
-      ph = unwrapDegrees(ph.map((v, i) => v + (xp[i] ?? 0)));
+      if (!xm || xm.length !== mag.length) {
+        console.warn('[AA] cross_section response length mismatch, skipping XO');
+      } else {
+        mag = mag.map((v, i) => v + xm[i]);
+        if (xp && xp.length === ph.length) {
+          ph = unwrapDegrees(ph.map((v, i) => v + xp[i]));
+        }
+      }
     }
 
     return { id: b.id, name: b.name, mag, ph, freq: [...b.measurement!.freq] };
@@ -234,10 +250,12 @@ function optimizePairDelay(
     const eps = 1e-7;
     const grad = (cost(currentDelay + eps) - cost(currentDelay - eps)) / (2 * eps);
     const newDelay = currentDelay - lr * grad;
-    const newCost = cost(newDelay);
+    // Clamp to scan range to prevent runaway
+    const clampedDelay = Math.max(-scanRange, Math.min(scanRange, newDelay));
+    const newCost = cost(clampedDelay);
 
     if (newCost < cost(currentDelay)) {
-      currentDelay = newDelay;
+      currentDelay = clampedDelay;
     } else {
       lr *= 0.5; // shrink step
     }
@@ -248,9 +266,3 @@ function optimizePairDelay(
   return currentDelay;
 }
 
-/** Estimate center frequency of a band based on its crossover filters */
-function bandCenterFreq(b: BandState): number {
-  const hp = b.target?.high_pass?.freq_hz ?? 20;
-  const lp = b.target?.low_pass?.freq_hz ?? 20000;
-  return Math.sqrt(hp * lp); // geometric mean
-}

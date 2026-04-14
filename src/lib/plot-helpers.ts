@@ -28,7 +28,7 @@ export function isGaussianMinPhase(f: FilterConfig | null | undefined): boolean 
 
 /** Compute Gaussian LP magnitude in dB for a frequency array.
  *  H_LP(f) = exp(-ln(2) * (f/fc)^(2M)), converted to dB. */
-export function gaussianLpMagDb(freq: number[], fc: number, m: number): number[] {
+function gaussianLpMagDb(freq: number[], fc: number, m: number): number[] {
   const ln2 = Math.LN2;
   return freq.map(f => {
     if (f <= 0) return 0;
@@ -46,7 +46,7 @@ export function gaussianFilterMagDb(freq: number[], f: FilterConfig, isLowPass: 
 }
 
 /** Compute Gaussian HP magnitude in dB: HP = 1 - LP. */
-export function gaussianHpMagDb(freq: number[], fc: number, m: number): number[] {
+function gaussianHpMagDb(freq: number[], fc: number, m: number): number[] {
   const ln2 = Math.LN2;
   return freq.map(f => {
     if (f <= 0) return -400;
