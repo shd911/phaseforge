@@ -3323,23 +3323,43 @@ export default function FrequencyPlot() {
         name: string;
       }
       const resampled: (ResampledMeas | null)[] = [];
-      for (const r of results) {
+
+      // Collect interpolation tasks for parallel execution
+      const interpTasks: { idx: number; m: any }[] = [];
+      for (let ri = 0; ri < results.length; ri++) {
+        const r = results[ri];
         if (!r.measurement) { resampled.push(null); continue; }
         const m = r.measurement;
         if (!needResample && m.freq.length === nPts && m.freq[0] === fMin && m.freq[m.freq.length - 1] === fMax) {
           // Уже на общей сетке
           resampled.push({ magnitude: m.magnitude, phase: m.phase ?? null, name: m.name });
         } else {
-          // Интерполируем на общую сетку
-          try {
-            const [, intMag, intPhase] = await invoke<[number[], number[], number[] | null]>(
+          interpTasks.push({ idx: resampled.length, m });
+          resampled.push(null); // placeholder
+        }
+      }
+
+      // Run all interpolate_log calls in parallel
+      if (interpTasks.length > 0) {
+        const interpResults = await Promise.all(
+          interpTasks.map(t =>
+            invoke<[number[], number[], number[] | null]>(
               "interpolate_log",
-              { freq: m.freq, magnitude: m.magnitude, phase: m.phase, nPoints: nPts, fMin, fMax }
-            );
-            resampled.push({ magnitude: intMag, phase: intPhase, name: m.name });
-          } catch (e) {
-            console.warn("Interpolation failed for", m.name, e);
-            resampled.push(null);
+              { freq: t.m.freq, magnitude: t.m.magnitude, phase: t.m.phase, nPoints: nPts, fMin, fMax }
+            ).catch(e => {
+              console.warn("Interpolation failed for", t.m.name, e);
+              return null;
+            })
+          )
+        );
+        for (let i = 0; i < interpTasks.length; i++) {
+          const t = interpTasks[i];
+          const result = interpResults[i];
+          if (result) {
+            const [, intMag, intPhase] = result;
+            resampled[t.idx] = { magnitude: intMag, phase: intPhase, name: t.m.name };
+          } else {
+            resampled[t.idx] = null;
           }
         }
       }
@@ -3385,12 +3405,11 @@ export default function FrequencyPlot() {
         });
         perBandTargetMags.push(response.magnitude);
 
-        const curveNoRef = { ...targetCurve, reference_level_db: 0 };
-        const responseNorm = await invoke<TargetResponse>("evaluate_target", {
-          target: curveNoRef, freq,
-        });
-        perBandTargetNorm.push(responseNorm.magnitude);
-        perBandTargetNormPhase.push(responseNorm.phase);
+        // Normalized response = response with ref_level=0, which is just response.magnitude - totalRef
+        // (evaluate_target is linear in reference_level_db, so no second invoke needed)
+        const normMag = response.magnitude.map(v => v - totalRef);
+        perBandTargetNorm.push(normMag);
+        perBandTargetNormPhase.push(response.phase);
       }
 
       // Строим uPlot series + data + легенду
@@ -3450,26 +3469,35 @@ export default function FrequencyPlot() {
           if (!hasPeq && !hasFilters) { perBandCorrected.push(null); perBandCorrPhase.push(null); continue; }
 
           try {
+            // Run PEQ and XO computations in parallel (independent operations)
+            const peqPromise = hasPeq
+              ? invoke<[number[], number[]]>("compute_peq_complex", {
+                  freq, bands: bands[i].peqBands,
+                })
+              : Promise.resolve(null);
+
+            const xsPromise = (hasFilters && tMag)
+              ? invoke<[number[], number[], number]>("compute_cross_section", {
+                  freq,
+                  highPass: bands[i].target.high_pass,
+                  lowPass: bands[i].target.low_pass,
+                })
+              : Promise.resolve(null);
+
+            const [peqResult, xsResult] = await Promise.all([peqPromise, xsPromise]);
+
             let peqMag: number[] | null = null;
             let peqPhase: number[] | null = null;
-            if (hasPeq) {
-              const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", {
-                freq, bands: bands[i].peqBands,
-              });
-              peqMag = pm;
-              peqPhase = pp;
+            if (peqResult) {
+              peqMag = peqResult[0];
+              peqPhase = peqResult[1];
             }
 
             let xsMag: number[] | null = null;
             let xsPhase: number[] | null = null;
-            if (hasFilters && tMag) {
-              const [xm, xp] = await invoke<[number[], number[], number]>("compute_cross_section", {
-                freq,
-                highPass: bands[i].target.high_pass,
-                lowPass: bands[i].target.low_pass,
-              });
-              xsMag = xm;
-              xsPhase = xp;
+            if (xsResult) {
+              xsMag = xsResult[0];
+              xsPhase = xsResult[1];
             }
 
             const corrected = rm.magnitude.map(
