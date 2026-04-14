@@ -11,6 +11,11 @@ pub mod target;
 
 use std::path::PathBuf;
 
+/// Check if a path is safe (no path traversal via ".." components)
+fn is_safe_path(path: &std::path::Path) -> bool {
+    path.components().all(|c| c != std::path::Component::ParentDir)
+}
+
 use dsp::SmoothingConfig;
 use dsp::impulse::ImpulseResult;
 use dsp::baffle::{BaffleConfig, BaffleStepPreview};
@@ -481,6 +486,10 @@ fn generate_model_fir(
 fn export_fir_wav(impulse: Vec<f64>, sample_rate: f64, path: String) -> Result<(), String> {
     info!("export_fir_wav: {} samples, sr={}, path={}", impulse.len(), sample_rate, path);
     let p = PathBuf::from(&path);
+    // Security check: prevent path traversal
+    if !is_safe_path(&p) {
+        return Err("path traversal detected: '..' not allowed in export path".into());
+    }
     fir::export_wav_f64(&impulse, sample_rate, &p).map_err(|e| e.to_string())
 }
 
@@ -493,7 +502,7 @@ pub fn run() {
         )
         .init();
 
-    info!("PhaseForge v0.1.0-b116 starting...");
+    info!("PhaseForge v0.1.0-b117 starting...");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())

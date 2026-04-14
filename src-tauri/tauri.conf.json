@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "PhaseForge",
-  "version": "0.1.116",
+  "version": "0.1.117",
   "identifier": "com.phaseforge.desktop",
   "build": {
     "frontendDist": "../dist",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "PhaseForge v0.1.0-b116",
+        "title": "PhaseForge b117",
         "width": 1280,
         "height": 800,
         "minWidth": 900,
@@ -22,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
     }
   },
   "bundle": {
