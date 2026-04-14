@@ -35,13 +35,23 @@ pub struct MergeResult {
     pub delay_diff_seconds: f64,
 }
 
+/// Interpolate a data array at a target frequency using linear interpolation
+/// on the frequency axis.  Falls back to edge values when out of range.
+fn interp_at_freq(freq: &[f64], data: &[f64], target_freq: f64) -> f64 {
+    let idx = freq.partition_point(|&f| f < target_freq);
+    if idx == 0 { return data[0]; }
+    if idx >= freq.len() { return data[freq.len() - 1]; }
+    let t = (target_freq - freq[idx - 1]) / (freq[idx] - freq[idx - 1]);
+    data[idx - 1] + t * (data[idx] - data[idx - 1])
+}
+
 /// Merge near-field and far-field measurements using frequency-domain splice
 /// with cosine crossfade in complex domain.
 ///
 /// Algorithm:
 /// 1. Interpolate both onto common log-spaced grid (intersection of freq ranges)
 /// 2. Level match: compute avg magnitude difference in overlap region, shift NF
-/// 3. Delay align: compute group delay difference, correct NF phase
+/// 3. Phase align: point-match NF/FF phase at splice frequency, apply constant offset
 /// 4. Cosine crossfade in complex domain across blend zone
 pub fn merge_nf_ff(
     nf: &Measurement,
@@ -128,19 +138,25 @@ pub fn merge_nf_ff(
     // Apply level shift to NF
     let nf_mag_shifted: Vec<f64> = nf_mag.iter().map(|&v| v + level_offset).collect();
 
-    // --- Delay alignment ---
-    let nf_delay = phase::compute_average_delay(&grid_freq, &nf_ph, match_lo, match_hi);
-    let ff_delay = phase::compute_average_delay(&grid_freq, &ff_ph, match_lo, match_hi);
-    let delay_diff = nf_delay - ff_delay;
+    // --- Phase alignment at splice frequency ---
+    // Instead of computing average delay over match_range (which only removes
+    // linear phase component and leaves 20-40° residual from baffle step,
+    // gate window, etc.), we point-match phase at the splice frequency.
+    // A constant offset guarantees exact phase continuity at splice, and
+    // the cosine crossfade smooths divergence away from the splice point.
+    let splice_f = config.splice_freq;
+    let nf_phase_at_splice = interp_at_freq(&grid_freq, &nf_ph, splice_f);
+    let ff_phase_at_splice = interp_at_freq(&grid_freq, &ff_ph, splice_f);
+    let phase_offset = ff_phase_at_splice - nf_phase_at_splice;
 
-    info!("merge: nf_delay={:.4}ms  ff_delay={:.4}ms  diff={:.4}ms",
-        nf_delay * 1000.0, ff_delay * 1000.0, delay_diff * 1000.0);
+    info!("merge: phase at splice NF={:.1}°  FF={:.1}°  offset={:.1}°",
+        nf_phase_at_splice, ff_phase_at_splice, phase_offset);
 
-    // Remove delay difference from NF phase
-    let nf_ph_aligned = phase::remove_delay(&grid_freq, &nf_ph, delay_diff);
+    // Apply constant phase offset to NF (NOT delay removal — offset may include
+    // non-delay components like baffle step phase and gate artifacts)
+    let nf_ph_aligned: Vec<f64> = nf_ph.iter().map(|&p| p + phase_offset).collect();
 
     // --- Blend zone boundaries ---
-    let splice_f = config.splice_freq;
     let half_blend = config.blend_octaves / 2.0;
     let f_low = splice_f / 2.0_f64.powf(half_blend);
     let f_high = splice_f * 2.0_f64.powf(half_blend);
@@ -222,7 +238,8 @@ pub fn merge_nf_ff(
     Ok(MergeResult {
         measurement: merged,
         auto_level_offset_db: auto_offset,
-        delay_diff_seconds: delay_diff,
+        // Deprecated: phase alignment now uses point-match at splice instead of delay computation
+        delay_diff_seconds: 0.0,
     })
 }
 
