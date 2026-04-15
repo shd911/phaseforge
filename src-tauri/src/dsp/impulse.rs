@@ -12,6 +12,10 @@ pub struct ImpulseResult {
     pub impulse: Vec<f64>,
     /// Step response (cumulative sum of impulse, normalized)
     pub step: Vec<f64>,
+    /// Raw impulse peak (before normalization). Used by frontend for shared normalization.
+    pub raw_peak: f64,
+    /// Raw step peak (before normalization). Used by frontend for shared normalization.
+    pub step_raw_peak: f64,
 }
 
 /// Compute impulse and step response from frequency-domain measurement.
@@ -77,6 +81,8 @@ pub fn compute_impulse_response(
             time: vec![0.0],
             impulse: vec![0.0],
             step: vec![0.0],
+            raw_peak: 0.0,
+            step_raw_peak: 0.0,
         };
     }
 
@@ -164,6 +170,8 @@ pub fn compute_impulse_response(
         time,
         impulse: impulse_out,
         step: step_norm,
+        raw_peak: peak,
+        step_raw_peak: if step_peak > 0.0 { step_peak } else { 0.0 },
     }
 }
 

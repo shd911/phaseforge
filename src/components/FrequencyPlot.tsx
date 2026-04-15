@@ -86,6 +86,8 @@ interface IrBandData {
   timeMs: number[];
   impulse: number[];
   step: number[];
+  rawPeak: number;       /* pre-normalization impulse peak for shared scaling */
+  stepRawPeak: number;   /* pre-normalization step peak for shared scaling */
 }
 
 export default function FrequencyPlot() {
@@ -2055,32 +2057,35 @@ export default function FrequencyPlot() {
         const n = freq.length;
 
         // --- Compute per-band measurement impulses in parallel (all bands, incl. excluded) ---
-        const measPromises = allBands.map(sb => {
+        // Apply delay as phase rotation BEFORE IFFT — same mechanism as coherent sum
+        // This ensures per-band IR shape matches what actually goes into the SUM
+        const measPromises = allBands.map(async (sb) => {
           const sbFreq = [...sb.measurement!.freq];
           const sbMag = [...sb.measurement!.magnitude];
           const sbPh = [...sb.measurement!.phase!];
           const sbSr = sb.measurement!.sample_rate ?? 48000;
-          return invoke<{ time: number[]; impulse: number[]; step: number[] }>("compute_impulse", {
-            freq: sbFreq, magnitude: sbMag, phase: sbPh, sampleRate: sbSr,
-          }).catch(() => null);
+          const delay = irDelayByName[sb.name] ?? 0;
+          let result;
+
+          if (delay !== 0) {
+            // Apply phase rotation: phase' = phase + 360 * f * delay
+            const rotatedPhase = sbPh.map((p, j) => p + 360 * sbFreq[j] * delay);
+            result = await invoke<{ time: number[]; impulse: number[]; step: number[]; raw_peak: number; step_raw_peak: number }>(
+              "compute_impulse",
+              { freq: sbFreq, magnitude: sbMag, phase: rotatedPhase, sampleRate: sbSr }
+            ).catch(() => null);
+          } else {
+            result = await invoke<{ time: number[]; impulse: number[]; step: number[]; raw_peak: number; step_raw_peak: number }>(
+              "compute_impulse",
+              { freq: sbFreq, magnitude: sbMag, phase: sbPh, sampleRate: sbSr }
+            ).catch(() => null);
+          }
+
+          return result;
         });
         const measResults = await Promise.all(measPromises);
         if (gen !== renderGen) return;
 
-        // Build per-band measurement IrBandData
-        const measBands: IrBandData[] = [];
-        for (let i = 0; i < allBands.length; i++) {
-          const r = measResults[i];
-          if (!r) continue;
-          const delayMs = (irDelayByName[allBands[i].name] ?? 0) * 1000;
-          measBands.push({
-            bandName: allBands[i].name,
-            bandColor: allBands[i].color,
-            timeMs: r.time.map(t => t * 1000 + delayMs),
-            impulse: r.impulse,
-            step: r.step,
-          });
-        }
 
         // Coherent sum measurement — normalize each band to 0 dB avg before summing
         // so that per-band impulses (each peaked at 100%) contribute equally
@@ -2115,15 +2120,35 @@ export default function FrequencyPlot() {
           sumMeasMag.push(amplitude > 0 ? 20 * Math.log10(amplitude) : -200);
           sumMeasPh.push(Math.atan2(sumIm[j], sumRe[j]) * 180 / Math.PI);
         }
-        const sumMeasResult = await invoke<{ time: number[]; impulse: number[]; step: number[] }>("compute_impulse", {
+        const sumMeasResult = await invoke<{ time: number[]; impulse: number[]; step: number[]; raw_peak: number; step_raw_peak: number }>("compute_impulse", {
           freq, magnitude: sumMeasMag, phase: sumMeasPh, sampleRate: sr,
         });
         if (gen !== renderGen) return;
+        const sumRawPeak = sumMeasResult.raw_peak || 1e-12;
+        const sumStepRawPeak = sumMeasResult.step_raw_peak || 1e-12;
         const measSum = {
           timeMs: sumMeasResult.time.map(t => t * 1000),
           impulse: sumMeasResult.impulse,
           step: sumMeasResult.step,
         };
+
+        // Scale per-band measurement impulses to SUM's reference
+        const measBands: IrBandData[] = [];
+        for (let i = 0; i < allBands.length; i++) {
+          const r = measResults[i];
+          if (!r) continue;
+          const peakRatio = (r.raw_peak || 1e-12) / sumRawPeak;
+          const stepRatio = (r.step_raw_peak || 1e-12) / sumStepRawPeak;
+          measBands.push({
+            bandName: allBands[i].name,
+            bandColor: allBands[i].color,
+            timeMs: r.time.map(t => t * 1000),
+            impulse: r.impulse.map(v => v * peakRatio),
+            step: r.step.map(v => v * stepRatio),
+            rawPeak: r.raw_peak || 0,
+            stepRawPeak: r.step_raw_peak || 0,
+          });
+        }
 
         // --- Per-band targets ---
         const targetBands: IrBandData[] = [];
@@ -2162,12 +2187,16 @@ export default function FrequencyPlot() {
               tPh = await addGaussianMinPhase(freq, tPh, sb.target.high_pass, sb.target.low_pass);
               if (gen !== renderGen) return null;
             }
-            const r = await invoke<{ time: number[]; impulse: number[]; step: number[] }>("compute_impulse", {
+            // Apply delay as phase rotation BEFORE IFFT
+            const delay = irDelayByName[sb.name] ?? 0;
+            if (delay !== 0) {
+              tPh = tPh.map((p, j) => p + 360 * freq[j] * delay);
+            }
+            const r = await invoke<{ time: number[]; impulse: number[]; step: number[]; raw_peak: number; step_raw_peak: number }>("compute_impulse", {
               freq, magnitude: tMag, phase: tPh, sampleRate: sr,
             });
             if (gen !== renderGen) return null;
-            const delayMs = (irDelayByName[sb.name] ?? 0) * 1000;
-            return { bandName: sb.name, bandColor: sb.color, timeMs: r.time.map(t => t * 1000 + delayMs), impulse: r.impulse, step: r.step } as IrBandData;
+            return { bandName: sb.name, bandColor: sb.color, timeMs: r.time.map(t => t * 1000), impulse: r.impulse, step: r.step, rawPeak: r.raw_peak || 0, stepRawPeak: r.step_raw_peak || 0 } as IrBandData;
           } catch (_) { return null; }
         });
         const tgtBandResults = await Promise.all(tgtBandPromises);
@@ -2227,10 +2256,19 @@ export default function FrequencyPlot() {
               tgtMag.push(amp > 0 ? 20 * Math.log10(amp) : -200);
               tgtPh.push(Math.atan2(tgtIm[j], tgtRe[j]) * 180 / Math.PI);
             }
-            const r = await invoke<{ time: number[]; impulse: number[]; step: number[] }>("compute_impulse", {
+            const r = await invoke<{ time: number[]; impulse: number[]; step: number[]; raw_peak: number; step_raw_peak: number }>("compute_impulse", {
               freq, magnitude: tgtMag, phase: tgtPh, sampleRate: sr,
             });
             if (gen !== renderGen) return;
+            // Scale per-band targets to target sum's reference
+            const sumPeak = r.raw_peak || 1e-12;
+            const sumStepPeak = r.step_raw_peak || 1e-12;
+            for (const tb of targetBands) {
+              const ratio = (tb.rawPeak || 1e-12) / sumPeak;
+              const stepRatio = (tb.stepRawPeak || 1e-12) / sumStepPeak;
+              tb.impulse = tb.impulse.map(v => v * ratio);
+              tb.step = tb.step.map(v => v * stepRatio);
+            }
             targetSum = { timeMs: r.time.map(t => t * 1000), impulse: r.impulse, step: r.step };
           }
         } catch (e) { console.error("TGT SUM ERR:", e); }
@@ -2263,12 +2301,16 @@ export default function FrequencyPlot() {
               cPh = await addGaussianMinPhase(sbFreq, cPh, sb.target.high_pass, sb.target.low_pass);
               if (gen !== renderGen) return null;
             }
-            const r = await invoke<{ time: number[]; impulse: number[]; step: number[] }>("compute_impulse", {
+            // Apply delay as phase rotation BEFORE IFFT
+            const delay = irDelayByName[sb.name] ?? 0;
+            if (delay !== 0) {
+              cPh = cPh.map((p, j) => p + 360 * sbFreq[j] * delay);
+            }
+            const r = await invoke<{ time: number[]; impulse: number[]; step: number[]; raw_peak: number; step_raw_peak: number }>("compute_impulse", {
               freq: sbFreq, magnitude: cMag, phase: cPh, sampleRate: sbSr,
             });
             if (gen !== renderGen) return null;
-            const delayMs = (irDelayByName[sb.name] ?? 0) * 1000;
-            return { bandName: sb.name, bandColor: sb.color, timeMs: r.time.map(t => t * 1000 + delayMs), impulse: r.impulse, step: r.step } as IrBandData;
+            return { bandName: sb.name, bandColor: sb.color, timeMs: r.time.map(t => t * 1000), impulse: r.impulse, step: r.step, rawPeak: r.raw_peak || 0, stepRawPeak: r.step_raw_peak || 0 } as IrBandData;
           } catch (_) { return null; }
         });
         const corrBandResults = await Promise.all(corrBandPromises);
@@ -2341,10 +2383,19 @@ export default function FrequencyPlot() {
               cMagSum.push(amp > 0 ? 20 * Math.log10(amp) : -200);
               cPhSum.push(Math.atan2(corrIm[j], corrRe[j]) * 180 / Math.PI);
             }
-            const r = await invoke<{ time: number[]; impulse: number[]; step: number[] }>("compute_impulse", {
+            const r = await invoke<{ time: number[]; impulse: number[]; step: number[]; raw_peak: number; step_raw_peak: number }>("compute_impulse", {
               freq, magnitude: cMagSum, phase: cPhSum, sampleRate: sr,
             });
             if (gen !== renderGen) return;
+            // Scale per-band corrected to corrected sum's reference
+            const sumPeak = r.raw_peak || 1e-12;
+            const sumStepPeak = r.step_raw_peak || 1e-12;
+            for (const cb of corrBands) {
+              const ratio = (cb.rawPeak || 1e-12) / sumPeak;
+              const stepRatio = (cb.stepRawPeak || 1e-12) / sumStepPeak;
+              cb.impulse = cb.impulse.map(v => v * ratio);
+              cb.step = cb.step.map(v => v * stepRatio);
+            }
             corrSum = { timeMs: r.time.map(t => t * 1000), impulse: r.impulse, step: r.step };
           }
         } catch (e) { console.error("CORR SUM ERR:", e); }
