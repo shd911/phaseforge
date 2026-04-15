@@ -771,9 +771,36 @@ export default function FrequencyPlot() {
       if (legendEntries[i].label.endsWith(" " + suffix)) matching.push(i);
     }
     if (matching.length === 0) return;
-    const allOn = matching.every(i => legendEntries[i].visible);
-    const newVis = !allOn;
+
+    // Collect unique categories from matching entries
+    const categories = new Set<string>();
     for (const i of matching) {
+      categories.add(catKey(legendEntries[i]));
+    }
+
+    // Determine which categories are enabled (at least one entry visible)
+    const enabledCats = new Set<string>();
+    for (const cat of categories) {
+      for (let i = 0; i < legendEntries.length; i++) {
+        if (catKey(legendEntries[i]) === cat && legendEntries[i].visible) {
+          enabledCats.add(cat);
+          break;
+        }
+      }
+    }
+
+    // Build list of entries from enabled categories only
+    const scopedMatching: number[] = [];
+    for (const i of matching) {
+      if (enabledCats.has(catKey(legendEntries[i]))) {
+        scopedMatching.push(i);
+      }
+    }
+    if (scopedMatching.length === 0) return;
+
+    const allOn = scopedMatching.every(i => legendEntries[i].visible);
+    const newVis = !allOn;
+    for (const i of scopedMatching) {
       if (legendEntries[i].visible !== newVis) {
         setLegendEntries(i, "visible", newVis);
         if (isSum()) sumVisMap.set(legendEntries[i].label, newVis);
@@ -4231,7 +4258,7 @@ export default function FrequencyPlot() {
                       return (
                         <Show when={irE() || stE()}>
                           <tr>
-                            <td class="sum-row-header" onClick={() => toggleCategory(cat)}>{catLabels[cat]}</td>
+                            <td class="sum-row-header" onClick={() => toggleCategory(cat)} style={{ opacity: (irE()?.visible || stE()?.visible) ? 1 : 0.4 }}>{catLabels[cat]}</td>
                             <td class="sum-cell">
                               <Show when={irE()}>{(e) => {
                                 const idx = () => legendEntries.findIndex(le => le.seriesIdx === e().seriesIdx);
@@ -4638,7 +4665,7 @@ export default function FrequencyPlot() {
                       return (
                         <Show when={catEnts().length > 0}>
                           <tr>
-                            <td class="sum-row-header" onClick={() => toggleCategory(cat)}>{catLabels[cat]}</td>
+                            <td class="sum-row-header" onClick={() => toggleCategory(cat)} style={{ opacity: (magE()?.visible || phE()?.visible) ? 1 : 0.4 }}>{catLabels[cat]}</td>
                             <td class="sum-cell">
                               <Show when={magE()}>{(e) => (
                                 <button class={`legend-item ${e().visible ? "" : "legend-off"}`} onClick={() => toggleLegendEntry(legendEntries.indexOf(e()))}>

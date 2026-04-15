@@ -548,7 +548,7 @@ body {
   font-size: var(--fs-sm);
   line-height: 11px;
   text-align: center;
-  color: #fff;
+  color: inherit;
 }
 .legend-swatch-dash {
   border-style: dashed;
