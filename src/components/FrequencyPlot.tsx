@@ -2673,11 +2673,11 @@ export default function FrequencyPlot() {
     const irLegend: LegendEntry[] = [];
     let sIdx = 1;
 
-    // SUM-specific colors
+    // SUM-specific colors — white/silver to avoid collision with band colors (VituixCAD convention: sum = white)
     const sumClr = {
-      measIr: MEAS_DEFAULT_COLOR, measStep: "#2563EB",
+      measIr: "#FFFFFF", measStep: "#C0C0C0",
       targetIr: SUM_TARGET_COLOR, targetStep: DEFAULT_IR_COLORS.targetStep,
-      corrIr: CORRECTED_COLOR, corrStep: "#16A34A",
+      corrIr: "#FFFFFF", corrStep: "#E0E0E0",
     };
 
     // Helper: add IR+Step series for a band or sum

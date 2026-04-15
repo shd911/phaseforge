@@ -23,3 +23,4 @@ generate_doc.py
 
 # Environment
 .env
+.aider*
