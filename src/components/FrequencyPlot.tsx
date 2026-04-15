@@ -3669,15 +3669,15 @@ export default function FrequencyPlot() {
               const sumCorrPhaseDisplay = new Array(freq.length);
               for (let j = 0; j < freq.length; j++) {
                 let weightedDelay = 0;
-                let totalPower = 0;
+                let totalAmplitude = 0;
                 for (let i = 0; i < bands.length; i++) {
                   if (!perBandCorrected[i]) continue;
-                  const power = Math.pow(10, perBandCorrected[i]![j] / 10);
+                  const amplitude = Math.pow(10, perBandCorrected[i]![j] / 20);
                   const alignDelay = bands[i].alignmentDelay ?? 0;
-                  weightedDelay += power * alignDelay;
-                  totalPower += power;
+                  weightedDelay += amplitude * alignDelay;
+                  totalAmplitude += amplitude;
                 }
-                const avgDelay = totalPower > 1e-30 ? weightedDelay / totalPower : 0;
+                const avgDelay = totalAmplitude > 1e-30 ? weightedDelay / totalAmplitude : 0;
                 sumCorrPhaseDisplay[j] = sumCorrPhase[j] - 360 * freq[j] * avgDelay;
               }
               uData.push(wrapPhase(sumCorrPhaseDisplay));
@@ -3757,15 +3757,15 @@ export default function FrequencyPlot() {
             const sumPhaseDisplay = new Array(nPts);
             for (let j = 0; j < nPts; j++) {
               let weightedDelay = 0;
-              let totalPower = 0;
+              let totalAmplitude = 0;
               for (const mi of measIndices) {
                 const rm = resampled[mi]!;
-                const power = Math.pow(10, rm.magnitude[j] / 10);
+                const amplitude = Math.pow(10, rm.magnitude[j] / 20);
                 const alignDelay = bands[mi].alignmentDelay ?? 0;
-                weightedDelay += power * alignDelay;
-                totalPower += power;
+                weightedDelay += amplitude * alignDelay;
+                totalAmplitude += amplitude;
               }
-              const avgDelay = totalPower > 1e-30 ? weightedDelay / totalPower : 0;
+              const avgDelay = totalAmplitude > 1e-30 ? weightedDelay / totalAmplitude : 0;
               sumPhaseDisplay[j] = sumPhase[j] - 360 * freq[j] * avgDelay;
             }
             uData.push(wrapPhase(sumPhaseDisplay));
