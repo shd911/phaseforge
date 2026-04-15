@@ -185,6 +185,29 @@ pub fn remove_delay(freq: &[f64], phase_deg: &[f64], delay_seconds: f64) -> Vec<
         .collect()
 }
 
+/// Interpolate a value array at frequency `f` using linear search + interpolation.
+/// Clamps to edge values when out of range.
+pub fn interp_scalar_at(freq: &[f64], values: &[f64], f: f64) -> f64 {
+    if freq.is_empty() || values.is_empty() {
+        return 0.0;
+    }
+    if f <= freq[0] {
+        return values[0];
+    }
+    let last = freq.len() - 1;
+    if f >= freq[last] {
+        return values[last];
+    }
+    let mut lo = 0;
+    let mut hi = last;
+    while hi - lo > 1 {
+        let mid = (lo + hi) / 2;
+        if freq[mid] <= f { lo = mid; } else { hi = mid; }
+    }
+    let t = (f - freq[lo]) / (freq[hi] - freq[lo]);
+    values[lo] + t * (values[hi] - values[lo])
+}
+
 /// Estimate propagation delay via IR peak detection (IFFT method).
 ///
 /// This matches REW's "estimated IR delay" method:
