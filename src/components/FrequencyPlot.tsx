@@ -4409,6 +4409,7 @@ export default function FrequencyPlot() {
                 {/* Smooth — all tabs except Export */}
                 <Show when={plotTab() !== "export"}>
                   <span class="readout-sep" />
+                  <span class="readout-label">Smooth</span>
                   <select
                     class="tb-select tb-select-xs"
                     value={s()?.smoothing ?? "off"}
@@ -4427,6 +4428,7 @@ export default function FrequencyPlot() {
                 {/* Delay toggle — all tabs except Export, only if phase available */}
                 <Show when={plotTab() !== "export" && m()?.phase}>
                   <span class="readout-sep" />
+                  <span class="readout-label">Delay</span>
                   <label class="tb-inline-label" title="Compensate propagation delay">
                     <input
                       type="checkbox"

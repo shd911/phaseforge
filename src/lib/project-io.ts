@@ -447,16 +447,26 @@ async function restoreState(project: ProjectFile, projDir: string | null) {
           try {
             const m = band.measurement;
             if (!m.phase || m.phase.length === 0) {
-              console.warn('[IO] skipping remove_measurement_delay: phase is null or empty');
+              console.warn('[IO] skipping delay restore: phase is null or empty');
             } else {
-              const [newPhase, delay, distance] = await invoke<[number[], number, number]>(
-                "remove_measurement_delay",
-                { freq: m.freq, magnitude: m.magnitude, phase: m.phase, sampleRate: m.sample_rate }
-              );
               band.settings.originalPhase = [...m.phase];
-              band.measurement.phase = newPhase;
-              band.settings.delay_seconds = delay;
-              band.settings.distance_meters = distance;
+              if (band.settings.delay_seconds != null) {
+                // Restore saved delay (manual or auto-detected)
+                const newPhase = await invoke<number[]>("apply_manual_delay", {
+                  freq: m.freq, phase: m.phase, delaySeconds: band.settings.delay_seconds,
+                });
+                band.measurement.phase = newPhase;
+                // distance_meters already loaded from project, don't overwrite
+              } else {
+                // Fallback: auto-detect (for old projects without saved delay)
+                const [newPhase, delay, distance] = await invoke<[number[], number, number]>(
+                  "remove_measurement_delay",
+                  { freq: m.freq, magnitude: m.magnitude, phase: m.phase, sampleRate: m.sample_rate }
+                );
+                band.measurement.phase = newPhase;
+                band.settings.delay_seconds = delay;
+                band.settings.distance_meters = distance;
+              }
             }
           } catch (_) {
             band.settings.delay_removed = false;
