@@ -106,8 +106,28 @@ pub fn compute_average_delay(
     }
     let slope = (n * sum_fp - sum_f * sum_p) / denom;
 
+    // R² to assess fit quality
+    let intercept = (sum_p - slope * sum_f) / n;
+    let ss_res: f64 = ff.iter().zip(pp.iter()).map(|(f, p)| {
+        let predicted = slope * f + intercept;
+        (p - predicted) * (p - predicted)
+    }).sum();
+    let mean_p = sum_p / n;
+    let ss_tot: f64 = pp.iter().map(|p| (p - mean_p) * (p - mean_p)).sum();
+    let r_squared = if ss_tot < 1e-30 { 0.0 } else { 1.0 - ss_res / ss_tot };
+
     // delay = -slope / 360 (slope is dφ/df in deg/Hz)
-    -slope / 360.0
+    let delay = -slope / 360.0;
+
+    // Reject trivial delays: if R² < 0.5 or delay < 0.1ms, it's likely noise/slope artifact
+    if r_squared < 0.5 {
+        return 0.0;
+    }
+    if delay.abs() < 0.0001 {
+        return 0.0;
+    }
+
+    delay
 }
 
 /// Select delay estimation range based on measurement bandwidth.
