@@ -60,8 +60,8 @@ function gaussianHpMagDb(freq: number[], fc: number, m: number): number[] {
 // --- Color constants ---
 export const SUM_TARGET_COLOR = "#FFD700";
 export const SUM_TARGET_PHASE_COLOR = "#B8960A";
-export const SUM_CORRECTED_COLOR = "#4ADE80";
-export const SUM_MEAS_COLOR = "#94A3B8";
+export const SUM_CORRECTED_COLOR = "#FFFFFF";    // white — VituixCAD convention: sum = white
+export const SUM_MEAS_COLOR = "#FFFFFF";          // white
 export const FREQ_SNAP_COLORS = ["#808080", "#A855F7", "#EC4899", "#14B8A6"];
 
 // --- Curve type colors ---
