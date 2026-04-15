@@ -9,6 +9,10 @@ import type { SmoothingMode, BandState, FreqSnapshot } from "../stores/bands";
 import { needAutoFit, setNeedAutoFit } from "../App";
 import { computeFloorBounce } from "../lib/floor-bounce";
 import { openCrossoverDialog, type CrossoverDialogData } from "./CrossoverDialog";
+import { handleImportMeasurement, setShowMergeDialog, showMergeDialog } from "../lib/measurement-actions";
+import MergeDialog from "./MergeDialog";
+import { copyMeasurementToProject } from "../lib/project-io";
+import { open } from "@tauri-apps/plugin-dialog";
 
 import {
   SUM_TARGET_COLOR, SUM_TARGET_PHASE_COLOR, SUM_CORRECTED_COLOR, SUM_MEAS_COLOR,
@@ -4337,7 +4341,126 @@ export default function FrequencyPlot() {
           <span class="readout-sep" />
           <button class={`tb-btn tb-btn-xs ${irDbMode() ? "active" : ""}`} onClick={() => { setIrDbMode(!irDbMode()); irToggleRedraw(); }}>{irDbMode() ? "dB" : "Lin"}</button>
         </Show>
+
+        {/* Compact controls for active band (b126) — replaces bottom panel */}
+        <Show when={!isSum() && activeBand()}>
+          {(() => {
+            const b = activeBand()!;
+            const s = () => b.settings;
+            const m = () => b.measurement;
+
+            async function handleImport() {
+              try {
+                const selected = await open({
+                  multiple: false,
+                  filters: [{ name: "Measurement Files", extensions: ["txt", "frd"] }],
+                });
+                if (!selected) return;
+                const filePath = Array.isArray(selected) ? selected[0] : selected;
+                const measurement = await invoke<Measurement>("import_measurement", { path: filePath });
+                setBandMeasurement(b.id, measurement);
+                const bandNum = b.name.match(/\d+/)?.[0] ?? "1";
+                const newName = `Band ${bandNum} · ${measurement.name}`;
+                renameBand(b.id, newName);
+                try {
+                  const fileName = await copyMeasurementToProject(filePath, newName);
+                  if (fileName) setBandMeasurementFile(b.id, fileName);
+                } catch (e) { console.warn("Failed to copy measurement:", e); }
+                setNeedAutoFit(true);
+                if (measurement.phase) {
+                  try {
+                    const [newPhase, delay, distance] = await invoke<[number[], number, number]>(
+                      "remove_measurement_delay",
+                      { freq: measurement.freq, magnitude: measurement.magnitude, phase: measurement.phase, sampleRate: measurement.sample_rate }
+                    );
+                    setBandDelayInfo(b.id, delay, distance);
+                    markBandDelayRemoved(b.id, newPhase);
+                  } catch (e) { console.error("Delay removal failed:", e); }
+                }
+              } catch (e) { console.error("Import failed:", e); }
+            }
+
+            async function handleToggleDelay() {
+              if (!m()?.phase || !s()) return;
+              if (s()?.delay_removed) {
+                restoreBandDelay(b.id);
+              } else {
+                try {
+                  const origPhase = s()?.originalPhase ?? m()?.phase!;
+                  const [newPhase, delay, distance] = await invoke<[number[], number, number]>(
+                    "remove_measurement_delay",
+                    { freq: m()!.freq, magnitude: m()!.magnitude, phase: origPhase, sampleRate: m()!.sample_rate }
+                  );
+                  setBandDelayInfo(b.id, delay, distance);
+                  markBandDelayRemoved(b.id, newPhase);
+                } catch (e) { console.error("Remove delay failed:", e); }
+              }
+            }
+
+            return (
+              <>
+                {/* Import + Merge — SPL tab only */}
+                <Show when={plotTab() === "freq"}>
+                  <span class="readout-sep" />
+                  <button class="tb-btn tb-btn-xs primary" onClick={handleImport} title="Import measurement file">Import</button>
+                  <button class="tb-btn tb-btn-xs" onClick={() => setShowMergeDialog(true)} title="Merge NF+FF">Merge</button>
+                </Show>
+
+                {/* Smooth — all tabs except Export */}
+                <Show when={plotTab() !== "export"}>
+                  <span class="readout-sep" />
+                  <select
+                    class="tb-select tb-select-xs"
+                    value={s()?.smoothing ?? "off"}
+                    onChange={(e) => setBandSmoothing(b.id, e.currentTarget.value as SmoothingMode)}
+                    title="Smoothing"
+                  >
+                    <option value="off">Off</option>
+                    <option value="1/3">1/3</option>
+                    <option value="1/6">1/6</option>
+                    <option value="1/12">1/12</option>
+                    <option value="1/24">1/24</option>
+                    <option value="var">Var</option>
+                  </select>
+                </Show>
+
+                {/* Delay toggle — all tabs except Export, only if phase available */}
+                <Show when={plotTab() !== "export" && m()?.phase}>
+                  <span class="readout-sep" />
+                  <label class="tb-inline-label" title="Compensate propagation delay">
+                    <input
+                      type="checkbox"
+                      checked={s()?.delay_removed ?? false}
+                      onChange={() => handleToggleDelay()}
+                    />
+                    <span>D:{s()?.delay_removed ? Math.abs(s()!.delay_seconds ?? 0).toFixed(2) : (s()?.delay_seconds ?? 0).toFixed(2)}ms</span>
+                  </label>
+                </Show>
+              </>
+            );
+          })()}
+        </Show>
       </div>
+
+      {/* Merge dialog — wired to toolbar button (b126) */}
+      <Show when={showMergeDialog()}>
+        <MergeDialog
+          onClose={() => setShowMergeDialog(false)}
+          onMerge={(measurement, source) => {
+            const b = activeBand();
+            if (b) {
+              setBandMeasurement(b.id, measurement);
+              setBandMergeSource(b.id, source);
+              const bandNum = b.name.match(/\d+/)?.[0] ?? "1";
+              const sourceLabel = source === "nf" ? "NF" : "FF";
+              renameBand(b.id, `Band ${bandNum} · ${measurement.name} ${sourceLabel}`);
+              setNeedAutoFit(true);
+            }
+            setShowMergeDialog(false);
+          }}
+        />
+      </Show>
+
       {/* Unified visibility matrix — above plot, all modes */}
       {/* SUM matrix is shared across all tabs — shown below via legendEntries */}
       <Show when={(plotTab() === "ir" || plotTab() === "step") && !isSum() && legendEntries.length > 0}>

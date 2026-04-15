@@ -101,35 +101,8 @@ export default function ControlPanel(props: { rightPanel?: boolean }) {
     );
   }
 
-  // Bottom panel: Measurements + Export tabs
-  return (
-    <div class="ctrl-panel">
-      <div class="ctrl-tabs">
-        <button
-          class={`ctrl-tab ${tab() === "measurements" ? "active" : ""}`}
-          onClick={() => setTab("measurements")}
-        >
-          Measurement
-          <Show when={band()?.measurement}>
-            <span class="ctrl-tab-badge">1</span>
-          </Show>
-        </button>
-        <button
-          class={`ctrl-tab ${tab() === "export" ? "active" : ""}`}
-          onClick={() => setTab("export")}
-        >Export</button>
-      </div>
-
-      <div class="ctrl-body">
-        <Show when={tab() === "measurements" || tab() === "target" || tab() === "peq"}>
-          <MeasurementsTab />
-        </Show>
-        <Show when={tab() === "export"}>
-          <ExportTab />
-        </Show>
-      </div>
-    </div>
-  );
+  // Bottom panel removed (b126) — controls moved to plot toolbar in FrequencyPlot
+  return null;
 }
 
 // ---------------------------------------------------------------------------

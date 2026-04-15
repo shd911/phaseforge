@@ -117,12 +117,7 @@ function App() {
             </div>
           </main>
 
-          {/* Resize handle + Control panel — hidden on SUM */}
-          <Show when={!isSum()}>
-            <div class="ctrl-wrap">
-              <ControlPanel />
-            </div>
-          </Show>
+          {/* Bottom panel removed (b126) — controls moved to plot toolbar */}
         </div>
 
         {/* Right panel: Target + PEQ — always visible (hidden in SUM) */}
