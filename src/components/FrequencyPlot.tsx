@@ -4,7 +4,7 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { invoke } from "@tauri-apps/api/core";
 import type { Measurement, TargetResponse, FilterType, FilterConfig, PeqBand } from "../lib/types";
-import { appState, activeBand, isSum, activeTab, plotTab, setPlotTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, setPeqDragging, updatePeqBand, commitPeqBand, bandsVersion, exportSampleRate, exportTaps, exportWindow, firIterations, firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess, firMaxBoost, firNoiseFloor, exportMetrics, setExportMetrics, plotSnapshots, addPlotSnapshot, clearPlotSnapshots, setAlignmentDelay } from "../stores/bands";
+import { appState, activeBand, isSum, activeTab, plotTab, setPlotTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, setPeqDragging, updatePeqBand, commitPeqBand, bandsVersion, exportSampleRate, exportTaps, exportWindow, firIterations, firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess, firMaxBoost, firNoiseFloor, exportMetrics, setExportMetrics, plotSnapshots, addPlotSnapshot, clearPlotSnapshots, setAlignmentDelay, setBandSmoothing } from "../stores/bands";
 import type { SmoothingMode, BandState, FreqSnapshot } from "../stores/bands";
 import { needAutoFit, setNeedAutoFit } from "../App";
 import { computeFloorBounce } from "../lib/floor-bounce";
@@ -4345,9 +4345,9 @@ export default function FrequencyPlot() {
         {/* Compact controls for active band (b126) — replaces bottom panel */}
         <Show when={!isSum() && activeBand()}>
           {(() => {
-            const b = activeBand()!;
-            const s = () => b.settings;
-            const m = () => b.measurement;
+            const b = () => activeBand()!;
+            const s = () => b().settings;
+            const m = () => b().measurement;
 
             async function handleImport() {
               try {
@@ -4358,13 +4358,13 @@ export default function FrequencyPlot() {
                 if (!selected) return;
                 const filePath = Array.isArray(selected) ? selected[0] : selected;
                 const measurement = await invoke<Measurement>("import_measurement", { path: filePath });
-                setBandMeasurement(b.id, measurement);
-                const bandNum = b.name.match(/\d+/)?.[0] ?? "1";
+                setBandMeasurement(b().id, measurement);
+                const bandNum = b().name.match(/\d+/)?.[0] ?? "1";
                 const newName = `Band ${bandNum} · ${measurement.name}`;
-                renameBand(b.id, newName);
+                renameBand(b().id, newName);
                 try {
                   const fileName = await copyMeasurementToProject(filePath, newName);
-                  if (fileName) setBandMeasurementFile(b.id, fileName);
+                  if (fileName) setBandMeasurementFile(b().id, fileName);
                 } catch (e) { console.warn("Failed to copy measurement:", e); }
                 setNeedAutoFit(true);
                 if (measurement.phase) {
@@ -4373,8 +4373,8 @@ export default function FrequencyPlot() {
                       "remove_measurement_delay",
                       { freq: measurement.freq, magnitude: measurement.magnitude, phase: measurement.phase, sampleRate: measurement.sample_rate }
                     );
-                    setBandDelayInfo(b.id, delay, distance);
-                    markBandDelayRemoved(b.id, newPhase);
+                    setBandDelayInfo(b().id, delay, distance);
+                    markBandDelayRemoved(b().id, newPhase);
                   } catch (e) { console.error("Delay removal failed:", e); }
                 }
               } catch (e) { console.error("Import failed:", e); }
@@ -4383,7 +4383,7 @@ export default function FrequencyPlot() {
             async function handleToggleDelay() {
               if (!m()?.phase || !s()) return;
               if (s()?.delay_removed) {
-                restoreBandDelay(b.id);
+                restoreBandDelay(b().id);
               } else {
                 try {
                   const origPhase = s()?.originalPhase ?? m()?.phase!;
@@ -4391,8 +4391,8 @@ export default function FrequencyPlot() {
                     "remove_measurement_delay",
                     { freq: m()!.freq, magnitude: m()!.magnitude, phase: origPhase, sampleRate: m()!.sample_rate }
                   );
-                  setBandDelayInfo(b.id, delay, distance);
-                  markBandDelayRemoved(b.id, newPhase);
+                  setBandDelayInfo(b().id, delay, distance);
+                  markBandDelayRemoved(b().id, newPhase);
                 } catch (e) { console.error("Remove delay failed:", e); }
               }
             }
@@ -4413,7 +4413,7 @@ export default function FrequencyPlot() {
                   <select
                     class="tb-select tb-select-xs"
                     value={s()?.smoothing ?? "off"}
-                    onChange={(e) => setBandSmoothing(b.id, e.currentTarget.value as SmoothingMode)}
+                    onChange={(e) => setBandSmoothing(b().id, e.currentTarget.value as SmoothingMode)}
                     title="Smoothing"
                   >
                     <option value="off">Off</option>
