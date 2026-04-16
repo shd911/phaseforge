@@ -4879,6 +4879,7 @@ export default function FrequencyPlot() {
                                       if (!isNaN(v)) commitDelay(b().id, v);
                                     }}
                                     onWheel={(e) => {
+                                      if (document.activeElement !== e.currentTarget) { e.preventDefault(); e.currentTarget.focus(); return; }
                                       e.preventDefault();
                                       const step = e.shiftKey ? 0.1 : 0.01;
                                       const cur = (b().alignmentDelay ?? 0) * 1000;
