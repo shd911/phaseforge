@@ -3,8 +3,8 @@ import { createStore } from "solid-js/store";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { invoke } from "@tauri-apps/api/core";
-import type { Measurement, TargetResponse, FilterType, FilterConfig, PeqBand } from "../lib/types";
-import { appState, activeBand, isSum, activeTab, plotTab, setPlotTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, setPeqDragging, updatePeqBand, commitPeqBand, bandsVersion, exportSampleRate, exportTaps, exportWindow, firIterations, firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess, firMaxBoost, firNoiseFloor, exportMetrics, setExportMetrics, plotSnapshots, addPlotSnapshot, clearPlotSnapshots, setAlignmentDelay, setBandSmoothing } from "../stores/bands";
+import type { Measurement, TargetResponse, FilterType, FilterConfig, PeqBand, WindowType } from "../lib/types";
+import { appState, activeBand, isSum, activeTab, plotTab, setPlotTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, setPeqDragging, updatePeqBand, commitPeqBand, bandsVersion, exportSampleRate, setExportSampleRate, exportTaps, setExportTaps, exportWindow, setExportWindow, firIterations, firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess, firMaxBoost, firNoiseFloor, exportMetrics, setExportMetrics, plotSnapshots, addPlotSnapshot, clearPlotSnapshots, setAlignmentDelay, setBandSmoothing } from "../stores/bands";
 import type { SmoothingMode, BandState, FreqSnapshot } from "../stores/bands";
 import { needAutoFit, setNeedAutoFit } from "../App";
 import { computeFloorBounce } from "../lib/floor-bounce";
@@ -4438,10 +4438,12 @@ export default function FrequencyPlot() {
                     <span>D:{s()?.delay_removed ? (Math.abs(s()!.delay_seconds ?? 0) * 1000).toFixed(2) : ((s()?.delay_seconds ?? 0) * 1000).toFixed(2)}ms</span>
                   </label>
                 </Show>
+
               </>
             );
           })()}
         </Show>
+
       </div>
 
       {/* Merge dialog — wired to toolbar button (b126) */}
@@ -4555,6 +4557,73 @@ export default function FrequencyPlot() {
         </div>
       </Show>
       <Show when={plotTab() === "export"}>
+        {/* Export controls — SR / Taps / Window (always visible on Export tab) */}
+        <div class="export-controls-row" style={{
+          display: "flex", "align-items": "center", gap: "var(--space-md)",
+          padding: "var(--space-xs) var(--space-lg)",
+          "border-bottom": "1px solid var(--border)",
+          "font-family": "var(--mono)", "font-size": "var(--fs-base)",
+        }}>
+          <span class="readout-label">SR</span>
+          <select
+            class="tb-select tb-select-xs"
+            value={exportSampleRate()}
+            onChange={(e) => setExportSampleRate(Number(e.currentTarget.value))}
+            title="Sample rate"
+          >
+            {[44100, 48000, 88200, 96000, 176400, 192000].map((sr) => (
+              <option value={sr}>{sr >= 1000 ? (sr / 1000) + "k" : sr}</option>
+            ))}
+          </select>
+          <span class="readout-label">Taps</span>
+          <select
+            class="tb-select tb-select-xs"
+            value={exportTaps()}
+            onChange={(e) => setExportTaps(Number(e.currentTarget.value))}
+            title="FIR filter length"
+          >
+            {[4096, 8192, 16384, 32768, 65536, 131072, 262144].map((t) => (
+              <option value={t}>{t >= 1024 ? (t / 1024) + "K" : t}</option>
+            ))}
+          </select>
+          <span class="readout-label">Win</span>
+          <select
+            class="tb-select tb-select-xs"
+            value={exportWindow()}
+            onChange={(e) => setExportWindow(e.currentTarget.value as WindowType)}
+            title="Window function"
+          >
+            <optgroup label="Basic">
+              <option value="Rectangular">Rectangular</option>
+              <option value="Bartlett">Bartlett</option>
+              <option value="Hann">Hann</option>
+              <option value="Hamming">Hamming</option>
+              <option value="Blackman">Blackman</option>
+            </optgroup>
+            <optgroup label="Blackman-Harris">
+              <option value="ExactBlackman">Exact Blackman</option>
+              <option value="BlackmanHarris">Blackman-Harris</option>
+              <option value="Nuttall3">Nuttall 3-term</option>
+              <option value="Nuttall4">Nuttall 4-term</option>
+              <option value="FlatTop">Flat Top</option>
+            </optgroup>
+            <optgroup label="Parametric">
+              <option value="Kaiser">Kaiser (β=10)</option>
+              <option value="DolphChebyshev">Dolph-Chebyshev</option>
+              <option value="Gaussian">Gaussian (σ=2.5)</option>
+              <option value="Tukey">Tukey (α=0.5)</option>
+            </optgroup>
+            <optgroup label="Special">
+              <option value="Lanczos">Lanczos</option>
+              <option value="Poisson">Poisson</option>
+              <option value="HannPoisson">Hann-Poisson</option>
+              <option value="Bohman">Bohman</option>
+              <option value="Cauchy">Cauchy</option>
+              <option value="Riesz">Riesz</option>
+            </optgroup>
+          </select>
+        </div>
+
         {/* Export legend — Model + FIR (mag & phase) */}
         <div class="sum-vis-table">
           <table>
