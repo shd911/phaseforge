@@ -941,6 +941,7 @@ function PeqTab() {
                   {peqBands().map((b, i) => {
                     const isPending = pendingPeqIdx() === i;
                     const peqWheel = (e: WheelEvent, field: "freq_hz" | "gain_db" | "q") => {
+                      if (document.activeElement !== e.currentTarget) { e.preventDefault(); (e.currentTarget as HTMLElement).focus(); return; }
                       e.preventDefault(); e.stopPropagation();
                       const bd = band(); if (!bd) return;
                       const dir = e.deltaY < 0 ? 1 : -1;
