@@ -4435,7 +4435,7 @@ export default function FrequencyPlot() {
                       checked={s()?.delay_removed ?? false}
                       onChange={() => handleToggleDelay()}
                     />
-                    <span>D:{s()?.delay_removed ? Math.abs(s()!.delay_seconds ?? 0).toFixed(2) : (s()?.delay_seconds ?? 0).toFixed(2)}ms</span>
+                    <span>D:{s()?.delay_removed ? (Math.abs(s()!.delay_seconds ?? 0) * 1000).toFixed(2) : ((s()?.delay_seconds ?? 0) * 1000).toFixed(2)}ms</span>
                   </label>
                 </Show>
               </>
