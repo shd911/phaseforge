@@ -26,6 +26,9 @@ import {
 import { addGaussianMinPhase, evaluateBand } from "../lib/band-evaluation";
 import { computeAutoAlign } from "../lib/auto-align";
 
+// Track which inputs have been explicitly clicked — wheel only fires when in set
+const wheelEnabled = new WeakSet<Element>();
+
 // ---------------------------------------------------------------------------
 // Crossover point: band[i] LP ↔ band[i+1] HP
 // ---------------------------------------------------------------------------
@@ -4878,8 +4881,10 @@ export default function FrequencyPlot() {
                                       const v = parseFloat(e.currentTarget.value);
                                       if (!isNaN(v)) commitDelay(b().id, v);
                                     }}
+                                    onPointerDown={(e) => wheelEnabled.add(e.currentTarget)}
+                                    onBlur={(e) => wheelEnabled.delete(e.currentTarget)}
                                     onWheel={(e) => {
-                                      if (document.activeElement !== e.currentTarget) { e.preventDefault(); e.currentTarget.focus(); return; }
+                                      if (!wheelEnabled.has(e.currentTarget)) { e.preventDefault(); return; }
                                       e.preventDefault();
                                       const step = e.shiftKey ? 0.1 : 0.01;
                                       const cur = (b().alignmentDelay ?? 0) * 1000;
