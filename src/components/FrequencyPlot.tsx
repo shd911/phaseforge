@@ -13,6 +13,7 @@ import { handleImportMeasurement, setShowMergeDialog, showMergeDialog } from "..
 import MergeDialog from "./MergeDialog";
 import { copyMeasurementToProject } from "../lib/project-io";
 import { open } from "@tauri-apps/plugin-dialog";
+import { exportBandWav } from "../lib/fir-export";
 
 import {
   SUM_TARGET_COLOR, SUM_TARGET_PHASE_COLOR, SUM_CORRECTED_COLOR, SUM_MEAS_COLOR,
@@ -378,6 +379,23 @@ export default function FrequencyPlot() {
   const [exportColors, setExportColors] = createSignal(DEFAULT_EXPORT_COLORS);
   // Export loading indicator
   const [exportComputing, setExportComputing] = createSignal(false);
+  // WAV export state
+  const [exportingWav, setExportingWav] = createSignal(false);
+  const [exportWavError, setExportWavError] = createSignal<string | null>(null);
+  async function handleExportWav() {
+    const b = activeBand();
+    if (!b) return;
+    setExportingWav(true);
+    setExportWavError(null);
+    try {
+      await exportBandWav(b);
+    } catch (e) {
+      console.error("Export WAV failed:", e);
+      setExportWavError(String(e));
+    } finally {
+      setExportingWav(false);
+    }
+  }
   // Export legend visibility
   const [showExpModel, setShowExpModel] = createSignal(true);
   const [showExpFir, setShowExpFir] = createSignal(true);
@@ -4625,6 +4643,19 @@ export default function FrequencyPlot() {
               <option value="Riesz">Riesz</option>
             </optgroup>
           </select>
+          <div style={{ "margin-left": "auto", display: "flex", "align-items": "center", gap: "var(--space-sm)" }}>
+            <Show when={exportWavError()}>
+              <span style={{ color: STATUS_BAD, "font-size": "var(--fs-sm)" }}>{exportWavError()}</span>
+            </Show>
+            <button
+              class="tb-btn primary"
+              disabled={exportingWav() || !activeBand()}
+              onClick={handleExportWav}
+              title="Export FIR as WAV"
+            >
+              {exportingWav() ? "Exporting..." : "Export WAV"}
+            </button>
+          </div>
         </div>
 
         {/* Export legend — Model + FIR (mag & phase) */}
