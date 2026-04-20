@@ -6,7 +6,7 @@ import {
   setBandDelayInfo, markBandDelayRemoved, setBandMergeSource,
 } from "../stores/bands";
 import { setNeedAutoFit } from "../App";
-import { copyMeasurementToProject, copyMergeFilesToProject } from "./project-io";
+import { copyMeasurementToProject, copyMergeFilesToProject, projectDir } from "./project-io";
 import type { Measurement } from "./types";
 import type { MergeSource } from "../stores/bands";
 
@@ -51,12 +51,28 @@ export async function handleMergeComplete(measurement: Measurement, source: Merg
   setBandMeasurement(b.id, measurement);
   setBandMergeSource(b.id, source);
   const bandNum = b.name.match(/\d+/)?.[0] ?? "1";
-  const sourceLabel = source === "nf" ? "NF" : "FF";
-  const newName = `Band ${bandNum} · ${measurement.name} ${sourceLabel}`;
+  const newName = `Band ${bandNum} · ${measurement.name}`;
   renameBand(b.id, newName);
   try {
-    const { fileName } = await copyMergeFilesToProject(measurement, source);
-    if (fileName) setBandMeasurementFile(b.id, fileName);
-  } catch (e) { console.warn("Failed to copy merge files:", e); }
+    const files = await copyMergeFilesToProject(source.nfPath, source.ffPath, newName);
+    if (files) {
+      setBandMeasurementFile(b.id, files.nfFile);
+      setBandMergeSource(b.id, {
+        ...source,
+        nfPath: `${projectDir()}/${files.nfFile}`,
+        ffPath: `${projectDir()}/${files.ffFile}`,
+      });
+    }
+  } catch (e) { console.warn("Failed to copy merge files to project folder:", e); }
   setNeedAutoFit(true);
+  if (measurement.phase) {
+    try {
+      const [newPhase, delay, distance] = await invoke<[number[], number, number]>(
+        "remove_measurement_delay",
+        { freq: measurement.freq, magnitude: measurement.magnitude, phase: measurement.phase, sampleRate: measurement.sample_rate }
+      );
+      setBandDelayInfo(b.id, delay, distance);
+      markBandDelayRemoved(b.id, newPhase);
+    } catch (e) { console.error("Delay removal failed:", e); }
+  }
 }

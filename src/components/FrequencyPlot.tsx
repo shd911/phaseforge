@@ -9,7 +9,8 @@ import type { SmoothingMode, BandState, FreqSnapshot } from "../stores/bands";
 import { needAutoFit, setNeedAutoFit } from "../App";
 import { computeFloorBounce } from "../lib/floor-bounce";
 import { openCrossoverDialog, type CrossoverDialogData } from "./CrossoverDialog";
-import { handleImportMeasurement, setShowMergeDialog, showMergeDialog } from "../lib/measurement-actions";
+import { handleImportMeasurement, handleMergeComplete, setShowMergeDialog, showMergeDialog } from "../lib/measurement-actions";
+import { setBandDelayInfo, markBandDelayRemoved, restoreBandDelay } from "../stores/bands";
 import MergeDialog from "./MergeDialog";
 import { exportBandWav } from "../lib/fir-export";
 
@@ -4439,15 +4440,7 @@ export default function FrequencyPlot() {
         <MergeDialog
           onClose={() => setShowMergeDialog(false)}
           onMerge={(measurement, source) => {
-            const b = activeBand();
-            if (b) {
-              setBandMeasurement(b.id, measurement);
-              setBandMergeSource(b.id, source);
-              const bandNum = b.name.match(/\d+/)?.[0] ?? "1";
-              const sourceLabel = source === "nf" ? "NF" : "FF";
-              renameBand(b.id, `Band ${bandNum} · ${measurement.name} ${sourceLabel}`);
-              setNeedAutoFit(true);
-            }
+            handleMergeComplete(measurement, source);
             setShowMergeDialog(false);
           }}
         />
