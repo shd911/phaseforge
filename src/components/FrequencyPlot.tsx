@@ -11,8 +11,6 @@ import { computeFloorBounce } from "../lib/floor-bounce";
 import { openCrossoverDialog, type CrossoverDialogData } from "./CrossoverDialog";
 import { handleImportMeasurement, setShowMergeDialog, showMergeDialog } from "../lib/measurement-actions";
 import MergeDialog from "./MergeDialog";
-import { copyMeasurementToProject } from "../lib/project-io";
-import { open } from "@tauri-apps/plugin-dialog";
 import { exportBandWav } from "../lib/fir-export";
 
 import {
@@ -4370,37 +4368,6 @@ export default function FrequencyPlot() {
             const s = () => b().settings;
             const m = () => b().measurement;
 
-            async function handleImport() {
-              try {
-                const selected = await open({
-                  multiple: false,
-                  filters: [{ name: "Measurement Files", extensions: ["txt", "frd"] }],
-                });
-                if (!selected) return;
-                const filePath = Array.isArray(selected) ? selected[0] : selected;
-                const measurement = await invoke<Measurement>("import_measurement", { path: filePath });
-                setBandMeasurement(b().id, measurement);
-                const bandNum = b().name.match(/\d+/)?.[0] ?? "1";
-                const newName = `Band ${bandNum} · ${measurement.name}`;
-                renameBand(b().id, newName);
-                try {
-                  const fileName = await copyMeasurementToProject(filePath, newName);
-                  if (fileName) setBandMeasurementFile(b().id, fileName);
-                } catch (e) { console.warn("Failed to copy measurement:", e); }
-                setNeedAutoFit(true);
-                if (measurement.phase) {
-                  try {
-                    const [newPhase, delay, distance] = await invoke<[number[], number, number]>(
-                      "remove_measurement_delay",
-                      { freq: measurement.freq, magnitude: measurement.magnitude, phase: measurement.phase, sampleRate: measurement.sample_rate }
-                    );
-                    setBandDelayInfo(b().id, delay, distance);
-                    markBandDelayRemoved(b().id, newPhase);
-                  } catch (e) { console.error("Delay removal failed:", e); }
-                }
-              } catch (e) { console.error("Import failed:", e); }
-            }
-
             async function handleToggleDelay() {
               if (!m()?.phase || !s()) return;
               if (s()?.delay_removed) {
@@ -4423,7 +4390,7 @@ export default function FrequencyPlot() {
                 {/* Import + Merge — SPL tab only */}
                 <Show when={plotTab() === "freq"}>
                   <span class="readout-sep" />
-                  <button class="tb-btn tb-btn-xs primary" onClick={handleImport} title="Import measurement file">Import</button>
+                  <button class="tb-btn tb-btn-xs primary" onClick={handleImportMeasurement} title="Import measurement file">Import</button>
                   <button class="tb-btn tb-btn-xs" onClick={() => setShowMergeDialog(true)} title="Merge NF+FF">Merge</button>
                 </Show>
 
