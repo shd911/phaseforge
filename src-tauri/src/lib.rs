@@ -10,6 +10,7 @@ pub mod recent;
 pub mod target;
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use dsp::SmoothingConfig;
 use dsp::impulse::ImpulseResult;
@@ -19,7 +20,28 @@ use io::Measurement;
 use fir::{FirConfig, FirResult, FirModelResult};
 use peq::{ExclusionZone, PeqBand, PeqConfig, PeqResult};
 use target::{TargetCurve, TargetResponse};
+use tauri::{Emitter, Manager, WindowEvent};
 use tracing::info;
+
+pub struct AppCloseState {
+    pub allow_close: AtomicBool,
+}
+
+#[tauri::command]
+fn close_window_now(
+    state: tauri::State<AppCloseState>,
+    window: tauri::Window,
+) -> Result<(), String> {
+    state.allow_close.store(true, Ordering::SeqCst);
+    match window.close() {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            // Reset so a subsequent CloseRequested still triggers the dialog.
+            state.allow_close.store(false, Ordering::SeqCst);
+            Err(e.to_string())
+        }
+    }
+}
 
 /// Validate that a path does not contain path traversal sequences and is within allowed directories.
 fn validate_export_path(path: &str) -> Result<PathBuf, String> {
@@ -529,10 +551,20 @@ pub fn run() {
         )
         .init();
 
-    info!("PhaseForge v0.1.0-b130 starting...");
+    info!("PhaseForge v0.1.0-b131 starting...");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .manage(AppCloseState { allow_close: AtomicBool::new(false) })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                let state: tauri::State<AppCloseState> = window.state();
+                if !state.allow_close.load(Ordering::SeqCst) {
+                    api.prevent_close();
+                    let _ = window.emit("request-close-confirm", ());
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             import_measurement,
             get_smoothed,
@@ -569,6 +601,7 @@ pub fn run() {
             recent::load_recent_projects,
             recent::add_recent_project,
             recent::clear_recent_projects,
+            close_window_now,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

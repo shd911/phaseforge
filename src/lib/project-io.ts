@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { save, open, ask } from "@tauri-apps/plugin-dialog";
+import { save, open } from "@tauri-apps/plugin-dialog";
 import { createSignal, batch } from "solid-js";
 import {
   appState,
@@ -74,6 +74,33 @@ export function resolvePrompt(value: ProjectPromptResult | null) {
   setPromptVisible(false);
   _promptResolve?.(value);
   _promptResolve = null;
+}
+
+// ---------------------------------------------------------------------------
+// Promise-based unsaved-changes dialog (Save / Don't Save / Cancel)
+// ---------------------------------------------------------------------------
+
+export type UnsavedDialogResult = "save" | "discard" | "cancel";
+
+let _unsavedResolve: ((val: UnsavedDialogResult) => void) | null = null;
+export const [unsavedDialogVisible, setUnsavedDialogVisible] = createSignal(false);
+
+export function showUnsavedChangesDialog(): Promise<UnsavedDialogResult> {
+  // Re-entrancy: if a previous dialog is still pending, cancel it so its
+  // awaiter unblocks and the slot is free for this new request.
+  if (_unsavedResolve) {
+    const prev = _unsavedResolve;
+    _unsavedResolve = null;
+    prev("cancel");
+  }
+  setUnsavedDialogVisible(true);
+  return new Promise((resolve) => { _unsavedResolve = resolve; });
+}
+
+export function resolveUnsavedDialog(value: UnsavedDialogResult) {
+  setUnsavedDialogVisible(false);
+  _unsavedResolve?.(value);
+  _unsavedResolve = null;
 }
 
 // ---------------------------------------------------------------------------
@@ -519,13 +546,18 @@ async function restoreState(project: ProjectFile, projDir: string | null) {
 // Confirm unsaved changes
 // ---------------------------------------------------------------------------
 
-async function confirmIfDirty(): Promise<boolean> {
+export async function confirmIfDirty(): Promise<boolean> {
   if (!isDirty()) return true;
-  const proceed = await ask(
-    "You have unsaved changes. Discard them?",
-    { title: "Unsaved Changes", kind: "warning", okLabel: "Discard", cancelLabel: "Cancel" },
-  );
-  return proceed;
+  const result = await showUnsavedChangesDialog();
+  if (result === "cancel") return false;
+  if (result === "discard") return true;
+  try {
+    await saveProject();
+  } catch (e) {
+    console.error("Save before proceeding failed:", e);
+    return false;
+  }
+  return !isDirty();
 }
 
 // ---------------------------------------------------------------------------

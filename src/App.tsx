@@ -1,5 +1,7 @@
 import "./App.css";
 import { createSignal, createEffect, onCleanup, Show } from "solid-js";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   appState,
   activeBand,
@@ -9,12 +11,21 @@ import {
   setExportHybridPhase,
 } from "./stores/bands";
 import { handleOptimizePeq, handleOptimizeAll, computing } from "./stores/peq-optimize";
-import { saveProject, saveProjectAs, loadProject, newProject, currentProjectPath, projectName } from "./lib/project-io";
+import {
+  saveProject,
+  saveProjectAs,
+  loadProject,
+  newProject,
+  currentProjectPath,
+  projectName,
+  confirmIfDirty,
+} from "./lib/project-io";
 import FileMenu from "./components/FileMenu";
 import FrequencyPlot from "./components/FrequencyPlot";
 import ControlPanel from "./components/ControlPanel";
 import BandTabs from "./components/BandTabs";
 import ProjectNameDialog from "./components/ProjectNameDialog";
+import UnsavedChangesDialog from "./components/UnsavedChangesDialog";
 import WelcomeDialog from "./components/WelcomeDialog";
 import CrossoverDialog from "./components/CrossoverDialog";
 import FirSettingsDialog from "./components/FirSettingsDialog";
@@ -43,6 +54,15 @@ function App() {
   };
   window.addEventListener("keydown", handleKeys);
   onCleanup(() => window.removeEventListener("keydown", handleKeys));
+
+  // Window close confirmation: backend prevents close, emits this event;
+  // we delegate to confirmIfDirty (same flow as New/Open), then ack the close.
+  const unlistenClose = listen("request-close-confirm", async () => {
+    if (await confirmIfDirty()) {
+      await invoke("close_window_now").catch((e) => console.error("close_window_now:", e));
+    }
+  });
+  onCleanup(() => { unlistenClose.then((u) => u()).catch(() => {}); });
 
   // Reactive window title: "PhaseForge — ProjectName *"
   createEffect(() => {
@@ -137,6 +157,7 @@ function App() {
       {/* Modal dialogs */}
       <WelcomeDialog />
       <ProjectNameDialog />
+      <UnsavedChangesDialog />
       <CrossoverDialog />
       <FirSettingsDialog />
     </div>
