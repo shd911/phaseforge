@@ -2,6 +2,7 @@ import { createSignal, Show, For, onCleanup } from "solid-js";
 import type { AnalysisFinding, AnalysisRecommendation, AnalysisResult } from "../lib/types";
 import { applyRecommendation } from "../lib/analysis-actions";
 import { setBandAnalysisDismissed } from "../stores/bands";
+import { beginInteraction, commitInteraction } from "../stores/history";
 
 interface OpenRequest {
   bandId: string;
@@ -11,8 +12,11 @@ interface OpenRequest {
 }
 
 const [_open, setOpen] = createSignal<OpenRequest | null>(null);
+const [_appliedIds, _setAppliedIds] = createSignal<Set<string>>(new Set());
 
 export function openMeasurementAnalysis(req: OpenRequest): void {
+  // Reset applied state per open so a previous band's marks don't leak in.
+  _setAppliedIds(new Set<string>());
   setOpen(req);
 }
 
@@ -25,53 +29,48 @@ function severityIcon(s: AnalysisFinding["severity"]): string {
 }
 
 export default function MeasurementAnalysisDialog() {
-  const [selected, setSelected] = createSignal<Set<string>>(new Set());
-  const [appliedFindingIds, setAppliedFindingIds] = createSignal<Set<string>>(new Set());
+  const appliedFindingIds = _appliedIds;
 
-  function close(dismissed: boolean) {
+  function close() {
     const req = _open();
-    if (req && dismissed) {
-      setBandAnalysisDismissed(req.bandId, true);
-    }
+    if (req) setBandAnalysisDismissed(req.bandId, true);
     setOpen(null);
-    setSelected(new Set<string>());
-    setAppliedFindingIds(new Set<string>());
   }
 
-  function toggleSelect(findingId: string) {
-    const s = new Set(selected());
-    if (s.has(findingId)) s.delete(findingId);
-    else s.add(findingId);
-    setSelected(s);
+  function markApplied(findingId: string) {
+    const a = new Set(_appliedIds());
+    a.add(findingId);
+    _setAppliedIds(a);
   }
 
-  function applyOne(finding: AnalysisFinding, rec: AnalysisRecommendation) {
-    const req = _open();
-    if (!req) return;
+  function applyFinding(req: OpenRequest, finding: AnalysisFinding, rec: AnalysisRecommendation) {
     applyRecommendation(req.bandId, rec, finding.id);
-    const a = new Set(appliedFindingIds());
-    a.add(finding.id);
-    setAppliedFindingIds(a);
+    markApplied(finding.id);
   }
 
-  function applySelected() {
+  function applyAll() {
     const req = _open();
     if (!req) return;
-    const sel = selected();
-    for (const f of req.result.findings) {
-      if (!sel.has(f.id)) continue;
-      if (appliedFindingIds().has(f.id)) continue;
-      const rec = f.recommendations[0];
-      if (rec) applyRecommendation(req.bandId, rec, f.id);
+    // Single history entry for the whole batch (b132 begin/commit suppresses
+    // intermediate pushHistory calls, so undo restores pre-batch state in
+    // one Cmd+Z regardless of finding count).
+    beginInteraction("Apply all recommendations");
+    try {
+      for (const f of req.result.findings) {
+        if (_appliedIds().has(f.id)) continue;
+        const rec = f.recommendations[0];
+        if (rec) applyFinding(req, f, rec);
+      }
+    } finally {
+      commitInteraction();
     }
-    close(true);
   }
 
   const onKey = (e: KeyboardEvent) => {
     if (!_open()) return;
     if (e.key === "Escape") {
       e.preventDefault();
-      close(true);
+      close();
     }
   };
   window.addEventListener("keydown", onKey);
@@ -90,10 +89,12 @@ export default function MeasurementAnalysisDialog() {
           }
           return c;
         };
+        const allApplied = () =>
+          findings().length > 0 && appliedFindingIds().size >= findings().length;
         return (
           <div
             class="pn-overlay"
-            onMouseDown={(e) => { if (e.target === e.currentTarget) close(true); }}
+            onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}
           >
             <div class="pn-dialog" style={{ "min-width": "520px", "max-width": "640px" }}>
               <div class="pn-title">Анализ замера: {req().fileName}</div>
@@ -115,59 +116,47 @@ export default function MeasurementAnalysisDialog() {
 
                 <div style={{ "max-height": "420px", "overflow-y": "auto", "border-top": "1px solid #333" }}>
                   <For each={findings()}>
-                    {(f) => (
-                      <div style={{
-                        padding: "10px 4px",
-                        "border-bottom": "1px solid #333",
-                        opacity: appliedFindingIds().has(f.id) ? 0.5 : 1,
-                      }}>
-                        <label style={{ display: "flex", "align-items": "flex-start", gap: "8px", cursor: "pointer" }}>
-                          <input
-                            type="checkbox"
-                            checked={selected().has(f.id)}
-                            disabled={appliedFindingIds().has(f.id)}
-                            onChange={() => toggleSelect(f.id)}
-                            style={{ "margin-top": "3px" }}
-                          />
-                          <div style={{ flex: 1 }}>
-                            <div style={{ "font-weight": 600 }}>
-                              {severityIcon(f.severity)} {f.title}
-                              <Show when={appliedFindingIds().has(f.id)}>
-                                <span style={{ "margin-left": "8px", color: "#7c7" }}>✓ применено</span>
-                              </Show>
-                            </div>
-                            <div style={{ color: "#aaa", "font-size": "12px", "margin-top": "2px" }}>
-                              {f.description}
-                            </div>
-                            <For each={f.recommendations}>
-                              {(rec) => (
-                                <button
-                                  class="dlg-btn"
-                                  style={{ "margin-top": "6px" }}
-                                  disabled={appliedFindingIds().has(f.id)}
-                                  onClick={() => applyOne(f, rec)}
-                                >{rec.label}</button>
-                              )}
-                            </For>
+                    {(f) => {
+                      const isApplied = () => appliedFindingIds().has(f.id);
+                      return (
+                        <div style={{ padding: "10px 4px", "border-bottom": "1px solid #333" }}>
+                          <div style={{ "font-weight": 600 }}>
+                            {severityIcon(f.severity)} {f.title}
+                            <Show when={isApplied()}>
+                              <span style={{ "margin-left": "8px", color: "#7c7", "font-weight": 400 }}>
+                                ✓ применено
+                              </span>
+                            </Show>
                           </div>
-                        </label>
-                      </div>
-                    )}
+                          <div style={{ color: "#aaa", "font-size": "12px", "margin": "2px 0 6px" }}>
+                            {f.description}
+                          </div>
+                          <For each={f.recommendations}>
+                            {(rec) => (
+                              <button
+                                class="dlg-btn"
+                                style={{ "margin-right": "6px" }}
+                                disabled={isApplied()}
+                                onClick={() => applyFinding(req(), f, rec)}
+                              >{isApplied() ? `✓ Установлено: ${rec.label}` : rec.label}</button>
+                            )}
+                          </For>
+                        </div>
+                      );
+                    }}
                   </For>
                 </div>
               </Show>
 
               <div class="pn-buttons" style={{ "margin-top": "16px" }}>
-                <button class="dlg-btn" onClick={() => close(true)}>
-                  {findings().length > 0 ? "Игнорировать всё" : "Закрыть"}
-                </button>
                 <Show when={findings().length > 0}>
                   <button
                     class="dlg-btn dlg-btn-primary"
-                    onClick={applySelected}
-                    disabled={selected().size === 0}
-                  >Применить отмеченное</button>
+                    onClick={applyAll}
+                    disabled={allApplied()}
+                  >Применить все</button>
                 </Show>
+                <button class="dlg-btn" onClick={close}>Закрыть</button>
               </div>
             </div>
           </div>
