@@ -33,6 +33,7 @@ import { tolerance, setTolerance, maxBands, setMaxBands, gainRegularization, set
 import type { AppState, BandState, PerMeasurementSettings, FloorBounceConfig, MergeSource } from "../stores/bands";
 import type { Measurement, MergeResult, WindowType } from "../lib/types";
 import { clearHistory } from "../stores/history";
+import { showToast } from "./toast";
 
 // ---------------------------------------------------------------------------
 // Signals: project path, project directory, project name
@@ -394,6 +395,7 @@ function mapBandFromProject(b: ProjectBand, idx: number): BandState {
 /** Restore state from a loaded project. For v2, re-import measurements from files. */
 export async function restoreState(project: ProjectFile, projDir: string | null) {
   const bands = project.bands.map((b, i) => mapBandFromProject(b, i));
+  const missingMeasurements: string[] = [];
 
   // v2: re-import measurements from files in project folder
   if (project.version >= 2 && projDir) {
@@ -446,6 +448,7 @@ export async function restoreState(project: ProjectFile, projDir: string | null)
               band.measurement = await invoke<Measurement>("import_measurement", { path: filePath });
             } catch (e2) {
               console.warn(`[Restore] Fallback import also failed:`, e2);
+              missingMeasurements.push(band.name);
             }
           }
         } else {
@@ -472,6 +475,7 @@ export async function restoreState(project: ProjectFile, projDir: string | null)
           band.measurement = m;
         } catch (e) {
           console.warn(`Failed to re-import measurement ${band.measurementFile}:`, e);
+          missingMeasurements.push(band.name);
         }
         } // end else (non-merged)
         // Re-apply delay compensation for both merged and non-merged bands
@@ -545,6 +549,14 @@ export async function restoreState(project: ProjectFile, projDir: string | null)
     setFirNoiseFloor(project.fir_noise_floor_db ?? -150.0);
     setIsDirty(false);
   });
+  if (missingMeasurements.length > 0) {
+    const list = missingMeasurements.map((n) => `«${n}»`).join(", ");
+    showToast(
+      `Не найдены измерения: ${list}. Полосы загружены без измерений, переимпортируйте файлы вручную.`,
+      "warn",
+      10000,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------

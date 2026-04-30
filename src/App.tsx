@@ -18,7 +18,10 @@ import {
   newProject,
   currentProjectPath,
   projectName,
+  projectDir,
   confirmIfDirty,
+  promptVisible,
+  unsavedDialogVisible,
 } from "./lib/project-io";
 import { undo, redo, canUndo, canRedo, lastUndoLabel, lastRedoLabel } from "./stores/history";
 import { peqDragging } from "./stores/bands";
@@ -28,7 +31,9 @@ import ControlPanel from "./components/ControlPanel";
 import BandTabs from "./components/BandTabs";
 import ProjectNameDialog from "./components/ProjectNameDialog";
 import UnsavedChangesDialog from "./components/UnsavedChangesDialog";
-import VersionsDialog from "./components/VersionsDialog";
+import VersionsDialog, { openVersionsDialog, isVersionsDialogOpen } from "./components/VersionsDialog";
+import Toasts from "./components/Toasts";
+import { showToast } from "./lib/toast";
 import WelcomeDialog from "./components/WelcomeDialog";
 import CrossoverDialog from "./components/CrossoverDialog";
 import FirSettingsDialog from "./components/FirSettingsDialog";
@@ -40,31 +45,43 @@ import { activeTab } from "./stores/bands";
 export const [needAutoFit, setNeedAutoFit] = createSignal(false);
 
 function App() {
-  // Keyboard shortcuts: Cmd+N/S/Shift+S/O, Cmd+Z/Shift+Cmd+Z
+  // Centralized global shortcuts (Cmd on macOS, Ctrl elsewhere). Suspended
+  // when focus is in a text-editing surface or any modal dialog is open.
   const isEditableTarget = (t: EventTarget | null): boolean => {
     if (!(t instanceof HTMLElement)) return false;
     const tag = t.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
     return t.isContentEditable;
   };
+  const isModalOpen = (): boolean =>
+    promptVisible() || unsavedDialogVisible() || isVersionsDialogOpen();
+
   const handleKeys = (e: KeyboardEvent) => {
     if (!(e.metaKey || e.ctrlKey)) return;
-    if (e.key === "z" || e.key === "Z") {
-      if (isEditableTarget(e.target)) return;
-      if (peqDragging()) return; // mid-drag — let user finish the drag first
+    if (isEditableTarget(e.target)) return;
+    if (isModalOpen()) return;
+    const k = e.key.toLowerCase();
+    if (k === "z") {
+      if (peqDragging()) return; // mid-drag — let the gesture finish first
       e.preventDefault();
       if (e.shiftKey) redo();
       else undo();
       return;
     }
-    if (e.key === "s" || e.key === "S") {
+    if (e.shiftKey && k === "v") {
+      e.preventDefault();
+      if (projectDir() !== null) openVersionsDialog();
+      else showToast("Сохраните проект через Save As, чтобы создавать версии", "info");
+      return;
+    }
+    if (k === "s") {
       e.preventDefault();
       if (e.shiftKey) saveProjectAs();
       else saveProject();
-    } else if (e.key === "o" || e.key === "O") {
+    } else if (k === "o") {
       e.preventDefault();
       loadProject();
-    } else if (e.key === "n" || e.key === "N") {
+    } else if (k === "n") {
       e.preventDefault();
       newProject();
     }
@@ -81,14 +98,12 @@ function App() {
   });
   onCleanup(() => { unlistenClose.then((u) => u()).catch(() => {}); });
 
-  // Reactive window title: "PhaseForge — ProjectName *"
   createEffect(() => {
     const pName = projectName();
     const path = currentProjectPath();
     const dirty = isDirty();
-    // Prefer project name, fallback to filename, fallback to "Untitled"
     const name = pName ?? (path ? path.split("/").pop() : "Untitled");
-    document.title = `PhaseForge — ${name}${dirty ? " *" : ""}`;
+    document.title = `PhaseForge — ${name}${dirty ? " •" : ""}`;
   });
 
   // Plot split removed — all modes now in FrequencyPlot tabs
@@ -112,13 +127,13 @@ function App() {
           class="tb-btn"
           onClick={() => undo()}
           disabled={!canUndo()}
-          title={canUndo() ? `Откатить: ${lastUndoLabel()}` : "Нечего откатывать"}
+          title={canUndo() ? `Откатить: ${lastUndoLabel()}` : "Откатить (нет действий)"}
         >↶</button>
         <button
           class="tb-btn"
           onClick={() => redo()}
           disabled={!canRedo()}
-          title={canRedo() ? `Повторить: ${lastRedoLabel()}` : "Нечего повторить"}
+          title={canRedo() ? `Повторить: ${lastRedoLabel()}` : "Повторить (нет действий)"}
         >↷</button>
         <span class="top-project-name" title={currentProjectPath() ?? "Untitled"}>
           {projectName() ?? (currentProjectPath()
@@ -190,6 +205,7 @@ function App() {
       <VersionsDialog />
       <CrossoverDialog />
       <FirSettingsDialog />
+      <Toasts />
     </div>
   );
 }

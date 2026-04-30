@@ -19,6 +19,9 @@ export function openVersionsDialog(): void {
   void refreshSnapshots();
 }
 
+/** Read-only signal so global shortcuts can suspend while the dialog is open. */
+export const isVersionsDialogOpen = _open;
+
 type RestoreChoice = "yes" | "no" | "cancel";
 
 function formatTs(ts: string): string {
@@ -101,7 +104,9 @@ export default function VersionsDialog() {
     setBusy(true);
     setStatusMsg(null);
     try {
-      const auto = `Авто-снимок перед загрузкой «${s.description}»`;
+      const now = new Date();
+      const stamp = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+      const auto = `Авто-снимок · ${stamp} · перед загрузкой «${s.description}»`;
       await restoreSnapshot(s.id, savePrevious, auto);
       close();
     } catch (e) {
@@ -146,6 +151,7 @@ export default function VersionsDialog() {
                 class="dlg-btn dlg-btn-primary"
                 onClick={() => { setCreating(true); setDraft(""); setStatusMsg(null); }}
                 disabled={busy()}
+                title="Создать версию текущего состояния с описанием"
               >+ Сохранить версию</button>
             </div>
           </Show>
@@ -198,12 +204,31 @@ export default function VersionsDialog() {
                         <div style={{ "font-size": "12px", color: "#888" }}>
                           {formatTs(s.ts)} · {s.app_version || "—"}
                         </div>
-                        <div style={{ "white-space": "nowrap", "overflow": "hidden", "text-overflow": "ellipsis" }} title={s.description}>
-                          {s.description || "(без описания)"}
+                        <div
+                          style={{
+                            "white-space": "nowrap",
+                            "overflow": "hidden",
+                            "text-overflow": "ellipsis",
+                            "font-style": s.description ? "normal" : "italic",
+                            "color": s.description ? undefined : "#888",
+                          }}
+                          title={s.description || "Описание не сохранилось при перестроении индекса"}
+                        >
+                          {s.description || "(описание утеряно)"}
                         </div>
                       </div>
-                      <button class="dlg-btn" onClick={() => startRestore(s)} disabled={busy()}>Восстановить</button>
-                      <button class="dlg-btn" onClick={() => handleDelete(s)} disabled={busy()} title="Удалить">×</button>
+                      <button
+                        class="dlg-btn"
+                        onClick={() => startRestore(s)}
+                        disabled={busy()}
+                        title="Загрузить состояние этой версии в текущий проект"
+                      >Восстановить</button>
+                      <button
+                        class="dlg-btn"
+                        onClick={() => handleDelete(s)}
+                        disabled={busy()}
+                        title="Удалить эту версию (файл будет удалён с диска)"
+                      >×</button>
                     </div>
                   )}
                 </For>
