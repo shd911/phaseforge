@@ -91,6 +91,7 @@ export default function MeasurementAnalysisDialog() {
         };
         const allApplied = () =>
           findings().length > 0 && appliedFindingIds().size >= findings().length;
+        const remainingCount = () => findings().length - appliedFindingIds().size;
         return (
           <div
             class="pn-overlay"
@@ -109,6 +110,9 @@ export default function MeasurementAnalysisDialog() {
                   </div>
                 }
               >
+                <div style={{ "margin-bottom": "8px", "font-size": "13px" }}>
+                  Выберите рекомендации, которые применить. Можно по одной или сразу все.
+                </div>
                 <div style={{ "margin-bottom": "12px", color: "#aaa", "font-size": "12px" }}>
                   Найдено: {counts().warn} предупреждений, {counts().info} заметок
                   {counts().err > 0 ? `, ${counts().err} ошибок` : ""}
@@ -149,14 +153,18 @@ export default function MeasurementAnalysisDialog() {
               </Show>
 
               <div class="pn-buttons" style={{ "margin-top": "16px" }}>
+                <button class="dlg-btn" onClick={close}>Закрыть</button>
                 <Show when={findings().length > 0}>
                   <button
                     class="dlg-btn dlg-btn-primary"
                     onClick={applyAll}
                     disabled={allApplied()}
-                  >Применить все</button>
+                  >{allApplied()
+                    ? "Все применены"
+                    : remainingCount() === findings().length
+                      ? "Применить все"
+                      : `Применить оставшиеся (${remainingCount()})`}</button>
                 </Show>
-                <button class="dlg-btn" onClick={close}>Закрыть</button>
               </div>
             </div>
           </div>
