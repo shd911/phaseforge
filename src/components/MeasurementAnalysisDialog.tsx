@@ -101,8 +101,10 @@ export default function MeasurementAnalysisDialog() {
               <Show
                 when={findings().length > 0}
                 fallback={
-                  <div style={{ padding: "16px 0", color: "#aaa" }}>
-                    Замер выглядит чисто, проблем не обнаружено.
+                  <div style={{ padding: "32px 0", "text-align": "center" }}>
+                    <div style={{ "font-size": "32px", color: "#7c7", "margin-bottom": "12px" }}>✓</div>
+                    <div style={{ "font-size": "16px", "margin-bottom": "6px" }}>Замер выглядит чисто</div>
+                    <div style={{ color: "#aaa", "font-size": "13px" }}>Анализ не выявил подозрительных участков.</div>
                   </div>
                 }
               >

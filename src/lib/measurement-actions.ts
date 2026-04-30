@@ -51,14 +51,7 @@ async function runAnalysis(bandId: string, m: Measurement, bandName: string): Pr
   try {
     const result = await invoke<AnalysisResult>("analyze_measurement", { measurement: m });
     setBandAnalysis(bandId, result);
-    if (result.findings.length > 0) {
-      openMeasurementAnalysis({
-        bandId,
-        bandName,
-        fileName: m.name,
-        result,
-      });
-    }
+    openMeasurementAnalysis({ bandId, bandName, fileName: m.name, result });
   } catch (e) {
     console.warn("analyze_measurement failed:", e);
   }

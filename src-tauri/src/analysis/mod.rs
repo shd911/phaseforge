@@ -1,5 +1,6 @@
 use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
+use tracing::info;
 
 use crate::io::Measurement;
 
@@ -161,8 +162,6 @@ fn detect_noise_floor_low(freq: &[f64], magnitude: &[f64]) -> Option<Finding> {
         return None;
     }
     let mean = window_mean(freq, magnitude, f_low).unwrap_or(0.0);
-    // Reject if the flat region isn't actually below the rest of the band —
-    // otherwise a perfectly flat measurement would falsely trigger.
     let rest_idx = freq.partition_point(|&f| f <= f_low * 1.2);
     if rest_idx < freq.len() {
         let rest_median = median(&magnitude[rest_idx..]);
@@ -323,12 +322,10 @@ pub fn detect_lf_rolloff(measurement: &Measurement, noise_floor_low: Option<f64>
     if !no_resonance(freq, mag, lo_idx, hi_idx) {
         return None;
     }
-    // f_min usable ≈ where slope crosses out of rolloff. Conservative: top of
-    // the analysed window.
     let f_round = round_freq(f_hi);
     if let Some(nf) = noise_floor_low {
         if f_round <= nf * 1.05 {
-            return None; // dominated by noise floor warning
+            return None;
         }
     }
     Some(Finding {
@@ -432,6 +429,14 @@ pub fn analyze_measurement(measurement: Measurement) -> Result<AnalysisResult, S
     if let Some(f) = detect_hf_cliff(freq, mag, sr) {
         findings.push(f);
     }
+    info!(
+        "analyze_measurement: name={}, len={}, sr={:?}, findings={} ids={:?}",
+        measurement.name,
+        measurement.freq.len(),
+        measurement.sample_rate,
+        findings.len(),
+        findings.iter().map(|f| f.id.as_str()).collect::<Vec<_>>(),
+    );
     Ok(AnalysisResult {
         timestamp: Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
         app_version: env!("CARGO_PKG_VERSION").into(),
