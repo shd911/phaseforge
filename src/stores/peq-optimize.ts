@@ -11,8 +11,11 @@ import {
   setBandPeqBands,
   clearBandPeqBands,
   setSelectedPeqIdx,
+  _captureBandsLight,
+  _applyBandsLight,
 } from "./bands";
 import type { BandState } from "./bands";
+import { pushHistory, registerHistoryHooks, type HistoryEntry } from "./history";
 
 // --- Signals ---
 export const [tolerance, setTolerance] = createSignal(1.0);
@@ -150,6 +153,7 @@ function mergeBands(frozen: PeqBand[], optimized: PeqBand[]): PeqBand[] {
 export async function handleOptimizePeq() {
   const b = activeBand();
   if (!b || !b.measurement) return;
+  pushHistory("Optimize PEQ");
   setComputing(true);
   setPeqError(null);
   try {
@@ -170,6 +174,7 @@ export async function handleOptimizeAll() {
   const bands = appState.bands;
   const eligible = bands.filter((b) => b.measurement);
   if (eligible.length === 0) return;
+  pushHistory("Optimize all");
   setComputing(true);
   setPeqError(null);
   try {
@@ -199,3 +204,37 @@ export function handleClearPeq() {
   setMaxErr(null);
   setSelectedPeqIdx(null);
 }
+
+// ---------------------------------------------------------------------------
+// History hook registration: combines bands' light snapshot with PEQ params.
+// ---------------------------------------------------------------------------
+
+registerHistoryHooks(
+  (label: string): HistoryEntry => {
+    const part = _captureBandsLight();
+    return {
+      ...part,
+      peqParams: {
+        tolerance: tolerance(),
+        maxBands: maxBands(),
+        gainRegularization: gainRegularization(),
+        peqFloor: peqFloor(),
+        peqRangeMode: peqRangeMode(),
+        peqDirectLow: peqDirectLow(),
+        peqDirectHigh: peqDirectHigh(),
+      },
+      label,
+      ts: Date.now(),
+    };
+  },
+  (entry: HistoryEntry) => {
+    setTolerance(entry.peqParams.tolerance);
+    setMaxBands(entry.peqParams.maxBands);
+    setGainRegularization(entry.peqParams.gainRegularization);
+    setPeqFloor(entry.peqParams.peqFloor);
+    setPeqRangeMode(entry.peqParams.peqRangeMode);
+    setPeqDirectLow(entry.peqParams.peqDirectLow);
+    setPeqDirectHigh(entry.peqParams.peqDirectHigh);
+    _applyBandsLight(entry);
+  },
+);

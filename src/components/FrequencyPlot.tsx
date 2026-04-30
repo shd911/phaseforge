@@ -4,7 +4,7 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { invoke } from "@tauri-apps/api/core";
 import type { Measurement, TargetResponse, FilterType, FilterConfig, PeqBand, WindowType } from "../lib/types";
-import { appState, activeBand, isSum, activeTab, plotTab, setPlotTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, setPeqDragging, updatePeqBand, commitPeqBand, bandsVersion, exportSampleRate, setExportSampleRate, exportTaps, setExportTaps, exportWindow, setExportWindow, firIterations, firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess, firMaxBoost, firNoiseFloor, exportMetrics, setExportMetrics, plotSnapshots, addPlotSnapshot, clearPlotSnapshots, setAlignmentDelay, setBandSmoothing } from "../stores/bands";
+import { appState, activeBand, isSum, activeTab, plotTab, setPlotTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, setPeqDragging, updatePeqBand, commitPeqBand, bandsVersion, exportSampleRate, setExportSampleRate, exportTaps, setExportTaps, exportWindow, setExportWindow, firIterations, firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess, firMaxBoost, firNoiseFloor, exportMetrics, setExportMetrics, plotSnapshots, addPlotSnapshot, clearPlotSnapshots, setAlignmentDelay, setBandSmoothing, beginInteraction, commitInteraction } from "../stores/bands";
 import type { SmoothingMode, BandState, FreqSnapshot } from "../stores/bands";
 import { needAutoFit, setNeedAutoFit } from "../App";
 import { computeFloorBounce } from "../lib/floor-bounce";
@@ -4207,7 +4207,7 @@ export default function FrequencyPlot() {
 
   function handlePeqDragMove(e: MouseEvent) {
     if (!peqDragActive || !chart || peqDragIdx < 0) return;
-    if (!peqDragMoved) { peqDragMoved = true; setPeqDragging(true); }
+    if (!peqDragMoved) { peqDragMoved = true; beginInteraction("PEQ drag"); setPeqDragging(true); }
     const overEl = chart.over ?? containerRef;
     const rect = overEl?.getBoundingClientRect();
     if (!rect) return;
@@ -4245,6 +4245,9 @@ export default function FrequencyPlot() {
       setSelectedPeqIdx(newIdx);
     }
     if (peqDragMoved) {
+      // Commit history synchronously so a quick re-drag can capture fresh
+      // pre-state. peqDragging stays true for 150ms to keep PEQ rebuild quiet.
+      commitInteraction();
       if (peqDragTimeout) clearTimeout(peqDragTimeout);
       peqDragTimeout = setTimeout(() => setPeqDragging(false), 150);
     }
@@ -4280,11 +4283,11 @@ export default function FrequencyPlot() {
     const delta = e.deltaY > 0 ? -0.15 : 0.15;
     const newQ = Math.max(0.1, Math.min(30, pb.q + pb.q * delta));
 
-    if (!peqDragging()) setPeqDragging(true);
+    if (!peqDragging()) { beginInteraction("PEQ wheel"); setPeqDragging(true); }
     updatePeqBand(bd.id, selIdx!, { q: Math.round(newQ * 100) / 100 });
     peqFastUpdate(bd);
     if (peqWheelTimeout) clearTimeout(peqWheelTimeout);
-    peqWheelTimeout = setTimeout(() => setPeqDragging(false), 400);
+    peqWheelTimeout = setTimeout(() => { setPeqDragging(false); commitInteraction(); }, 400);
   }
 
   onCleanup(() => {

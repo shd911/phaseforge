@@ -32,6 +32,7 @@ import type { FilterConfig } from "../lib/types";
 import { tolerance, setTolerance, maxBands, setMaxBands, gainRegularization, setGainRegularization, peqFloor, setPeqFloor, peqRangeMode, setPeqRangeMode, peqDirectLow, setPeqDirectLow, peqDirectHigh, setPeqDirectHigh } from "../stores/peq-optimize";
 import type { AppState, BandState, PerMeasurementSettings, FloorBounceConfig, MergeSource } from "../stores/bands";
 import type { Measurement, MergeResult, WindowType } from "../lib/types";
+import { clearHistory } from "../stores/history";
 
 // ---------------------------------------------------------------------------
 // Signals: project path, project directory, project name
@@ -734,6 +735,7 @@ export async function newProject(): Promise<void> {
   const pfprojPath = `${folderPath}/${trimmedName}.pfproj`;
   setCurrentProjectPath(pfprojPath);
   setIsDirty(false);
+  clearHistory();
 
   // 6. Auto-save initial empty project
   try {
@@ -878,6 +880,7 @@ async function doLoad(path: string): Promise<void> {
 
   await restoreState(project, project.version >= 2 ? info.dir : null);
   setCurrentProjectPath(path);
+  clearHistory();
   // Add to recent projects
   await invoke("add_recent_project", { path }).catch(() => {});
 }

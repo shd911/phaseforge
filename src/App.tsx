@@ -20,6 +20,8 @@ import {
   projectName,
   confirmIfDirty,
 } from "./lib/project-io";
+import { undo, redo, canUndo, canRedo, lastUndoLabel, lastRedoLabel } from "./stores/history";
+import { peqDragging } from "./stores/bands";
 import FileMenu from "./components/FileMenu";
 import FrequencyPlot from "./components/FrequencyPlot";
 import ControlPanel from "./components/ControlPanel";
@@ -37,9 +39,23 @@ import { activeTab } from "./stores/bands";
 export const [needAutoFit, setNeedAutoFit] = createSignal(false);
 
 function App() {
-  // Keyboard shortcuts: Cmd+N, Cmd+S, Cmd+Shift+S, Cmd+O
+  // Keyboard shortcuts: Cmd+N/S/Shift+S/O, Cmd+Z/Shift+Cmd+Z
+  const isEditableTarget = (t: EventTarget | null): boolean => {
+    if (!(t instanceof HTMLElement)) return false;
+    const tag = t.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+    return t.isContentEditable;
+  };
   const handleKeys = (e: KeyboardEvent) => {
     if (!(e.metaKey || e.ctrlKey)) return;
+    if (e.key === "z" || e.key === "Z") {
+      if (isEditableTarget(e.target)) return;
+      if (peqDragging()) return; // mid-drag — let user finish the drag first
+      e.preventDefault();
+      if (e.shiftKey) redo();
+      else undo();
+      return;
+    }
     if (e.key === "s" || e.key === "S") {
       e.preventDefault();
       if (e.shiftKey) saveProjectAs();
@@ -91,6 +107,18 @@ function App() {
         <span class="top-logo">PhaseForge</span>
         <div class="top-sep" />
         <FileMenu />
+        <button
+          class="tb-btn"
+          onClick={() => undo()}
+          disabled={!canUndo()}
+          title={canUndo() ? `Откатить: ${lastUndoLabel()}` : "Нечего откатывать"}
+        >↶</button>
+        <button
+          class="tb-btn"
+          onClick={() => redo()}
+          disabled={!canRedo()}
+          title={canRedo() ? `Повторить: ${lastRedoLabel()}` : "Нечего повторить"}
+        >↷</button>
         <span class="top-project-name" title={currentProjectPath() ?? "Untitled"}>
           {projectName() ?? (currentProjectPath()
             ? currentProjectPath()!.split("/").pop()

@@ -2,6 +2,16 @@ import { createStore, reconcile } from "solid-js/store";
 import { createSignal, batch } from "solid-js";
 import type { Measurement, TargetCurve, MergeConfig, PeqBand, FirResult, WindowType, ExclusionZone } from "../lib/types";
 import { MEASUREMENT_COLORS } from "../lib/types";
+import {
+  pushHistory,
+  beginInteraction,
+  commitInteraction,
+  registerHistoryHooks,
+  type HistoryEntry,
+  type LightBand,
+} from "./history";
+// Re-exported for explicit drag wiring elsewhere.
+export { pushHistory, beginInteraction, commitInteraction } from "./history";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -231,6 +241,7 @@ export function isSum(): boolean {
 // ---------------------------------------------------------------------------
 
 export function addBand() {
+  pushHistory("Add band");
   const num = state.nextBandNum;
   const band = createBand(num);
   batch(() => {
@@ -246,6 +257,7 @@ export function removeBand(id: string) {
   if (state.bands.length <= 1) return; // нельзя удалить последнюю полосу
   const idx = bandIndex(id);
   if (idx < 0) return;
+  pushHistory("Remove band");
   batch(() => {
     // Сбрасываем linkedToNext у предыдущей полосы (если была связана с удаляемой)
     if (idx > 0 && state.bands[idx - 1].linkedToNext) {
@@ -275,6 +287,7 @@ export function setActiveBandSum() {
 export function renameBand(id: string, name: string) {
   const idx = bandIndex(id);
   if (idx < 0) return;
+  pushHistory("Rename band");
   setState("bands", idx, "name", name);
   markDirty();
 }
@@ -284,6 +297,7 @@ export function moveBand(fromIdx: number, toIdx: number) {
   if (fromIdx === toIdx) return;
   if (fromIdx < 0 || fromIdx >= state.bands.length) return;
   if (toIdx < 0 || toIdx >= state.bands.length) return;
+  pushHistory("Move band");
 
   const bands = [...state.bands].map(b => ({
     ...b,
@@ -430,6 +444,7 @@ export function updateBandPhase(bandId: string, newPhase: number[]) {
 export function toggleBandTarget(bandId: string) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
+  pushHistory("Toggle target");
   setState("bands", idx, "targetEnabled", !state.bands[idx].targetEnabled);
   markDirty();
 }
@@ -447,6 +462,7 @@ export function ensureTargetEnabled(bandId: string) {
 export function toggleBandInverted(bandId: string) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
+  pushHistory("Invert polarity");
   setState("bands", idx, "inverted", !state.bands[idx].inverted);
   markDirty();
 }
@@ -455,6 +471,7 @@ export function toggleBandInverted(bandId: string) {
 export function toggleBandLinked(bandId: string) {
   const idx = bandIndex(bandId);
   if (idx < 0 || idx >= state.bands.length - 1) return; // нельзя link последнюю полосу
+  pushHistory("Toggle link");
   const newVal = !state.bands[idx].linkedToNext;
   setState("bands", idx, "linkedToNext", newVal);
   // При включении связи — синхронизируем LP → HP следующей (freq + type + order + linear_phase)
@@ -489,6 +506,7 @@ export function isBandLinkedFromPrev(bandId: string): boolean {
 export function setBandPreset(bandId: string, preset: PresetName) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
+  pushHistory("Apply preset");
   setState("bands", idx, "target", PRESETS[preset]());
   markDirty();
 }
@@ -496,6 +514,7 @@ export function setBandPreset(bandId: string, preset: PresetName) {
 export function setBandReferenceLevel(bandId: string, db: number) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
+  pushHistory("Reference level");
   setState("bands", idx, "target", "reference_level_db", db);
   markDirty();
 }
@@ -503,6 +522,7 @@ export function setBandReferenceLevel(bandId: string, db: number) {
 export function setBandTilt(bandId: string, dbPerOctave: number) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
+  pushHistory("Target tilt");
   setState("bands", idx, "target", "tilt_db_per_octave", dbPerOctave);
   markDirty();
 }
@@ -523,6 +543,7 @@ function unwrapFilterConfig(f: import("../lib/types").FilterConfig): import("../
 export function setBandHighPass(bandId: string, config: import("../lib/types").FilterConfig | null) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
+  pushHistory("Edit crossover");
   // Deep clone to prevent shared reference with LP in SolidJS store
   if (config) config = unwrapFilterConfig(config);
   // Валидация: HP freq не может быть >= LP freq (enforce 5% minimum gap)
@@ -573,6 +594,7 @@ export function setBandHighPass(bandId: string, config: import("../lib/types").F
 export function setBandLowPass(bandId: string, config: import("../lib/types").FilterConfig | null) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
+  pushHistory("Edit crossover");
   // Deep clone to prevent shared reference with HP in SolidJS store
   if (config) config = unwrapFilterConfig(config);
   // Валидация: LP freq не может быть <= HP freq (enforce 5% minimum gap)
@@ -618,6 +640,7 @@ export function setBandLowPass(bandId: string, config: import("../lib/types").Fi
 export function setBandLowShelf(bandId: string, config: import("../lib/types").ShelfConfig | null) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
+  pushHistory("Edit shelf");
   setState("bands", idx, "target", "low_shelf", config);
   if (config && !state.bands[idx].targetEnabled) {
     setState("bands", idx, "targetEnabled", true);
@@ -628,6 +651,7 @@ export function setBandLowShelf(bandId: string, config: import("../lib/types").S
 export function setBandHighShelf(bandId: string, config: import("../lib/types").ShelfConfig | null) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
+  pushHistory("Edit shelf");
   setState("bands", idx, "target", "high_shelf", config);
   if (config && !state.bands[idx].targetEnabled) {
     setState("bands", idx, "targetEnabled", true);
@@ -708,6 +732,7 @@ export function setBandPeqBands(bandId: string, bands: PeqBand[]) {
 export function removePeqBand(bandId: string, peqIdx: number) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
+  pushHistory("Remove PEQ");
   setState("bands", idx, "peqBands", (prev) => prev.filter((_, i) => i !== peqIdx));
   markDirty();
 }
@@ -715,6 +740,7 @@ export function removePeqBand(bandId: string, peqIdx: number) {
 export function clearBandPeqBands(bandId: string) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
+  pushHistory("Clear PEQ");
   setState("bands", idx, "peqBands", []);
   markDirty();
 }
@@ -722,6 +748,7 @@ export function clearBandPeqBands(bandId: string) {
 export function addPeqBand(bandId: string, band: PeqBand) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
+  pushHistory("Add PEQ");
   // Добавляем в начало — новый фильтр всегда первая строка таблицы
   setState("bands", idx, "peqBands", (prev) => [band, ...prev]);
   markDirty();
@@ -732,6 +759,7 @@ export function updatePeqBand(bandId: string, peqIdx: number, patch: Partial<Peq
   if (idx < 0) return;
   const peq = state.bands[idx].peqBands[peqIdx];
   if (!peq) return;
+  pushHistory("PEQ adjust");
   const updated = { ...peq, ...patch };
   setState("bands", idx, "peqBands", peqIdx, updated);
   markDirty();
@@ -758,6 +786,7 @@ export function commitPeqBand(bandId: string, peqIdx: number): number {
 export function addExclusionZone(bandId: string, zone: ExclusionZone) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
+  pushHistory("Exclusion zone");
   setState("bands", idx, "exclusionZones", (prev) => [...prev, zone]);
   markDirty();
 }
@@ -765,6 +794,7 @@ export function addExclusionZone(bandId: string, zone: ExclusionZone) {
 export function removeExclusionZone(bandId: string, zoneIdx: number) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
+  pushHistory("Exclusion zone");
   setState("bands", idx, "exclusionZones", (prev) => prev.filter((_, i) => i !== zoneIdx));
   markDirty();
 }
@@ -772,6 +802,7 @@ export function removeExclusionZone(bandId: string, zoneIdx: number) {
 export function updateExclusionZone(bandId: string, zoneIdx: number, patch: Partial<ExclusionZone>) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
+  pushHistory("Exclusion zone");
   setState("bands", idx, "exclusionZones", zoneIdx, (prev) => ({ ...prev, ...patch }));
   markDirty();
 }
@@ -806,6 +837,7 @@ export function setBandColor(bandId: string, color: string) {
 export function setAlignmentDelay(bandId: string, seconds: number) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
+  pushHistory("Alignment delay");
   batch(() => {
     setState("bands", idx, "alignmentDelay", seconds);
     markDirty();
@@ -990,6 +1022,103 @@ export const [bandsVersion, setBandsVersion] = createSignal(0);
 export function markDirty() {
   if (!isDirty()) setIsDirty(true);
   setBandsVersion(v => v + 1);
+}
+
+// ---------------------------------------------------------------------------
+// History snapshot helpers (b132). Capture / apply the bands+FIR+export part.
+// PEQ-optimize signals are merged in by peq-optimize.ts at hook registration.
+// ---------------------------------------------------------------------------
+
+export function _captureBandsLight(): {
+  bands: LightBand[];
+  activeBandId: string;
+  nextBandNum: number;
+  firParams: HistoryEntry["firParams"];
+  exportParams: HistoryEntry["exportParams"];
+} {
+  const lightBands: LightBand[] = state.bands.map((b) => ({
+    id: b.id,
+    name: b.name,
+    peqBands: JSON.parse(JSON.stringify(b.peqBands)),
+    target: JSON.parse(JSON.stringify(b.target)),
+    targetEnabled: b.targetEnabled,
+    inverted: b.inverted,
+    linkedToNext: b.linkedToNext,
+    alignmentDelay: b.alignmentDelay,
+    color: b.color,
+    exclusionZones: JSON.parse(JSON.stringify(b.exclusionZones)),
+  }));
+  return {
+    bands: lightBands,
+    activeBandId: state.activeBandId,
+    nextBandNum: state.nextBandNum,
+    firParams: {
+      iterations: firIterations(),
+      freqWeighting: firFreqWeighting(),
+      narrowbandLimit: firNarrowbandLimit(),
+      nbSmoothingOct: firNbSmoothingOct(),
+      nbMaxExcess: firNbMaxExcess(),
+      maxBoost: firMaxBoost(),
+      noiseFloor: firNoiseFloor(),
+    },
+    exportParams: {
+      sampleRate: exportSampleRate(),
+      taps: exportTaps(),
+      window: exportWindow(),
+      hybridPhase: exportHybridPhase(),
+    },
+  };
+}
+
+export function _applyBandsLight(entry: HistoryEntry): void {
+  batch(() => {
+    const currentById = new Map(state.bands.map((b) => [b.id, b]));
+    const newBands: BandState[] = entry.bands.map((lb) => {
+      const cur = currentById.get(lb.id);
+      const target = JSON.parse(JSON.stringify(lb.target)) as TargetCurve;
+      const peqBands = JSON.parse(JSON.stringify(lb.peqBands));
+      const exclusionZones = JSON.parse(JSON.stringify(lb.exclusionZones));
+      return {
+        id: lb.id,
+        name: lb.name,
+        measurement: cur?.measurement ?? null,
+        measurementFile: cur?.measurementFile ?? null,
+        settings: cur?.settings ?? null,
+        target,
+        targetEnabled: lb.targetEnabled,
+        inverted: lb.inverted,
+        linkedToNext: lb.linkedToNext,
+        peqBands,
+        exclusionZones,
+        firResult: cur?.firResult ?? null,
+        crossNormDb: cur?.crossNormDb ?? 0,
+        color: lb.color,
+        alignmentDelay: lb.alignmentDelay,
+      };
+    });
+    // Build a plain AppState literal (no spread of store proxy).
+    setState(reconcile({
+      bands: newBands,
+      activeBandId: entry.activeBandId,
+      showPhase: state.showPhase,
+      showMag: state.showMag,
+      showTarget: state.showTarget,
+      nextBandNum: entry.nextBandNum,
+    }));
+    setExportSampleRate(entry.exportParams.sampleRate);
+    setExportTaps(entry.exportParams.taps);
+    setExportWindow(entry.exportParams.window);
+    setExportHybridPhase(entry.exportParams.hybridPhase);
+    setFirIterations(entry.firParams.iterations);
+    setFirFreqWeighting(entry.firParams.freqWeighting);
+    setFirNarrowbandLimit(entry.firParams.narrowbandLimit);
+    setFirNbSmoothingOct(entry.firParams.nbSmoothingOct);
+    setFirNbMaxExcess(entry.firParams.nbMaxExcess);
+    setFirMaxBoost(entry.firParams.maxBoost);
+    setFirNoiseFloor(entry.firParams.noiseFloor);
+    setIsDirty(true);
+    setBandsVersion((v) => v + 1);
+  });
 }
 
 // ---------------------------------------------------------------------------
