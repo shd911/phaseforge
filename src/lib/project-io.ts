@@ -169,7 +169,7 @@ function isSafePath(p: string): boolean {
 // Build project data: AppState (camelCase) → ProjectFile (snake_case)
 // ---------------------------------------------------------------------------
 
-interface ProjectFile {
+export interface ProjectFile {
   version: number;
   app_name: string;
   project_name?: string | null;
@@ -198,6 +198,10 @@ interface ProjectFile {
   fir_nb_max_excess_db?: number;
   fir_max_boost_db?: number;
   fir_noise_floor_db?: number;
+  snapshot_id?: string | null;
+  snapshot_description?: string | null;
+  snapshot_app_version?: string | null;
+  snapshot_ts?: string | null;
 }
 
 interface ProjectBand {
@@ -291,7 +295,7 @@ function mapBandToProject(b: BandState): ProjectBand {
   };
 }
 
-function buildProjectData(): ProjectFile {
+export function buildProjectData(): ProjectFile {
   const isV2 = projectDir() !== null;
   return {
     version: isV2 ? 2 : 1,
@@ -388,7 +392,7 @@ function mapBandFromProject(b: ProjectBand, idx: number): BandState {
 }
 
 /** Restore state from a loaded project. For v2, re-import measurements from files. */
-async function restoreState(project: ProjectFile, projDir: string | null) {
+export async function restoreState(project: ProjectFile, projDir: string | null) {
   const bands = project.bands.map((b, i) => mapBandFromProject(b, i));
 
   // v2: re-import measurements from files in project folder

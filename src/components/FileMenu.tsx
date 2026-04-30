@@ -6,8 +6,10 @@ import {
   loadProject,
   loadProjectFromPath,
   newProject,
+  projectDir,
 } from "../lib/project-io";
 import { isDirty } from "../stores/bands";
+import { openVersionsDialog } from "./VersionsDialog";
 
 export default function FileMenu() {
   const [isOpen, setIsOpen] = createSignal(false);
@@ -175,6 +177,17 @@ export default function FileMenu() {
           <button class="file-menu-item" onClick={handleSaveAs}>
             <span class="file-menu-label">Save As...</span>
             <span class="file-menu-shortcut">{"\u21E7\u2318"}S</span>
+          </button>
+
+          <div class="file-menu-sep" />
+
+          <button
+            class="file-menu-item"
+            onClick={() => { closeMenu(); openVersionsDialog(); }}
+            disabled={projectDir() === null}
+            title={projectDir() === null ? "\u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u0435 \u043F\u0440\u043E\u0435\u043A\u0442, \u0447\u0442\u043E\u0431\u044B \u0441\u043E\u0437\u0434\u0430\u0432\u0430\u0442\u044C \u0432\u0435\u0440\u0441\u0438\u0438" : ""}
+          >
+            <span class="file-menu-label">{"\u0412\u0435\u0440\u0441\u0438\u0438\u2026"}</span>
           </button>
         </div>
       </Show>

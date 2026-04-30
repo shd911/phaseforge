@@ -7,6 +7,7 @@ pub mod peq;
 pub mod phase;
 pub mod project;
 pub mod recent;
+pub mod snapshots;
 pub mod target;
 
 use std::path::{Path, PathBuf};
@@ -551,7 +552,7 @@ pub fn run() {
         )
         .init();
 
-    info!("PhaseForge v0.1.0-b132 starting...");
+    info!("PhaseForge v0.1.0-b133 starting...");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -602,6 +603,11 @@ pub fn run() {
             recent::add_recent_project,
             recent::clear_recent_projects,
             close_window_now,
+            snapshots::create_snapshot,
+            snapshots::list_snapshots,
+            snapshots::load_snapshot,
+            snapshots::delete_snapshot,
+            snapshots::rebuild_snapshot_index,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

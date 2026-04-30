@@ -28,6 +28,7 @@ import ControlPanel from "./components/ControlPanel";
 import BandTabs from "./components/BandTabs";
 import ProjectNameDialog from "./components/ProjectNameDialog";
 import UnsavedChangesDialog from "./components/UnsavedChangesDialog";
+import VersionsDialog from "./components/VersionsDialog";
 import WelcomeDialog from "./components/WelcomeDialog";
 import CrossoverDialog from "./components/CrossoverDialog";
 import FirSettingsDialog from "./components/FirSettingsDialog";
@@ -186,6 +187,7 @@ function App() {
       <WelcomeDialog />
       <ProjectNameDialog />
       <UnsavedChangesDialog />
+      <VersionsDialog />
       <CrossoverDialog />
       <FirSettingsDialog />
     </div>

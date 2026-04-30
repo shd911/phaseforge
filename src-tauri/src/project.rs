@@ -69,6 +69,18 @@ pub struct ProjectFile {
     pub fir_max_boost_db: Option<f64>,
     #[serde(default)]
     pub fir_noise_floor_db: Option<f64>,
+
+    // Snapshot metadata: present only inside snapshots/<id>.pfproj copies.
+    // Lets rebuild_snapshot_index reconstruct the index from orphan files.
+    // skip_serializing_if keeps the live <name>.pfproj free of these fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_app_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_ts: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
