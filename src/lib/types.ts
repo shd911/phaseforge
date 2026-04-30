@@ -111,6 +111,35 @@ export interface ExclusionZone {
   endHz: number;
 }
 
+// Measurement analysis (b135). Mirrors Rust src-tauri/src/analysis/mod.rs.
+export type AnalysisSeverity = "Info" | "Warning" | "Error";
+
+export type AnalysisAction =
+  | { type: "SetOptLowerBound"; value: number }
+  | { type: "SetOptUpperBound"; value: number }
+  | { type: "AddExclusionZone"; value: { low_hz: number; high_hz: number } }
+  | { type: "ApplySmoothing"; value: string };
+
+export interface AnalysisRecommendation {
+  action: AnalysisAction;
+  label: string;
+}
+
+export interface AnalysisFinding {
+  id: string;
+  severity: AnalysisSeverity;
+  title: string;
+  description: string;
+  freq_range: [number, number] | null;
+  recommendations: AnalysisRecommendation[];
+}
+
+export interface AnalysisResult {
+  timestamp: string;
+  app_version: string;
+  findings: AnalysisFinding[];
+}
+
 export interface PeqConfig {
   max_bands: number;
   tolerance_db: number;

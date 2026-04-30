@@ -34,6 +34,7 @@ import type { AppState, BandState, PerMeasurementSettings, FloorBounceConfig, Me
 import type { Measurement, MergeResult, WindowType } from "../lib/types";
 import { clearHistory } from "../stores/history";
 import { showToast } from "./toast";
+import { openMeasurementAnalysis } from "../components/MeasurementAnalysisDialog";
 
 // ---------------------------------------------------------------------------
 // Signals: project path, project directory, project name
@@ -229,6 +230,8 @@ interface ProjectSettings {
   original_phase: number[] | null;
   floor_bounce: ProjectFloorBounce | null;
   merge_source: ProjectMergeSource | null;
+  analysis?: import("./types").AnalysisResult | null;
+  analysis_dismissed?: boolean;
 }
 
 interface ProjectFloorBounce {
@@ -270,6 +273,8 @@ function mapSettingsToProject(s: PerMeasurementSettings): ProjectSettings {
     original_phase: s.originalPhase,
     floor_bounce: fb,
     merge_source: ms,
+    analysis: s.analysis ?? undefined,
+    analysis_dismissed: s.analysisDismissed,
   };
 }
 
@@ -360,6 +365,8 @@ function mapSettingsFromProject(s: ProjectSettings): PerMeasurementSettings {
     originalPhase: s.original_phase,
     floorBounce: fb,
     mergeSource: ms,
+    analysis: s.analysis ?? null,
+    analysisDismissed: s.analysis_dismissed ?? false,
   };
 }
 
@@ -556,6 +563,20 @@ export async function restoreState(project: ProjectFile, projDir: string | null)
       "warn",
       10000,
     );
+  }
+  // Show the analysis dialog at most once per load — first band with
+  // findings that hasn't been dismissed.
+  for (const b of bands) {
+    const a = b.settings?.analysis;
+    if (a && !b.settings?.analysisDismissed && a.findings.length > 0 && b.measurement) {
+      openMeasurementAnalysis({
+        bandId: b.id,
+        bandName: b.name,
+        fileName: b.measurement.name ?? b.name,
+        result: a,
+      });
+      break;
+    }
   }
 }
 

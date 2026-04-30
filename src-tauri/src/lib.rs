@@ -1,3 +1,4 @@
+pub mod analysis;
 pub mod dsp;
 pub mod error;
 pub mod export;
@@ -552,7 +553,7 @@ pub fn run() {
         )
         .init();
 
-    info!("PhaseForge v0.1.0-b134 starting...");
+    info!("PhaseForge v0.1.0-b135 starting...");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -608,6 +609,7 @@ pub fn run() {
             snapshots::load_snapshot,
             snapshots::delete_snapshot,
             snapshots::rebuild_snapshot_index,
+            analysis::analyze_measurement,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

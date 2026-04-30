@@ -3,12 +3,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { createSignal } from "solid-js";
 import {
   activeBand, setBandMeasurement, renameBand, setBandMeasurementFile,
-  setBandDelayInfo, markBandDelayRemoved, setBandMergeSource,
+  setBandDelayInfo, markBandDelayRemoved, setBandMergeSource, setBandAnalysis,
 } from "../stores/bands";
 import { setNeedAutoFit } from "../App";
 import { copyMeasurementToProject, copyMergeFilesToProject, projectDir } from "./project-io";
-import type { Measurement } from "./types";
+import type { Measurement, AnalysisResult } from "./types";
 import type { MergeSource } from "../stores/bands";
+import { openMeasurementAnalysis } from "../components/MeasurementAnalysisDialog";
 
 export const [showMergeDialog, setShowMergeDialog] = createSignal(false);
 
@@ -42,7 +43,25 @@ export async function handleImportMeasurement() {
         markBandDelayRemoved(b.id, newPhase);
       } catch (e) { console.error("Delay removal failed:", e); }
     }
+    await runAnalysis(b.id, measurement, b.name);
   } catch (e) { console.error("Import failed:", e); }
+}
+
+async function runAnalysis(bandId: string, m: Measurement, bandName: string): Promise<void> {
+  try {
+    const result = await invoke<AnalysisResult>("analyze_measurement", { measurement: m });
+    setBandAnalysis(bandId, result);
+    if (result.findings.length > 0) {
+      openMeasurementAnalysis({
+        bandId,
+        bandName,
+        fileName: m.name,
+        result,
+      });
+    }
+  } catch (e) {
+    console.warn("analyze_measurement failed:", e);
+  }
 }
 
 export async function handleMergeComplete(measurement: Measurement, source: MergeSource) {
@@ -75,4 +94,5 @@ export async function handleMergeComplete(measurement: Measurement, source: Merg
       markBandDelayRemoved(b.id, newPhase);
     } catch (e) { console.error("Delay removal failed:", e); }
   }
+  await runAnalysis(b.id, measurement, b.name);
 }

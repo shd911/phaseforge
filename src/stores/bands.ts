@@ -1,6 +1,6 @@
 import { createStore, reconcile } from "solid-js/store";
 import { createSignal, batch } from "solid-js";
-import type { Measurement, TargetCurve, MergeConfig, PeqBand, FirResult, WindowType, ExclusionZone } from "../lib/types";
+import type { Measurement, TargetCurve, MergeConfig, PeqBand, FirResult, WindowType, ExclusionZone, AnalysisResult } from "../lib/types";
 import { MEASUREMENT_COLORS } from "../lib/types";
 import {
   pushHistory,
@@ -40,6 +40,8 @@ export interface PerMeasurementSettings {
   originalPhase: number[] | null; // оригинальная фаза до компенсации задержки
   floorBounce: FloorBounceConfig | null;
   mergeSource: MergeSource | null; // сохранённые параметры merge для интерактивного re-merge
+  analysis: AnalysisResult | null;
+  analysisDismissed: boolean;
 }
 
 export interface BandState {
@@ -90,7 +92,7 @@ function defaultTarget(): TargetCurve {
 }
 
 function defaultSettings(): PerMeasurementSettings {
-  return { smoothing: "off", delay_seconds: null, distance_meters: null, delay_removed: false, originalPhase: null, floorBounce: null, mergeSource: null };
+  return { smoothing: "off", delay_seconds: null, distance_meters: null, delay_removed: false, originalPhase: null, floorBounce: null, mergeSource: null, analysis: null, analysisDismissed: false };
 }
 
 /** Compute equal-octave crossover frequencies for n bands spanning fMin–fMax.
@@ -830,6 +832,21 @@ export function setBandColor(bandId: string, color: string) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
   setState("bands", idx, "color", color);
+  markDirty();
+}
+
+export function setBandAnalysis(bandId: string, analysis: AnalysisResult | null) {
+  const idx = bandIndex(bandId);
+  if (idx < 0 || !state.bands[idx].settings) return;
+  setState("bands", idx, "settings", "analysis", analysis);
+  setState("bands", idx, "settings", "analysisDismissed", false);
+  markDirty();
+}
+
+export function setBandAnalysisDismissed(bandId: string, dismissed: boolean) {
+  const idx = bandIndex(bandId);
+  if (idx < 0 || !state.bands[idx].settings) return;
+  setState("bands", idx, "settings", "analysisDismissed", dismissed);
   markDirty();
 }
 

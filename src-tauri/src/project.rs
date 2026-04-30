@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
+use crate::analysis::AnalysisResult;
 use crate::dsp::merge::MergeConfig;
 use crate::io::Measurement;
 use crate::peq::PeqBand;
@@ -118,6 +119,10 @@ pub struct SettingsData {
     pub original_phase: Option<Vec<f64>>,
     pub floor_bounce: Option<FloorBounceData>,
     pub merge_source: Option<MergeSourceData>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub analysis: Option<AnalysisResult>,
+    #[serde(default)]
+    pub analysis_dismissed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

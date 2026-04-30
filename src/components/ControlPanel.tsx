@@ -72,6 +72,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { setNeedAutoFit } from "../App";
 import { projectDir, projectName, copyMeasurementToProject, copyMergeFilesToProject, sanitize, yymmdd } from "../lib/project-io";
+import { handleImportMeasurement, handleMergeComplete } from "../lib/measurement-actions";
 import MergeDialog from "./MergeDialog";
 
 const FILTER_TYPES: FilterType[] = ["Butterworth", "Bessel", "LinkwitzRiley", "Gaussian", "Custom"];
@@ -424,90 +425,15 @@ function MeasurementsTab() {
 
   const [showMergeDialog, setShowMergeDialog] = createSignal(false);
 
+  // Both delegate to centralized handlers in measurement-actions.ts so the
+  // post-import analysis runs uniformly. Keeping local thin wrappers makes
+  // the JSX wiring (onClick, onMerge) unchanged.
   async function handleImport() {
-    const b = band();
-    if (!b) return;
-    try {
-      const selected = await open({
-        multiple: false,
-        filters: [{ name: "Measurement Files", extensions: ["txt", "frd"] }],
-      });
-      if (!selected) return;
-      const filePath = Array.isArray(selected) ? selected[0] : selected;
-      const measurement = await invoke<Measurement>("import_measurement", { path: filePath });
-      setBandMeasurement(b.id, measurement);
-      // Переименовать вкладку: "Band N · filename"
-      const bandNum = b.name.match(/\d+/)?.[0] ?? "1";
-      const newName = `Band ${bandNum} · ${measurement.name}`;
-      renameBand(b.id, newName);
-      // Copy measurement to project folder (if project folder exists)
-      try {
-        const fileName = await copyMeasurementToProject(filePath, newName);
-        if (fileName) {
-          setBandMeasurementFile(b.id, fileName);
-        }
-      } catch (e) {
-        console.warn("Failed to copy measurement to project folder:", e);
-      }
-      setNeedAutoFit(true);
-      // Авто-компенсация временной задержки при импорте
-      if (measurement.phase) {
-        try {
-          const [newPhase, delay, distance] = await invoke<[number[], number, number]>(
-            "remove_measurement_delay",
-            { freq: measurement.freq, magnitude: measurement.magnitude, phase: measurement.phase, sampleRate: measurement.sample_rate }
-          );
-          setBandDelayInfo(b.id, delay, distance);
-          markBandDelayRemoved(b.id, newPhase);
-        } catch (e) {
-          console.error("Delay removal failed:", e);
-        }
-      }
-    } catch (e) {
-      console.error("Import failed:", e);
-    }
+    await handleImportMeasurement();
   }
 
-  async function handleMergeComplete(measurement: Measurement, source: MergeSource) {
-    const b = band();
-    if (!b) return;
-    setBandMeasurement(b.id, measurement);
-    setBandMergeSource(b.id, source);
-    // Переименовать вкладку: "Band N · filename"
-    const bandNum = b.name.match(/\d+/)?.[0] ?? "1";
-    const newName = `Band ${bandNum} · ${measurement.name}`;
-    renameBand(b.id, newName);
-    // Copy NF/FF files to project folder (if project folder exists)
-    try {
-      const files = await copyMergeFilesToProject(source.nfPath, source.ffPath, newName);
-      if (files) {
-        // For merged bands, set measurementFile to NF as a marker that files are in project.
-        // On load, merge_source triggers re-merge from NF+FF (not single-file import).
-        setBandMeasurementFile(b.id, files.nfFile);
-        // Update merge source paths to project-local copies
-        setBandMergeSource(b.id, {
-          ...source,
-          nfPath: `${projectDir()}/${files.nfFile}`,
-          ffPath: `${projectDir()}/${files.ffFile}`,
-        });
-      }
-    } catch (e) {
-      console.warn("Failed to copy merge files to project folder:", e);
-    }
-    setNeedAutoFit(true);
-    // Авто-компенсация временной задержки при merge
-    if (measurement.phase) {
-      try {
-        const [newPhase, delay, distance] = await invoke<[number[], number, number]>(
-          "remove_measurement_delay",
-          { freq: measurement.freq, magnitude: measurement.magnitude, phase: measurement.phase, sampleRate: measurement.sample_rate }
-        );
-        setBandDelayInfo(b.id, delay, distance);
-        markBandDelayRemoved(b.id, newPhase);
-      } catch (e) {
-        console.error("Delay removal failed:", e);
-      }
-    }
+  async function handleMergeCompleteLocal(measurement: Measurement, source: MergeSource) {
+    await handleMergeComplete(measurement, source);
   }
 
   async function handleToggleDelay() {
@@ -704,7 +630,7 @@ function MeasurementsTab() {
       <Show when={showMergeDialog()}>
         <MergeDialog
           onClose={() => setShowMergeDialog(false)}
-          onMerge={handleMergeComplete}
+          onMerge={handleMergeCompleteLocal}
         />
       </Show>
     </div>
@@ -892,9 +818,9 @@ function PeqTab() {
                 <tr class="peq-row-pending peq-row-selected" onClick={() => setSelectedPeqIdx(pi)}>
                   <td><input type="checkbox" class="peq-toggle" checked={pb.enabled} onChange={() => { const bd = band(); if (bd) updatePeqBand(bd.id, pi, { enabled: !pb.enabled }); }} /></td>
                   <td><select class="peq-type-select" value={pb.filter_type} onChange={(e) => { const bd = band(); if (bd) updatePeqBand(bd.id, pi, { filter_type: e.currentTarget.value as any }); }}><option value="Peaking">PK</option><option value="LowShelf">LS</option><option value="HighShelf">HS</option></select></td>
-                  <td><NumberInput value={pb.freq_hz} onChange={(v) => { const bd = band(); if (bd) updatePeqBand(bd.id, pi, { freq_hz: v }); }} min={20} max={20000} step={(d) => d > 0 ? Math.max(1, Math.round(pb.freq_hz * 0.02)) : -Math.max(1, Math.round(pb.freq_hz * 0.02))} precision={0} /></td>
-                  <td><NumberInput value={pb.gain_db} onChange={(v) => { const bd = band(); if (bd) updatePeqBand(bd.id, pi, { gain_db: v }); }} min={-60} max={60} step={0.1} precision={1} /></td>
-                  <td><NumberInput value={pb.q} onChange={(v) => { const bd = band(); if (bd) updatePeqBand(bd.id, pi, { q: v }); }} min={0.1} max={20} step={0.1} precision={1} /></td>
+                  <td><input class="peq-input" type="number" value={Math.round(pb.freq_hz)} min={20} max={20000} step={1} onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v) && v >= 20 && v <= 20000) { const bd = band(); if (bd) updatePeqBand(bd.id, pi, { freq_hz: v }); } }} /></td>
+                  <td><input class={`peq-input ${pb.gain_db > 0 ? "peq-boost" : "peq-cut"}`} type="number" value={pb.gain_db.toFixed(1)} min={-60} max={60} step={0.1} onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v)) { const bd = band(); if (bd) updatePeqBand(bd.id, pi, { gain_db: v }); } }} /></td>
+                  <td><input class="peq-input" type="number" value={pb.q.toFixed(1)} min={0.1} max={20} step={0.1} onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v) && v >= 0.1 && v <= 20) { const bd = band(); if (bd) updatePeqBand(bd.id, pi, { q: v }); } }} /></td>
                   <td><button class="peq-commit" onClick={() => { const bd = band(); if (bd) { const ni = commitPeqBand(bd.id, pi); setPendingPeqIdx(null); setSelectedPeqIdx(ni); } }}>✓</button></td>
                 </tr>
               </tbody></table>

@@ -32,6 +32,7 @@ import BandTabs from "./components/BandTabs";
 import ProjectNameDialog from "./components/ProjectNameDialog";
 import UnsavedChangesDialog from "./components/UnsavedChangesDialog";
 import VersionsDialog, { openVersionsDialog, isVersionsDialogOpen } from "./components/VersionsDialog";
+import MeasurementAnalysisDialog, { isAnalysisDialogOpen } from "./components/MeasurementAnalysisDialog";
 import Toasts from "./components/Toasts";
 import { showToast } from "./lib/toast";
 import WelcomeDialog from "./components/WelcomeDialog";
@@ -54,7 +55,7 @@ function App() {
     return t.isContentEditable;
   };
   const isModalOpen = (): boolean =>
-    promptVisible() || unsavedDialogVisible() || isVersionsDialogOpen();
+    promptVisible() || unsavedDialogVisible() || isVersionsDialogOpen() || isAnalysisDialogOpen();
 
   const handleKeys = (e: KeyboardEvent) => {
     if (!(e.metaKey || e.ctrlKey)) return;
@@ -203,6 +204,7 @@ function App() {
       <ProjectNameDialog />
       <UnsavedChangesDialog />
       <VersionsDialog />
+      <MeasurementAnalysisDialog />
       <CrossoverDialog />
       <FirSettingsDialog />
       <Toasts />
