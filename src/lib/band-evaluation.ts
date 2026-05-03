@@ -18,7 +18,21 @@ export async function addGaussianMinPhase(
 ): Promise<number[]> {
   let result = phase;
   if (isGaussianMinPhase(hp)) {
-    const hpMag = gaussianFilterMagDb(freq, hp!, false);
+    let hpMag = gaussianFilterMagDb(freq, hp!, false);
+    // b138.3: bake subsonic_protect into the magnitude before Hilbert so the
+    // reconstructed min-phase reflects total (Gaussian × Subsonic). Formula
+    // mirrors Rust apply_filter exactly: 8th-order Butterworth at fc/8.
+    if (hp!.subsonic_protect === true && hp!.freq_hz > 40) {
+      const fSub = hp!.freq_hz / 8;
+      hpMag = hpMag.map((db, i) => {
+        const f = freq[i];
+        if (f <= 0) return db;
+        const ratio = Math.pow(fSub / f, 16);
+        const subsonicLin = Math.sqrt(1 / (1 + ratio));
+        const subsonicDb = subsonicLin > 1e-20 ? 20 * Math.log10(subsonicLin) : -400;
+        return db + subsonicDb;
+      });
+    }
     const hpPh = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: hpMag });
     result = result.map((v, i) => v + hpPh[i]);
   }
