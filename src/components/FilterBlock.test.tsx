@@ -78,6 +78,7 @@ function unwrapFilter(f: FilterConfig | null | undefined): FilterConfig | null {
     shape: f.shape,
     linear_phase: f.linear_phase,
     q: f.q,
+    subsonic_protect: f.subsonic_protect ?? null,
   };
 }
 

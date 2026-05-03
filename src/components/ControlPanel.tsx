@@ -128,6 +128,7 @@ function unwrapFilter(f: import("../lib/types").FilterConfig | null | undefined)
     shape: f.shape,
     linear_phase: f.linear_phase,
     q: f.q,
+    subsonic_protect: f.subsonic_protect ?? null,
   };
 }
 
@@ -421,10 +422,6 @@ function FilterBlock(props: FilterBlockProps) {
                 checked={c()!.subsonic_protect === true}
                 disabled={c()!.freq_hz <= 40}
                 onChange={() => {
-                  // Toggle from signal, not from DOM — Solid sets `checked`
-                  // after render and the DOM read can race the next reactive
-                  // pass, returning the just-rendered value instead of the
-                  // user's intent. Computing from current state is stable.
                   const newValue = !(c()!.subsonic_protect === true);
                   props.onChange(withOverride({ subsonic_protect: newValue }));
                 }}
