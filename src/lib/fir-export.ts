@@ -8,6 +8,7 @@ import {
   firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess,
 } from "../stores/bands";
 import { projectDir, sanitize } from "./project-io";
+import { hasActiveSubsonicProtect } from "./band-evaluation";
 
 export function driverName(b: BandState): string {
   let name = b.measurement?.name ?? b.name;
@@ -36,7 +37,12 @@ async function generateBandImpulse(b: BandState): Promise<number[]> {
     peqMagArr = peqMag;
   }
 
-  const isLin = (f: FilterConfig | null | undefined) => !f || f.linear_phase;
+  // b138.4: subsonic_protect on a Gaussian HP is always min-phase, so a
+  // "linear" Gaussian HP with subsonic active is no longer fully linear —
+  // the FIR must run MinimumPhase mode so Rust's Hilbert sees the subsonic
+  // contribution baked into target magnitude.
+  const isLin = (f: FilterConfig | null | undefined) =>
+    !f || (f.linear_phase && !hasActiveSubsonicProtect(f));
   const fir = await invoke<{ impulse: number[] }>("generate_model_fir", {
     freq,
     targetMag,

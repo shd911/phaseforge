@@ -4,7 +4,16 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Measurement, TargetResponse, FilterConfig } from "./types";
 import type { BandState, SmoothingMode } from "../stores/bands";
-import { smoothingConfig, isGaussianMinPhase, gaussianFilterMagDb } from "./plot-helpers";
+import { smoothingConfig, isGaussianMinPhase, gaussianFilterMagDb, subsonicMagDb } from "./plot-helpers";
+
+/** True when the HP carries an active subsonic_protect that must contribute
+ *  min-phase even if the Gaussian itself is linear-phase. */
+export function hasActiveSubsonicProtect(hp: FilterConfig | null | undefined): boolean {
+  return !!hp
+    && hp.filter_type === "Gaussian"
+    && hp.subsonic_protect === true
+    && hp.freq_hz > 40;
+}
 
 // ---------------------------------------------------------------------------
 // Gaussian per-filter Hilbert: compute min-phase for each Gaussian filter
@@ -19,22 +28,18 @@ export async function addGaussianMinPhase(
   let result = phase;
   if (isGaussianMinPhase(hp)) {
     let hpMag = gaussianFilterMagDb(freq, hp!, false);
-    // b138.3: bake subsonic_protect into the magnitude before Hilbert so the
-    // reconstructed min-phase reflects total (Gaussian × Subsonic). Formula
-    // mirrors Rust apply_filter exactly: 8th-order Butterworth at fc/8.
-    if (hp!.subsonic_protect === true && hp!.freq_hz > 40) {
-      const fSub = hp!.freq_hz / 8;
-      hpMag = hpMag.map((db, i) => {
-        const f = freq[i];
-        if (f <= 0) return db;
-        const ratio = Math.pow(fSub / f, 16);
-        const subsonicLin = Math.sqrt(1 / (1 + ratio));
-        const subsonicDb = subsonicLin > 1e-20 ? 20 * Math.log10(subsonicLin) : -400;
-        return db + subsonicDb;
-      });
+    if (hasActiveSubsonicProtect(hp)) {
+      const subDb = subsonicMagDb(freq, hp!.freq_hz / 8);
+      hpMag = hpMag.map((db, i) => db + subDb[i]);
     }
     const hpPh = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: hpMag });
     result = result.map((v, i) => v + hpPh[i]);
+  } else if (hasActiveSubsonicProtect(hp) && hp!.linear_phase === true) {
+    // b138.4: linear-phase Gaussian still needs min-phase contribution from
+    // the subsonic filter alone — Hilbert from subsonic-only magnitude.
+    const subDb = subsonicMagDb(freq, hp!.freq_hz / 8);
+    const subPh = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: subDb });
+    result = result.map((v, i) => v + subPh[i]);
   }
   if (isGaussianMinPhase(lp)) {
     const lpMag = gaussianFilterMagDb(freq, lp!, true);
@@ -113,8 +118,16 @@ export async function evaluateBand(band: BandState): Promise<{
     }
   }
 
-  // Gaussian min-phase: compute Hilbert per-filter (not blanket on full magnitude)
-  if (targetPhase && freq && (isGaussianMinPhase(band.target.high_pass) || isGaussianMinPhase(band.target.low_pass))) {
+  // Gaussian min-phase: compute Hilbert per-filter (not blanket on full magnitude).
+  // b138.4: also fire when HP is linear-phase Gaussian + subsonic — the
+  // subsonic part stays min-phase even if the user asked for linear Gaussian.
+  const needsLinearPhaseSubsonic = band.target.high_pass?.linear_phase === true
+    && hasActiveSubsonicProtect(band.target.high_pass);
+  if (targetPhase && freq && (
+    isGaussianMinPhase(band.target.high_pass)
+    || isGaussianMinPhase(band.target.low_pass)
+    || needsLinearPhaseSubsonic
+  )) {
     targetPhase = await addGaussianMinPhase(freq, targetPhase, band.target.high_pass, band.target.low_pass);
   }
 

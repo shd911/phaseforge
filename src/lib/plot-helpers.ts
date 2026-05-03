@@ -45,6 +45,17 @@ export function gaussianFilterMagDb(freq: number[], f: FilterConfig, isLowPass: 
   return isLowPass ? gaussianLpMagDb(freq, fc, m) : gaussianHpMagDb(freq, fc, m);
 }
 
+/** Butterworth 8th-order HP magnitude (dB) for the b138 subsonic filter.
+ *  Mirrors Rust target::apply_filter exactly: ratio=(fc/f)^16, |H|=sqrt(1/(1+ratio)). */
+export function subsonicMagDb(freq: number[], cutoffHz: number): number[] {
+  return freq.map((f) => {
+    if (f <= 0) return -400;
+    const ratio = Math.pow(cutoffHz / f, 16);
+    const lin = Math.sqrt(1 / (1 + ratio));
+    return lin > 1e-20 ? 20 * Math.log10(lin) : -400;
+  });
+}
+
 /** Compute Gaussian HP magnitude in dB: HP = 1 - LP. */
 function gaussianHpMagDb(freq: number[], fc: number, m: number): number[] {
   const ln2 = Math.LN2;

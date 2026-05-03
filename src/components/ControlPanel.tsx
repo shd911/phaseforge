@@ -69,6 +69,7 @@ import {
   handleOptimizePeq, handleClearPeq, peqStale,
 } from "../stores/peq-optimize";
 import { showStaleConfirmDialog } from "./StalePeqExportDialog";
+import { hasActiveSubsonicProtect } from "../lib/band-evaluation";
 import { qWarnAt } from "../lib/peq-quality";
 import { openHighQPopup } from "./HighQWarningPopup";
 import { invoke } from "@tauri-apps/api/core";
@@ -1086,7 +1087,10 @@ function ExportTab() {
     }
 
     // 3. Generate FIR
-    const isLin = (f: FilterConfig | null | undefined) => !f || f.linear_phase;
+    // b138.4: see fir-export.ts — Gaussian HP + subsonic_protect demotes
+    // "linear" to MinimumPhase mode so the subsonic phase is reconstructed.
+    const isLin = (f: FilterConfig | null | undefined) =>
+      !f || (f.linear_phase && !hasActiveSubsonicProtect(f));
 
     const firResult = await invoke<{
       impulse: number[]; time_ms: number[]; realized_mag: number[];
