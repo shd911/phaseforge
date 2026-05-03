@@ -1167,6 +1167,7 @@ mod tests {
                 shape,
                 linear_phase,
                 q: None,
+                subsonic_protect: None,
             }
         }
 

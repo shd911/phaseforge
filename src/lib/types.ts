@@ -31,6 +31,9 @@ export interface FilterConfig {
   shape: number | null; // M coefficient (Gaussian only)
   linear_phase: boolean;
   q: number | null;  // Q factor (Custom only, default 0.707)
+  /** b138: optional subsonic protection. Honoured only for Gaussian HP
+   *  with freq_hz > 40. Null/undefined = inactive. */
+  subsonic_protect?: boolean | null;
 }
 
 export interface TargetResponse {

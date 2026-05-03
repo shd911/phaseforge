@@ -544,6 +544,7 @@ function unwrapFilterConfig(f: import("../lib/types").FilterConfig): import("../
     shape: f.shape,
     linear_phase: f.linear_phase,
     q: f.q,
+    subsonic_protect: f.subsonic_protect ?? null,
   };
 }
 

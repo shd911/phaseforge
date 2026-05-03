@@ -229,6 +229,7 @@ function FiltersTab() {
         {/* High-Pass (🔗 индикатор, если связан с LP предыдущей) */}
         <FilterBlock
           title="High-Pass"
+          isHighPass={true}
           config={unwrapFilter(target()?.high_pass)}
           linked={hpLinked()}
           onToggle={() => {
@@ -239,7 +240,7 @@ function FiltersTab() {
               lastHP.set(id, cur);
               setBandHighPass(id, null);
             } else {
-              setBandHighPass(id, lastHP.get(id) ?? { filter_type: "Butterworth", order: 2, freq_hz: 80, shape: null, linear_phase: false, q: null });
+              setBandHighPass(id, lastHP.get(id) ?? { filter_type: "Butterworth", order: 2, freq_hz: 80, shape: null, linear_phase: false, q: null, subsonic_protect: null });
             }
           }}
           onChange={(c) => { const id = bandId(); if (id) setBandHighPass(id, c); }}
@@ -288,6 +289,7 @@ interface FilterBlockProps {
   onLinkToggle?: () => void; // callback переключения связи
   onToggle: () => void;
   onChange: (c: import("../lib/types").FilterConfig) => void;
+  isHighPass?: boolean; // b138: subsonic-protect UI for Gaussian HP only
 }
 
 function FilterBlock(props: FilterBlockProps) {
@@ -307,6 +309,7 @@ function FilterBlock(props: FilterBlockProps) {
       shape: cur.shape,
       linear_phase: cur.linear_phase,
       q: cur.q,
+      subsonic_protect: cur.subsonic_protect ?? null,
       ...overrides,
     };
   };
@@ -343,12 +346,14 @@ function FilterBlock(props: FilterBlockProps) {
               onChange={(e) => {
                 const ft = e.currentTarget.value as FilterType;
                 if (ft === c()!.filter_type) return; // guard: SolidJS/WebKit programmatic set
+                // b138: subsonic-protect auto-on for Gaussian HP, dropped otherwise.
+                const subsonic = ft === "Gaussian" && props.isHighPass ? true : null;
                 if (ft === "Gaussian") {
-                  props.onChange(withOverride({ filter_type: ft, shape: c()!.shape ?? 1.0, q: null }));
+                  props.onChange(withOverride({ filter_type: ft, shape: c()!.shape ?? 1.0, q: null, subsonic_protect: subsonic }));
                 } else if (ft === "Custom") {
-                  props.onChange(withOverride({ filter_type: ft, shape: null, q: c()!.q ?? 0.707 }));
+                  props.onChange(withOverride({ filter_type: ft, shape: null, q: c()!.q ?? 0.707, subsonic_protect: null }));
                 } else {
-                  props.onChange(withOverride({ filter_type: ft, shape: null, q: null }));
+                  props.onChange(withOverride({ filter_type: ft, shape: null, q: null, subsonic_protect: null }));
                 }
               }}
             >
@@ -404,6 +409,28 @@ function FilterBlock(props: FilterBlockProps) {
         </div>
         <Show when={isCustom()}>
           <div class="fb-hint">0.50=LR · 0.58=Bsl · 0.71=BW</div>
+        </Show>
+        <Show when={props.isHighPass && isGaussian()}>
+          <div class="subsonic-protect-row">
+            <label
+              title="Минимально-фазовый Butterworth 48 дБ/окт на 3 октавы ниже HP. Защищает driver от излишнего excursion в инфразвуке."
+              style={{ display: "flex", "align-items": "center", gap: "6px", cursor: c()!.freq_hz > 40 ? "pointer" : "not-allowed" }}
+            >
+              <input
+                type="checkbox"
+                checked={c()!.subsonic_protect === true}
+                disabled={c()!.freq_hz <= 40}
+                onChange={(e) => props.onChange(withOverride({ subsonic_protect: e.currentTarget.checked }))}
+              />
+              <span>Защитный subsonic фильтр</span>
+            </label>
+            <Show when={c()!.freq_hz <= 40}>
+              <span class="hint" title="HP слишком низкий, защита не требуется">⊘</span>
+            </Show>
+            <Show when={c()!.subsonic_protect === false && c()!.freq_hz > 40}>
+              <div class="warn">⚠ Защита отключена, риск excursion на инфразвуке</div>
+            </Show>
+          </div>
         </Show>
       </Show>
     </div>

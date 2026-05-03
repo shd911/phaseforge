@@ -24,6 +24,12 @@ pub struct FilterConfig {
     pub linear_phase: bool, // true → magnitude-only (zero phase)
     #[serde(default)]
     pub q: Option<f64>,     // Q factor (Custom only, default 0.707 = Butterworth)
+    /// Optional subsonic protection (b138). Currently honoured only for
+    /// Gaussian HP with freq_hz > 40 — adds a Butterworth 8th-order
+    /// roll-off three octaves below freq_hz. Round-tripped via serde;
+    /// peq-stale comparison ignores this field by design.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subsonic_protect: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -152,6 +158,14 @@ fn apply_filter(
         return;
     }
 
+    // Subsonic protection (b138): Gaussian HP only, freq_hz > 40, opt-in.
+    // 8th-order Butterworth attenuation 3 octaves below fc, additive in dB.
+    let subsonic_active = !is_lowpass
+        && matches!(cfg.filter_type, FilterType::Gaussian)
+        && cfg.subsonic_protect == Some(true)
+        && fc > 40.0;
+    let f_subsonic = fc / 8.0;
+
     // Collect filter magnitude (dB) for all frequencies
     let mut filt_mag_db = Vec::with_capacity(freq.len());
     for i in 0..freq.len() {
@@ -166,7 +180,13 @@ fn apply_filter(
         } else {
             filter_hp_response(f, fc, cfg)
         };
-        filt_mag_db.push(m_db);
+        let mut total_db = m_db;
+        if subsonic_active {
+            // Butterworth HP magnitude: |H|^2 = 1 / (1 + (f_c/f)^(2N)), N=8
+            let ratio = (f_subsonic / f).powi(16);
+            total_db += -10.0 * (1.0 + ratio).log10();
+        }
+        filt_mag_db.push(total_db);
     }
 
     // Apply magnitude
@@ -747,7 +767,8 @@ mod tests {
                 shape: None,
                 linear_phase: false,
                 q: None,
-            }),
+                subsonic_protect: None,
+}),
             low_pass: None,
             low_shelf: None,
             high_shelf: None,
@@ -787,7 +808,8 @@ mod tests {
                 shape: None,
                 linear_phase: false,
                 q: None,
-            }),
+                subsonic_protect: None,
+}),
             low_shelf: None,
             high_shelf: None,
         };
@@ -812,7 +834,8 @@ mod tests {
             shape: None,
             linear_phase: false,
             q: None,
-        };
+            subsonic_protect: None,
+};
         let lr = FilterConfig {
             filter_type: FilterType::LinkwitzRiley,
             order: 2,
@@ -820,7 +843,8 @@ mod tests {
             shape: None,
             linear_phase: false,
             q: None,
-        };
+            subsonic_protect: None,
+};
         let (bw_db, _) = filter_hp_response(100.0, 100.0, &bw);
         let (lr_db, _) = filter_hp_response(100.0, 100.0, &lr);
         assert!((lr_db - 2.0 * bw_db).abs() < 0.1);
@@ -900,7 +924,8 @@ mod tests {
                 shape: None,
                 linear_phase: false,
                 q: None,
-            }),
+                subsonic_protect: None,
+}),
             low_shelf: None,
             high_shelf: None,
         };
@@ -948,7 +973,8 @@ mod tests {
                 low_pass: Some(FilterConfig {
                     filter_type: filter_type.clone(),
                     order, freq_hz: xo_freqs[0], shape, linear_phase, q: None,
-                }),
+            subsonic_protect: None,
+}),
                 low_shelf: None, high_shelf: None,
             },
             TargetCurve {
@@ -958,11 +984,13 @@ mod tests {
                 high_pass: Some(FilterConfig {
                     filter_type: filter_type.clone(),
                     order, freq_hz: xo_freqs[0], shape, linear_phase, q: None,
-                }),
+            subsonic_protect: None,
+}),
                 low_pass: Some(FilterConfig {
                     filter_type: filter_type.clone(),
                     order, freq_hz: xo_freqs[1], shape, linear_phase, q: None,
-                }),
+            subsonic_protect: None,
+}),
                 low_shelf: None, high_shelf: None,
             },
             TargetCurve {
@@ -972,11 +1000,13 @@ mod tests {
                 high_pass: Some(FilterConfig {
                     filter_type: filter_type.clone(),
                     order, freq_hz: xo_freqs[1], shape, linear_phase, q: None,
-                }),
+            subsonic_protect: None,
+}),
                 low_pass: Some(FilterConfig {
                     filter_type: filter_type.clone(),
                     order, freq_hz: xo_freqs[2], shape, linear_phase, q: None,
-                }),
+            subsonic_protect: None,
+}),
                 low_shelf: None, high_shelf: None,
             },
             TargetCurve {
@@ -986,7 +1016,8 @@ mod tests {
                 high_pass: Some(FilterConfig {
                     filter_type: filter_type.clone(),
                     order, freq_hz: xo_freqs[2], shape, linear_phase, q: None,
-                }),
+            subsonic_protect: None,
+}),
                 low_pass: None,
                 low_shelf: None, high_shelf: None,
             },
@@ -1152,7 +1183,76 @@ mod tests {
     }
 
     fn make_filter(ft: FilterType, order: u8, freq: f64, shape: Option<f64>, linear_phase: bool) -> FilterConfig {
-        FilterConfig { filter_type: ft, order, freq_hz: freq, shape, linear_phase, q: None }
+        FilterConfig { filter_type: ft, order, freq_hz: freq, shape, linear_phase, q: None, subsonic_protect: None }
+    }
+
+    fn gaussian_hp(freq_hz: f64, subsonic: Option<bool>) -> FilterConfig {
+        FilterConfig {
+            filter_type: FilterType::Gaussian,
+            order: 4,
+            freq_hz,
+            shape: Some(2.0),
+            linear_phase: false,
+            q: None,
+            subsonic_protect: subsonic,
+        }
+    }
+
+    fn eval_hp_mag(hp: &FilterConfig, freqs: &[f64]) -> Vec<f64> {
+        let mut mag = vec![0.0; freqs.len()];
+        let mut phase = vec![0.0; freqs.len()];
+        apply_filter(&mut mag, &mut phase, freqs, hp, false);
+        mag
+    }
+
+    #[test]
+    fn subsonic_off_doesnt_affect_passband() {
+        let freqs: Vec<f64> = (0..200).map(|i| 200.0 * (20000.0_f64 / 200.0).powf(i as f64 / 199.0)).collect();
+        let baseline = eval_hp_mag(&gaussian_hp(100.0, None), &freqs);
+        let with_off = eval_hp_mag(&gaussian_hp(100.0, Some(false)), &freqs);
+        for i in 0..freqs.len() {
+            assert!((baseline[i] - with_off[i]).abs() < 0.001,
+                "subsonic_protect=false changed magnitude at {:.1} Hz: {} vs {}",
+                freqs[i], baseline[i], with_off[i]);
+        }
+    }
+
+    #[test]
+    fn subsonic_on_attenuates_infrasound() {
+        let freqs = vec![6.25_f64, 12.5, 100.0, 200.0, 1000.0];
+        let baseline = eval_hp_mag(&gaussian_hp(100.0, None), &freqs);
+        let with_on = eval_hp_mag(&gaussian_hp(100.0, Some(true)), &freqs);
+        let passband_baseline = baseline[3]; // 200 Hz
+        let attenuation = passband_baseline - (with_on[0] - baseline[0]) * 0.0 - with_on[0];
+        // At 6.25 Hz subsonic_db = -10*log10(1+(12.5/6.25)^16) = -10*log10(1+65536) ≈ -48.16 dB
+        // So with_on[0] should be ≥ 40 dB below passband.
+        assert!(attenuation >= 40.0,
+            "subsonic on: attenuation at 6.25 Hz = {:.2} dB, want ≥ 40", attenuation);
+    }
+
+    #[test]
+    fn subsonic_on_passband_unchanged() {
+        let freqs = vec![200.0_f64, 500.0, 1000.0, 5000.0, 20000.0];
+        let baseline = eval_hp_mag(&gaussian_hp(100.0, None), &freqs);
+        let with_on = eval_hp_mag(&gaussian_hp(100.0, Some(true)), &freqs);
+        for i in 0..freqs.len() {
+            let diff = (with_on[i] - baseline[i]).abs();
+            assert!(diff < 0.05,
+                "subsonic on: passband shifted at {:.0} Hz by {:.4} dB", freqs[i], diff);
+        }
+    }
+
+    #[test]
+    fn subsonic_skipped_for_low_hp() {
+        // HP at 30 Hz → subsonic would be at 3.75 Hz. Spec says skip when freq_hz ≤ 40.
+        let freqs = vec![5.0_f64, 10.0, 30.0, 100.0];
+        let baseline = eval_hp_mag(&gaussian_hp(30.0, None), &freqs);
+        let with_on = eval_hp_mag(&gaussian_hp(30.0, Some(true)), &freqs);
+        for i in 0..freqs.len() {
+            assert!((baseline[i] - with_on[i]).abs() < 1e-9,
+                "subsonic_protect should be inactive at fc=30 Hz; diff at {:.0} Hz = {}",
+                freqs[i], baseline[i] - with_on[i]);
+        }
     }
 
     fn target_with_hp(f: FilterConfig) -> TargetCurve {

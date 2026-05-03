@@ -2051,6 +2051,24 @@ body {
   border-radius: 3px;
 }
 
+/* Subsonic-protect (b138) */
+.subsonic-protect-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+.subsonic-protect-row .warn {
+  color: #d97706;
+  font-size: 12px;
+}
+.subsonic-protect-row .hint {
+  color: #888;
+  font-size: 12px;
+}
+
 
 /* ============================================================
    Merge NF+FF Dialog

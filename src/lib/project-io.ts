@@ -374,7 +374,7 @@ function mapSettingsFromProject(s: ProjectSettings): PerMeasurementSettings {
 
 function cloneFilter(f: import("./types").FilterConfig | null | undefined): import("./types").FilterConfig | null {
   if (!f) return null;
-  return { filter_type: f.filter_type, order: f.order, freq_hz: f.freq_hz, shape: f.shape, linear_phase: f.linear_phase, q: f.q };
+  return { filter_type: f.filter_type, order: f.order, freq_hz: f.freq_hz, shape: f.shape, linear_phase: f.linear_phase, q: f.q, subsonic_protect: f.subsonic_protect ?? null };
 }
 
 function mapBandFromProject(b: ProjectBand, idx: number): BandState {
