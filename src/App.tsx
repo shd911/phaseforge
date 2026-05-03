@@ -33,6 +33,7 @@ import ProjectNameDialog from "./components/ProjectNameDialog";
 import UnsavedChangesDialog from "./components/UnsavedChangesDialog";
 import VersionsDialog, { openVersionsDialog, isVersionsDialogOpen } from "./components/VersionsDialog";
 import MeasurementAnalysisDialog, { isAnalysisDialogOpen } from "./components/MeasurementAnalysisDialog";
+import StalePeqExportDialog, { isStaleConfirmDialogOpen } from "./components/StalePeqExportDialog";
 import Toasts from "./components/Toasts";
 import { showToast } from "./lib/toast";
 import WelcomeDialog from "./components/WelcomeDialog";
@@ -55,7 +56,8 @@ function App() {
     return t.isContentEditable;
   };
   const isModalOpen = (): boolean =>
-    promptVisible() || unsavedDialogVisible() || isVersionsDialogOpen() || isAnalysisDialogOpen();
+    promptVisible() || unsavedDialogVisible() || isVersionsDialogOpen()
+    || isAnalysisDialogOpen() || isStaleConfirmDialogOpen();
 
   const handleKeys = (e: KeyboardEvent) => {
     if (!(e.metaKey || e.ctrlKey)) return;
@@ -205,6 +207,7 @@ function App() {
       <UnsavedChangesDialog />
       <VersionsDialog />
       <MeasurementAnalysisDialog />
+      <StalePeqExportDialog />
       <CrossoverDialog />
       <FirSettingsDialog />
       <Toasts />

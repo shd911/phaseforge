@@ -13,6 +13,8 @@ import { handleImportMeasurement, handleMergeComplete, setShowMergeDialog, showM
 import { setBandDelayInfo, markBandDelayRemoved, restoreBandDelay } from "../stores/bands";
 import MergeDialog from "./MergeDialog";
 import { exportBandWav } from "../lib/fir-export";
+import { peqStale } from "../stores/peq-optimize";
+import { showStaleConfirmDialog } from "./StalePeqExportDialog";
 
 import {
   SUM_TARGET_COLOR, SUM_TARGET_PHASE_COLOR, SUM_CORRECTED_COLOR, SUM_MEAS_COLOR,
@@ -384,6 +386,10 @@ export default function FrequencyPlot() {
   async function handleExportWav() {
     const b = activeBand();
     if (!b) return;
+    if (peqStale(b)) {
+      const proceed = await showStaleConfirmDialog([b.name]);
+      if (!proceed) return;
+    }
     setExportingWav(true);
     setExportWavError(null);
     try {

@@ -107,6 +107,16 @@ pub struct BandData {
     pub color: Option<String>,
     #[serde(default)]
     pub alignment_delay: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peq_optimized_target: Option<PeqOptimizedTargetData>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeqOptimizedTargetData {
+    pub high_pass: Option<crate::target::FilterConfig>,
+    pub low_pass: Option<crate::target::FilterConfig>,
+    #[serde(default)]
+    pub exclusion_zones: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -5,7 +5,7 @@
 // ---------------------------------------------------------------------------
 
 import { createSignal } from "solid-js";
-import type { PeqBand, TargetCurve, WindowType, ExclusionZone } from "../lib/types";
+import type { PeqBand, TargetCurve, WindowType, ExclusionZone, PeqOptimizedTarget } from "../lib/types";
 import type { PeqRangeMode } from "./peq-optimize";
 
 export interface LightBand {
@@ -19,6 +19,7 @@ export interface LightBand {
   alignmentDelay: number;
   color: string;
   exclusionZones: ExclusionZone[];
+  peqOptimizedTarget: PeqOptimizedTarget | null;
 }
 
 export interface PeqParamsSnap {

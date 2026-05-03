@@ -111,6 +111,16 @@ export interface ExclusionZone {
   endHz: number;
 }
 
+/** Snapshot of target fields that affect PEQ optimization. Stored on
+ *  BandState after Optimize so we can detect when current target diverges
+ *  (peqStale). reference_level_db is intentionally excluded — refOffset is
+ *  recomputed every optimization so changing it does not invalidate PEQ. */
+export interface PeqOptimizedTarget {
+  high_pass: FilterConfig | null;
+  low_pass: FilterConfig | null;
+  exclusion_zones: ExclusionZone[];
+}
+
 // Measurement analysis (b135). Mirrors Rust src-tauri/src/analysis/mod.rs.
 export type AnalysisSeverity = "Info" | "Warning" | "Error";
 

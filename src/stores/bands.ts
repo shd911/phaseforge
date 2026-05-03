@@ -1,6 +1,6 @@
 import { createStore, reconcile } from "solid-js/store";
 import { createSignal, batch } from "solid-js";
-import type { Measurement, TargetCurve, MergeConfig, PeqBand, FirResult, WindowType, ExclusionZone, AnalysisResult } from "../lib/types";
+import type { Measurement, TargetCurve, MergeConfig, PeqBand, FirResult, WindowType, ExclusionZone, AnalysisResult, PeqOptimizedTarget } from "../lib/types";
 import { MEASUREMENT_COLORS } from "../lib/types";
 import {
   pushHistory,
@@ -55,6 +55,10 @@ export interface BandState {
   inverted: boolean; // инвертирование полярности (фаза +180°)
   linkedToNext: boolean; // связь LP этой полосы ↔ HP следующей
   peqBands: PeqBand[]; // авто-подобранные PEQ полосы
+  /** Snapshot of target/exclusion at the time of the last successful
+   *  optimization. null = optimize never ran (or PEQ cleared). Used for
+   *  peqStale detection when target diverges. */
+  peqOptimizedTarget: PeqOptimizedTarget | null;
   exclusionZones: ExclusionZone[]; // частотные зоны исключённые из оптимизации
   firResult: FirResult | null; // результат генерации FIR
   crossNormDb: number; // normalization estimate from cross-section peak (dB)
@@ -147,6 +151,7 @@ export function createBand(num: number): BandState {
     inverted: false,
     linkedToNext: false,
     peqBands: [],
+    peqOptimizedTarget: null,
     exclusionZones: [],
     firResult: null,
     crossNormDb: 0,
@@ -743,7 +748,17 @@ export function clearBandPeqBands(bandId: string) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
   pushHistory("Clear PEQ");
-  setState("bands", idx, "peqBands", []);
+  batch(() => {
+    setState("bands", idx, "peqBands", []);
+    setState("bands", idx, "peqOptimizedTarget", null);
+  });
+  markDirty();
+}
+
+export function setBandPeqOptimizedTarget(bandId: string, snapshot: PeqOptimizedTarget | null) {
+  const idx = bandIndex(bandId);
+  if (idx < 0) return;
+  setState("bands", idx, "peqOptimizedTarget", snapshot);
   markDirty();
 }
 
@@ -1064,6 +1079,9 @@ export function _captureBandsLight(): {
     alignmentDelay: b.alignmentDelay,
     color: b.color,
     exclusionZones: JSON.parse(JSON.stringify(b.exclusionZones)),
+    peqOptimizedTarget: b.peqOptimizedTarget
+      ? JSON.parse(JSON.stringify(b.peqOptimizedTarget))
+      : null,
   }));
   return {
     bands: lightBands,
@@ -1095,6 +1113,9 @@ export function _applyBandsLight(entry: HistoryEntry): void {
       const target = JSON.parse(JSON.stringify(lb.target)) as TargetCurve;
       const peqBands = JSON.parse(JSON.stringify(lb.peqBands));
       const exclusionZones = JSON.parse(JSON.stringify(lb.exclusionZones));
+      const peqOptimizedTarget = lb.peqOptimizedTarget
+        ? JSON.parse(JSON.stringify(lb.peqOptimizedTarget))
+        : null;
       return {
         id: lb.id,
         name: lb.name,
@@ -1106,6 +1127,7 @@ export function _applyBandsLight(entry: HistoryEntry): void {
         inverted: lb.inverted,
         linkedToNext: lb.linkedToNext,
         peqBands,
+        peqOptimizedTarget,
         exclusionZones,
         firResult: cur?.firResult ?? null,
         crossNormDb: cur?.crossNormDb ?? 0,

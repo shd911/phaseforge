@@ -3,13 +3,14 @@
 // ---------------------------------------------------------------------------
 import { createSignal, batch } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
-import type { PeqBand, PeqConfig, PeqResult } from "../lib/types";
+import type { PeqBand, PeqConfig, PeqResult, FilterConfig, ExclusionZone, PeqOptimizedTarget } from "../lib/types";
 import {
   activeBand,
   appState,
   exportHybridPhase,
   setBandPeqBands,
   clearBandPeqBands,
+  setBandPeqOptimizedTarget,
   setSelectedPeqIdx,
   _captureBandsLight,
   _applyBandsLight,
@@ -149,16 +150,62 @@ function mergeBands(frozen: PeqBand[], optimized: PeqBand[]): PeqBand[] {
   return all;
 }
 
+// Snapshot of target/exclusion taken at successful optimization. Used by
+// peqStale to detect divergence later.
+export function captureOptimizedTarget(b: BandState): PeqOptimizedTarget {
+  return {
+    high_pass: b.target.high_pass ? { ...b.target.high_pass } : null,
+    low_pass: b.target.low_pass ? { ...b.target.low_pass } : null,
+    exclusion_zones: JSON.parse(JSON.stringify(b.exclusionZones)),
+  };
+}
+
+function filterEquals(a: FilterConfig | null, b: FilterConfig | null): boolean {
+  if (a === null && b === null) return true;
+  if (a === null || b === null) return false;
+  return a.filter_type === b.filter_type
+    && a.order === b.order
+    && a.freq_hz === b.freq_hz
+    && a.shape === b.shape
+    && a.q === b.q;
+}
+
+function exclusionZonesEquals(a: ExclusionZone[], b: ExclusionZone[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].startHz !== b[i].startHz) return false;
+    if (a[i].endHz !== b[i].endHz) return false;
+  }
+  return true;
+}
+
+/** True iff peqBands exist, an optimization snapshot exists, and target or
+ *  exclusion zones diverge from the snapshot. Pure read — safe inside Solid
+ *  reactive contexts. */
+export function peqStale(b: BandState): boolean {
+  if (!b.peqBands || b.peqBands.length === 0) return false;
+  if (!b.peqOptimizedTarget) return false;
+  const snap = b.peqOptimizedTarget;
+  if (!filterEquals(b.target.high_pass, snap.high_pass)) return true;
+  if (!filterEquals(b.target.low_pass, snap.low_pass)) return true;
+  if (!exclusionZonesEquals(b.exclusionZones, snap.exclusion_zones)) return true;
+  return false;
+}
+
 // --- Main actions ---
 export async function handleOptimizePeq() {
   const b = activeBand();
   if (!b || !b.measurement) return;
   pushHistory("Optimize PEQ");
+  // Snapshot the target the optimizer is about to consume — concurrent edits
+  // during the await must not poison the staleness check.
+  const optimizedTarget = captureOptimizedTarget(b);
   setComputing(true);
   setPeqError(null);
   try {
     const { result, frozenBands } = await optimizeBand(b);
     setBandPeqBands(b.id, mergeBands(frozenBands, result.bands));
+    setBandPeqOptimizedTarget(b.id, optimizedTarget);
     setMaxErr(result.max_error_db);
     setIters(result.iterations);
     setSelectedPeqIdx(null);
@@ -178,15 +225,27 @@ export async function handleOptimizeAll() {
   setComputing(true);
   setPeqError(null);
   try {
-    // 1. Compute ALL results first (no store writes during loop)
-    const results: { id: string; peqBands: PeqBand[]; maxErr: number; iters: number }[] = [];
+    // 1. Compute ALL results first (no store writes during loop). Snapshot
+    //    each band's target BEFORE its await so a concurrent target edit
+    //    cannot retroactively make the post-optimize state look "fresh".
+    const results: { id: string; peqBands: PeqBand[]; maxErr: number; iters: number; target: PeqOptimizedTarget }[] = [];
     for (const b of eligible) {
+      const target = captureOptimizedTarget(b);
       const { result, frozenBands } = await optimizeBand(b);
-      results.push({ id: b.id, peqBands: mergeBands(frozenBands, result.bands), maxErr: result.max_error_db, iters: result.iterations });
+      results.push({
+        id: b.id,
+        peqBands: mergeBands(frozenBands, result.bands),
+        maxErr: result.max_error_db,
+        iters: result.iterations,
+        target,
+      });
     }
     // 2. Apply all at once → single reactive update
     batch(() => {
-      for (const r of results) setBandPeqBands(r.id, r.peqBands);
+      for (const r of results) {
+        setBandPeqBands(r.id, r.peqBands);
+        setBandPeqOptimizedTarget(r.id, r.target);
+      }
       setMaxErr(Math.max(...results.map(r => r.maxErr)));
       setIters(results.reduce((sum, r) => sum + r.iters, 0));
       setSelectedPeqIdx(null);

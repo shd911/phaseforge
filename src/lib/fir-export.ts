@@ -58,7 +58,9 @@ async function generateBandImpulse(b: BandState): Promise<number[]> {
   return fir.impulse;
 }
 
-/** Export active band to WAV. Returns true on success, false on cancel, throws on error. */
+/** Export active band to WAV. Returns true on success, false on cancel, throws on error.
+ *  Stale PEQ is gated by a confirm dialog at higher-level call sites — keep this
+ *  function focused on the export pipeline. */
 export async function exportBandWav(b: BandState): Promise<boolean> {
   const impulse = await generateBandImpulse(b);
   const sr = exportSampleRate();

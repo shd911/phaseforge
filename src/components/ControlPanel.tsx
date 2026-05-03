@@ -66,8 +66,9 @@ import {
   peqDirectHigh, setPeqDirectHigh,
   computing, peqError, maxErr, iters,
   peqRange, formatFreq,
-  handleOptimizePeq, handleClearPeq,
+  handleOptimizePeq, handleClearPeq, peqStale,
 } from "../stores/peq-optimize";
+import { showStaleConfirmDialog } from "./StalePeqExportDialog";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { setNeedAutoFit } from "../App";
@@ -769,8 +770,32 @@ function PeqTab() {
     removePeqBand(b.id, idx);
   }
 
+  const isStale = () => {
+    const b = band();
+    return b ? peqStale(b) : false;
+  };
+
   return (
-    <div class="peq-tab-content">
+    <div
+      class="peq-tab-content"
+      classList={{ "peq-tab-stale": isStale() }}
+    >
+      <Show when={isStale()}>
+        <div class="peq-stale-banner">
+          <span>⚠ PEQ устарел: target изменён после последней оптимизации</span>
+          <span style={{ display: "flex", gap: "var(--space-xs)" }}>
+            <button
+              class="tb-btn tb-btn-sm"
+              onClick={handleOptimizePeq}
+              disabled={computing() || !band()?.measurement}
+            >Переоптимизировать</button>
+            <button class="tb-btn tb-btn-sm" onClick={handleClearPeq}>
+              Очистить
+            </button>
+          </span>
+        </div>
+      </Show>
+
       {/* Exclusion Zones — yellow */}
       <Show when={band()?.measurement}>
         <div class="peq-exclusion-section">
@@ -1063,6 +1088,10 @@ function ExportTab() {
   async function handleExport() {
     const b = activeBand();
     if (!b) return;
+    if (peqStale(b)) {
+      const proceed = await showStaleConfirmDialog([b.name]);
+      if (!proceed) return;
+    }
     setExporting(true);
     setExportError(null);
     try {

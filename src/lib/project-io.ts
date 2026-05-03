@@ -220,6 +220,7 @@ interface ProjectBand {
   exclusion_zones?: any[]; // ExclusionZone { startHz, endHz }
   color?: string;
   alignment_delay?: number;
+  peq_optimized_target?: import("./types").PeqOptimizedTarget | null;
 }
 
 interface ProjectSettings {
@@ -298,6 +299,7 @@ function mapBandToProject(b: BandState): ProjectBand {
     exclusion_zones: b.exclusionZones.length > 0 ? b.exclusionZones : undefined,
     color: b.color,
     alignment_delay: b.alignmentDelay ?? 0,
+    peq_optimized_target: b.peqOptimizedTarget,
   };
 }
 
@@ -396,6 +398,7 @@ function mapBandFromProject(b: ProjectBand, idx: number): BandState {
     crossNormDb: 0,
     color: b.color ?? MEASUREMENT_COLORS[idx % MEASUREMENT_COLORS.length],
     alignmentDelay: b.alignment_delay ?? 0,
+    peqOptimizedTarget: b.peq_optimized_target ?? null,
   };
 }
 

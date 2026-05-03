@@ -10,6 +10,7 @@ import {
   renameBand,
   isSum,
 } from "../stores/bands";
+import { peqStale } from "../stores/peq-optimize";
 import { projectName } from "../lib/project-io";
 
 export default function BandTabs() {
@@ -114,7 +115,12 @@ export default function BandTabs() {
                 onPointerDown={(e) => e.stopPropagation()}
               />
             ) : (
-              <span class="band-tab-label">{band.name}</span>
+              <>
+                <span class="band-tab-label">{band.name}</span>
+                <Show when={peqStale(band)}>
+                  <span class="band-tab-stale-dot" title="PEQ устарел">●</span>
+                </Show>
+              </>
             )}
             <Show when={appState.bands.length > 1}>
               <span
