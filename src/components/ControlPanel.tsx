@@ -420,7 +420,14 @@ function FilterBlock(props: FilterBlockProps) {
                 type="checkbox"
                 checked={c()!.subsonic_protect === true}
                 disabled={c()!.freq_hz <= 40}
-                onChange={(e) => props.onChange(withOverride({ subsonic_protect: e.currentTarget.checked }))}
+                onChange={() => {
+                  // Toggle from signal, not from DOM — Solid sets `checked`
+                  // after render and the DOM read can race the next reactive
+                  // pass, returning the just-rendered value instead of the
+                  // user's intent. Computing from current state is stable.
+                  const newValue = !(c()!.subsonic_protect === true);
+                  props.onChange(withOverride({ subsonic_protect: newValue }));
+                }}
               />
               <span>Защитный subsonic фильтр</span>
             </label>
