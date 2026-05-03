@@ -123,8 +123,8 @@ pub(crate) fn estimate_q_from_peak_width(freq: &[f64], error: &[f64], peak_idx: 
     // Bandwidth in Hz
     let bw_hz = (right_freq - left_freq).max(1.0);
 
-    // Q = fc / bw (clamped)
-    let q = (peak_freq / bw_hz).clamp(Q_MIN, Q_MAX);
+    // Q = fc / bw (clamped to frequency-dependent envelope; b137).
+    let q = (peak_freq / bw_hz).clamp(Q_MIN, crate::peq::q_cap_at(peak_freq));
     q
 }
 
@@ -232,7 +232,7 @@ pub(crate) fn merge_nearby_bands(bands: &mut Vec<PeqBand>, merge_distance_oct: f
         merged.push(PeqBand {
             freq_hz: merged_freq,
             gain_db: group_gain,
-            q: group_q_min.clamp(Q_MIN, Q_MAX),
+            q: group_q_min.clamp(Q_MIN, crate::peq::q_cap_at(merged_freq)),
             enabled: true,
             filter_type: PeqFilterType::Peaking,
         });

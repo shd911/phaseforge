@@ -235,10 +235,11 @@ impl<'a> LmaSolver<'a> {
         for i in 0..n_bands {
             params[i * 3] = params[i * 3].clamp(self.config.freq_range.0, self.config.freq_range.1);
             params[i * 3 + 1] = params[i * 3 + 1].clamp(-self.config.max_cut_db, self.config.max_boost_db);
-            let q_max = if params[i * 3] > self.lp_freq {
+            let freq = params[i * 3];
+            let q_max = if freq > self.lp_freq {
                 Q_MAX_ABOVE_LP
             } else {
-                Q_MAX
+                crate::peq::q_cap_at(freq)
             };
             params[i * 3 + 2] = params[i * 3 + 2].clamp(Q_MIN, q_max);
         }
@@ -293,9 +294,13 @@ impl<'a> LmaSolver<'a> {
             if freq > self.lp_freq && q > 1.5 {
                 cost += (q - 1.5).powi(2) * gain.abs() * 0.5 * m;
             }
-            // General Q penalty for very high Q in-band
-            if q > 8.0 {
-                cost += (q - 8.0).powi(2) * 0.1 * m;
+            // In-band penalty aligned with the envelope (b137): pressure to
+            // stay below q_warn_at(freq) instead of a freq-blind threshold.
+            if freq <= self.lp_freq {
+                let warn = crate::peq::q_warn_at(freq);
+                if q > warn {
+                    cost += (q - warn).powi(2) * 0.1 * m;
+                }
             }
         }
 

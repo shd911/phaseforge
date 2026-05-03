@@ -34,6 +34,7 @@ import UnsavedChangesDialog from "./components/UnsavedChangesDialog";
 import VersionsDialog, { openVersionsDialog, isVersionsDialogOpen } from "./components/VersionsDialog";
 import MeasurementAnalysisDialog, { isAnalysisDialogOpen } from "./components/MeasurementAnalysisDialog";
 import StalePeqExportDialog, { isStaleConfirmDialogOpen } from "./components/StalePeqExportDialog";
+import HighQWarningPopup, { isHighQPopupOpen } from "./components/HighQWarningPopup";
 import Toasts from "./components/Toasts";
 import { showToast } from "./lib/toast";
 import WelcomeDialog from "./components/WelcomeDialog";
@@ -57,7 +58,7 @@ function App() {
   };
   const isModalOpen = (): boolean =>
     promptVisible() || unsavedDialogVisible() || isVersionsDialogOpen()
-    || isAnalysisDialogOpen() || isStaleConfirmDialogOpen();
+    || isAnalysisDialogOpen() || isStaleConfirmDialogOpen() || isHighQPopupOpen();
 
   const handleKeys = (e: KeyboardEvent) => {
     if (!(e.metaKey || e.ctrlKey)) return;
@@ -208,6 +209,7 @@ function App() {
       <VersionsDialog />
       <MeasurementAnalysisDialog />
       <StalePeqExportDialog />
+      <HighQWarningPopup />
       <CrossoverDialog />
       <FirSettingsDialog />
       <Toasts />

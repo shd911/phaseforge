@@ -19,9 +19,11 @@ mod types;
 mod biquad;
 mod lma;
 mod greedy;
+pub mod q_envelope;
 
 pub use types::*;
 pub use biquad::{apply_peq, peq_band_response, apply_peq_complex};
+pub use q_envelope::{q_cap_at, q_warn_at};
 pub(crate) use lma::{LmaSolver, compute_weights, compute_uniform_weights, apply_exclusion_zones, try_promote_to_shelves};
 pub(crate) use greedy::{greedy_fit_adaptive, estimate_q_from_peak_width, mark_exclusion_zone, merge_nearby_bands, compute_max_error_in_range};
 
@@ -168,10 +170,13 @@ pub fn auto_peq_lma(
 
     let mut bands = greedy_fit_adaptive(freq, &smoothed_error, config, exclusion_zones);
 
-    // Enforce Q constraints: Q <= 2.5 for bands above LP
+    // Enforce Q constraints: Q <= 2.5 above LP, frequency-dependent envelope inside passband.
     for b in &mut bands {
         if b.freq_hz > lp_freq && b.q > Q_MAX_ABOVE_LP {
             b.q = Q_MAX_ABOVE_LP;
+        } else if b.freq_hz <= lp_freq {
+            let cap = q_envelope::q_cap_at(b.freq_hz);
+            if b.q > cap { b.q = cap; }
         }
     }
 
@@ -249,7 +254,7 @@ pub fn auto_peq_lma(
             estimate_q_from_peak_width(freq, &{
                 let c = apply_peq(freq, &bands, SAMPLE_RATE);
                 meas_mag.iter().zip(target.iter()).zip(c.iter()).map(|((m, t), cr)| m + cr - t).collect::<Vec<_>>()
-            }, worst_idx).min(Q_MAX)
+            }, worst_idx).min(q_envelope::q_cap_at(new_fc))
         };
 
         bands.push(PeqBand {
@@ -281,12 +286,12 @@ pub fn auto_peq_lma(
     // Sort by frequency
     bands.sort_by(|a, b| a.freq_hz.partial_cmp(&b.freq_hz).unwrap_or(std::cmp::Ordering::Equal));
 
-    // Final Q enforcement
+    // Final Q enforcement (frequency-dependent cap inside passband; b137).
     for b in &mut bands {
         if b.freq_hz > lp_freq {
             b.q = b.q.clamp(Q_MIN, Q_MAX_ABOVE_LP);
         } else {
-            b.q = b.q.clamp(Q_MIN, Q_MAX);
+            b.q = b.q.clamp(Q_MIN, q_envelope::q_cap_at(b.freq_hz));
         }
     }
 
@@ -771,10 +776,10 @@ mod tests {
             .0;
 
         let q = estimate_q_from_peak_width(&freq, &error, peak_idx);
+        let cap = q_envelope::q_cap_at(freq[peak_idx]);
         assert!(
-            q >= Q_MIN && q <= Q_MAX,
-            "Q should be within bounds, got {}",
-            q
+            q >= Q_MIN && q <= cap,
+            "Q should be within bounds [{Q_MIN}, {cap:.2}], got {q}",
         );
         // Narrow peak should produce higher Q
         assert!(

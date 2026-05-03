@@ -69,6 +69,8 @@ import {
   handleOptimizePeq, handleClearPeq, peqStale,
 } from "../stores/peq-optimize";
 import { showStaleConfirmDialog } from "./StalePeqExportDialog";
+import { qWarnAt } from "../lib/peq-quality";
+import { openHighQPopup } from "./HighQWarningPopup";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { setNeedAutoFit } from "../App";
@@ -890,7 +892,7 @@ function PeqTab() {
           <Show when={peqBands().length > 0}>
             <div class="peq-sidebar-table-scroll">
               <table class="peq-table">
-                <thead><tr><th></th><th>Type</th><th>Freq</th><th>Gain</th><th>Q</th><th></th></tr></thead>
+                <thead><tr><th></th><th>Type</th><th>Freq</th><th>Gain</th><th>Q</th><th></th><th></th></tr></thead>
                 <tbody>
                   {peqBands().map((b, i) => {
                     const isPending = pendingPeqIdx() === i;
@@ -919,6 +921,10 @@ function PeqTab() {
                         <td><input class="peq-input" type="number" value={Math.round(b.freq_hz)} min={20} max={20000} step={1} onWheel={(e) => peqWheel(e, "freq_hz")} onPointerDown={(e) => wheelEnabled.add(e.currentTarget)} onBlur={(e) => wheelEnabled.delete(e.currentTarget)} onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v) && v >= 20 && v <= 20000) { const bd = band(); if (bd) updatePeqBand(bd.id, i, { freq_hz: v }); } }} /></td>
                         <td><input class={`peq-input ${b.gain_db > 0 ? "peq-boost" : "peq-cut"}`} type="number" value={b.gain_db.toFixed(1)} min={exportHybridPhase() ? -60 : -18} max={exportHybridPhase() ? 60 : 6} step={0.1} onWheel={(e) => peqWheel(e, "gain_db")} onPointerDown={(e) => wheelEnabled.add(e.currentTarget)} onBlur={(e) => wheelEnabled.delete(e.currentTarget)} onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v)) { const bd = band(); if (bd) updatePeqBand(bd.id, i, { gain_db: v }); } }} /></td>
                         <td><input class="peq-input" type="number" value={b.q.toFixed(1)} min={0.1} max={20} step={0.1} onWheel={(e) => peqWheel(e, "q")} onPointerDown={(e) => wheelEnabled.add(e.currentTarget)} onBlur={(e) => wheelEnabled.delete(e.currentTarget)} onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v) && v >= 0.1 && v <= 20) { const bd = band(); if (bd) updatePeqBand(bd.id, i, { q: v }); } }} /></td>
+                        <td>{b.enabled && b.q > qWarnAt(b.freq_hz) ? (
+                          <button class="peq-warn-icon" title="" aria-label="Высокая добротность"
+                            onClick={(e) => { e.stopPropagation(); openHighQPopup(b, i); }}>⚠</button>
+                        ) : null}</td>
                         <td>{isPending ? <button class="peq-commit" onClick={(e) => { e.stopPropagation(); const bd = band(); if (bd) { const ni = commitPeqBand(bd.id, i); setPendingPeqIdx(null); setSelectedPeqIdx(ni); } }}>✓</button> : <button class="peq-remove" onClick={() => handleRemovePeq(i)}>×</button>}</td>
                       </tr>
                     );

@@ -2035,6 +2035,22 @@ body {
   line-height: 1;
 }
 
+/* High-Q warning marker (b137) — popup-only, no hover tooltip */
+.peq-warn-icon {
+  background: transparent;
+  border: none;
+  color: #d97706;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  margin-left: 4px;
+  line-height: 1;
+}
+.peq-warn-icon:hover {
+  background: rgba(217, 119, 6, 0.18);
+  border-radius: 3px;
+}
+
 
 /* ============================================================
    Merge NF+FF Dialog

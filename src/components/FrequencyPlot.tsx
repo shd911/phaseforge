@@ -15,6 +15,7 @@ import MergeDialog from "./MergeDialog";
 import { exportBandWav } from "../lib/fir-export";
 import { peqStale } from "../stores/peq-optimize";
 import { showStaleConfirmDialog } from "./StalePeqExportDialog";
+import { highQIndices } from "../lib/peq-quality";
 
 import {
   SUM_TARGET_COLOR, SUM_TARGET_PHASE_COLOR, SUM_CORRECTED_COLOR, SUM_MEAS_COLOR,
@@ -1346,6 +1347,12 @@ export default function FrequencyPlot() {
             const dpr = devicePixelRatio || 1;
             const xData = u.data[0];
             const yData = u.data[si];
+            // High-Q markers (b137): bands whose Q exceeds qWarnAt(freq) get
+            // a yellow stroke. Match dots to bands by freq proximity since
+            // dataIndices is keyed by grid bin, not band index.
+            const bd = activeBand();
+            const peqBands = bd?.peqBands ?? [];
+            const highQ = highQIndices(peqBands);
             ctx.save();
             for (const idx of dots.dataIndices) {
               const xVal = xData[idx];
@@ -1354,13 +1361,21 @@ export default function FrequencyPlot() {
               const cx = u.valToPos(xVal, "x", true);
               const cy = u.valToPos(yVal, "mag", true);
               if (!isFinite(cx) || !isFinite(cy)) continue;
+              let bandIdx = -1;
+              let bestDist = Infinity;
+              for (let k = 0; k < peqBands.length; k++) {
+                if (!peqBands[k].enabled) continue;
+                const d = Math.abs(peqBands[k].freq_hz - (xVal as number));
+                if (d < bestDist) { bestDist = d; bandIdx = k; }
+              }
+              const isHighQ = bandIdx >= 0 && highQ.has(bandIdx);
               const r = 4 * dpr;
               ctx.beginPath();
               ctx.arc(cx, cy, r, 0, 2 * Math.PI);
               ctx.fillStyle = PEQ_COLOR;
               ctx.fill();
-              ctx.strokeStyle = "#fff";
-              ctx.lineWidth = 1.5 * dpr;
+              ctx.strokeStyle = isHighQ ? "#d97706" : "#fff";
+              ctx.lineWidth = (isHighQ ? 2 : 1.5) * dpr;
               ctx.stroke();
             }
             ctx.restore();
