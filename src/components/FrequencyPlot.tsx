@@ -26,8 +26,8 @@ import {
   STATUS_GOOD, STATUS_WARN, STATUS_BAD,
   DEFAULT_IR_COLORS, DEFAULT_GD_COLORS, DEFAULT_EXPORT_COLORS,
 } from "../lib/plot-helpers";
-import { addGaussianMinPhase, evaluateBand, hasActiveSubsonicProtect } from "../lib/band-evaluation";
-import { evaluateBandFull } from "../lib/band-evaluator";
+import { hasActiveSubsonicProtect } from "../lib/band-evaluation";
+import { evaluateBandFull, reconstructTargetPhase } from "../lib/band-evaluator";
 import { computeAutoAlign } from "../lib/auto-align";
 
 // Track which inputs have been explicitly clicked — wheel only fires when in set
@@ -2031,28 +2031,12 @@ export default function FrequencyPlot() {
           targetGdMs = tgd.gdMs;
         }
 
-        // Corrected GD (band mode only, meas + PEQ + cross-section)
+        // Corrected GD: read evalRes.correctedPhase directly. Single source
+        // of truth — Gaussian/subsonic reconstruction is unified with target.
         let corrGdMs: number[] | null = null;
-        if (gdEval && band) {
-          try {
-            let corrPh = [...phase];
-            const pp = gdEval.peqPhase;
-            corrPh = corrPh.map((v, i) => v + pp[i]);
-            if (band.target.high_pass || band.target.low_pass) {
-              const [, xp] = await invoke<[number[], number[], number]>("compute_cross_section", {
-                freq, highPass: band.target.high_pass, lowPass: band.target.low_pass,
-              });
-              if (gen !== renderGen) return;
-              corrPh = corrPh.map((v, i) => v + xp[i]);
-            }
-            // Gaussian min-phase: add per-filter Hilbert-derived phase to corrected phase
-            if (isGaussianMinPhase(band.target.high_pass) || isGaussianMinPhase(band.target.low_pass)) {
-              corrPh = await addGaussianMinPhase(freq, corrPh, band.target.high_pass, band.target.low_pass);
-              if (gen !== renderGen) return;
-            }
-            const cgd = computeGroupDelay(freq, corrPh);
-            corrGdMs = cgd.gdMs;
-          } catch (_) {}
+        if (gdEval && gdEval.correctedPhase) {
+          const cgd = computeGroupDelay(freq, gdEval.correctedPhase);
+          corrGdMs = cgd.gdMs;
         }
 
         // GD colors from band
@@ -2236,11 +2220,9 @@ export default function FrequencyPlot() {
               tMag = tMag.map((v: number, i: number) => v + xm[i]);
               tPh = tPh.map((v: number, i: number) => v + xp[i]);
             }
-            // Gaussian min-phase: add per-filter Hilbert-derived minimum phase
-            if (isGaussianMinPhase(sb.target.high_pass) || isGaussianMinPhase(sb.target.low_pass)) {
-              tPh = await addGaussianMinPhase(freq, tPh, sb.target.high_pass, sb.target.low_pass);
-              if (gen !== renderGen) return null;
-            }
+            // b139.4c: unified phase reconstruction (Gaussian + subsonic).
+            tPh = await reconstructTargetPhase(freq, tPh, sb.target.high_pass, sb.target.low_pass);
+            if (gen !== renderGen) return null;
             // Normalize to 0 dB peak before IFFT (same as sum normalization)
             let tPeakMag = -Infinity;
             for (let j = 0; j < tMag.length; j++) {
@@ -2369,9 +2351,9 @@ export default function FrequencyPlot() {
               cMag = cMag.map((v, i) => v + (xm[i] ?? 0));
               cPh = cPh.map((v, i) => v + (xp[i] ?? 0));
             }
-            // Gaussian min-phase: add per-filter Hilbert-derived phase to corrected phase
-            if (sb.targetEnabled && (isGaussianMinPhase(sb.target.high_pass) || isGaussianMinPhase(sb.target.low_pass))) {
-              cPh = await addGaussianMinPhase(sbFreq, cPh, sb.target.high_pass, sb.target.low_pass);
+            // b139.4c: unified phase reconstruction (Gaussian + subsonic).
+            if (sb.targetEnabled) {
+              cPh = await reconstructTargetPhase(sbFreq, cPh, sb.target.high_pass, sb.target.low_pass);
               if (gen !== renderGen) return null;
             }
             // Normalize to 0 dB peak before IFFT (same as sum normalization)
@@ -2432,9 +2414,9 @@ export default function FrequencyPlot() {
               cMag = cMag.map((v, i) => v + (xm[i] ?? 0));
               cPh = cPh.map((v, i) => v + (xp[i] ?? 0));
             }
-            // Gaussian min-phase
-            if (bd.targetEnabled && (isGaussianMinPhase(bd.target.high_pass) || isGaussianMinPhase(bd.target.low_pass))) {
-              cPh = await addGaussianMinPhase(sbFreq, cPh, bd.target.high_pass, bd.target.low_pass);
+            // b139.4c: unified phase reconstruction (Gaussian + subsonic).
+            if (bd.targetEnabled) {
+              cPh = await reconstructTargetPhase(sbFreq, cPh, bd.target.high_pass, bd.target.low_pass);
               if (gen !== renderGen) return null;
             }
             // Resample onto dense common grid
@@ -2516,98 +2498,38 @@ export default function FrequencyPlot() {
         // ============================================================
         // BAND MODE: single band IR/Step (wrap into per-band format)
         // ============================================================
-        const magnitude = [...b.measurement!.magnitude];
-        const phase = [...b.measurement!.phase!];
-
-        let result: { time: number[]; impulse: number[]; step: number[] };
-        try {
-          result = await invoke<{ time: number[]; impulse: number[]; step: number[] }>("compute_impulse", {
-            freq, magnitude, phase, sampleRate: sr,
-          });
-        } catch (_) {
+        // b139.4c: BandEvaluator returns measurement / target / corrected
+        // impulses in one shot. No inline compute_impulse, compute_cross_section
+        // or addGaussianMinPhase here — single source of truth.
+        const irEval = await evaluateBandFull({ band: band!, freq, includeIr: true })
+          .catch(() => null);
+        if (gen !== renderGen) return;
+        if (!irEval || !irEval.ir?.measurement) {
           return;
         }
-        if (gen !== renderGen) return;
-
+        const irMeas = irEval.ir.measurement;
         const measBands: IrBandData[] = [{
           bandName: band!.name,
           bandColor: band!.color,
-          timeMs: result.time.map(t => t * 1000),
-          impulse: result.impulse,
-          step: result.step,
+          timeMs: irMeas.time.map(t => t * 1000),
+          impulse: irMeas.impulse,
+          step: irMeas.step,
         }];
 
-        // b139.4b: target/corrected impulse share BandEvaluator's
-        // target+peq computation. compute_impulse stays inline because IR
-        // uses (meas + PEQ + cross_section) — different from FIR-export
-        // semantics (target ideal). evalRes.peqMag/Phase replaces the
-        // duplicate compute_peq_complex IPC.
-        const irEval = (band && band.targetEnabled)
-          ? await evaluateBandFull({ band, freq }).catch(() => null)
-          : null;
-        if (gen !== renderGen) return;
-
-        // Target impulse (single band)
-        let targetResult: { time: number[]; impulse: number[]; step: number[] } | null = null;
-        if (irEval && irEval.targetMag && irEval.targetPhase) {
-          // Apply passband-anchored ref level (200-2000 Hz avg) so target IR
-          // sits at the same SPL as measurement.
-          let sum = 0, n2 = 0;
-          for (let i = 0; i < freq.length; i++) {
-            if (freq[i] >= 200 && freq[i] <= 2000) { sum += magnitude[i]; n2++; }
-          }
-          const refShift = n2 > 0 ? sum / n2 : 0;
-          const tMag = irEval.targetMag.map(v => v + refShift);
-          try {
-            targetResult = await invoke<{ time: number[]; impulse: number[]; step: number[] }>("compute_impulse", {
-              freq, magnitude: tMag, phase: irEval.targetPhase, sampleRate: sr,
-            });
-            if (gen !== renderGen) return;
-          } catch (_) {}
-        }
-        const targetBands: IrBandData[] = targetResult ? [{
+        const targetBands: IrBandData[] = irEval.ir.target ? [{
           bandName: band!.name,
           bandColor: band!.color,
-          timeMs: targetResult.time.map(t => t * 1000),
-          impulse: targetResult.impulse,
-          step: targetResult.step,
+          timeMs: irEval.ir.target.time.map(t => t * 1000),
+          impulse: irEval.ir.target.impulse,
+          step: irEval.ir.target.step,
         }] : [];
 
-        // Corrected impulse (single band: meas + PEQ + cross-section)
-        let corrResult: { time: number[]; impulse: number[]; step: number[] } | null = null;
-        if (irEval && band) {
-          try {
-            let corrMag = [...magnitude];
-            let corrPh = [...phase];
-            const pm = irEval.peqMag;
-            const pp = irEval.peqPhase;
-            corrMag = corrMag.map((v, i) => v + pm[i]);
-            corrPh = corrPh.map((v, i) => v + pp[i]);
-            if (band.target.high_pass || band.target.low_pass) {
-              const [xm, xp] = await invoke<[number[], number[], number]>("compute_cross_section", {
-                freq, highPass: band.target.high_pass, lowPass: band.target.low_pass,
-              });
-              if (gen !== renderGen) return;
-              corrMag = corrMag.map((v, i) => v + xm[i]);
-              corrPh = corrPh.map((v, i) => v + xp[i]);
-            }
-            // Gaussian min-phase: add per-filter Hilbert-derived phase to corrected phase
-            if (isGaussianMinPhase(band.target.high_pass) || isGaussianMinPhase(band.target.low_pass)) {
-              corrPh = await addGaussianMinPhase(freq, corrPh, band.target.high_pass, band.target.low_pass);
-              if (gen !== renderGen) return;
-            }
-            corrResult = await invoke<{ time: number[]; impulse: number[]; step: number[] }>("compute_impulse", {
-              freq, magnitude: corrMag, phase: corrPh, sampleRate: sr,
-            });
-            if (gen !== renderGen) return;
-          } catch (_) {}
-        }
-        const corrBands: IrBandData[] = corrResult ? [{
+        const corrBands: IrBandData[] = irEval.ir.corrected ? [{
           bandName: band!.name,
           bandColor: band!.color,
-          timeMs: corrResult.time.map(t => t * 1000),
-          impulse: corrResult.impulse,
-          step: corrResult.step,
+          timeMs: irEval.ir.corrected.time.map(t => t * 1000),
+          impulse: irEval.ir.corrected.impulse,
+          step: irEval.ir.corrected.step,
         }] : [];
 
         // HP freq for masking zone
@@ -3234,25 +3156,14 @@ export default function FrequencyPlot() {
             }
           }
 
-          // Cross-section: filters + min-phase makeup where corrected < target
-          let xsMag: number[] | null = null;
-          let xsPhase: number[] | null = null;
-          if (hasFilters && result.targetMag) {
-            const [xm, xp, xNorm] = await invoke<[number[], number[], number]>("compute_cross_section", {
-              freq: result.measurement.freq,
-              highPass: band.target.high_pass,
-              lowPass: band.target.low_pass,
-            });
-            xsMag = xm;
-            xsPhase = xp;
-          }
-
-          // Full corrected = measurement + PEQ + cross-section
-          // Hybrid: amber "Corrected + XO", Standard: green "Corrected"
-          const fullCorrected = result.measurement.magnitude.map(
-            (v: number, i: number) =>
-              v + (peqMag ? peqMag[i] : 0) + (xsMag ? xsMag[i] : 0)
-          );
+          // b139.4c: corrected mag/phase come from BandEvaluator (single
+          // unified path through reconstructTargetPhase). The view-specific
+          // passband normalization (corrOffset) stays here.
+          const fullCorrected = evalRes.correctedMag
+            ? [...evalRes.correctedMag]
+            : result.measurement.magnitude.map((v: number, i: number) =>
+                v + (peqMag ? peqMag[i] : 0)
+              );
 
           // Normalize corrected to target in passband (b82.06)
           if (result.targetMag) {
@@ -3288,31 +3199,21 @@ export default function FrequencyPlot() {
             sIdx++;
           }
 
-          // Corrected phase = measurement phase + PEQ phase + cross-section phase
-          let fullCorrectedPhase: number[] | null = null;
-          if (result.measurement.phase) {
-            fullCorrectedPhase = result.measurement.phase.map(
-              (v: number, i: number) =>
-                v + (peqPhase ? peqPhase[i] : 0) + (xsPhase ? xsPhase[i] : 0)
-            );
-            // Gaussian min-phase: add per-filter Hilbert-derived phase to corrected phase
-            if (isGaussianMinPhase(band.target.high_pass) || isGaussianMinPhase(band.target.low_pass)) {
-              fullCorrectedPhase = await addGaussianMinPhase(result.freq!, fullCorrectedPhase, band.target.high_pass, band.target.low_pass);
-              if (gen !== renderGen) return;
-            }
-            if (showPhase) {
-              const phaseLabel = isHybrid ? "Corrected + XO" : "Corrected";
-              uSeries.push({
-                label: phaseLabel + " \u00B0",
-                stroke: cf.correctedPhase,
-                width: 1.5,
-                dash: [4, 4],
-                scale: "phase",
-              });
-              uData.push(wrapPhase(fullCorrectedPhase));
-              legend.push({ label: phaseLabel + " \u00B0", color: cf.correctedPhase, dash: true, visible: true, seriesIdx: sIdx, category: "corrected" });
-              sIdx++;
-            }
+          // b139.4c: corrected phase from BandEvaluator (Gaussian/subsonic
+          // reconstruction is unified with target \u2014 bug fix for SPL tab).
+          const fullCorrectedPhase: number[] | null = evalRes.correctedPhase ?? null;
+          if (fullCorrectedPhase && showPhase) {
+            const phaseLabel = isHybrid ? "Corrected + XO" : "Corrected";
+            uSeries.push({
+              label: phaseLabel + " \u00B0",
+              stroke: cf.correctedPhase,
+              width: 1.5,
+              dash: [4, 4],
+              scale: "phase",
+            });
+            uData.push(wrapPhase(fullCorrectedPhase));
+            legend.push({ label: phaseLabel + " \u00B0", color: cf.correctedPhase, dash: true, visible: true, seriesIdx: sIdx, category: "corrected" });
+            sIdx++;
           }
 
           // Save per-category data for snapshot capture (raw, pre-normalization)
@@ -3451,7 +3352,25 @@ export default function FrequencyPlot() {
     const bands: BandState[] = JSON.parse(JSON.stringify(appState.bands));
 
     try {
-      const results = await Promise.all(bands.map((b) => evaluateBand(b)));
+      // b139.4c: unified entry point. Adapter preserves the {measurement,
+      // freq, targetMag, targetPhase} shape that the rest of renderSumMode
+      // reads — measurement object reconstructs from band + smoothed mag.
+      const results = await Promise.all(bands.map(async (b) => {
+        const r = await evaluateBandFull({ band: b });
+        const measurement = r.measurementMag && b.measurement
+          ? {
+              ...b.measurement,
+              magnitude: r.measurementMag,
+              phase: r.measurementPhase ?? b.measurement.phase ?? null,
+            }
+          : null;
+        return {
+          measurement,
+          freq: r.freq,
+          targetMag: r.targetMag,
+          targetPhase: r.targetPhase,
+        };
+      }));
       if (gen !== renderGen) return; // stale render, discard
 
       // Определяем общую частотную сетку (максимальное число точек, самый широкий диапазон)
@@ -3714,11 +3633,9 @@ export default function FrequencyPlot() {
               let corrPhase = unwrapDegrees(rm.phase.map(
                 (v: number, j: number) => v + (peqPhase ? peqPhase[j] : 0) + (xsPhase ? xsPhase[j] : 0)
               ));
-              // Gaussian min-phase: add per-filter Hilbert-derived phase to corrected phase
-              if (isGaussianMinPhase(bands[i].target.high_pass) || isGaussianMinPhase(bands[i].target.low_pass)) {
-                corrPhase = await addGaussianMinPhase(freq, corrPhase, bands[i].target.high_pass, bands[i].target.low_pass);
-                if (gen !== renderGen) return;
-              }
+              // b139.4c: unified phase reconstruction (Gaussian + subsonic).
+              corrPhase = await reconstructTargetPhase(freq, corrPhase, bands[i].target.high_pass, bands[i].target.low_pass);
+              if (gen !== renderGen) return;
               perBandCorrPhase.push(corrPhase);
             } else {
               perBandCorrPhase.push(null);

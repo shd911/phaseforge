@@ -59,6 +59,18 @@ export interface BandEvalResult {
   combinedTargetMag: number[] | null;
   combinedTargetPhase: number[] | null;
 
+  /** b139.4c: HP/LP cross-section magnitudes/phases applied as a filter
+   *  (compute_cross_section). Used for the corrected curve and sanity. */
+  crossSectionMag: number[] | null;
+  crossSectionPhase: number[] | null;
+
+  /** b139.4c: corrected = measurement + PEQ + cross-section. Phase goes
+   *  through reconstructTargetPhase so Gaussian/subsonic min-phase is
+   *  applied uniformly with the target — fixes the SPL-tab bug where
+   *  linear-Gaussian + subsonic produced corrected phase = 0. */
+  correctedMag: number[] | null;
+  correctedPhase: number[] | null;
+
   refLevel: number;
 
   fir?: {
@@ -71,7 +83,14 @@ export interface BandEvalResult {
     normDb: number;
     causality: number;
   };
-  ir?: { impulse: number[]; step: number[]; time: number[] };
+  /** b139.4c: structured IR for the SPL/IR/Step views. Each sub-field is
+   *  populated only when the underlying response exists; `time` is
+   *  seconds (compute_impulse native). */
+  ir?: {
+    measurement?: { time: number[]; impulse: number[]; step: number[] };
+    target?: { time: number[]; impulse: number[]; step: number[] };
+    corrected?: { time: number[]; impulse: number[]; step: number[] };
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -79,7 +98,7 @@ export interface BandEvalResult {
 // Gaussian × subsonic combinations. Mirrors band-evaluation.ts:addGaussianMinPhase
 // but is callable on any (freq, basePhase) pair regardless of caller.
 // ---------------------------------------------------------------------------
-async function reconstructTargetPhase(
+export async function reconstructTargetPhase(
   freq: number[],
   basePhase: number[],
   hp: FilterConfig | null | undefined,
@@ -210,6 +229,44 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
     combinedTargetPhase = targetPhase.map((p, i) => p + peqPhase[i]);
   }
 
+  // 5b. b139.4c: cross-section (HP/LP filters as a standalone curve)
+  //      — used to build the corrected response (measurement + PEQ + xs).
+  let crossSectionMag: number[] | null = null;
+  let crossSectionPhase: number[] | null = null;
+  if (band.targetEnabled && (band.target.high_pass || band.target.low_pass)) {
+    try {
+      const [xm, xp] = await invoke<[number[], number[], number]>(
+        "compute_cross_section",
+        { freq, highPass: band.target.high_pass, lowPass: band.target.low_pass },
+      );
+      crossSectionMag = xm;
+      crossSectionPhase = xp;
+    } catch (_) {
+      // No filters → leave null; corrected = meas + PEQ alone.
+    }
+  }
+
+  // 5c. Corrected = measurement + PEQ + cross-section. Phase goes through
+  //      the same Gaussian/subsonic reconstructTargetPhase as target so all
+  //      four (linear × subsonic) combinations behave identically — fixes
+  //      the SPL bug where corrected phase = 0 for linear-Gaussian + subsonic.
+  let correctedMag: number[] | null = null;
+  let correctedPhase: number[] | null = null;
+  if (measurement) {
+    correctedMag = measurement.magnitude.map((m, i) =>
+      m + (peqMag[i] ?? 0) + (crossSectionMag?.[i] ?? 0)
+    );
+    if (measurement.phase) {
+      let basePhase = measurement.phase.map((p, i) =>
+        p + (peqPhase[i] ?? 0) + (crossSectionPhase?.[i] ?? 0)
+      );
+      basePhase = await reconstructTargetPhase(
+        freq, basePhase, band.target.high_pass, band.target.low_pass,
+      );
+      correctedPhase = basePhase;
+    }
+  }
+
   // 6. Optional FIR. b139.4a: send PhaseMode::Composite, which lets Rust
   //    honour the user's linear-phase choice for the main filter while
   //    keeping any subsonic-protect contribution min-phase. Composite
@@ -261,34 +318,43 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
     };
   }
 
-  // 7. Optional IR / step.
+  // 7. Optional IR / step. b139.4c: structured by curve so callers can pick
+  //     measurement / target / corrected independently.
   let ir: BandEvalResult["ir"];
-  if (req.includeIr && measurement) {
-    if (combinedTargetMag && combinedTargetPhase) {
-      const r = await invoke<{ time: number[]; impulse: number[]; step: number[] }>(
-        "compute_corrected_impulse",
-        {
-          measFreq: measurement.freq,
-          measMag: measurement.magnitude,
-          measPhase: measurement.phase ?? new Array(measurement.freq.length).fill(0),
-          realizedMag: combinedTargetMag,
-          realizedPhase: combinedTargetPhase,
-          firFreq: freq,
-          sampleRate: measurement.sample_rate ?? 48000,
-        },
-      );
-      ir = { impulse: r.impulse, step: r.step, time: r.time };
-    } else {
-      const r = await invoke<{ time: number[]; impulse: number[]; step: number[] }>(
-        "compute_impulse",
-        {
-          freq: measurement.freq,
-          magnitude: measurement.magnitude,
-          phase: measurement.phase ?? new Array(measurement.freq.length).fill(0),
-          sampleRate: measurement.sample_rate ?? null,
-        },
-      );
-      ir = { impulse: r.impulse, step: r.step, time: r.time };
+  if (req.includeIr) {
+    ir = {};
+    const sr = measurement?.sample_rate ?? 48000;
+    if (measurement) {
+      try {
+        const r = await invoke<{ time: number[]; impulse: number[]; step: number[] }>(
+          "compute_impulse",
+          {
+            freq: measurement.freq,
+            magnitude: measurement.magnitude,
+            phase: measurement.phase ?? new Array(measurement.freq.length).fill(0),
+            sampleRate: measurement.sample_rate ?? null,
+          },
+        );
+        ir.measurement = { time: r.time, impulse: r.impulse, step: r.step };
+      } catch (_) {}
+    }
+    if (targetMag && targetPhase) {
+      try {
+        const r = await invoke<{ time: number[]; impulse: number[]; step: number[] }>(
+          "compute_impulse",
+          { freq, magnitude: targetMag, phase: targetPhase, sampleRate: sr },
+        );
+        ir.target = { time: r.time, impulse: r.impulse, step: r.step };
+      } catch (_) {}
+    }
+    if (correctedMag && correctedPhase) {
+      try {
+        const r = await invoke<{ time: number[]; impulse: number[]; step: number[] }>(
+          "compute_impulse",
+          { freq, magnitude: correctedMag, phase: correctedPhase, sampleRate: sr },
+        );
+        ir.corrected = { time: r.time, impulse: r.impulse, step: r.step };
+      } catch (_) {}
     }
   }
 
@@ -302,8 +368,187 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
     peqPhase,
     combinedTargetMag,
     combinedTargetPhase,
+    crossSectionMag,
+    crossSectionPhase,
+    correctedMag,
+    correctedPhase,
     refLevel,
     fir,
+    ir,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// b139.4c: SUM aggregator. Evaluates each band via evaluateBandFull on a
+// common log-spaced freq grid, then coherently sums target / corrected
+// curves with polarity and alignment_delay phase rotation. The resulting
+// sumMag/sumPhase/correctedSum* are what renderSumMode would draw on the
+// SPL chart; sumIR is the IFFT of the corrected sum (optional).
+// ---------------------------------------------------------------------------
+export interface SumEvalResult {
+  freq: number[];
+  /** Per-band BandEvalResult resampled onto `freq`. Phase is unchanged
+   *  (each band's evalRes is computed on its own grid, then results merged). */
+  perBand: BandEvalResult[];
+  /** Coherent sum of perBand[i].combinedTargetMag/Phase with polarity +
+   *  alignment_delay phase rotation. Null when no band has a target. */
+  sumTargetMag: number[] | null;
+  sumTargetPhase: number[] | null;
+  /** Coherent sum of perBand[i].correctedMag/Phase. Null when no band has
+   *  a measurement. */
+  sumCorrectedMag: number[] | null;
+  sumCorrectedPhase: number[] | null;
+  /** Optional IR of the corrected sum (compute_impulse on summed mag/phase). */
+  ir?: { time: number[]; impulse: number[]; step: number[] };
+}
+
+export interface SumEvalOptions {
+  freq?: number[];
+  includeIr?: boolean;
+  /** When true the per-band combined target is normalised (peak = 0 dB) before
+   *  the coherent sum — matches how renderSumMode treats target IR aggregation. */
+  normalizeTargetPerBand?: boolean;
+}
+
+function buildLogGrid(n: number, fMin: number, fMax: number): number[] {
+  const out = new Array(n);
+  const lo = Math.log(fMin), hi = Math.log(fMax);
+  for (let i = 0; i < n; i++) {
+    out[i] = Math.exp(lo + (hi - lo) * i / (n - 1));
+  }
+  return out;
+}
+
+async function resampleOntoGrid(
+  srcFreq: number[],
+  srcMag: number[] | null,
+  srcPhase: number[] | null,
+  targetFreq: number[],
+): Promise<{ mag: number[] | null; phase: number[] | null }> {
+  if (srcMag === null) return { mag: null, phase: null };
+  // interpolate_log handles both mag + phase in one call (phase optional).
+  const [, mag, phase] = await invoke<[number[], number[], number[] | null]>(
+    "interpolate_log",
+    {
+      freq: srcFreq, magnitude: srcMag, phase: srcPhase,
+      nPoints: targetFreq.length,
+      fMin: targetFreq[0], fMax: targetFreq[targetFreq.length - 1],
+    },
+  );
+  return { mag, phase: phase ?? null };
+}
+
+function coherentSum(
+  freq: number[],
+  bandsData: Array<{ mag: number[]; phase: number[]; sign: 1 | -1; delay: number } | null>,
+): { mag: number[]; phase: number[] } | null {
+  const n = freq.length;
+  const re = new Float64Array(n);
+  const im = new Float64Array(n);
+  let any = false;
+  for (const b of bandsData) {
+    if (!b) continue;
+    any = true;
+    for (let j = 0; j < n; j++) {
+      const amp = Math.pow(10, (b.mag[j] ?? -200) / 20) * b.sign;
+      const phRad = ((b.phase[j] ?? 0) + 360 * freq[j] * b.delay) * Math.PI / 180;
+      re[j] += amp * Math.cos(phRad);
+      im[j] += amp * Math.sin(phRad);
+    }
+  }
+  if (!any) return null;
+  const mag = new Array(n);
+  const phase = new Array(n);
+  for (let j = 0; j < n; j++) {
+    const amplitude = Math.sqrt(re[j] * re[j] + im[j] * im[j]);
+    mag[j] = amplitude > 0 ? 20 * Math.log10(amplitude) : -200;
+    phase[j] = Math.atan2(im[j], re[j]) * 180 / Math.PI;
+  }
+  return { mag, phase };
+}
+
+export async function evaluateSum(
+  bands: BandState[],
+  options?: SumEvalOptions,
+): Promise<SumEvalResult> {
+  // 1. Per-band evaluation on each band's native grid.
+  const perBand = await Promise.all(bands.map(b => evaluateBandFull({ band: b })));
+
+  // 2. Build common log grid: union of band ranges, point count = max.
+  let fMin = Infinity, fMax = -Infinity, nMax = 512;
+  for (const r of perBand) {
+    const f = r.freq;
+    if (f.length === 0) continue;
+    if (f[0] < fMin) fMin = f[0];
+    if (f[f.length - 1] > fMax) fMax = f[f.length - 1];
+    if (f.length > nMax) nMax = f.length;
+  }
+  if (!isFinite(fMin) || !isFinite(fMax)) {
+    fMin = 20; fMax = 20000;
+  }
+  const freq = options?.freq ?? buildLogGrid(nMax, fMin, fMax);
+
+  // 3. Resample target + corrected onto the common grid for each band.
+  const targetData: Array<{ mag: number[]; phase: number[]; sign: 1 | -1; delay: number } | null> = [];
+  const correctedData: Array<{ mag: number[]; phase: number[]; sign: 1 | -1; delay: number } | null> = [];
+  for (let i = 0; i < bands.length; i++) {
+    const r = perBand[i];
+    const sign: 1 | -1 = bands[i].inverted ? -1 : 1;
+    const delay = bands[i].alignmentDelay ?? 0;
+    if (r.combinedTargetMag && r.combinedTargetPhase) {
+      let tMag = r.combinedTargetMag;
+      const tPhase = r.combinedTargetPhase;
+      const resampled = await resampleOntoGrid(r.freq, tMag, tPhase, freq);
+      if (resampled.mag && resampled.phase) {
+        let mag = resampled.mag;
+        if (options?.normalizeTargetPerBand) {
+          let peak = -Infinity;
+          for (const v of mag) if (v > peak) peak = v;
+          mag = mag.map(v => v - peak);
+        }
+        targetData.push({ mag, phase: resampled.phase, sign, delay });
+      } else {
+        targetData.push(null);
+      }
+    } else {
+      targetData.push(null);
+    }
+    if (r.correctedMag && r.correctedPhase) {
+      const resampled = await resampleOntoGrid(r.freq, r.correctedMag, r.correctedPhase, freq);
+      if (resampled.mag && resampled.phase) {
+        correctedData.push({ mag: resampled.mag, phase: resampled.phase, sign, delay });
+      } else {
+        correctedData.push(null);
+      }
+    } else {
+      correctedData.push(null);
+    }
+  }
+
+  // 4. Coherent sum.
+  const targetSum = coherentSum(freq, targetData);
+  const correctedSum = coherentSum(freq, correctedData);
+
+  // 5. Optional IR for the corrected sum.
+  let ir: SumEvalResult["ir"];
+  if (options?.includeIr && correctedSum) {
+    try {
+      const sr = bands.find(b => b.measurement)?.measurement?.sample_rate ?? 48000;
+      const r = await invoke<{ time: number[]; impulse: number[]; step: number[] }>(
+        "compute_impulse",
+        { freq, magnitude: correctedSum.mag, phase: correctedSum.phase, sampleRate: sr },
+      );
+      ir = { time: r.time, impulse: r.impulse, step: r.step };
+    } catch (_) {}
+  }
+
+  return {
+    freq,
+    perBand,
+    sumTargetMag: targetSum?.mag ?? null,
+    sumTargetPhase: targetSum?.phase ?? null,
+    sumCorrectedMag: correctedSum?.mag ?? null,
+    sumCorrectedPhase: correctedSum?.phase ?? null,
     ir,
   };
 }

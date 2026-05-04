@@ -27,12 +27,36 @@ vi.mock("@tauri-apps/api/core", () => ({
     if (cmd === "compute_impulse" || cmd === "compute_corrected_impulse") {
       return { time: [0, 1], impulse: [0, 0], step: [0, 0] };
     }
+    if (cmd === "compute_cross_section") {
+      // Mirror Rust apply_filter_public for Gaussian (phase=0, mag from
+      // gaussianFilterMagDb). Non-Gaussian filters → zeros (fixtures 5/6
+      // still snapshot deterministically because the freq grid + zero
+      // contributions are reproducible).
+      const freq = args.freq as number[];
+      const hp = args.highPass as FilterConfig | null;
+      const lp = args.lowPass as FilterConfig | null;
+      const n = freq.length;
+      const mag = new Array(n).fill(0);
+      const phase = new Array(n).fill(0);
+      if (hp && hp.filter_type === "Gaussian") {
+        const m = gaussianFilterMagDb(freq, hp, false);
+        for (let i = 0; i < n; i++) mag[i] += m[i];
+      }
+      if (lp && lp.filter_type === "Gaussian") {
+        const m = gaussianFilterMagDb(freq, lp, true);
+        for (let i = 0; i < n; i++) mag[i] += m[i];
+      }
+      return [mag, phase, 0];
+    }
+    if (cmd === "interpolate_log") {
+      // Trivial pass-through — fixture grid already covers the requested span.
+      return [args.freq, args.magnitude, args.phase ?? null];
+    }
     throw new Error(`Unmocked command: ${cmd}`);
   }),
 }));
 
 import { evaluateBandFull } from "../band-evaluator";
-import { evaluateBand } from "../band-evaluation";
 import { gaussianFilterMagDb, subsonicMagDb } from "../plot-helpers";
 
 function mockLogGrid(fmin: number, fmax: number, n: number): number[] {
@@ -112,31 +136,27 @@ describe("evaluateBandFull (b139.1)", () => {
     }
   });
 
-  describe("equivalence with legacy evaluateBand", () => {
+  // b139.4c: equivalence-with-legacy-evaluateBand suite removed — equivalence
+  // baselined at b139.1 (snapshots above lock the canonical behaviour).
+  // Legacy evaluateBand has been deleted from band-evaluation.ts.
+
+  // b139.4c: pin correctedMag / correctedPhase for the same six fixtures.
+  // Single-source-of-truth check — the four (linear × subsonic) Gaussian
+  // combinations all flow through reconstructTargetPhase, so any
+  // regression in that path shows up here.
+  describe("snapshot — correctedMag + correctedPhase for 6 fixtures", () => {
     for (const cfg of FIXTURE_CONFIGS) {
-      it(`${cfg.label} — magnitude bit-identical`, async () => {
+      it(`${cfg.label} — correctedMag`, async () => {
         const band = fixtureBand(cfg.hp);
-        const oldR = await evaluateBand(band);
-        const newR = await evaluateBandFull({ band });
-        expect(oldR.targetMag).not.toBeNull();
-        expect(newR.targetMag).not.toBeNull();
-        let maxDiff = 0;
-        for (let i = 0; i < oldR.targetMag!.length; i++) {
-          maxDiff = Math.max(maxDiff, Math.abs(oldR.targetMag![i] - newR.targetMag![i]));
-        }
-        expect(maxDiff).toBeLessThan(1e-9);
+        const r = await evaluateBandFull({ band });
+        expect(r.correctedMag).not.toBeNull();
+        expect(round(r.correctedMag!)).toMatchSnapshot();
       });
-      it(`${cfg.label} — phase bit-identical`, async () => {
+      it(`${cfg.label} — correctedPhase`, async () => {
         const band = fixtureBand(cfg.hp);
-        const oldR = await evaluateBand(band);
-        const newR = await evaluateBandFull({ band });
-        expect(oldR.targetPhase).not.toBeNull();
-        expect(newR.targetPhase).not.toBeNull();
-        let maxDiff = 0;
-        for (let i = 0; i < oldR.targetPhase!.length; i++) {
-          maxDiff = Math.max(maxDiff, Math.abs(oldR.targetPhase![i] - newR.targetPhase![i]));
-        }
-        expect(maxDiff).toBeLessThan(1e-9);
+        const r = await evaluateBandFull({ band });
+        expect(r.correctedPhase).not.toBeNull();
+        expect(round(r.correctedPhase!)).toMatchSnapshot();
       });
     }
   });
