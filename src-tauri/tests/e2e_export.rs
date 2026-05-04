@@ -123,19 +123,15 @@ fn subsonic_mag_lin(n_bins: usize, sample_rate: f64, cutoff_hz: Option<f64>) -> 
     out
 }
 
-/// Resample a linear-grid array onto the log freq grid by nearest-bin lookup —
-/// matches what generate_model_fir's analyser does internally for FFT bins.
+/// Resample a linear-grid array onto the log freq grid using `dsp::interp_1d`
+/// — same path generate_model_fir uses to produce result.realized_phase, so
+/// the comparison stays apples-to-apples.
 fn linear_to_log(linear_phase: &[f64], log_freq: &[f64], sample_rate: f64) -> Vec<f64> {
     let n_bins = linear_phase.len();
     let n_fft = (n_bins - 1) * 2;
     let bin_hz = sample_rate / n_fft as f64;
-    log_freq
-        .iter()
-        .map(|&f| {
-            let bin = ((f / bin_hz).round() as usize).min(n_bins - 1);
-            linear_phase[bin]
-        })
-        .collect()
+    let lin_freq: Vec<f64> = (0..n_bins).map(|i| i as f64 * bin_hz).collect();
+    dsp::interp_1d(&lin_freq, linear_phase, log_freq)
 }
 
 /// Expected phase response per the Composite assembly that generate_model_fir
@@ -292,6 +288,56 @@ fn evaluate_config(cfg: &ExportConfig) -> E2ERow {
     }
 }
 
+/// b140.1 — assert that a real min-phase PEQ contribution survives the
+/// Composite assembly + iterative_refine round trip. Pre-fix this fails for
+/// every `linear_phase_main = true` config that has PEQ bands, because the
+/// old composite_phase_inner zeroed the entire base_mag (which already
+/// contained the PEQ on top of the main filter).
+#[test]
+fn e2e_peq_phase_present_in_realized() {
+    let configs = acceptance_configs();
+    let freq = fir_grid();
+    let mut failures: Vec<String> = Vec::new();
+
+    for cfg in configs.iter().filter(|c| !c.peq_bands.is_empty()) {
+        let result = run_export_pipeline(cfg);
+        let real_phase = &result.realized_phase;
+
+        for band in &cfg.peq_bands {
+            // ±0.5 octave window around the band centre.
+            let f_lo = band.freq_hz / 2f64.sqrt();
+            let f_hi = band.freq_hz * 2f64.sqrt();
+            let mut p_min = f64::INFINITY;
+            let mut p_max = f64::NEG_INFINITY;
+            for (i, &f) in freq.iter().enumerate() {
+                if f >= f_lo && f <= f_hi {
+                    if real_phase[i] < p_min { p_min = real_phase[i]; }
+                    if real_phase[i] > p_max { p_max = real_phase[i]; }
+                }
+            }
+            let rotation = p_max - p_min;
+            if rotation < 20.0 {
+                failures.push(format!(
+                    "  {}: PEQ band {:.0} Hz (gain {:+.1} dB, Q {}) → rotation {:.2}° < 20°",
+                    cfg.name, band.freq_hz, band.gain_db, band.q, rotation,
+                ));
+            }
+        }
+    }
+
+    if !failures.is_empty() {
+        let mut msg = format!(
+            "\ne2e_peq_phase_present_in_realized: {} PEQ bands lost their min-phase rotation\n",
+            failures.len()
+        );
+        for f in &failures {
+            msg.push_str(f);
+            msg.push('\n');
+        }
+        panic!("{msg}");
+    }
+}
+
 #[test]
 fn e2e_acceptance_matrix() {
     let configs = acceptance_configs();
@@ -321,7 +367,7 @@ fn e2e_acceptance_matrix() {
         ));
     }
 
-    eprintln!("\n=== E2E Acceptance Matrix (b140.0 baseline) ===");
+    eprintln!("\n=== E2E Acceptance Matrix ===");
     eprintln!("{}", report);
     eprintln!(
         "Phase + magnitude acceptance: {} of {} PASS, {} FAIL.",

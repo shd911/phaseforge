@@ -111,27 +111,29 @@ fn gaussian_hp(fc: f64, linear: bool, subsonic: bool) -> TargetCurve {
     }
 }
 
-/// Three narrow PEQ bands with known frequency / Q / gain — exercises both
-/// boost and cut, both above and below the HP corner.
-fn sample_peq_bands() -> Vec<PeqBand> {
+/// Three narrow PEQ bands with known frequency / Q / gain. Each has |gain| ≥ 6 dB
+/// and Q ≥ 3 so the min-phase rotation around the band centre is ≥ 30° —
+/// large enough that the b140.0 PEQ-rotation assertion can detect a missing
+/// PEQ phase contribution unambiguously.
+pub fn sample_peq_bands() -> Vec<PeqBand> {
     vec![
         PeqBand {
             freq_hz: 200.0,
-            gain_db: -3.0,
+            gain_db: -6.0,
             q: 4.0,
             enabled: true,
             filter_type: PeqFilterType::Peaking,
         },
         PeqBand {
             freq_hz: 1000.0,
-            gain_db: 3.0,
-            q: 2.0,
+            gain_db: 6.0,
+            q: 3.0,
             enabled: true,
             filter_type: PeqFilterType::Peaking,
         },
         PeqBand {
             freq_hz: 5000.0,
-            gain_db: -2.5,
+            gain_db: -6.0,
             q: 3.0,
             enabled: true,
             filter_type: PeqFilterType::Peaking,

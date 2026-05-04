@@ -145,9 +145,14 @@ pub fn generate_fir(
 
     // 11. Iterative weighted refinement (compensates windowing distortion)
     if config.iterations > 0 {
+        // generate_fir is the legacy measurement-based path; it does not split
+        // PEQ as a separate Hilbert source — pass an empty slice so the inner
+        // loop's zero-PEQ guard short-circuits.
+        let no_peq: Vec<f64> = vec![0.0; n_bins];
         iterative_refine(
             &mut impulse,
             &limited,         // target correction on linear grid
+            &no_peq,          // b140.1: linear-grid PEQ magnitude (empty here)
             &phase_rad,       // phase on linear grid
             config,
             crossover_range,
@@ -306,9 +311,14 @@ pub fn generate_hybrid_fir(
 
     // 10b. Iterative weighted refinement
     if config.iterations > 0 {
+        // hybrid_fir does not split PEQ from the correction magnitude here;
+        // pass an empty slice so Composite mode (if ever wired to this path)
+        // short-circuits its PEQ Hilbert step.
+        let no_peq: Vec<f64> = vec![0.0; n_bins];
         iterative_refine(
             &mut impulse,
             &lin_total,           // target correction on linear grid
+            &no_peq,              // b140.1: linear-grid PEQ magnitude (empty here)
             &correction_phase,    // phase on linear grid
             config,
             crossover_range,
@@ -580,16 +590,17 @@ pub fn generate_model_fir(
     //      (some filters lin-phase, some min-phase — frontend computes per-filter Hilbert)
     //    MixedPhase + zero model_phase: fallback to LinearPhase
     //    PEQ phase: ALWAYS Hilbert (min-phase biquads)
-    let target_phase_rad = if effective_linear {
-        vec![0.0; n_bins]
-    } else if config.phase_mode == PhaseMode::Composite {
-        // b139.4a: split target into base + subsonic, phase from each:
-        // base honours linear_phase_main, subsonic is always min-phase.
-        // (When subsonic_cutoff_hz=None, base_phase carries the entire
-        // response — so this also handles the "no subsonic" degenerate
-        // case symmetrically with effective_linear above.)
+    let target_phase_rad = if config.phase_mode == PhaseMode::Composite {
+        // b140.1: compose_target_phase now returns the full
+        // main + peq + subsonic phase composed from three independent
+        // Hilbert sources — matches what iterative_refine recomputes each
+        // pass, so initial and iterated assemblies stay in lockstep.
+        // Total magnitude (lin_mag = target + peq) and lin_peq are passed
+        // separately so composite_phase_inner can subtract them out of
+        // base_mag and Hilbert each piece on its own.
         crate::fir::helpers::compose_target_phase(
-            &lin_target,
+            &lin_mag,
+            &lin_peq,
             n_fft,
             n_bins,
             config.sample_rate,
@@ -597,6 +608,8 @@ pub fn generate_model_fir(
             config.subsonic_cutoff_hz,
             config.noise_floor_db,
         )
+    } else if effective_linear {
+        vec![0.0; n_bins]
     } else if config.phase_mode == PhaseMode::MixedPhase && !config.gaussian_min_phase_filters.is_empty() {
         // MixedPhase: compute per-filter Gaussian Hilbert on linear FFT grid
         let nyquist = config.sample_rate / 2.0;
@@ -624,7 +637,11 @@ pub fn generate_model_fir(
         minimum_phase_from_magnitude(&lin_target, n_fft)
     };
 
-    let peq_phase_rad = if has_peq {
+    // b140.1: Composite mode already incorporates the PEQ Hilbert via
+    // compose_target_phase. Other phase modes still need it added here.
+    let peq_phase_rad = if config.phase_mode == PhaseMode::Composite {
+        vec![0.0; n_bins]
+    } else if has_peq {
         minimum_phase_from_magnitude(&lin_peq, n_fft)
     } else {
         vec![0.0; n_bins]
@@ -677,6 +694,7 @@ pub fn generate_model_fir(
         iterative_refine(
             &mut impulse,
             &lin_mag,         // target magnitude on linear grid
+            &lin_peq,         // b140.1: PEQ magnitude (own Hilbert source)
             &phase_rad,       // phase on linear grid
             config,
             (20.0, 20000.0),  // model FIR: full range, no crossover

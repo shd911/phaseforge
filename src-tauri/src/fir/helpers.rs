@@ -79,6 +79,7 @@ pub(crate) fn frequency_weight(freq_hz: f64, crossover_range: (f64, f64)) -> f64
 pub(crate) fn iterative_refine(
     impulse: &mut Vec<f64>,
     target_correction_db: &[f64],   // desired correction on linear grid (n_bins)
+    peq_mag_db: &[f64],             // b140.1: linear-grid PEQ magnitude (n_bins)
     phase_rad: &[f64],              // phase on linear grid (n_bins)
     config: &FirConfig,
     crossover_range: (f64, f64),
@@ -194,7 +195,12 @@ pub(crate) fn iterative_refine(
             let sub = subsonic_mag_fixed.as_ref()
                 .expect("subsonic_mag_fixed must exist in Composite mode");
             iter_phase = composite_phase_inner(
-                &refined_db, sub, n_fft, config.linear_phase_main, config.noise_floor_db,
+                &refined_db,
+                sub,
+                peq_mag_db,
+                n_fft,
+                config.linear_phase_main,
+                config.noise_floor_db,
             );
             debug_assert_eq!(iter_phase.len(), n_bins);
         }
@@ -425,38 +431,64 @@ pub(crate) fn subsonic_mag_db_lin(
     out
 }
 
-/// Composite phase for one iteration / one assembly: split total magnitude
-/// into base = total - subsonic, give base zero or min-phase per
-/// `linear_phase_main`, sum with always-min-phase subsonic contribution.
+/// Composite phase for one iteration / one assembly. b140.1 splits the
+/// composed phase into THREE physically independent sources:
+///   • main      = total − subsonic − peq  → zero (linear) or Hilbert (min)
+///   • peq       = always Hilbert (biquads are min-phase by construction)
+///   • subsonic  = always Hilbert (Butterworth-8 HP is min-phase)
+/// The pre-fix version subtracted only subsonic, so PEQ phase was bundled
+/// into base_mag — and `linear_phase_main = true` zeroed it. That made the
+/// exported FIR drop the entire PEQ phase contribution under iterative_refine,
+/// reproducible as the b140.1 e2e PEQ-rotation regression.
 pub(crate) fn composite_phase_inner(
     total_mag_db: &[f64],
     subsonic_mag_db: &[f64],
+    peq_mag_db: &[f64],
     n_fft: usize,
     linear_phase_main: bool,
     noise_floor_db: f64,
 ) -> Vec<f64> {
     debug_assert_eq!(total_mag_db.len(), subsonic_mag_db.len());
+    debug_assert_eq!(total_mag_db.len(), peq_mag_db.len());
     let n = total_mag_db.len();
+
+    // Main = total − subsonic − peq (clamped to noise floor).
     let base_mag: Vec<f64> = (0..n)
-        .map(|k| (total_mag_db[k] - subsonic_mag_db[k]).max(noise_floor_db))
+        .map(|k| (total_mag_db[k] - subsonic_mag_db[k] - peq_mag_db[k]).max(noise_floor_db))
         .collect();
     let base_phase = if linear_phase_main {
         vec![0.0_f64; n]
     } else {
         minimum_phase_from_magnitude(&base_mag, n_fft)
     };
-    let subsonic_phase = minimum_phase_from_magnitude(subsonic_mag_db, n_fft);
-    base_phase
-        .iter()
-        .zip(subsonic_phase.iter())
-        .map(|(b, s)| b + s)
+
+    // PEQ contribution — Hilbert only when a real PEQ magnitude exists,
+    // otherwise the Hilbert of zeros is itself zero (skip the FFT cost).
+    let peq_phase = if peq_mag_db.iter().all(|&v| v.abs() < 1e-9) {
+        vec![0.0_f64; n]
+    } else {
+        minimum_phase_from_magnitude(peq_mag_db, n_fft)
+    };
+
+    // Subsonic contribution — same skip-when-zero guard.
+    let subsonic_phase = if subsonic_mag_db.iter().all(|&v| v.abs() < 1e-9) {
+        vec![0.0_f64; n]
+    } else {
+        minimum_phase_from_magnitude(subsonic_mag_db, n_fft)
+    };
+
+    (0..n)
+        .map(|k| base_phase[k] + peq_phase[k] + subsonic_phase[k])
         .collect()
 }
 
 /// Public composite-phase entry used by generate_model_fir's initial spectrum
 /// assembly (before iterative_refine). Builds the subsonic mag internally.
+/// b140.1: takes peq_mag_db so the PEQ phase contribution is reconstructed
+/// as a third independent Hilbert source, not bundled into base_mag.
 pub(crate) fn compose_target_phase(
     total_mag_db: &[f64],
+    peq_mag_db: &[f64],
     n_fft: usize,
     n_bins: usize,
     sample_rate: f64,
@@ -465,8 +497,16 @@ pub(crate) fn compose_target_phase(
     noise_floor_db: f64,
 ) -> Vec<f64> {
     debug_assert_eq!(total_mag_db.len(), n_bins);
+    debug_assert_eq!(peq_mag_db.len(), n_bins);
     let subsonic = subsonic_mag_db_lin(n_bins, sample_rate, cutoff_hz);
-    composite_phase_inner(total_mag_db, &subsonic, n_fft, linear_phase_main, noise_floor_db)
+    composite_phase_inner(
+        total_mag_db,
+        &subsonic,
+        peq_mag_db,
+        n_fft,
+        linear_phase_main,
+        noise_floor_db,
+    )
 }
 
 // ---------------------------------------------------------------------------
