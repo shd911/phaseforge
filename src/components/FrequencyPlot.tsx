@@ -27,6 +27,7 @@ import {
   DEFAULT_IR_COLORS, DEFAULT_GD_COLORS, DEFAULT_EXPORT_COLORS,
 } from "../lib/plot-helpers";
 import { addGaussianMinPhase, evaluateBand } from "../lib/band-evaluation";
+import { evaluateBandFull } from "../lib/band-evaluator";
 import { computeAutoAlign } from "../lib/auto-align";
 
 // Track which inputs have been explicitly clicked — wheel only fires when in set
@@ -3108,8 +3109,25 @@ export default function FrequencyPlot() {
     const gen = ++renderGen;
     zoomCenter = 0; // reset before async — will be recalculated from measurement
     try {
-      const result = await evaluateBand(band);
+      // b139.2: migrated to canonical BandEvaluator. Adapter below preserves
+      // the legacy { measurement, freq, targetMag, targetPhase } shape so the
+      // ~700-line renderBandMode body keeps reading result.measurement.foo
+      // unchanged. Equivalence proven by b139.1 unit tests (max diff 1e-9).
+      const evalRes = await evaluateBandFull({ band });
       if (gen !== renderGen) return; // stale render, discard
+      const result = {
+        freq: evalRes.freq,
+        targetMag: evalRes.targetMag,
+        targetPhase: evalRes.targetPhase,
+        measurement: band.measurement
+          ? {
+              ...band.measurement,
+              freq: evalRes.freq,
+              magnitude: evalRes.measurementMag ?? band.measurement.magnitude,
+              phase: evalRes.measurementPhase ?? band.measurement.phase,
+            }
+          : null,
+      };
 
       if (!result.freq) {
         try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
