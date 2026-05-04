@@ -1603,4 +1603,146 @@ mod tests {
         let at_1k = freq.iter().position(|&f| f > 1000.0).unwrap();
         assert!(xs_mag[at_1k].abs() < 0.5, "Gaussian XS passband should be ~0 dB, got {}", xs_mag[at_1k]);
     }
+
+    // -----------------------------------------------------------------------
+    // b139.0 golden snapshot tests for evaluate_target.
+    // -----------------------------------------------------------------------
+
+    fn b139_freq32() -> Vec<f64> {
+        (0..32).map(|i| 20.0 * (1000f64).powf(i as f64 / 31.0)).collect()
+    }
+
+    fn b139_baseline() -> TargetCurve {
+        TargetCurve {
+            reference_level_db: 0.0,
+            tilt_db_per_octave: 0.0,
+            tilt_ref_freq: 1000.0,
+            high_pass: None,
+            low_pass: None,
+            low_shelf: None,
+            high_shelf: None,
+        }
+    }
+
+    fn b139_gauss_hp(lin: bool, sub: Option<bool>) -> FilterConfig {
+        FilterConfig {
+            filter_type: FilterType::Gaussian, order: 4, freq_hz: 632.0,
+            shape: Some(1.0), linear_phase: lin, q: None, subsonic_protect: sub,
+        }
+    }
+
+    fn b139_lr4_hp() -> FilterConfig {
+        FilterConfig {
+            filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: 80.0,
+            shape: None, linear_phase: false, q: None, subsonic_protect: None,
+        }
+    }
+
+    fn b139_assert_mag(target: &TargetCurve, expected: &[f64]) {
+        let freq = b139_freq32();
+        let resp = evaluate(target, &freq);
+        assert_eq!(resp.magnitude.len(), expected.len(),
+            "length mismatch: got {}, expected {}", resp.magnitude.len(), expected.len());
+        for (i, (a, b)) in resp.magnitude.iter().zip(expected.iter()).enumerate() {
+            assert!((a - b).abs() < 1e-5,
+                "mag mismatch at i={}, freq={:.2}: got {:.6}, expected {:.6}",
+                i, freq[i], a, b);
+        }
+    }
+
+    #[test]
+    fn evaluate_target_b139_golden_gaussian_lin_subsonic_off() {
+        let t = TargetCurve { high_pass: Some(b139_gauss_hp(true, Some(false))), ..b139_baseline() };
+        let expected = vec![
+            -63.173989, -59.304713, -55.436388, -51.569547, -47.705021, -43.844109,
+            -39.988835, -36.142356, -32.309581, -28.498140, -24.719849, -20.992929,
+            -17.345261, -13.819002, -10.476619, -7.407536, -4.731996, -2.592863,
+            -1.116531, -0.325520, -0.050153, -0.002763, -0.000030, -0.000000,
+            -0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
+        ];
+        b139_assert_mag(&t, &expected);
+    }
+
+    #[test]
+    fn evaluate_target_b139_golden_gaussian_lin_subsonic_on() {
+        let t = TargetCurve { high_pass: Some(b139_gauss_hp(true, Some(true))), ..b139_baseline() };
+        let expected = vec![
+            -158.629524, -139.276378, -119.924183, -100.573524, -81.227003, -61.948018,
+            -44.460149, -36.358031, -32.315832, -28.498317, -24.719854, -20.992929,
+            -17.345261, -13.819002, -10.476619, -7.407536, -4.731996, -2.592863,
+            -1.116531, -0.325520, -0.050153, -0.002763, -0.000030, -0.000000,
+            -0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
+        ];
+        b139_assert_mag(&t, &expected);
+    }
+
+    #[test]
+    fn evaluate_target_b139_golden_gaussian_min_subsonic_off() {
+        let t = TargetCurve { high_pass: Some(b139_gauss_hp(false, Some(false))), ..b139_baseline() };
+        let expected = vec![
+            -63.173989, -59.304713, -55.436388, -51.569547, -47.705021, -43.844109,
+            -39.988835, -36.142356, -32.309581, -28.498140, -24.719849, -20.992929,
+            -17.345261, -13.819002, -10.476619, -7.407536, -4.731996, -2.592863,
+            -1.116531, -0.325520, -0.050153, -0.002763, -0.000030, -0.000000,
+            -0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
+        ];
+        b139_assert_mag(&t, &expected);
+    }
+
+    #[test]
+    fn evaluate_target_b139_golden_gaussian_min_subsonic_on() {
+        let t = TargetCurve { high_pass: Some(b139_gauss_hp(false, Some(true))), ..b139_baseline() };
+        let expected = vec![
+            -158.629524, -139.276378, -119.924183, -100.573524, -81.227003, -61.948018,
+            -44.460149, -36.358031, -32.315832, -28.498317, -24.719854, -20.992929,
+            -17.345261, -13.819002, -10.476619, -7.407536, -4.731996, -2.592863,
+            -1.116531, -0.325520, -0.050153, -0.002763, -0.000030, -0.000000,
+            -0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
+        ];
+        b139_assert_mag(&t, &expected);
+    }
+
+    #[test]
+    fn evaluate_target_b139_golden_lr4_baseline() {
+        let t = TargetCurve { high_pass: Some(b139_lr4_hp()), ..b139_baseline() };
+        let expected = vec![
+            -96.329731, -80.846516, -65.366541, -49.905797, -34.558174, -19.843013,
+            -7.901655, -1.934943, -0.357098, -0.061098, -0.010306, -0.001734,
+            -0.000292, -0.000049, -0.000008, -0.000001, -0.000000, -0.000000,
+            -0.000000, -0.000000, -0.000000, -0.000000, -0.000000, -0.000000,
+            -0.000000, -0.000000, -0.000000, -0.000000, -0.000000, 0.000000,
+            -0.000000, 0.000000,
+        ];
+        b139_assert_mag(&t, &expected);
+    }
+
+    #[test]
+    fn evaluate_target_b139_golden_no_hp_fullrange() {
+        let t = b139_baseline();
+        let expected = vec![0.0_f64; 32];
+        b139_assert_mag(&t, &expected);
+    }
+
+    /// One-shot dumper: cargo test b139_DUMP -- --ignored --nocapture → output
+    /// becomes the reference vectors above. Kept ignored so it never runs in CI.
+    #[test]
+    #[ignore]
+    fn b139_dump_reference_values() {
+        let baseline = b139_baseline();
+        let configs: Vec<(&str, TargetCurve)> = vec![
+            ("gaussian_lin_subsonic_off", TargetCurve { high_pass: Some(b139_gauss_hp(true,  Some(false))), ..baseline.clone() }),
+            ("gaussian_lin_subsonic_on",  TargetCurve { high_pass: Some(b139_gauss_hp(true,  Some(true))),  ..baseline.clone() }),
+            ("gaussian_min_subsonic_off", TargetCurve { high_pass: Some(b139_gauss_hp(false, Some(false))), ..baseline.clone() }),
+            ("gaussian_min_subsonic_on",  TargetCurve { high_pass: Some(b139_gauss_hp(false, Some(true))),  ..baseline.clone() }),
+            ("lr4_baseline",              TargetCurve { high_pass: Some(b139_lr4_hp()),                     ..baseline.clone() }),
+            ("no_hp_fullrange",           baseline.clone()),
+        ];
+        let freq = b139_freq32();
+        for (name, t) in configs {
+            let r = evaluate(&t, &freq);
+            let mag: Vec<String> = r.magnitude.iter().map(|v| format!("{:.6}", v)).collect();
+            eprintln!("// {}", name);
+            eprintln!("vec![{}]", mag.join(", "));
+        }
+    }
 }

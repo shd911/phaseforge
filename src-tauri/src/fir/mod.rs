@@ -1584,4 +1584,66 @@ mod tests {
             );
         }
     }
+
+    // -----------------------------------------------------------------------
+    // b139.0 golden snapshot for generate_model_fir.
+    // -----------------------------------------------------------------------
+
+    /// Stable FNV-1a 64-bit over the rounded impulse — no extra crate needed.
+    fn b139_impulse_hash(impulse: &[f64]) -> String {
+        const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+        const FNV_PRIME: u64 = 0x100000001b3;
+        let mut h: u64 = FNV_OFFSET;
+        for &v in impulse {
+            // Round to 6 decimals first so hash is stable against float noise.
+            let r = (v * 1_000_000.0).round() as i64;
+            for byte in r.to_le_bytes().iter() {
+                h ^= *byte as u64;
+                h = h.wrapping_mul(FNV_PRIME);
+            }
+        }
+        format!("{:016x}", h)
+    }
+
+    #[test]
+    fn generate_fir_b139_golden_lr4_baseline_impulse_hash() {
+        // Reference config: LR4 HP=80 Hz, no PEQ, sr=48000, taps=8192,
+        // Blackman window, MinimumPhase mode (LR4 HP without linear_phase).
+        let n = 512;
+        let freq: Vec<f64> = (0..n).map(|i| 5.0 * (40000f64 / 5.0).powf(i as f64 / (n - 1) as f64)).collect();
+        // Build LR4 HP=80 magnitude in dB on this grid (8th-order Butterworth-squared).
+        let target_mag: Vec<f64> = freq.iter().map(|&f| {
+            // |H_LR4_HP|^2 = (f/fc)^16 / (1 + (f/fc)^16)
+            let r = (f / 80.0).powi(8);
+            let mag_lin = r / (1.0 + r);
+            10.0 * (mag_lin.max(1e-20)).log10()
+        }).collect();
+
+        let config = FirConfig {
+            taps: 8192,
+            sample_rate: 48000.0,
+            max_boost_db: 18.0,
+            noise_floor_db: -150.0,
+            window: WindowType::Blackman,
+            phase_mode: PhaseMode::MinimumPhase,
+            iterations: 0,
+            freq_weighting: false,
+            narrowband_limit: false,
+            nb_smoothing_oct: 0.333,
+            nb_max_excess_db: 6.0,
+            gaussian_min_phase_filters: vec![],
+        };
+
+        let result = generate_model_fir(&freq, &target_mag, &[], &vec![0.0; n], &config)
+            .expect("generate_model_fir should succeed");
+        assert_eq!(result.impulse.len(), 8192);
+
+        let hash = b139_impulse_hash(&result.impulse);
+        // Captured from b138.4 reference run; any change in the FIR pipeline
+        // that touches this config flips the hash → investigate before
+        // accepting.
+        let expected = "3a56a4dab45f0fb1";
+        assert_eq!(hash, expected,
+            "FIR impulse hash drift — capture new value from this test failure if intentional");
+    }
 }
