@@ -1697,68 +1697,58 @@ export default function FrequencyPlot() {
       const sr = exportSampleRate();
       const taps = exportTaps();
       const win = exportWindow();
-      const target = JSON.parse(JSON.stringify(band.target));
       const peqBands = band.peqBands?.filter((b: PeqBand) => b.enabled) ?? [];
 
-      // Evaluate target
-      const [freq, response] = await invoke<[number[], TargetResponse]>(
-        "evaluate_target_standalone", { target, nPoints: 512, fMin: 5, fMax: 40000 },
-      );
-      if (gen !== renderGen) return;
-
-      const targetMag = response.magnitude;
-      let modelPhase = response.phase;
-
-      // b139.3: Gaussian min-phase reconstruction now also covers
-      // linear-phase Gaussian + subsonic (the b138.4 invariant). Use
-      // hasActiveSubsonicProtect to gate the additional branch the same
-      // way band-evaluator does.
-      const needsLinearPhaseSubsonic = target.high_pass?.linear_phase === true
-        && hasActiveSubsonicProtect(target.high_pass);
-      if (
-        isGaussianMinPhase(target.high_pass)
-        || isGaussianMinPhase(target.low_pass)
-        || needsLinearPhaseSubsonic
-      ) {
-        modelPhase = await addGaussianMinPhase(freq, modelPhase, target.high_pass, target.low_pass);
-        if (gen !== renderGen) return;
+      // b139.4b: Export tab uses the canonical BandEvaluator. The standalone
+      // 5–40k log grid is built here so the result doesn't depend on whether
+      // the band has a measurement attached. evaluateBandFull builds Composite
+      // FIR (linear_phase_main + subsonic_cutoff_hz from band.target).
+      const exportFreq: number[] = new Array(512);
+      for (let i = 0; i < 512; i++) {
+        exportFreq[i] = 5 * Math.pow(40000 / 5, i / 511);
       }
-
-      // PEQ contribution
-      let peqMagArr: number[] = [];
-      if (peqBands.length > 0) {
-        const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", { freq, bands: peqBands, sampleRate: sr });
-        peqMagArr = pm;
-        modelPhase = modelPhase.map((v: number, i: number) => v + pp[i]);
-      }
+      const evalRes = await evaluateBandFull({
+        band, freq: exportFreq,
+        fir: {
+          taps, sampleRate: sr, window: win,
+          maxBoostDb: firMaxBoost(), noiseFloorDb: firNoiseFloor(),
+          iterations: firIterations(), freqWeighting: firFreqWeighting(),
+          narrowbandLimit: firNarrowbandLimit(),
+          nbSmoothingOct: firNbSmoothingOct(), nbMaxExcessDb: firNbMaxExcess(),
+        },
+      });
       if (gen !== renderGen) return;
-
-      // Generate FIR. b138.4: subsonic_protect demotes "linear" so Rust's
-      // Hilbert reconstructs subsonic phase from the full magnitude.
-      const isLin = (f: FilterConfig | null | undefined) =>
-        !f || (f.linear_phase && !hasActiveSubsonicProtect(f));
-      const allLinear = isLin(target.high_pass) && isLin(target.low_pass);
-      // FIR phase mode:
-      // LinearPhase: all filters lin → symmetric FIR
-      // MixedPhase: ONLY when Gaussian filters have MIXED lin/min phase (one lin + one min)
-      // MinimumPhase: all non-linear, or all Gaussian min-phase → blanket Hilbert
-      // FIR: LinearPhase (all lin) or MinimumPhase (any min-phase)
-      // MixedPhase per-filter Hilbert causes phase oscillations in FIR due to windowing
-      // artifacts — this is a physical limitation of single-FIR design.
-      // Per-filter Hilbert is for DISPLAY only (Model curve on SPL/GD/IR tabs).
-      const firConfig = {
-        taps, sample_rate: sr, max_boost_db: firMaxBoost(), noise_floor_db: firNoiseFloor(),
-        window: win, phase_mode: allLinear ? "LinearPhase" : "MinimumPhase",
-        iterations: firIterations(), freq_weighting: firFreqWeighting(),
-        narrowband_limit: firNarrowbandLimit(), nb_smoothing_oct: firNbSmoothingOct(),
-        nb_max_excess_db: firNbMaxExcess(),
+      if (!evalRes.fir || !evalRes.targetMag) {
+        setExportComputing(false);
+        return;
+      }
+      const freq = evalRes.freq;
+      const targetMag = evalRes.targetMag;
+      const peqMagArr = peqBands.length > 0 ? evalRes.peqMag : [];
+      const modelPhase = evalRes.combinedTargetPhase ?? evalRes.targetPhase ?? new Array(freq.length).fill(0);
+      const firResult = {
+        realized_mag: evalRes.fir.realizedMag,
+        realized_phase: evalRes.fir.realizedPhase,
+        impulse: evalRes.fir.impulse,
+        time_ms: evalRes.fir.timeMs,
+        norm_db: evalRes.fir.normDb,
+        causality: evalRes.fir.causality,
+        taps: evalRes.fir.taps,
+        sample_rate: evalRes.fir.sampleRate,
       };
-      const firResult = await invoke<{ realized_mag: number[]; realized_phase: number[]; impulse: number[]; time_ms: number[]; norm_db: number; causality: number; taps: number; sample_rate: number }>(
-        "generate_model_fir", { freq, targetMag, peqMag: peqMagArr, modelPhase: new Array(freq.length).fill(0), config: firConfig },
-      );
-      if (gen !== renderGen) return;
+      const target = band.target;
 
-      // Normalize model mag
+      // Status label reflects the user's linear-phase choice + subsonic state.
+      const isUserLin = (f: FilterConfig | null | undefined) =>
+        !f || f.linear_phase === true;
+      const linearMain = isUserLin(target.high_pass) && isUserLin(target.low_pass);
+      const hasSubsonic = hasActiveSubsonicProtect(target.high_pass);
+      const phaseLabel =
+        linearMain && hasSubsonic ? "Linear-Phase + Subsonic"
+        : linearMain ? "Linear-Phase"
+        : hasSubsonic ? "Min-Phase + Subsonic"
+        : "Min-Phase";
+      // Normalize model mag (combined = target+peq, shifted by FIR norm)
       const normModelMag = targetMag.map((v: number, i: number) => (v + (peqMagArr[i] ?? 0)) - firResult.norm_db);
 
       // Compute export metrics from FIR result
@@ -1810,7 +1800,7 @@ export default function FrequencyPlot() {
 
       setExportMetrics({
         taps: firResult.taps, sampleRate: firResult.sample_rate, window: win,
-        phaseLabel: allLinear ? "Linear-Phase" : "Min-Phase",
+        phaseLabel,
         peqCount: peqBands.length, normDb: firResult.norm_db,
         causality: Math.round(firResult.causality * 100),
         preRingMs: Math.round(preRingMs * 100) / 100,
@@ -2027,43 +2017,33 @@ export default function FrequencyPlot() {
         const measGd = computeGroupDelay(gdFreq, gdPhase);
         if (gen !== renderGen) return;
 
+        // b139.4b: target / corrected GD share BandEvaluator's
+        // target+peq computation on the measurement grid.
+        const gdEval = (!sumMode && band && band.targetEnabled)
+          ? await evaluateBandFull({ band, freq }).catch(() => null)
+          : null;
+        if (gen !== renderGen) return;
+
         // Target GD (band mode only)
         let targetGdMs: number[] | null = null;
-        if (!sumMode && band && band.targetEnabled) {
-          try {
-            const targetCurve = JSON.parse(JSON.stringify(band.target));
-            const tResp = await invoke<{ magnitude: number[]; phase: number[] }>("evaluate_target", { target: targetCurve, freq });
-            if (gen !== renderGen) return;
-            let tPh = tResp.phase;
-            if (isGaussianMinPhase(band.target.high_pass) || isGaussianMinPhase(band.target.low_pass)) {
-              tPh = await addGaussianMinPhase(freq, tPh, band.target.high_pass, band.target.low_pass);
-              if (gen !== renderGen) return;
-            }
-            const tgd = computeGroupDelay(freq, tPh);
-            targetGdMs = tgd.gdMs;
-          } catch (_) {}
+        if (gdEval && gdEval.targetPhase) {
+          const tgd = computeGroupDelay(freq, gdEval.targetPhase);
+          targetGdMs = tgd.gdMs;
         }
 
         // Corrected GD (band mode only, meas + PEQ + cross-section)
         let corrGdMs: number[] | null = null;
-        if (!sumMode && band && band.targetEnabled) {
+        if (gdEval && band) {
           try {
             let corrPh = [...phase];
-            let corrMag = [...magnitude];
-            const peqBands = band.peqBands?.filter((p: PeqBand) => p.enabled) ?? [];
-            if (peqBands.length > 0) {
-              const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", { freq, bands: peqBands });
-              if (gen !== renderGen) return;
-              corrPh = corrPh.map((v, i) => v + pp[i]);
-              corrMag = corrMag.map((v, i) => v + pm[i]);
-            }
+            const pp = gdEval.peqPhase;
+            corrPh = corrPh.map((v, i) => v + pp[i]);
             if (band.target.high_pass || band.target.low_pass) {
-              const [xm, xp] = await invoke<[number[], number[], number]>("compute_cross_section", {
+              const [, xp] = await invoke<[number[], number[], number]>("compute_cross_section", {
                 freq, highPass: band.target.high_pass, lowPass: band.target.low_pass,
               });
               if (gen !== renderGen) return;
               corrPh = corrPh.map((v, i) => v + xp[i]);
-              corrMag = corrMag.map((v, i) => v + xm[i]);
             }
             // Gaussian min-phase: add per-filter Hilbert-derived phase to corrected phase
             if (isGaussianMinPhase(band.target.high_pass) || isGaussianMinPhase(band.target.low_pass)) {
@@ -2557,26 +2537,30 @@ export default function FrequencyPlot() {
           step: result.step,
         }];
 
+        // b139.4b: target/corrected impulse share BandEvaluator's
+        // target+peq computation. compute_impulse stays inline because IR
+        // uses (meas + PEQ + cross_section) — different from FIR-export
+        // semantics (target ideal). evalRes.peqMag/Phase replaces the
+        // duplicate compute_peq_complex IPC.
+        const irEval = (band && band.targetEnabled)
+          ? await evaluateBandFull({ band, freq }).catch(() => null)
+          : null;
+        if (gen !== renderGen) return;
+
         // Target impulse (single band)
         let targetResult: { time: number[]; impulse: number[]; step: number[] } | null = null;
-        if (band && band.targetEnabled) {
+        if (irEval && irEval.targetMag && irEval.targetPhase) {
+          // Apply passband-anchored ref level (200-2000 Hz avg) so target IR
+          // sits at the same SPL as measurement.
+          let sum = 0, n2 = 0;
+          for (let i = 0; i < freq.length; i++) {
+            if (freq[i] >= 200 && freq[i] <= 2000) { sum += magnitude[i]; n2++; }
+          }
+          const refShift = n2 > 0 ? sum / n2 : 0;
+          const tMag = irEval.targetMag.map(v => v + refShift);
           try {
-            const targetCurve = JSON.parse(JSON.stringify(band.target));
-            let sum = 0, n2 = 0;
-            for (let i = 0; i < freq.length; i++) {
-              if (freq[i] >= 200 && freq[i] <= 2000) { sum += magnitude[i]; n2++; }
-            }
-            targetCurve.reference_level_db += n2 > 0 ? sum / n2 : 0;
-            const tResp = await invoke<{ magnitude: number[]; phase: number[] }>("evaluate_target", { target: targetCurve, freq });
-            if (gen !== renderGen) return;
-            let tPh2 = tResp.phase;
-            // Gaussian min-phase: add per-filter Hilbert-derived phase
-            if (isGaussianMinPhase(band!.target.high_pass) || isGaussianMinPhase(band!.target.low_pass)) {
-              tPh2 = await addGaussianMinPhase(freq, tPh2, band!.target.high_pass, band!.target.low_pass);
-              if (gen !== renderGen) return;
-            }
             targetResult = await invoke<{ time: number[]; impulse: number[]; step: number[] }>("compute_impulse", {
-              freq, magnitude: tResp.magnitude, phase: tPh2, sampleRate: sr,
+              freq, magnitude: tMag, phase: irEval.targetPhase, sampleRate: sr,
             });
             if (gen !== renderGen) return;
           } catch (_) {}
@@ -2591,23 +2575,14 @@ export default function FrequencyPlot() {
 
         // Corrected impulse (single band: meas + PEQ + cross-section)
         let corrResult: { time: number[]; impulse: number[]; step: number[] } | null = null;
-        if (band && band.targetEnabled) {
+        if (irEval && band) {
           try {
-            const targetCurve = JSON.parse(JSON.stringify(band.target));
-            let sum2 = 0, n3 = 0;
-            for (let i = 0; i < freq.length; i++) { if (freq[i] >= 200 && freq[i] <= 2000) { sum2 += magnitude[i]; n3++; } }
-            targetCurve.reference_level_db += n3 > 0 ? sum2 / n3 : 0;
-            const tResp2 = await invoke<{ magnitude: number[]; phase: number[] }>("evaluate_target", { target: targetCurve, freq });
-            if (gen !== renderGen) return;
-            const peqBands = band.peqBands.filter((p: PeqBand) => p.enabled);
             let corrMag = [...magnitude];
             let corrPh = [...phase];
-            if (peqBands.length > 0) {
-              const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", { freq, bands: peqBands });
-              if (gen !== renderGen) return;
-              corrMag = corrMag.map((v, i) => v + pm[i]);
-              corrPh = corrPh.map((v, i) => v + pp[i]);
-            }
+            const pm = irEval.peqMag;
+            const pp = irEval.peqPhase;
+            corrMag = corrMag.map((v, i) => v + pm[i]);
+            corrPh = corrPh.map((v, i) => v + pp[i]);
             if (band.target.high_pass || band.target.low_pass) {
               const [xm, xp] = await invoke<[number[], number[], number]>("compute_cross_section", {
                 freq, highPass: band.target.high_pass, lowPass: band.target.low_pass,
@@ -3220,14 +3195,14 @@ export default function FrequencyPlot() {
         try {
           const isHybrid = exportHybridPhase();
 
-          // PEQ correction
+          // PEQ correction. b139.4b: use evalRes.peqMag/peqPhase (already
+          // computed by BandEvaluator on measurement.freq grid) instead of a
+          // duplicate compute_peq_complex IPC.
           let peqMag: number[] | null = null;
           let peqPhase: number[] | null = null;
           if (hasPeq) {
-            const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", {
-              freq: result.measurement.freq,
-              bands: band.peqBands,
-            });
+            const pm = evalRes.peqMag;
+            const pp = evalRes.peqPhase;
             peqMag = pm;
             peqPhase = pp;
 
