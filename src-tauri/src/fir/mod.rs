@@ -1839,12 +1839,81 @@ mod tests {
             "MinimumPhase peak should be near start (causal), got idx {pi} of {} taps", cfg.taps);
     }
 
+    /// b139.3.2: real-world divergence reproducer. Kirill's logs showed
+    /// iterative_refine errors GROWING (0.151 → 12.091 → 13.486 dB) when
+    /// linear-phase Gaussian + subsonic gets demoted to MinimumPhase mode.
+    /// Pure single-pass tests never see this because they don't run iter=2+.
+    /// This test runs generate_model_fir with iterations=3 (production
+    /// default) and asserts the realised magnitude actually ends up close
+    /// to target. The TargetCurve is built directly and evaluated through
+    /// crate::target::evaluate so the magnitude exactly matches what
+    /// fir-export.ts ships in production.
+    #[test]
+    fn iterative_refine_converges_with_min_phase_subsonic() {
+        use crate::target::{evaluate, FilterConfig, FilterType, TargetCurve};
+        let n = 512;
+        let freq = b139_3_1_log_grid(n, 5.0, 40000.0);
+        let target_curve = TargetCurve {
+            reference_level_db: 0.0,
+            tilt_db_per_octave: 0.0,
+            tilt_ref_freq: 1000.0,
+            high_pass: Some(FilterConfig {
+                filter_type: FilterType::Gaussian,
+                order: 4,
+                freq_hz: 632.0,
+                shape: Some(1.0),
+                linear_phase: true,
+                q: None,
+                subsonic_protect: Some(true),
+            }),
+            low_pass: None,
+            low_shelf: None,
+            high_shelf: None,
+        };
+        let resp = evaluate(&target_curve, &freq);
+        let target_mag = resp.magnitude;
+        let target_phase = vec![0.0; n];
+        let peq_mag: Vec<f64> = vec![];
+
+        // Production-shape config: 65k taps, iterations=3, freq_weighting on,
+        // narrowband_limit on — matches what fir-export.ts sends.
+        let cfg = FirConfig {
+            taps: 65536, sample_rate: 48000.0,
+            max_boost_db: 24.0, noise_floor_db: -150.0,
+            window: WindowType::Blackman,
+            phase_mode: PhaseMode::MinimumPhase,
+            iterations: 3, freq_weighting: true,
+            narrowband_limit: true,
+            nb_smoothing_oct: 0.333,
+            nb_max_excess_db: 6.0,
+            gaussian_min_phase_filters: vec![],
+        };
+        let result = generate_model_fir(&freq, &target_mag, &peq_mag, &target_phase, &cfg)
+            .expect("generate_model_fir should succeed");
+
+        // Check passband (1 kHz – 10 kHz) — well above subsonic, well above
+        // Gaussian rolloff. Realised magnitude must track target within 1 dB
+        // after iterative_refine converges.
+        let mut max_err = 0.0_f64;
+        let mut max_err_freq = 0.0;
+        for (i, &f) in freq.iter().enumerate() {
+            if f < 1000.0 || f > 10000.0 { continue; }
+            let realised = result.realized_mag[i];
+            let expected = target_mag[i] - result.norm_db;
+            let err = (realised - expected).abs();
+            if err > max_err { max_err = err; max_err_freq = f; }
+        }
+        eprintln!("iterative_refine_converges: passband max_err = {:.3} dB at {:.1} Hz",
+            max_err, max_err_freq);
+        assert!(max_err < 1.0,
+            "iterative_refine diverged: passband max_err = {:.3} dB at {:.1} Hz \
+             (target -10..0 dB drift). This reproduces Kirill's b139.3 bug.",
+            max_err, max_err_freq);
+    }
+
     /// Linear-phase Gaussian HP=632 + subsonic ON, run through generate_model_fir
-    /// in MinimumPhase mode (matches b138.4 isLin demotion). The realised
-    /// magnitude in the passband must match target_mag, and phase in the
-    /// passband must be small (Gaussian magnitude is gentle so its Hilbert
-    /// phase stays modest), while infrasound shows real rotation from
-    /// the subsonic Butterworth.
+    /// in MinimumPhase mode (matches b138.4 isLin demotion). Single-pass
+    /// (iterations=0) — passband should track target.
     #[test]
     fn fir_linear_gaussian_with_subsonic_keeps_passband_intact() {
         let n = 512;
