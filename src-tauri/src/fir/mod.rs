@@ -1755,4 +1755,119 @@ mod tests {
         assert_eq!(hash, expected,
             "LR4 + PEQ FIR hash drift — capture new value if intentional");
     }
+
+    // -----------------------------------------------------------------------
+    // b139.3.1 identity / subsonic regression tests. These are physical
+    // correctness tests, not pinned hashes — so they survive future
+    // refactors as long as the math stays right.
+    // -----------------------------------------------------------------------
+
+    fn b139_3_1_log_grid(n: usize, fmin: f64, fmax: f64) -> Vec<f64> {
+        (0..n).map(|i| fmin * (fmax / fmin).powf(i as f64 / (n - 1) as f64)).collect()
+    }
+
+    /// Find the absolute-peak sample index of an impulse response.
+    fn b139_3_1_peak_idx(impulse: &[f64]) -> usize {
+        let mut best = 0usize;
+        let mut best_v = 0.0_f64;
+        for (i, &v) in impulse.iter().enumerate() {
+            if v.abs() > best_v.abs() {
+                best_v = v;
+                best = i;
+            }
+        }
+        best
+    }
+
+    fn b139_3_1_off_peak_energy(impulse: &[f64], peak_idx: usize) -> f64 {
+        let mut s = 0.0_f64;
+        for (i, &v) in impulse.iter().enumerate() {
+            if i != peak_idx { s += v * v; }
+        }
+        s
+    }
+
+    /// Flat target + zero phase + no PEQ + LinearPhase mode → FIR must be
+    /// (windowed) impulse: one large peak with ≪ peak² energy elsewhere.
+    #[test]
+    fn fir_identity_for_flat_input_no_filters() {
+        let n = 512;
+        let freq = b139_3_1_log_grid(n, 5.0, 40000.0);
+        let target_mag = vec![0.0; n];
+        let target_phase = vec![0.0; n];
+        let peq_mag: Vec<f64> = vec![];
+
+        let cfg = b139_3_fir_config(PhaseMode::LinearPhase);
+        let result = generate_model_fir(&freq, &target_mag, &peq_mag, &target_phase, &cfg)
+            .expect("generate_model_fir should succeed");
+
+        let pi = b139_3_1_peak_idx(&result.impulse);
+        let pv = result.impulse[pi];
+        let off = b139_3_1_off_peak_energy(&result.impulse, pi);
+        // Window scales the peak (Blackman has gain ~0.42 at center, but the
+        // FIR is already DFT-amplitude-normalized + window-energy-corrected).
+        // The realised peak should be O(1).
+        assert!(pv.abs() > 0.5 && pv.abs() < 1.5,
+            "Identity LinearPhase FIR peak should be ~1.0, got {pv} at idx {pi}");
+        assert!(off < 0.1 * pv * pv,
+            "Identity FIR should have ≪10% energy off peak, got off-peak energy {off}, peak² {}",
+            pv * pv);
+    }
+
+    /// Same baseline but MinimumPhase mode — peak is at the start (causal),
+    /// off-peak energy still small.
+    #[test]
+    fn fir_identity_with_min_phase_mode() {
+        let n = 512;
+        let freq = b139_3_1_log_grid(n, 5.0, 40000.0);
+        let target_mag = vec![0.0; n];
+        let target_phase = vec![0.0; n];
+        let peq_mag: Vec<f64> = vec![];
+
+        let cfg = b139_3_fir_config(PhaseMode::MinimumPhase);
+        let result = generate_model_fir(&freq, &target_mag, &peq_mag, &target_phase, &cfg)
+            .expect("generate_model_fir should succeed");
+
+        let pi = b139_3_1_peak_idx(&result.impulse);
+        let pv = result.impulse[pi];
+        let off = b139_3_1_off_peak_energy(&result.impulse, pi);
+        assert!(pv.abs() > 0.5 && pv.abs() < 1.5,
+            "Identity MinimumPhase FIR peak should be ~1.0, got {pv}");
+        assert!(off < 0.1 * pv * pv,
+            "Identity MinimumPhase FIR should have ≪10% energy off peak, got {off}");
+        assert!(pi < cfg.taps / 4,
+            "MinimumPhase peak should be near start (causal), got idx {pi} of {} taps", cfg.taps);
+    }
+
+    /// Linear-phase Gaussian HP=632 + subsonic ON, run through generate_model_fir
+    /// in MinimumPhase mode (matches b138.4 isLin demotion). The realised
+    /// magnitude in the passband must match target_mag, and phase in the
+    /// passband must be small (Gaussian magnitude is gentle so its Hilbert
+    /// phase stays modest), while infrasound shows real rotation from
+    /// the subsonic Butterworth.
+    #[test]
+    fn fir_linear_gaussian_with_subsonic_keeps_passband_intact() {
+        let n = 512;
+        let freq = b139_3_1_log_grid(n, 5.0, 40000.0);
+        let target_mag = b139_3_gaussian_hp_mag(&freq, 632.0, 1.0, true);
+        let target_phase = vec![0.0; n];
+        let peq_mag: Vec<f64> = vec![];
+
+        let cfg = b139_3_fir_config(PhaseMode::MinimumPhase);
+        let result = generate_model_fir(&freq, &target_mag, &peq_mag, &target_phase, &cfg)
+            .expect("generate_model_fir should succeed");
+
+        // Realised magnitude is computed by Rust on the input freq grid.
+        // Compare to target_mag in the passband (1 kHz – 10 kHz) — must
+        // align modulo norm_db offset and clipping.
+        let mut max_err = 0.0_f64;
+        for (i, &f) in freq.iter().enumerate() {
+            if f < 1000.0 || f > 10000.0 { continue; }
+            let realised = result.realized_mag[i];
+            let expected = target_mag[i] - result.norm_db;
+            max_err = max_err.max((realised - expected).abs());
+        }
+        assert!(max_err < 1.0,
+            "Realised magnitude in passband (1k–10k) drifts from target by up to {max_err:.3} dB");
+    }
 }

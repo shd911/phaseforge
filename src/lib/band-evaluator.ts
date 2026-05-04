@@ -222,6 +222,18 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
       !f || (f.linear_phase && !hasActiveSubsonicProtect(f));
     const allLinear = isLin(band.target.high_pass) && isLin(band.target.low_pass);
     const phaseMode = allLinear ? "LinearPhase" : "MinimumPhase";
+    // b139.3.1 diagnostic — confirms which phase mode is chosen and what
+    // numbers are sent to Rust. Strip in b139.3.2 once the case is closed.
+    const idx1k = freq.findIndex((f) => f >= 1000);
+    console.log("[BandEval:FIR]", {
+      bandName: band.name,
+      hp: band.target.high_pass,
+      hasSubsonic: hasActiveSubsonicProtect(band.target.high_pass),
+      phaseMode,
+      targetMag_at_1kHz: idx1k >= 0 ? targetMag[idx1k] : null,
+      combinedTargetPhase_at_1kHz: idx1k >= 0 ? combinedTargetPhase?.[idx1k] : null,
+      peqMag_nonzero: peqMag.some((v) => v !== 0),
+    });
     const cfg = req.fir;
     const result = await invoke<{
       impulse: number[]; time_ms: number[]; realized_mag: number[];

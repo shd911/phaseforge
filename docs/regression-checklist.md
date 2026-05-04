@@ -1,30 +1,52 @@
-# Regression Checklist для b139.x этапов
+# Regression Checklist (manual UI workflow)
 
-После каждого этапа запускать соответствующий
-`PhaseForge_<version>.dmg` (не dev-сервер) и проверить:
+DSP-логика покрыта автотестами (cargo + vitest). Этот checklist — только UI
+workflow которые требуют запуска приложения и не автоматизированы без
+e2e-фреймворка.
 
-1. **New Project с двумя полосами** — Cmd+S сохраняет, Cmd+O открывает
-   тот же проект, обе полосы и их target восстанавливаются.
-2. **Импорт измерения** (любой `.txt`) — после успешного импорта
-   автоматически появляется диалог анализа замера (b135).
-3. **Gaussian HP=632, linear_phase=true, subsonic ON** — на SPL phase
-   крутится в диапазоне 5–40 Гц, в 200–2000 Гц = 0.
-4. **Gaussian HP=632, linear_phase=false, subsonic ON** — phase
-   крутится в обеих зонах (Gaussian min-phase + Butterworth subsonic).
-5. **Optimize PEQ** — все полученные полосы имеют Q ≤ `q_cap_at(freq)`
-   по envelope b137 (12 на басу, 4 на высоких).
-6. **Изменение HP freq** после Optimize → оранжевый банер
-   «PEQ устарел: target изменён…» в PEQ-вкладке (b136).
-7. **Cmd+Z после Optimize** возвращает PEQ-полосы и `peqOptimizedTarget`
-   к pre-Optimize состоянию (b132).
-8. **File → Versions → Save Version → Restore** — состояние снапшота
-   полностью восстанавливается, индикатор `(modified)` появляется
-   (b133).
-9. **Cmd+Q при unsaved changes** — диалог Save / Don't Save / Cancel,
-   каждая кнопка ведёт себя корректно (b131).
-10. **FIR Export → файл .wav сохранён**, импульс непустой
-    (визуально: при открытии файла в audio-tool виден ненулевой
-    response, не тишина).
+## Перед запуском
 
-Все 10 пунктов должны проходить на каждом этапе b139.x. Любое
-отклонение — diagnostic patch + точечный фикс, **не слепой**.
+```
+cargo test --manifest-path src-tauri/Cargo.toml
+npm test
+```
+
+Если что-то падает — DSP regression. Останавливаемся и чиним до сборки.
+
+## Manual smoke на `.dmg`
+
+1. **Версия** — заголовок окна совпадает с релизом (`PhaseForge v0.1.0-bXXX.X`).
+2. **Project lifecycle** — New Project → две полосы → Cmd+S → Cmd+O возвращает
+   то же состояние; Cmd+Q при unsaved → диалог Save / Don't Save / Cancel
+   (b131); File → Versions → Save Version → Restore (b133).
+3. **Импорт измерения** (любой `.txt`) → сразу появляется analysis dialog
+   (b135). Закрытие через ✓/Закрыть.
+4. **Optimize PEQ + Stale flag** — после Optimize изменить HP freq → PEQ-вкладка
+   получает оранжевый банер «PEQ устарел» (b136). Cmd+Z откатывает оба
+   изменения (b132).
+5. **FIR Export** — выбрать активную полосу → Export WAV → файл сохраняется,
+   импульс непустой (импортируй обратно через Import — должно совпадать с
+   target в пределах нормализации).
+
+## DSP-логика, покрытая автотестами
+
+Не дублировать вручную — fail в этих ветках = провал автотеста.
+
+- evaluate_target для всех 6 канонических HP конфигураций
+  (`evaluate_target_b139_golden_*` cargo)
+- FIR identity для flat input (LinearPhase + MinimumPhase) —
+  `fir_identity_for_flat_input_no_filters`,
+  `fir_identity_with_min_phase_mode`
+- FIR magnitude в passband для Gaussian linear + subsonic —
+  `fir_linear_gaussian_with_subsonic_keeps_passband_intact`
+- Lock-in golden hashes для b138.4 поведения —
+  `generate_fir_b139_3_*`
+- Phase reconstruction для всех 4 Gaussian × subsonic комбинаций —
+  vitest `band-evaluator.test.ts` snapshot + equivalence
+- evaluateBandFull → identity FIR для flat band — vitest
+  `band-evaluator-fir.test.ts`
+- Q envelope, peq stale, subsonic-protect math, q_warn_at —
+  cargo `q_envelope::tests::*`, frontend `peq-quality.ts`
+
+Если автотесты падают — DSP regression. Если manual UI checklist падает —
+UI/state regression.
