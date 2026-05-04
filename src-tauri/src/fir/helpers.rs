@@ -6,6 +6,7 @@ use tracing::info;
 
 use crate::dsp::fft::FftEngine;
 use crate::dsp::fractional_octave_smooth;
+use crate::dsp::minimum_phase_from_magnitude;
 
 use super::types::*;
 use super::windowing::*;
@@ -105,6 +106,19 @@ pub(crate) fn iterative_refine(
     let mut engine = FftEngine::new();
 
     let is_linear_phase = matches!(config.phase_mode, PhaseMode::LinearPhase);
+    // b139.3.4: in MinimumPhase mode the (magnitude, phase) pair must stay
+    // consistent across iterations — Hilbert(refined_db) recomputed each
+    // pass. LinearPhase keeps zero phase; MixedPhase/HybridPhase carry a
+    // composite phase from per-filter Hilbert that doesn't depend on the
+    // running magnitude, so they reuse the entry-point phase.
+    let recompute_min_phase = matches!(config.phase_mode, PhaseMode::MinimumPhase);
+    // Buffer reused for the per-iteration recompute when needed. Skip the
+    // entry-point copy if we're going to overwrite on iter 0 anyway.
+    let mut iter_phase: Vec<f64> = if recompute_min_phase {
+        Vec::with_capacity(n_bins)
+    } else {
+        phase_rad.to_vec()
+    };
 
     for iter in 0..iterations {
         // 1. FFT current impulse → realized spectrum
@@ -154,8 +168,17 @@ pub(crate) fn iterative_refine(
             break;
         }
 
-        // 3. Rebuild impulse from refined correction
-        let mut new_spectrum = assemble_complex_spectrum(&refined_db, phase_rad, n_fft);
+        // 3. Rebuild impulse from refined correction. For MinimumPhase,
+        //    recompute Hilbert from the refined magnitude so the (mag, phase)
+        //    pair is internally consistent — without this the IFFT realises
+        //    neither the refined magnitude nor the original phase, and the
+        //    next FFT round-trip diverges (b139.3.3 repro: 0.151 → 12.091 dB).
+        if recompute_min_phase {
+            iter_phase = minimum_phase_from_magnitude(&refined_db, n_fft);
+            debug_assert_eq!(iter_phase.len(), n_bins,
+                "minimum_phase_from_magnitude must return n_bins entries");
+        }
+        let mut new_spectrum = assemble_complex_spectrum(&refined_db, &iter_phase, n_fft);
         engine.fft_inverse(&mut new_spectrum);
 
         let norm = 1.0 / n_fft as f64;
