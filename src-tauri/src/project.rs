@@ -235,6 +235,26 @@ pub fn create_project_folder(parent_dir: String, project_name: String) -> Result
     Ok(path)
 }
 
+/// Resolve canonical paths for source and destination, then return true when
+/// they point at the same on-disk file. Used to short-circuit copies that
+/// would otherwise truncate the source (std::fs::copy opens dest first with
+/// O_TRUNC, which empties the file before reading source). The destination
+/// is allowed to not exist yet — in that case we canonicalise its parent
+/// directory and join the file name back.
+fn paths_resolve_to_same_file(source: &std::path::Path, dest: &std::path::Path) -> bool {
+    let Ok(src_canon) = std::fs::canonicalize(source) else {
+        return false;
+    };
+    let dst_canon_opt = if dest.exists() {
+        std::fs::canonicalize(dest).ok()
+    } else {
+        dest.parent()
+            .and_then(|p| std::fs::canonicalize(p).ok())
+            .and_then(|cp| dest.file_name().map(|f| cp.join(f)))
+    };
+    matches!(dst_canon_opt, Some(d) if d == src_canon)
+}
+
 /// Copy a file into the project folder.
 #[tauri::command]
 pub fn copy_file_to_project(source_path: String, dest_path: String) -> Result<(), String> {
@@ -245,6 +265,21 @@ pub fn copy_file_to_project(source_path: String, dest_path: String) -> Result<()
             return Err("Invalid destination path: contains '..'".into());
         }
     }
+
+    // b139.5.2: guard against self-copy. If a user drops a file directly into
+    // <project>/inbox/ and then "imports" it via the picker pointing at the
+    // same path, std::fs::copy would truncate dest before reading source and
+    // leave the user with a 0-byte file. Skip the copy when paths resolve to
+    // the same on-disk file.
+    let source = std::path::Path::new(&source_path);
+    if paths_resolve_to_same_file(source, dest) {
+        info!(
+            "copy_file_to_project: source == dest ({}), skipping self-copy",
+            source_path
+        );
+        return Ok(());
+    }
+
     info!("copy_file_to_project: {} -> {}", source_path, dest_path);
     std::fs::copy(&source_path, &dest_path)
         .map_err(|e| format!("Copy error: {e}"))?;
@@ -282,10 +317,111 @@ pub fn copy_dir_contents(source_dir: String, dest_dir: String) -> Result<u32, St
             continue;
         }
         let dest_file = dst.join(entry.file_name());
+        // b139.5.2: same self-copy guard — when source_dir == dest_dir the
+        // entries resolve to themselves and std::fs::copy would zero them.
+        if paths_resolve_to_same_file(&entry.path(), &dest_file) {
+            count += 1;
+            continue;
+        }
         std::fs::copy(entry.path(), &dest_file)
             .map_err(|e| format!("Copy error {}: {e}", entry.path().display()))?;
         count += 1;
     }
     info!("copy_dir_contents: {} -> {} ({} files)", source_dir, dest_dir, count);
     Ok(count)
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static TEST_DIR_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+    /// Allocate a unique scratch dir under the OS temp root. Caller is
+    /// responsible for `remove_dir_all` cleanup.
+    fn make_scratch_dir(label: &str) -> std::path::PathBuf {
+        let n = TEST_DIR_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let pid = std::process::id();
+        let dir = std::env::temp_dir().join(format!("phaseforge-{label}-{pid}-{n}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn copy_file_to_project_handles_self_copy() {
+        let dir = make_scratch_dir("self-copy");
+        let path = dir.join("test.txt");
+        {
+            let mut f = std::fs::File::create(&path).unwrap();
+            writeln!(f, "important data").unwrap();
+        }
+        let original_size = std::fs::metadata(&path).unwrap().len();
+        assert!(original_size > 0);
+
+        let same = path.to_string_lossy().to_string();
+        let result = copy_file_to_project(same.clone(), same.clone());
+        assert!(result.is_ok(), "self-copy must not fail: {:?}", result.err());
+
+        let after_size = std::fs::metadata(&path).unwrap().len();
+        assert_eq!(after_size, original_size,
+            "self-copy must not truncate: original={}, after={}", original_size, after_size);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn copy_file_to_project_normal_copy_works() {
+        let dir = make_scratch_dir("normal-copy");
+        let src = dir.join("src.txt");
+        let dst = dir.join("dst.txt");
+        {
+            let mut f = std::fs::File::create(&src).unwrap();
+            writeln!(f, "data").unwrap();
+        }
+
+        let result = copy_file_to_project(
+            src.to_string_lossy().to_string(),
+            dst.to_string_lossy().to_string(),
+        );
+        assert!(result.is_ok(), "normal copy failed: {:?}", result.err());
+        assert!(dst.exists());
+        assert_eq!(
+            std::fs::metadata(&dst).unwrap().len(),
+            std::fs::metadata(&src).unwrap().len(),
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn copy_dir_contents_handles_self_copy() {
+        // When source_dir == dest_dir each top-level file would otherwise
+        // truncate itself. The guard keeps file content intact.
+        let dir = make_scratch_dir("dir-self-copy");
+        let f1 = dir.join("a.txt");
+        let f2 = dir.join("b.txt");
+        {
+            let mut a = std::fs::File::create(&f1).unwrap();
+            writeln!(a, "alpha").unwrap();
+            let mut b = std::fs::File::create(&f2).unwrap();
+            writeln!(b, "beta beta beta").unwrap();
+        }
+        let s1 = std::fs::metadata(&f1).unwrap().len();
+        let s2 = std::fs::metadata(&f2).unwrap().len();
+
+        let same = dir.to_string_lossy().to_string();
+        let result = copy_dir_contents(same.clone(), same.clone());
+        assert!(result.is_ok(), "dir self-copy must not fail: {:?}", result.err());
+
+        assert_eq!(std::fs::metadata(&f1).unwrap().len(), s1, "a.txt zeroed");
+        assert_eq!(std::fs::metadata(&f2).unwrap().len(), s2, "b.txt zeroed");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
