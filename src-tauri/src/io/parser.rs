@@ -54,7 +54,12 @@ pub fn parse_rew_txt(content: &str) -> Result<Measurement, AppError> {
     let mut has_phase = false;
     let mut first_data = true;
 
-    for line in content.lines() {
+    // b139.5.1: normalise CR-only and CRLF endings to LF so str::lines()
+    // splits the file regardless of source platform (classic Mac REW
+    // exports use CR-only and were silently treated as one giant line).
+    let normalized = content.replace("\r\n", "\n").replace('\r', "\n");
+
+    for line in normalized.lines() {
         let trimmed = line.trim();
 
         // Skip empty lines and comment lines
@@ -199,6 +204,50 @@ mod tests {
         let data = "100.0 65.0\n50.0 70.0\n";
         let result = parse_rew_txt(data);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn parser_handles_cr_only_line_endings() {
+        // Synthetic REW measurement file with CR-only line endings (Mac classic).
+        let content = "* Measurement data\r\
+                       * Freq(Hz) SPL(dB) Phase(degrees)\r\
+                       20.0 47.5 78.2\r\
+                       100.0 50.0 -10.5\r\
+                       1000.0 48.3 0.0\r";
+        let result = parse_rew_txt(content);
+        assert!(result.is_ok(), "CR-only parser failed: {:?}", result.err());
+        let m = result.unwrap();
+        assert_eq!(m.freq.len(), 3);
+        assert!((m.freq[0] - 20.0).abs() < 1e-6);
+        assert!((m.magnitude[0] - 47.5).abs() < 1e-6);
+        assert!((m.freq[2] - 1000.0).abs() < 1e-6);
+        assert!((m.magnitude[2] - 48.3).abs() < 1e-6);
+    }
+
+    #[test]
+    fn parser_handles_lf_line_endings() {
+        let content = "* Measurement data\n\
+                       * Freq(Hz) SPL(dB) Phase(degrees)\n\
+                       20.0 47.5 78.2\n\
+                       100.0 50.0 -10.5\n";
+        let result = parse_rew_txt(content);
+        assert!(result.is_ok(), "LF parser failed: {:?}", result.err());
+        let m = result.unwrap();
+        assert_eq!(m.freq.len(), 2);
+        assert!((m.magnitude[1] - 50.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn parser_handles_crlf_line_endings() {
+        let content = "* Measurement data\r\n\
+                       * Freq(Hz) SPL(dB) Phase(degrees)\r\n\
+                       20.0 47.5 78.2\r\n\
+                       100.0 50.0 -10.5\r\n";
+        let result = parse_rew_txt(content);
+        assert!(result.is_ok(), "CRLF parser failed: {:?}", result.err());
+        let m = result.unwrap();
+        assert_eq!(m.freq.len(), 2);
+        assert!((m.freq[1] - 100.0).abs() < 1e-6);
     }
 
     #[test]
