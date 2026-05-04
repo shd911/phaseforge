@@ -2125,4 +2125,42 @@ mod tests {
         assert!(max_err < 0.5,
             "Composite min main + subsonic: passband magnitude drift {:.3} dB > 0.5 dB", max_err);
     }
+
+    /// b139.5.3 — FIR design must run on a grid that extends below 20 Hz so
+    /// the HP rolloff is realisable. Pre-fix the JS layer was passing the
+    /// measurement grid (20 Hz – 20 kHz) and the Gaussian HP rolloff at 7 Hz
+    /// was simply absent from the FIR. With the standalone grid 5 Hz – 40 kHz
+    /// the realised magnitude at 7 Hz must be ≥ 30 dB below the passband.
+    #[test]
+    fn fir_wide_grid_realises_hp_rolloff_below_20hz() {
+        let n = 512;
+        let freq = b139_3_1_log_grid(n, 5.0, 40000.0);
+        let target_mag = b139_3_gaussian_hp_mag(&freq, 1000.0, 1.0, false);
+        let cfg = b139_4a_composite_config(true, None);
+        let result = generate_model_fir(&freq, &target_mag, &[], &vec![0.0; n], &cfg)
+            .expect("generate_model_fir should succeed");
+
+        // Passband peak (~1 kHz – 10 kHz) should be at 0 dB after norm.
+        let mut pb_max = f64::NEG_INFINITY;
+        for (i, &f) in freq.iter().enumerate() {
+            if f >= 1000.0 && f <= 10000.0 && result.realized_mag[i] > pb_max {
+                pb_max = result.realized_mag[i];
+            }
+        }
+        // 7 Hz is ~7 octaves below fc=1000 with a Gaussian shape — must be
+        // strongly attenuated relative to the passband peak.
+        let infra_at_7hz = {
+            let mut idx = 0;
+            let mut best = f64::INFINITY;
+            for (i, &f) in freq.iter().enumerate() {
+                let d = (f - 7.0).abs();
+                if d < best { best = d; idx = i; }
+            }
+            result.realized_mag[idx]
+        };
+        let attenuation = pb_max - infra_at_7hz;
+        assert!(attenuation > 30.0,
+            "Wide-grid FIR must roll off HP below 20 Hz: passband peak {:.2} dB, 7 Hz {:.2} dB, attenuation {:.2} dB (need > 30)",
+            pb_max, infra_at_7hz, attenuation);
+    }
 }

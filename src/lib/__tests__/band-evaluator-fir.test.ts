@@ -102,20 +102,22 @@ function flatBand(): BandState {
 }
 
 describe("evaluateBandFull FIR Composite IPC payload (b139.4a)", () => {
-  async function captureFirConfig(band: BandState) {
+  async function captureFirArgs(band: BandState, sr = 48000) {
     const mockMod = await import("@tauri-apps/api/core");
     const inv = (mockMod as any).invoke as ReturnType<typeof vi.fn>;
-    let captured: any = null;
+    let captured: { freq: number[]; targetMag: number[]; config: any } | null = null;
     const sniff = inv.getMockImplementation()!;
     inv.mockImplementation(async (cmd: string, args: any) => {
-      if (cmd === "generate_model_fir") captured = args.config;
+      if (cmd === "generate_model_fir") {
+        captured = { freq: args.freq, targetMag: args.targetMag, config: args.config };
+      }
       return sniff(cmd, args);
     });
     try {
       await evaluateBandFull({
         band,
         fir: {
-          taps: 4096, sampleRate: 48000, window: "Blackman",
+          taps: 4096, sampleRate: sr, window: "Blackman",
           maxBoostDb: 24, noiseFloorDb: -150,
           iterations: 1, freqWeighting: false,
           narrowbandLimit: false, nbSmoothingOct: 0.333, nbMaxExcessDb: 6,
@@ -125,6 +127,11 @@ describe("evaluateBandFull FIR Composite IPC payload (b139.4a)", () => {
       inv.mockImplementation(sniff);
     }
     return captured;
+  }
+
+  async function captureFirConfig(band: BandState) {
+    const r = await captureFirArgs(band);
+    return r?.config;
   }
 
   it("flat / no HP → phase_mode=Composite, linear_phase_main=true, subsonic_cutoff_hz=null", async () => {
@@ -168,6 +175,64 @@ describe("evaluateBandFull FIR Composite IPC payload (b139.4a)", () => {
     expect(cfg.phase_mode).toBe("Composite");
     expect(cfg.linear_phase_main).toBe(true);
     expect(cfg.subsonic_cutoff_hz).toBeNull();
+  });
+});
+
+describe("evaluateBandFull FIR grid (b139.5.3)", () => {
+  // The FIR pipeline must run on the standalone 5..min(40k, sr/2·0.95)
+  // log grid (512 pts), independent of the measurement grid that drives
+  // the SPL display. Otherwise HP rolloff below 20 Hz and anti-aliasing
+  // headroom above 20 kHz are both truncated.
+  async function captureFirArgs2(band: BandState, sr: number) {
+    const mockMod = await import("@tauri-apps/api/core");
+    const inv = (mockMod as any).invoke as ReturnType<typeof vi.fn>;
+    let captured: { freq: number[] } | null = null;
+    const sniff = inv.getMockImplementation()!;
+    inv.mockImplementation(async (cmd: string, args: any) => {
+      if (cmd === "generate_model_fir") captured = { freq: args.freq };
+      return sniff(cmd, args);
+    });
+    try {
+      await evaluateBandFull({
+        band,
+        fir: {
+          taps: 4096, sampleRate: sr, window: "Blackman",
+          maxBoostDb: 24, noiseFloorDb: -150,
+          iterations: 1, freqWeighting: false,
+          narrowbandLimit: false, nbSmoothingOct: 0.333, nbMaxExcessDb: 6,
+        },
+      });
+    } finally {
+      inv.mockImplementation(sniff);
+    }
+    return captured!;
+  }
+
+  it("FIR grid is 512 log-spaced points 5..40k at sr=48k", async () => {
+    const band = flatBand();
+    const { freq } = await captureFirArgs2(band, 48000);
+    expect(freq.length).toBe(512);
+    expect(freq[0]).toBeCloseTo(5, 5);
+    // sr/2 * 0.95 = 22800 < 40000 → fMax = 22800
+    expect(freq[freq.length - 1]).toBeCloseTo(48000 / 2 * 0.95, 0);
+  });
+
+  it("FIR grid caps at 40 kHz when Nyquist · 0.95 > 40 kHz (sr=176.4k)", async () => {
+    const band = flatBand();
+    const { freq } = await captureFirArgs2(band, 176400);
+    expect(freq.length).toBe(512);
+    expect(freq[0]).toBeCloseTo(5, 5);
+    // sr/2 * 0.95 = 83790 → capped at 40000
+    expect(freq[freq.length - 1]).toBeCloseTo(40000, 0);
+  });
+
+  it("FIR grid is independent of measurement grid", async () => {
+    // flatBand has measurement.freq starting at 20 Hz, ending 20 kHz, 512 pts.
+    // FIR must NOT inherit those bounds.
+    const band = flatBand();
+    const { freq } = await captureFirArgs2(band, 48000);
+    // Must extend below measurement min (20 Hz).
+    expect(freq[0]).toBeLessThan(20);
   });
 });
 

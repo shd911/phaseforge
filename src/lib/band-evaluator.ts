@@ -272,8 +272,16 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
   //    keeping any subsonic-protect contribution min-phase. Composite
   //    degenerates to LinearPhase / MinimumPhase when no subsonic is on,
   //    so this single path replaces the old isLin / demotion logic.
+  //
+  //    b139.5.3: FIR runs on its OWN log grid (5 Hz – min(40 kHz, Nyquist·0.95),
+  //    512 points) — independent of the measurement grid that drives the
+  //    SPL display. The display grid is fine for "what the listener
+  //    perceives" but truncates the FIR's HP rolloff (no bins below 20 Hz)
+  //    and its anti-aliasing headroom (no bins above 20 kHz when
+  //    sr ≥ 88.2 kHz). This is the same grid the legacy
+  //    generateBandImpulse used.
   let fir: BandEvalResult["fir"];
-  if (req.fir && targetMag) {
+  if (req.fir && band.targetEnabled) {
     const isUserLin = (f: FilterConfig | null | undefined) =>
       !f || f.linear_phase === true;
     const linearMain =
@@ -281,15 +289,39 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
     const hp = band.target.high_pass;
     const subsonicCutoff = hasActiveSubsonicProtect(hp) ? hp!.freq_hz / 8 : null;
     const cfg = req.fir;
+
+    // FIR-specific grid + target evaluation.
+    const fMaxFir = Math.min(40000, cfg.sampleRate / 2 * 0.95);
+    const [firFreq, firResp] = await invoke<[number[], TargetResponse]>(
+      "evaluate_target_standalone",
+      { target: targetCurve, nPoints: 512, fMin: 5, fMax: fMaxFir },
+    );
+    const firTargetMag = firResp.magnitude;
+    const firTargetPhase = await reconstructTargetPhase(
+      firFreq, firResp.phase, band.target.high_pass, band.target.low_pass,
+    );
+
+    // PEQ on the FIR grid (biquads are sample-rate independent — same bands).
+    let firPeqMag: number[] = new Array(firFreq.length).fill(0);
+    let firPeqPhase: number[] = new Array(firFreq.length).fill(0);
+    if (enabledPeq.length > 0) {
+      const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", {
+        freq: firFreq, bands: enabledPeq,
+      });
+      firPeqMag = pm;
+      firPeqPhase = pp;
+    }
+    const firCombinedPhase = firTargetPhase.map((p, i) => p + firPeqPhase[i]);
+
     const result = await invoke<{
       impulse: number[]; time_ms: number[]; realized_mag: number[];
       realized_phase: number[]; taps: number; sample_rate: number;
       norm_db: number; causality: number;
     }>("generate_model_fir", {
-      freq,
-      targetMag,
-      peqMag,
-      modelPhase: combinedTargetPhase ?? new Array(freq.length).fill(0),
+      freq: firFreq,
+      targetMag: firTargetMag,
+      peqMag: firPeqMag,
+      modelPhase: firCombinedPhase,
       config: {
         taps: cfg.taps,
         sample_rate: cfg.sampleRate,
