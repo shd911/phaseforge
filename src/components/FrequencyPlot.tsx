@@ -26,7 +26,7 @@ import {
   STATUS_GOOD, STATUS_WARN, STATUS_BAD,
   DEFAULT_IR_COLORS, DEFAULT_GD_COLORS, DEFAULT_EXPORT_COLORS,
 } from "../lib/plot-helpers";
-import { addGaussianMinPhase, evaluateBand } from "../lib/band-evaluation";
+import { addGaussianMinPhase, evaluateBand, hasActiveSubsonicProtect } from "../lib/band-evaluation";
 import { evaluateBandFull } from "../lib/band-evaluator";
 import { computeAutoAlign } from "../lib/auto-align";
 
@@ -1709,8 +1709,17 @@ export default function FrequencyPlot() {
       const targetMag = response.magnitude;
       let modelPhase = response.phase;
 
-      // Gaussian min-phase: per-filter Hilbert (for display)
-      if (isGaussianMinPhase(target.high_pass) || isGaussianMinPhase(target.low_pass)) {
+      // b139.3: Gaussian min-phase reconstruction now also covers
+      // linear-phase Gaussian + subsonic (the b138.4 invariant). Use
+      // hasActiveSubsonicProtect to gate the additional branch the same
+      // way band-evaluator does.
+      const needsLinearPhaseSubsonic = target.high_pass?.linear_phase === true
+        && hasActiveSubsonicProtect(target.high_pass);
+      if (
+        isGaussianMinPhase(target.high_pass)
+        || isGaussianMinPhase(target.low_pass)
+        || needsLinearPhaseSubsonic
+      ) {
         modelPhase = await addGaussianMinPhase(freq, modelPhase, target.high_pass, target.low_pass);
         if (gen !== renderGen) return;
       }
@@ -1724,8 +1733,10 @@ export default function FrequencyPlot() {
       }
       if (gen !== renderGen) return;
 
-      // Generate FIR
-      const isLin = (f: FilterConfig | null | undefined) => !f || f.linear_phase;
+      // Generate FIR. b138.4: subsonic_protect demotes "linear" so Rust's
+      // Hilbert reconstructs subsonic phase from the full magnitude.
+      const isLin = (f: FilterConfig | null | undefined) =>
+        !f || (f.linear_phase && !hasActiveSubsonicProtect(f));
       const allLinear = isLin(target.high_pass) && isLin(target.low_pass);
       // FIR phase mode:
       // LinearPhase: all filters lin → symmetric FIR

@@ -16,13 +16,27 @@ import {
 } from "./plot-helpers";
 import { hasActiveSubsonicProtect } from "./band-evaluation";
 
+export interface FirRequestConfig {
+  taps: number;
+  sampleRate: number;
+  window: string;
+  maxBoostDb: number;
+  noiseFloorDb: number;
+  iterations: number;
+  freqWeighting: boolean;
+  narrowbandLimit: boolean;
+  nbSmoothingOct: number;
+  nbMaxExcessDb: number;
+}
+
 export interface BandEvalRequest {
   band: BandState;
   /** Override the freq grid. If omitted: measurement.freq when present,
    *  otherwise a 512-point log grid 5 Hz – 40 kHz via evaluate_target_standalone. */
   freq?: number[];
-  /** Generate FIR coefficients via generate_model_fir. */
-  includeFir?: boolean;
+  /** Pass a config to also generate FIR coefficients via generate_model_fir.
+   *  If omitted, fir output is undefined. */
+  fir?: FirRequestConfig;
   /** Generate IR + step via compute_impulse / compute_corrected_impulse. */
   includeIr?: boolean;
 }
@@ -47,7 +61,16 @@ export interface BandEvalResult {
 
   refLevel: number;
 
-  fir?: { impulse: number[]; sampleRate: number };
+  fir?: {
+    impulse: number[];
+    timeMs: number[];
+    realizedMag: number[];
+    realizedPhase: number[];
+    taps: number;
+    sampleRate: number;
+    normDb: number;
+    causality: number;
+  };
   ir?: { impulse: number[]; step: number[]; time: number[] };
 }
 
@@ -187,39 +210,52 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
     combinedTargetPhase = targetPhase.map((p, i) => p + peqPhase[i]);
   }
 
-  // 6. Optional FIR. Known-issue carried into b139.3: generate_model_fir's
-  //    LinearPhase/MinimumPhase modes ignore the explicit modelPhase param
-  //    today. Until the Rust side accepts it, we keep the legacy phase_mode
-  //    selection so behaviour matches the existing FIR pipeline exactly.
-  let fir: { impulse: number[]; sampleRate: number } | undefined;
-  if (req.includeFir && targetMag) {
-    // Mirror legacy fir-export.ts: subsonic_protect demotes "linear" so Rust
-    // reconstructs subsonic phase from the full magnitude.
+  // 6. Optional FIR. b138.4 invariant: subsonic_protect demotes "linear" to
+  //    MinimumPhase so Rust's Hilbert reconstructs the subsonic phase from
+  //    full target magnitude (which includes subsonic via apply_filter).
+  //    PEQ phase is added by Rust Hilbert. modelPhase is currently advisory
+  //    (no PhaseMode actually consumes it) — we still pass combinedTargetPhase
+  //    so any future Rust mode that honours it picks up correct phase.
+  let fir: BandEvalResult["fir"];
+  if (req.fir && targetMag) {
     const isLin = (f: FilterConfig | null | undefined) =>
       !f || (f.linear_phase && !hasActiveSubsonicProtect(f));
     const allLinear = isLin(band.target.high_pass) && isLin(band.target.low_pass);
     const phaseMode = allLinear ? "LinearPhase" : "MinimumPhase";
-    const sr = 48000;
-    const result = await invoke<{ impulse: number[]; sample_rate: number }>("generate_model_fir", {
+    const cfg = req.fir;
+    const result = await invoke<{
+      impulse: number[]; time_ms: number[]; realized_mag: number[];
+      realized_phase: number[]; taps: number; sample_rate: number;
+      norm_db: number; causality: number;
+    }>("generate_model_fir", {
       freq,
       targetMag,
       peqMag,
       modelPhase: combinedTargetPhase ?? new Array(freq.length).fill(0),
       config: {
-        taps: 65536,
-        sample_rate: sr,
-        max_boost_db: 24.0,
-        noise_floor_db: -150.0,
-        window: "Blackman",
+        taps: cfg.taps,
+        sample_rate: cfg.sampleRate,
+        max_boost_db: cfg.maxBoostDb,
+        noise_floor_db: cfg.noiseFloorDb,
+        window: cfg.window,
         phase_mode: phaseMode,
-        iterations: 3,
-        freq_weighting: true,
-        narrowband_limit: true,
-        nb_smoothing_oct: 0.333,
-        nb_max_excess_db: 6.0,
+        iterations: cfg.iterations,
+        freq_weighting: cfg.freqWeighting,
+        narrowband_limit: cfg.narrowbandLimit,
+        nb_smoothing_oct: cfg.nbSmoothingOct,
+        nb_max_excess_db: cfg.nbMaxExcessDb,
       },
     });
-    fir = { impulse: result.impulse, sampleRate: result.sample_rate ?? sr };
+    fir = {
+      impulse: result.impulse,
+      timeMs: result.time_ms,
+      realizedMag: result.realized_mag,
+      realizedPhase: result.realized_phase,
+      taps: result.taps,
+      sampleRate: result.sample_rate,
+      normDb: result.norm_db,
+      causality: result.causality,
+    };
   }
 
   // 7. Optional IR / step.
@@ -273,7 +309,7 @@ export function createBandEvalResource(
   band: () => BandState,
   options?: {
     freq?: () => number[] | undefined;
-    includeFir?: () => boolean;
+    fir?: () => FirRequestConfig | undefined;
     includeIr?: () => boolean;
   },
 ): Resource<BandEvalResult> {
@@ -281,7 +317,7 @@ export function createBandEvalResource(
     () => ({
       band: band(),
       freq: options?.freq?.(),
-      includeFir: options?.includeFir?.() ?? false,
+      fir: options?.fir?.(),
       includeIr: options?.includeIr?.() ?? false,
     }),
     async (req) => evaluateBandFull(req),

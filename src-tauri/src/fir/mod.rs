@@ -1646,4 +1646,113 @@ mod tests {
         assert_eq!(hash, expected,
             "FIR impulse hash drift — capture new value from this test failure if intentional");
     }
+
+    // -----------------------------------------------------------------------
+    // b139.3 lock-in tests: Gaussian-and-subsonic FIR phase paths. Each test
+    // captures the b138.4 hash so stage-4/5 migrations can detect drift.
+    // -----------------------------------------------------------------------
+
+    fn b139_3_gaussian_hp_mag(freq: &[f64], fc: f64, m: f64, with_subsonic: bool) -> Vec<f64> {
+        let ln2 = 2.0_f64.ln();
+        let f_sub = fc / 8.0;
+        freq.iter().map(|&f| {
+            if f <= 0.0 { return -400.0; }
+            // Gaussian HP = 1 - LP(f/fc)
+            let ratio = (f / fc).powf(2.0 * m);
+            let lp_lin = (-ln2 * ratio).exp();
+            let hp_lin = 1.0 - lp_lin;
+            let mut db = if hp_lin > 1e-20 { 20.0 * hp_lin.log10() } else { -400.0 };
+            if with_subsonic {
+                let sub_ratio = (f_sub / f).powi(16);
+                db += -10.0 * (1.0 + sub_ratio).log10();
+            }
+            db
+        }).collect()
+    }
+
+    fn b139_3_fir_config(phase_mode: PhaseMode) -> FirConfig {
+        FirConfig {
+            taps: 8192, sample_rate: 48000.0,
+            max_boost_db: 18.0, noise_floor_db: -150.0,
+            window: WindowType::Blackman, phase_mode,
+            iterations: 0, freq_weighting: false, narrowband_limit: false,
+            nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0,
+            gaussian_min_phase_filters: vec![],
+        }
+    }
+
+    /// Gaussian HP=632, linear_phase=true, subsonic ON → caller demotes to
+    /// MinimumPhase (b138.4 isLin), Rust Hilbert reconstructs subsonic phase
+    /// from full magnitude. Lock the resulting hash.
+    #[test]
+    fn generate_fir_b139_3_gaussian_lin_subsonic_min_phase() {
+        let n = 512;
+        let freq: Vec<f64> = (0..n).map(|i| 5.0 * (40000f64 / 5.0).powf(i as f64 / (n - 1) as f64)).collect();
+        let target_mag = b139_3_gaussian_hp_mag(&freq, 632.0, 1.0, true);
+        let result = generate_model_fir(&freq, &target_mag, &[], &vec![0.0; n], &b139_3_fir_config(PhaseMode::MinimumPhase))
+            .expect("generate_model_fir should succeed");
+        let hash = b139_impulse_hash(&result.impulse);
+        let expected = "f239598b9ca52795";
+        assert_eq!(hash, expected,
+            "Gaussian linear + subsonic FIR hash drift — capture new value if intentional");
+    }
+
+    /// Gaussian HP=632, linear_phase=false, subsonic ON → MinimumPhase mode,
+    /// Hilbert from (Gaussian × subsonic) magnitude. Same Rust input as
+    /// the linear+subsonic case (caller demoted it), so same hash.
+    #[test]
+    fn generate_fir_b139_3_gaussian_min_subsonic_min_phase() {
+        let n = 512;
+        let freq: Vec<f64> = (0..n).map(|i| 5.0 * (40000f64 / 5.0).powf(i as f64 / (n - 1) as f64)).collect();
+        let target_mag = b139_3_gaussian_hp_mag(&freq, 632.0, 1.0, true);
+        let result = generate_model_fir(&freq, &target_mag, &[], &vec![0.0; n], &b139_3_fir_config(PhaseMode::MinimumPhase))
+            .expect("generate_model_fir should succeed");
+        let hash = b139_impulse_hash(&result.impulse);
+        let expected = "f239598b9ca52795";
+        assert_eq!(hash, expected,
+            "Gaussian min-phase + subsonic FIR hash drift — capture new value if intentional");
+    }
+
+    /// LR4 HP=80 with one peaking PEQ band at 1kHz Q=4 +6dB. PEQ phase
+    /// contribution comes from Rust Hilbert over the PEQ-only magnitude
+    /// (already in generate_model_fir today). Lock the resulting hash.
+    #[test]
+    fn generate_fir_b139_3_lr4_with_peq_peak() {
+        let n = 512;
+        let freq: Vec<f64> = (0..n).map(|i| 5.0 * (40000f64 / 5.0).powf(i as f64 / (n - 1) as f64)).collect();
+        let target_mag: Vec<f64> = freq.iter().map(|&f| {
+            let r = (f / 80.0).powi(8);
+            let mag_lin = r / (1.0 + r);
+            10.0 * (mag_lin.max(1e-20)).log10()
+        }).collect();
+        // PEQ magnitude (peaking biquad analytic): A=10^(gain/40), w0=2π*fc/fs,
+        // alpha=sin(w0)/(2Q). For sr=48k, fc=1k, Q=4, gain=6dB.
+        let sr = 48000.0;
+        let peq_mag: Vec<f64> = freq.iter().map(|&f| {
+            let a = 10f64.powf(6.0 / 40.0);
+            let w0 = 2.0 * std::f64::consts::PI * 1000.0 / sr;
+            let cos_w0 = w0.cos();
+            let sin_w0 = w0.sin();
+            let alpha = sin_w0 / (2.0 * 4.0);
+            let b0 = 1.0 + alpha * a;
+            let b1 = -2.0 * cos_w0;
+            let b2 = 1.0 - alpha * a;
+            let a0 = 1.0 + alpha / a;
+            let a1 = -2.0 * cos_w0;
+            let a2 = 1.0 - alpha / a;
+            // |H(e^{jw})|^2
+            let w = 2.0 * std::f64::consts::PI * f / sr;
+            let cos_w = w.cos();
+            let cos_2w = (2.0 * w).cos();
+            let num = b0 * b0 + b1 * b1 + b2 * b2 + 2.0 * (b0 * b1 + b1 * b2) * cos_w + 2.0 * b0 * b2 * cos_2w;
+            let den = a0 * a0 + a1 * a1 + a2 * a2 + 2.0 * (a0 * a1 + a1 * a2) * cos_w + 2.0 * a0 * a2 * cos_2w;
+            10.0 * (num / den).max(1e-20).log10()
+        }).collect();
+        let result = generate_model_fir(&freq, &target_mag, &peq_mag, &vec![0.0; n], &b139_3_fir_config(PhaseMode::MinimumPhase))
+            .expect("generate_model_fir should succeed");
+        let hash = b139_impulse_hash(&result.impulse);
+        let expected = "a1c030bf0bceeee0";
+        assert_eq!(hash, expected,
+            "LR4 + PEQ FIR hash drift — capture new value if intentional");
+    }
 }
