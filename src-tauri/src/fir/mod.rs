@@ -1839,20 +1839,20 @@ mod tests {
             "MinimumPhase peak should be near start (causal), got idx {pi} of {} taps", cfg.taps);
     }
 
-    /// b139.3.2: real-world divergence reproducer. Kirill's logs showed
+    /// b139.3.2/3: real-world divergence reproducer. Kirill's logs showed
     /// iterative_refine errors GROWING (0.151 → 12.091 → 13.486 dB) when
     /// linear-phase Gaussian + subsonic gets demoted to MinimumPhase mode.
     /// Pure single-pass tests never see this because they don't run iter=2+.
-    /// This test runs generate_model_fir with iterations=3 (production
-    /// default) and asserts the realised magnitude actually ends up close
-    /// to target. The TargetCurve is built directly and evaluated through
-    /// crate::target::evaluate so the magnitude exactly matches what
-    /// fir-export.ts ships in production.
+    /// b139.3.3 uses the production grid generator and the production
+    /// FirConfig; if it still PASSes, divergence depends on something else
+    /// the harness doesn't cover yet.
     #[test]
     fn iterative_refine_converges_with_min_phase_subsonic() {
         use crate::target::{evaluate, FilterConfig, FilterType, TargetCurve};
         let n = 512;
-        let freq = b139_3_1_log_grid(n, 5.0, 40000.0);
+        // Production-shape grid: same as evaluate_target_standalone with
+        // the explicit 5–40k range fir-export historically passed.
+        let freq = crate::dsp::generate_log_freq_grid(n, 5.0, 40000.0);
         let target_curve = TargetCurve {
             reference_level_db: 0.0,
             tilt_db_per_octave: 0.0,
@@ -1888,8 +1888,24 @@ mod tests {
             nb_max_excess_db: 6.0,
             gaussian_min_phase_filters: vec![],
         };
+        super::helpers::iter_stats_reset();
         let result = generate_model_fir(&freq, &target_mag, &peq_mag, &target_phase, &cfg)
             .expect("generate_model_fir should succeed");
+        let history = super::helpers::iter_stats_take();
+        eprintln!("iterative_refine history ({} iters):", history.len());
+        for s in &history {
+            eprintln!("  iter={} max_err={:.3} dB rms={:.3} dB", s.iter, s.max_err, s.rms_err);
+        }
+        // Sanity: errors must not blow up between iterations.
+        let mut prev = f64::INFINITY;
+        for s in &history {
+            if s.iter > 1 {
+                assert!(s.max_err <= prev * 1.5 + 1.0,
+                    "DIVERGENCE at iter {}: max_err {:.3} dB > 1.5 × previous {:.3} dB",
+                    s.iter, s.max_err, prev);
+            }
+            prev = s.max_err;
+        }
 
         // Check passband (1 kHz – 10 kHz) — well above subsonic, well above
         // Gaussian rolloff. Realised magnitude must track target within 1 dB

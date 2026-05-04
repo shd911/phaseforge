@@ -10,6 +10,20 @@ use crate::dsp::fractional_octave_smooth;
 use super::types::*;
 use super::windowing::*;
 
+// Test-only capture for iterative_refine per-iteration errors. Production
+// `info!` logging stays untouched; this lets cargo tests see the same
+// numbers Kirill saw in the dev-server console.
+#[cfg(test)]
+pub(crate) struct IterStats { pub iter: usize, pub max_err: f64, pub rms_err: f64 }
+#[cfg(test)]
+pub(crate) static ITER_STATS: std::sync::Mutex<Vec<IterStats>> = std::sync::Mutex::new(Vec::new());
+#[cfg(test)]
+pub(crate) fn iter_stats_reset() { ITER_STATS.lock().unwrap().clear(); }
+#[cfg(test)]
+pub(crate) fn iter_stats_take() -> Vec<IterStats> {
+    std::mem::take(&mut *ITER_STATS.lock().unwrap())
+}
+
 // ---------------------------------------------------------------------------
 // Internal: iterative weighted least-squares refinement
 // ---------------------------------------------------------------------------
@@ -129,6 +143,10 @@ pub(crate) fn iterative_refine(
 
         let rms_err = if err_count > 0 { (sum_sq_err / err_count as f64).sqrt() } else { 0.0 };
         info!("iterative_refine: iter={}, max_err={:.3} dB, rms_err={:.3} dB", iter + 1, max_err, rms_err);
+        #[cfg(test)]
+        {
+            ITER_STATS.lock().unwrap().push(IterStats { iter: iter + 1, max_err, rms_err });
+        }
 
         // Early exit if error is already very small
         if max_err < 0.05 {
