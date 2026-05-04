@@ -210,18 +210,19 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
     combinedTargetPhase = targetPhase.map((p, i) => p + peqPhase[i]);
   }
 
-  // 6. Optional FIR. b138.4 invariant: subsonic_protect demotes "linear" to
-  //    MinimumPhase so Rust's Hilbert reconstructs the subsonic phase from
-  //    full target magnitude (which includes subsonic via apply_filter).
-  //    PEQ phase is added by Rust Hilbert. modelPhase is currently advisory
-  //    (no PhaseMode actually consumes it) — we still pass combinedTargetPhase
-  //    so any future Rust mode that honours it picks up correct phase.
+  // 6. Optional FIR. b139.4a: send PhaseMode::Composite, which lets Rust
+  //    honour the user's linear-phase choice for the main filter while
+  //    keeping any subsonic-protect contribution min-phase. Composite
+  //    degenerates to LinearPhase / MinimumPhase when no subsonic is on,
+  //    so this single path replaces the old isLin / demotion logic.
   let fir: BandEvalResult["fir"];
   if (req.fir && targetMag) {
-    const isLin = (f: FilterConfig | null | undefined) =>
-      !f || (f.linear_phase && !hasActiveSubsonicProtect(f));
-    const allLinear = isLin(band.target.high_pass) && isLin(band.target.low_pass);
-    const phaseMode = allLinear ? "LinearPhase" : "MinimumPhase";
+    const isUserLin = (f: FilterConfig | null | undefined) =>
+      !f || f.linear_phase === true;
+    const linearMain =
+      isUserLin(band.target.high_pass) && isUserLin(band.target.low_pass);
+    const hp = band.target.high_pass;
+    const subsonicCutoff = hasActiveSubsonicProtect(hp) ? hp!.freq_hz / 8 : null;
     const cfg = req.fir;
     const result = await invoke<{
       impulse: number[]; time_ms: number[]; realized_mag: number[];
@@ -238,7 +239,9 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
         max_boost_db: cfg.maxBoostDb,
         noise_floor_db: cfg.noiseFloorDb,
         window: cfg.window,
-        phase_mode: phaseMode,
+        phase_mode: "Composite",
+        linear_phase_main: linearMain,
+        subsonic_cutoff_hz: subsonicCutoff,
         iterations: cfg.iterations,
         freq_weighting: cfg.freqWeighting,
         narrowband_limit: cfg.narrowbandLimit,

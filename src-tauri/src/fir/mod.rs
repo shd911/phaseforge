@@ -100,6 +100,10 @@ pub fn generate_fir(
         PhaseMode::LinearPhase => vec![0.0; n_bins], // zero phase → symmetric
         PhaseMode::MixedPhase => minimum_phase_from_magnitude(&limited, n_fft), // same as min for now
         PhaseMode::HybridPhase => minimum_phase_from_magnitude(&limited, n_fft), // fallback: same as min
+        // Composite is not used by generate_fir (the legacy measurement path).
+        // Fallback to MinimumPhase semantics so callers that wire it here
+        // by mistake don't crash.
+        PhaseMode::Composite => minimum_phase_from_magnitude(&limited, n_fft),
     };
 
     // 7. Assemble complex spectrum with conjugate symmetry
@@ -112,26 +116,20 @@ pub fn generate_fir(
     let norm = 1.0 / n_fft as f64;
     let mut impulse: Vec<f64> = spectrum.iter().map(|c| c.re * norm).collect();
 
-    // 9. Phase-dependent reordering
+    // 9. Phase-dependent reordering — only used by generate_fir (legacy
+    //    measurement path), where Composite is not invoked. Honour the
+    //    high-level mode here.
     match config.phase_mode {
-        PhaseMode::MinimumPhase | PhaseMode::HybridPhase => {
-            // Minimum phase: impulse is causal, already correct
-            // Just truncate to taps length (should already be n_fft)
-        }
-        PhaseMode::LinearPhase => {
-            // Circular shift: move peak to center (N/2)
-            circular_shift_to_center(&mut impulse);
-        }
-        PhaseMode::MixedPhase => {
-            // Same as minimum phase for now
-        }
+        PhaseMode::MinimumPhase | PhaseMode::HybridPhase | PhaseMode::Composite => { /* causal */ }
+        PhaseMode::LinearPhase => { circular_shift_to_center(&mut impulse); }
+        PhaseMode::MixedPhase => { /* causal for now */ }
     }
 
     // 10. Apply window
     // For minimum phase: use half-window (1.0 at start, taper to 0 at end)
     // For linear phase: use full symmetric window (centered peak)
     match config.phase_mode {
-        PhaseMode::MinimumPhase | PhaseMode::MixedPhase | PhaseMode::HybridPhase => {
+        PhaseMode::MinimumPhase | PhaseMode::MixedPhase | PhaseMode::HybridPhase | PhaseMode::Composite => {
             let half_win = generate_half_window(n_fft, &config.window);
             for (i, w) in half_win.iter().enumerate() {
                 impulse[i] *= w;
@@ -560,6 +558,14 @@ pub fn generate_model_fir(
         // MixedPhase: linear only if no per-filter Gaussian info provided
         PhaseMode::MixedPhase => config.gaussian_min_phase_filters.is_empty(),
         PhaseMode::MinimumPhase | PhaseMode::HybridPhase => false,
+        // b139.4a: Composite follows linear_phase_main for the impulse
+        // structure (full window + center shift). The subsonic min-phase
+        // contribution is carried by the assembled phase spectrum, not by
+        // the windowing path, so half-window would corrupt the symmetric
+        // base component. Even with subsonic on, the realized phase
+        // analyzer subtracts the N/2 linear delay; subsonic min-phase
+        // rotation survives in the residual.
+        PhaseMode::Composite => config.linear_phase_main,
     };
 
     info!(
@@ -576,6 +582,21 @@ pub fn generate_model_fir(
     //    PEQ phase: ALWAYS Hilbert (min-phase biquads)
     let target_phase_rad = if effective_linear {
         vec![0.0; n_bins]
+    } else if config.phase_mode == PhaseMode::Composite {
+        // b139.4a: split target into base + subsonic, phase from each:
+        // base honours linear_phase_main, subsonic is always min-phase.
+        // (When subsonic_cutoff_hz=None, base_phase carries the entire
+        // response — so this also handles the "no subsonic" degenerate
+        // case symmetrically with effective_linear above.)
+        crate::fir::helpers::compose_target_phase(
+            &lin_target,
+            n_fft,
+            n_bins,
+            config.sample_rate,
+            config.linear_phase_main,
+            config.subsonic_cutoff_hz,
+            config.noise_floor_db,
+        )
     } else if config.phase_mode == PhaseMode::MixedPhase && !config.gaussian_min_phase_filters.is_empty() {
         // MixedPhase: compute per-filter Gaussian Hilbert on linear FFT grid
         let nyquist = config.sample_rate / 2.0;
@@ -788,6 +809,8 @@ mod tests {
             iterations: 0, freq_weighting: false, narrowband_limit: false,
             nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0,
             gaussian_min_phase_filters: vec![],
+        linear_phase_main: false,
+        subsonic_cutoff_hz: None,
         };
 
         let result = generate_fir(&freq, &mag, &target, &peq, &config, (20.0, 20000.0)).unwrap();
@@ -817,6 +840,8 @@ mod tests {
             iterations: 0, freq_weighting: false, narrowband_limit: false,
             nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0,
             gaussian_min_phase_filters: vec![],
+        linear_phase_main: false,
+        subsonic_cutoff_hz: None,
         };
 
         let result = generate_fir(&freq, &mag, &target, &peq, &config, (20.0, 20000.0)).unwrap();
@@ -969,6 +994,8 @@ mod tests {
             iterations: 0, freq_weighting: false, narrowband_limit: false,
             nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0,
             gaussian_min_phase_filters: vec![],
+        linear_phase_main: false,
+        subsonic_cutoff_hz: None,
         };
 
         let result = generate_model_fir(&freq, &mag, &[], &phase, &config).unwrap();
@@ -1017,6 +1044,8 @@ mod tests {
             nb_smoothing_oct: 0.333,
             nb_max_excess_db: 6.0,
             gaussian_min_phase_filters: vec![],
+        linear_phase_main: false,
+        subsonic_cutoff_hz: None,
         };
 
         let result = generate_model_fir(&freq, &mag, &[], &phase, &config).unwrap();
@@ -1069,6 +1098,8 @@ mod tests {
             nb_smoothing_oct: 0.333,
             nb_max_excess_db: 6.0,
             gaussian_min_phase_filters: vec![],
+        linear_phase_main: false,
+        subsonic_cutoff_hz: None,
         };
 
         let result = generate_model_fir(&freq, &mag, &[], &phase, &config).unwrap();
@@ -1154,6 +1185,8 @@ mod tests {
             nb_smoothing_oct: 0.333,
             nb_max_excess_db: 6.0,
             gaussian_min_phase_filters: vec![],
+        linear_phase_main: false,
+        subsonic_cutoff_hz: None,
         };
 
         fn make_filter(
@@ -1334,6 +1367,8 @@ mod tests {
             nb_smoothing_oct: 0.333,
             nb_max_excess_db: 6.0,
             gaussian_min_phase_filters: vec![],
+        linear_phase_main: false,
+        subsonic_cutoff_hz: None,
         };
 
         // Passband indices: 350-1200 Hz
@@ -1539,6 +1574,8 @@ mod tests {
                 nb_smoothing_oct: 0.333,
                 nb_max_excess_db: 6.0,
                 gaussian_min_phase_filters: gauss_filters.clone(),
+                linear_phase_main: false,
+                subsonic_cutoff_hz: None,
             };
 
             let zero_phase = vec![0.0; n];
@@ -1632,6 +1669,8 @@ mod tests {
             nb_smoothing_oct: 0.333,
             nb_max_excess_db: 6.0,
             gaussian_min_phase_filters: vec![],
+        linear_phase_main: false,
+        subsonic_cutoff_hz: None,
         };
 
         let result = generate_model_fir(&freq, &target_mag, &[], &vec![0.0; n], &config)
@@ -1678,6 +1717,8 @@ mod tests {
             iterations: 0, freq_weighting: false, narrowband_limit: false,
             nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0,
             gaussian_min_phase_filters: vec![],
+        linear_phase_main: false,
+        subsonic_cutoff_hz: None,
         }
     }
 
@@ -1887,6 +1928,8 @@ mod tests {
             nb_smoothing_oct: 0.333,
             nb_max_excess_db: 6.0,
             gaussian_min_phase_filters: vec![],
+        linear_phase_main: false,
+        subsonic_cutoff_hz: None,
         };
         super::helpers::iter_stats_reset();
         let result = generate_model_fir(&freq, &target_mag, &peq_mag, &target_phase, &cfg)
@@ -1954,5 +1997,132 @@ mod tests {
         }
         assert!(max_err < 1.0,
             "Realised magnitude in passband (1k–10k) drifts from target by up to {max_err:.3} dB");
+    }
+
+    // -----------------------------------------------------------------------
+    // b139.4a — Composite phase mode (linear-phase main + min-phase subsonic).
+    // -----------------------------------------------------------------------
+
+    fn b139_4a_composite_config(linear_main: bool, subsonic_cutoff: Option<f64>) -> FirConfig {
+        FirConfig {
+            taps: 8192, sample_rate: 48000.0,
+            max_boost_db: 24.0, noise_floor_db: -150.0,
+            window: WindowType::Blackman,
+            phase_mode: PhaseMode::Composite,
+            iterations: 3, freq_weighting: true, narrowband_limit: false,
+            nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0,
+            gaussian_min_phase_filters: vec![],
+            linear_phase_main: linear_main,
+            subsonic_cutoff_hz: subsonic_cutoff,
+        }
+    }
+
+    /// Find the realized_phase value at the freq closest to `target_hz`.
+    fn b139_4a_phase_at(freq: &[f64], realized_phase: &[f64], target_hz: f64) -> f64 {
+        let idx = freq.iter().enumerate()
+            .min_by(|(_, a), (_, b)| (**a - target_hz).abs().partial_cmp(&(**b - target_hz).abs()).unwrap())
+            .map(|(i, _)| i).unwrap_or(0);
+        realized_phase[idx]
+    }
+
+    /// Maximum |phase| over a frequency window.
+    fn b139_4a_max_abs_phase(freq: &[f64], realized_phase: &[f64], lo: f64, hi: f64) -> f64 {
+        let mut m = 0.0_f64;
+        for (i, &f) in freq.iter().enumerate() {
+            if f < lo || f > hi { continue; }
+            if realized_phase[i].abs() > m { m = realized_phase[i].abs(); }
+        }
+        m
+    }
+
+    /// Composite, linear main, no subsonic → reduces to LinearPhase semantics:
+    /// passband phase ≈ 0 across the audible band.
+    #[test]
+    fn fir_composite_lin_main_no_subsonic() {
+        let n = 512;
+        let freq = b139_3_1_log_grid(n, 5.0, 40000.0);
+        let target_mag = b139_3_gaussian_hp_mag(&freq, 632.0, 1.0, false);
+        let cfg = b139_4a_composite_config(true, None);
+        let result = generate_model_fir(&freq, &target_mag, &[], &vec![0.0; n], &cfg)
+            .expect("generate_model_fir should succeed");
+        let max_phase = b139_4a_max_abs_phase(&freq, &result.realized_phase, 1000.0, 10000.0);
+        assert!(max_phase < 1.0,
+            "Composite lin main, no subsonic: passband phase should be ~0°, got max |phase| = {:.3}°",
+            max_phase);
+    }
+
+    /// Composite, linear main, subsonic ON → main filter is linear-phase
+    /// (flat phase across passband), subsonic carries the only min-phase
+    /// rotation. Cumulative phase at passband includes the full -720° BW8
+    /// asymptote, so we check passband *flatness* (slope), not absolute.
+    #[test]
+    fn fir_composite_lin_main_with_subsonic() {
+        let n = 512;
+        let freq = b139_3_1_log_grid(n, 5.0, 40000.0);
+        let target_mag = b139_3_gaussian_hp_mag(&freq, 632.0, 1.0, true);
+        let cfg = b139_4a_composite_config(true, Some(79.0));
+        let result = generate_model_fir(&freq, &target_mag, &[], &vec![0.0; n], &cfg)
+            .expect("generate_model_fir should succeed");
+
+        // Passband flatness: phase variation 1k–10k must be small. The
+        // subsonic Hilbert has asymptoted to -720° well before 1 kHz, so the
+        // residual slope across the passband should be tiny (< 5°).
+        let p_lo = b139_4a_phase_at(&freq, &result.realized_phase, 1000.0);
+        let p_hi = b139_4a_phase_at(&freq, &result.realized_phase, 10000.0);
+        let pass_var = (p_hi - p_lo).abs();
+        // BW8 HP (fc=79) hasn't fully reached its -720° asymptote at 1 kHz;
+        // residual slope from 1k→10k is ~20° of real physics, not windowing.
+        assert!(pass_var < 30.0,
+            "Composite lin main + subsonic: passband phase should be flat, got Δphase(1k→10k) = {:.3}° (p_lo={:.1}°, p_hi={:.1}°)",
+            pass_var, p_lo, p_hi);
+
+        // Infrasound: subsonic min-phase rotation must be present.
+        let infra_max = b139_4a_max_abs_phase(&freq, &result.realized_phase, 5.0, 40.0);
+        assert!(infra_max > 100.0,
+            "Composite lin main + subsonic: infrasound should show min-phase rotation, got max |phase| = {:.3}°",
+            infra_max);
+    }
+
+    /// Composite, min-phase main, no subsonic → reduces to MinimumPhase
+    /// semantics: phase is the natural Gaussian min-phase rotation.
+    #[test]
+    fn fir_composite_min_main_no_subsonic() {
+        let n = 512;
+        let freq = b139_3_1_log_grid(n, 5.0, 40000.0);
+        let target_mag = b139_3_gaussian_hp_mag(&freq, 632.0, 1.0, false);
+        let cfg = b139_4a_composite_config(false, None);
+        let result = generate_model_fir(&freq, &target_mag, &[], &vec![0.0; n], &cfg)
+            .expect("generate_model_fir should succeed");
+        // Around HP corner phase rotation must be measurable but bounded.
+        let near_hp = b139_4a_phase_at(&freq, &result.realized_phase, 632.0);
+        assert!(near_hp.abs() > 1.0,
+            "Composite min main, no subsonic: phase near HP corner should rotate, got {:.3}°",
+            near_hp);
+    }
+
+    /// Composite, min-phase main, subsonic ON → both Gaussian min-phase
+    /// (around 632 Hz corner) AND subsonic min-phase (5–40 Hz) contribute.
+    #[test]
+    fn fir_composite_min_main_with_subsonic() {
+        let n = 512;
+        let freq = b139_3_1_log_grid(n, 5.0, 40000.0);
+        let target_mag = b139_3_gaussian_hp_mag(&freq, 632.0, 1.0, true);
+        let cfg = b139_4a_composite_config(false, Some(79.0));
+        let result = generate_model_fir(&freq, &target_mag, &[], &vec![0.0; n], &cfg)
+            .expect("generate_model_fir should succeed");
+        let infra_max = b139_4a_max_abs_phase(&freq, &result.realized_phase, 5.0, 40.0);
+        assert!(infra_max > 100.0,
+            "Composite min main + subsonic: infrasound should rotate, got max |phase| = {:.3}°",
+            infra_max);
+        // Magnitude in passband must still match target after iterative_refine.
+        let mut max_err = 0.0_f64;
+        for (i, &f) in freq.iter().enumerate() {
+            if f < 1000.0 || f > 10000.0 { continue; }
+            let realised = result.realized_mag[i];
+            let expected = target_mag[i] - result.norm_db;
+            max_err = max_err.max((realised - expected).abs());
+        }
+        assert!(max_err < 0.5,
+            "Composite min main + subsonic: passband magnitude drift {:.3} dB > 0.5 dB", max_err);
     }
 }

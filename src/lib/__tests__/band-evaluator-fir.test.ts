@@ -52,7 +52,13 @@ vi.mock("@tauri-apps/api/core", () => ({
       // delta at index 0 in MinimumPhase. Off-peak energy = 0.
       const taps = args.config.taps as number;
       const impulse = new Array(taps).fill(0);
-      const peakIdx = args.config.phase_mode === "LinearPhase" ? Math.floor(taps / 2) : 0;
+      // b139.4a: Composite degenerates to linear (centered) when
+      // linear_phase_main && no subsonic; otherwise causal at index 0.
+      const cfg = args.config;
+      const isLinPath =
+        cfg.phase_mode === "LinearPhase" ||
+        (cfg.phase_mode === "Composite" && cfg.linear_phase_main === true && cfg.subsonic_cutoff_hz == null);
+      const peakIdx = isLinPath ? Math.floor(taps / 2) : 0;
       // For non-flat target_mag, the mock degrades (we only need this branch
       // exercised by the identity test).
       const mag = args.targetMag as number[];
@@ -94,6 +100,76 @@ function flatBand(): BandState {
     firResult: null, crossNormDb: 0, color: "#888", alignmentDelay: 0,
   };
 }
+
+describe("evaluateBandFull FIR Composite IPC payload (b139.4a)", () => {
+  async function captureFirConfig(band: BandState) {
+    const mockMod = await import("@tauri-apps/api/core");
+    const inv = (mockMod as any).invoke as ReturnType<typeof vi.fn>;
+    let captured: any = null;
+    const sniff = inv.getMockImplementation()!;
+    inv.mockImplementation(async (cmd: string, args: any) => {
+      if (cmd === "generate_model_fir") captured = args.config;
+      return sniff(cmd, args);
+    });
+    try {
+      await evaluateBandFull({
+        band,
+        fir: {
+          taps: 4096, sampleRate: 48000, window: "Blackman",
+          maxBoostDb: 24, noiseFloorDb: -150,
+          iterations: 1, freqWeighting: false,
+          narrowbandLimit: false, nbSmoothingOct: 0.333, nbMaxExcessDb: 6,
+        },
+      });
+    } finally {
+      inv.mockImplementation(sniff);
+    }
+    return captured;
+  }
+
+  it("flat / no HP → phase_mode=Composite, linear_phase_main=true, subsonic_cutoff_hz=null", async () => {
+    const cfg = await captureFirConfig(flatBand());
+    expect(cfg.phase_mode).toBe("Composite");
+    expect(cfg.linear_phase_main).toBe(true);
+    expect(cfg.subsonic_cutoff_hz).toBeNull();
+  });
+
+  it("HP linear + subsonic_protect → linear_phase_main=true, subsonic_cutoff_hz=fc/8", async () => {
+    const band = flatBand();
+    band.target.high_pass = {
+      filter_type: "Gaussian", order: 4, freq_hz: 632.0,
+      shape: 1.0, q: null, linear_phase: true, subsonic_protect: true,
+    };
+    const cfg = await captureFirConfig(band);
+    expect(cfg.phase_mode).toBe("Composite");
+    expect(cfg.linear_phase_main).toBe(true);
+    expect(cfg.subsonic_cutoff_hz).toBeCloseTo(632.0 / 8, 5);
+  });
+
+  it("HP min-phase + subsonic_protect → linear_phase_main=false, subsonic_cutoff_hz=fc/8", async () => {
+    const band = flatBand();
+    band.target.high_pass = {
+      filter_type: "Gaussian", order: 4, freq_hz: 632.0,
+      shape: 1.0, q: null, linear_phase: false, subsonic_protect: true,
+    };
+    const cfg = await captureFirConfig(band);
+    expect(cfg.phase_mode).toBe("Composite");
+    expect(cfg.linear_phase_main).toBe(false);
+    expect(cfg.subsonic_cutoff_hz).toBeCloseTo(632.0 / 8, 5);
+  });
+
+  it("HP linear, no subsonic_protect → linear_phase_main=true, subsonic_cutoff_hz=null", async () => {
+    const band = flatBand();
+    band.target.high_pass = {
+      filter_type: "Gaussian", order: 4, freq_hz: 632.0,
+      shape: 1.0, q: null, linear_phase: true, subsonic_protect: false,
+    };
+    const cfg = await captureFirConfig(band);
+    expect(cfg.phase_mode).toBe("Composite");
+    expect(cfg.linear_phase_main).toBe(true);
+    expect(cfg.subsonic_cutoff_hz).toBeNull();
+  });
+});
 
 describe("evaluateBandFull FIR identity (b139.3.1)", () => {
   it("flat measurement, no filters, no PEQ → identity FIR", async () => {

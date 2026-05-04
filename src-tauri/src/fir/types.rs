@@ -20,6 +20,12 @@ pub enum PhaseMode {
     LinearPhase,
     MixedPhase,
     HybridPhase, // min-phase correction + linear-phase filter
+    /// b139.4a: respect the user's linear-phase choice for the main filter
+    /// while keeping any subsonic-protect contribution minimum-phase. The
+    /// caller sets `subsonic_cutoff_hz = Some(fc/8)` and `linear_phase_main`
+    /// per UI checkbox; Rust splits the magnitude (`base = total - subsonic`)
+    /// and recombines two phases.
+    Composite,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +76,15 @@ pub struct FirConfig {
     pub nb_max_excess_db: f64,                // max dB above smoothed curve
     #[serde(default)]
     pub gaussian_min_phase_filters: Vec<GaussianFilterInfo>,
+    /// b139.4a Composite mode: user's linear-phase choice for the main filter.
+    /// Ignored when phase_mode != Composite.
+    #[serde(default)]
+    pub linear_phase_main: bool,
+    /// b139.4a Composite mode: subsonic Butterworth-8 corner (typically fc/8).
+    /// Set to None when subsonic_protect is off; the Composite path then
+    /// degenerates to {Linear,Min}Phase based on linear_phase_main.
+    #[serde(default)]
+    pub subsonic_cutoff_hz: Option<f64>,
 }
 
 pub(crate) fn default_iterations() -> usize { 3 }

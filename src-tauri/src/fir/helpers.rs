@@ -105,16 +105,29 @@ pub(crate) fn iterative_refine(
 
     let mut engine = FftEngine::new();
 
-    let is_linear_phase = matches!(config.phase_mode, PhaseMode::LinearPhase);
+    // b139.4a: must mirror effective_linear in generate_model_fir so the
+    // refinement loop reorders/windows the impulse the same way as the
+    // initial assembly. Otherwise Composite + linear_main loses the
+    // center-shift and gets half-windowed, destroying the symmetric base.
+    let is_linear_phase = matches!(config.phase_mode, PhaseMode::LinearPhase)
+        || (matches!(config.phase_mode, PhaseMode::Composite) && config.linear_phase_main);
     // b139.3.4: in MinimumPhase mode the (magnitude, phase) pair must stay
     // consistent across iterations — Hilbert(refined_db) recomputed each
     // pass. LinearPhase keeps zero phase; MixedPhase/HybridPhase carry a
     // composite phase from per-filter Hilbert that doesn't depend on the
     // running magnitude, so they reuse the entry-point phase.
     let recompute_min_phase = matches!(config.phase_mode, PhaseMode::MinimumPhase);
+    let recompute_composite = matches!(config.phase_mode, PhaseMode::Composite);
+    // For Composite mode, the subsonic part is fixed (depends only on
+    // cutoff_hz, not on the running magnitude) — precompute it once.
+    let subsonic_mag_fixed: Option<Vec<f64>> = if recompute_composite {
+        Some(subsonic_mag_db_lin(n_bins, config.sample_rate, config.subsonic_cutoff_hz))
+    } else {
+        None
+    };
     // Buffer reused for the per-iteration recompute when needed. Skip the
     // entry-point copy if we're going to overwrite on iter 0 anyway.
-    let mut iter_phase: Vec<f64> = if recompute_min_phase {
+    let mut iter_phase: Vec<f64> = if recompute_min_phase || recompute_composite {
         Vec::with_capacity(n_bins)
     } else {
         phase_rad.to_vec()
@@ -177,6 +190,13 @@ pub(crate) fn iterative_refine(
             iter_phase = minimum_phase_from_magnitude(&refined_db, n_fft);
             debug_assert_eq!(iter_phase.len(), n_bins,
                 "minimum_phase_from_magnitude must return n_bins entries");
+        } else if recompute_composite {
+            let sub = subsonic_mag_fixed.as_ref()
+                .expect("subsonic_mag_fixed must exist in Composite mode");
+            iter_phase = composite_phase_inner(
+                &refined_db, sub, n_fft, config.linear_phase_main, config.noise_floor_db,
+            );
+            debug_assert_eq!(iter_phase.len(), n_bins);
         }
         let mut new_spectrum = assemble_complex_spectrum(&refined_db, &iter_phase, n_fft);
         engine.fft_inverse(&mut new_spectrum);
@@ -207,6 +227,21 @@ pub(crate) fn iterative_refine(
                 let half_win = generate_half_window(n_fft, &config.window);
                 for (i, w) in half_win.iter().enumerate() {
                     impulse[i] *= w;
+                }
+            }
+            PhaseMode::Composite => {
+                // b139.4a: linear_main → centered impulse → full window.
+                // min-phase main → asymmetric impulse → half window.
+                if config.linear_phase_main {
+                    let window = generate_window(n_fft, &config.window);
+                    for (i, w) in window.iter().enumerate() {
+                        impulse[i] *= w;
+                    }
+                } else {
+                    let half_win = generate_half_window(n_fft, &config.window);
+                    for (i, w) in half_win.iter().enumerate() {
+                        impulse[i] *= w;
+                    }
                 }
             }
             PhaseMode::LinearPhase => {
@@ -360,6 +395,78 @@ pub(crate) fn sigmoid_blend(freq: f64, center_freq: f64, octaves: f64) -> f64 {
     let steepness = 6.0 / octaves; // ~6 gives a nice sigmoid over the octave width
     let x = log_ratio * steepness;
     1.0 / (1.0 + (-x).exp())
+}
+
+// ---------------------------------------------------------------------------
+// b139.4a Composite phase: subsonic Butterworth-8 magnitude (linear FFT grid)
+// ---------------------------------------------------------------------------
+
+/// Compute Butterworth-8 HP magnitude in dB at the linear FFT grid for
+/// the given subsonic cutoff. Mirrors target/mod.rs apply_filter exactly:
+/// |H(f)|^2 = 1 / (1 + (fc/f)^16). Returns zeros if cutoff is None.
+pub(crate) fn subsonic_mag_db_lin(
+    n_bins: usize,
+    sample_rate: f64,
+    cutoff_hz: Option<f64>,
+) -> Vec<f64> {
+    let mut out = vec![0.0_f64; n_bins];
+    let Some(fc) = cutoff_hz else { return out; };
+    let nyquist = sample_rate / 2.0;
+    for k in 0..n_bins {
+        let f = nyquist * k as f64 / (n_bins - 1) as f64;
+        if f <= 0.0 {
+            out[k] = -400.0;
+            continue;
+        }
+        let ratio = (fc / f).powi(16);
+        // -10·log10(1 + ratio) = 20·log10(sqrt(1/(1+ratio)))
+        out[k] = -10.0 * (1.0 + ratio).log10();
+    }
+    out
+}
+
+/// Composite phase for one iteration / one assembly: split total magnitude
+/// into base = total - subsonic, give base zero or min-phase per
+/// `linear_phase_main`, sum with always-min-phase subsonic contribution.
+pub(crate) fn composite_phase_inner(
+    total_mag_db: &[f64],
+    subsonic_mag_db: &[f64],
+    n_fft: usize,
+    linear_phase_main: bool,
+    noise_floor_db: f64,
+) -> Vec<f64> {
+    debug_assert_eq!(total_mag_db.len(), subsonic_mag_db.len());
+    let n = total_mag_db.len();
+    let base_mag: Vec<f64> = (0..n)
+        .map(|k| (total_mag_db[k] - subsonic_mag_db[k]).max(noise_floor_db))
+        .collect();
+    let base_phase = if linear_phase_main {
+        vec![0.0_f64; n]
+    } else {
+        minimum_phase_from_magnitude(&base_mag, n_fft)
+    };
+    let subsonic_phase = minimum_phase_from_magnitude(subsonic_mag_db, n_fft);
+    base_phase
+        .iter()
+        .zip(subsonic_phase.iter())
+        .map(|(b, s)| b + s)
+        .collect()
+}
+
+/// Public composite-phase entry used by generate_model_fir's initial spectrum
+/// assembly (before iterative_refine). Builds the subsonic mag internally.
+pub(crate) fn compose_target_phase(
+    total_mag_db: &[f64],
+    n_fft: usize,
+    n_bins: usize,
+    sample_rate: f64,
+    linear_phase_main: bool,
+    cutoff_hz: Option<f64>,
+    noise_floor_db: f64,
+) -> Vec<f64> {
+    debug_assert_eq!(total_mag_db.len(), n_bins);
+    let subsonic = subsonic_mag_db_lin(n_bins, sample_rate, cutoff_hz);
+    composite_phase_inner(total_mag_db, &subsonic, n_fft, linear_phase_main, noise_floor_db)
 }
 
 // ---------------------------------------------------------------------------
