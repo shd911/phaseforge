@@ -76,7 +76,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   }),
 }));
 
-import { evaluateSum } from "../band-evaluator";
+import { evaluateSum, resampleOntoGrid } from "../band-evaluator";
 
 const N = 512;
 function logGrid(fmin: number, fmax: number, n: number): number[] {
@@ -294,7 +294,11 @@ describe("evaluateSum — perBandResampled (b140.2.1.5)", () => {
     }
   });
 
-  it("supertweeter perBandResampled silent below native range", async () => {
+  it("supertweeter perBandResampled below native range follows extension (b140.2.1.7)", async () => {
+    // flatBand has a flat target curve (no HP/LP). With globalRef = 0 the
+    // analytical target on the common grid is 0 dB everywhere — extension
+    // continues the curve at 0 dB rather than dropping to -200 dB silence.
+    // The b140.2.1.4 silence-fence is now opt-in (default-options call).
     const bands = [
       bandWithRange("a", 20, 22000),
       bandWithRange("b", 1000, 22000), // supertweeter
@@ -302,11 +306,10 @@ describe("evaluateSum — perBandResampled (b140.2.1.5)", () => {
     const result = await evaluateSum(bands);
     const idx100 = nearest(result.freq, 100);
     const supertweeter = result.perBandResampled[1];
-    expect(supertweeter.measurementMag![idx100]).toBeLessThan(-150);
-    expect(supertweeter.correctedMag![idx100]).toBeLessThan(-150);
-    // In native range — non-silent.
+    expect(supertweeter.measurementMag![idx100]).toBeCloseTo(0, 1);
+    // In native range — same flat 0 dB.
     const idx5k = nearest(result.freq, 5000);
-    expect(supertweeter.measurementMag![idx5k]).toBeGreaterThan(-50);
+    expect(supertweeter.measurementMag![idx5k]).toBeCloseTo(0, 1);
   });
 
   it("first band keeps its full-range data (no spurious fencing)", async () => {
@@ -323,51 +326,55 @@ describe("evaluateSum — perBandResampled (b140.2.1.5)", () => {
   });
 });
 
-describe("evaluateSum — extrapolation fence (b140.2.1.4)", () => {
-  // A supertweeter measured only from 5 kHz upward must NOT contribute
-  // to the coherent sum on the bass — pre-fix Rust's interp_single
-  // clamped to mag[0], leaving the resampled curve at its boundary value
-  // all the way down to 20 Hz. Fence in resampleOntoGrid replaces those
-  // bins with -200 dB so 10^(m/20) ≈ 0 and the coherent sum sees nothing.
-  function bandWithRange(id: string, fMin: number, fMax: number, levelDb = 0): BandState {
-    const b = flatBand(id);
-    // Replace the freq grid with a band-limited one starting at fMin.
-    b.measurement!.freq = logGrid(fMin, fMax, N);
-    b.measurement!.magnitude = new Array(N).fill(levelDb);
-    b.measurement!.phase = new Array(N).fill(0);
-    return b;
-  }
-
-  it("supertweeter band only contributes inside its native freq range", async () => {
-    // Band 1: full 20 Hz – 20 kHz at 0 dB.
-    // Band 2: 5 kHz – 20 kHz at 0 dB (supertweeter).
-    const bands = [
-      bandWithRange("a", 20, 20000, 0),
-      bandWithRange("b", 5000, 20000, 0),
-    ];
-    const result = await evaluateSum(bands);
-
-    // 100 Hz: only Band 1 in its native range. Band 2 should be fenced.
-    // Σ measurement = single band at 0 dB = 0 dB (NOT +6 dB).
-    const idx100 = nearest(result.freq, 100);
-    expect(result.sumMeasurementMag![idx100]).toBeCloseTo(0, 1);
-
-    // 10 kHz: both bands native → coherent sum +6.02 dB.
-    const idx10k = nearest(result.freq, 10000);
-    expect(result.sumMeasurementMag![idx10k]).toBeCloseTo(6.02, 1);
+describe("resampleOntoGrid extension (b140.2.1.7)", () => {
+  // Direct-call tests for the three out-of-range strategies of
+  // resampleOntoGrid: target-shape extension, log-linear trend fallback,
+  // and the -200 dB silence fence (default).
+  it("target shape extension matches measurement at boundary", async () => {
+    // Source: flat 0 dB measurement on [1k, 20k] (supertweeter).
+    // Target: rolloff at low end (-40 dB at 100 Hz, 0 dB at 1k+).
+    // Extension at 100 Hz should follow target with offset = 0 - 0 = 0 →
+    // expect ≈ -40 dB.
+    const targetFreq = [100, 1000, 10000];
+    const result = await resampleOntoGrid(
+      [1000, 20000], [0, 0], null, targetFreq,
+      { extensionTargetMag: [-40, 0, 0] },
+    );
+    expect(result.mag).not.toBeNull();
+    expect(result.mag![0]).toBeCloseTo(-40, 0);
+    // In-range bins return measurement value (0 dB).
+    expect(result.mag![1]).toBeCloseTo(0, 1);
+    expect(result.mag![2]).toBeCloseTo(0, 1);
   });
 
-  it("out-of-range bins do not phantom-leak via large boundary mag", async () => {
-    // Same shape but Band 2 starts at 5 kHz with +30 dB level. Pre-fix the
-    // boundary clamp would push +30 dB across the whole low end and the
-    // sum at 100 Hz would shoot up. With fence, low end stays at 0 dB.
-    const bands = [
-      bandWithRange("a", 20, 20000, 0),
-      bandWithRange("b", 5000, 20000, 30),
-    ];
-    const result = await evaluateSum(bands);
-    const idx100 = nearest(result.freq, 100);
-    expect(result.sumMeasurementMag![idx100]).toBeCloseTo(0, 1);
+  it("trend fallback extrapolates log-linear slope from tail", async () => {
+    // Flat measurement on [200, 22000] → tail slope = 0 dB/oct → extension
+    // stays at 0 dB.
+    const result = await resampleOntoGrid(
+      [200, 250, 300, 22000], [0, 0, 0, 0], null, [100, 200],
+      { fallbackToTrend: true },
+    );
+    expect(result.mag![0]).toBeCloseTo(0, 0);
+  });
+
+  it("trend fallback follows a +12 dB/oct rising tail (HP-rolloff shape)", async () => {
+    // Source rising at +12 dB / octave near fLo — typical HP filter
+    // rolloff seen in the lowest measurement bins. Extending one octave
+    // below fLo (100 Hz given fLo = 200) drops 12 dB.
+    const srcFreq = [200, 210, 225, 235, 800];
+    const srcMag = srcFreq.map(f => 12 * Math.log2(f / 200));
+    const result = await resampleOntoGrid(
+      srcFreq, srcMag, null, [100, 200],
+      { fallbackToTrend: true },
+    );
+    expect(result.mag![0]).toBeCloseTo(-12, 0);
+  });
+
+  it("no options → -200 dB fence (b140.2.1.4 fallback)", async () => {
+    const result = await resampleOntoGrid(
+      [200, 22000], [0, 0], null, [100, 200],
+    );
+    expect(result.mag![0]).toBeLessThan(-150);
   });
 });
 

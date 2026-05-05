@@ -490,11 +490,65 @@ function buildLogGrid(n: number, fMin: number, fMax: number): number[] {
   return out;
 }
 
-async function resampleOntoGrid(
+/** b140.2.1.7: log-linear slope (dB / octave) over a tail window of the
+ *  source data. Used for trend extension when no target shape is supplied. */
+function tailSlope(
+  srcFreq: number[],
+  srcMag: number[],
+  fEnd: number,
+  fromLow: boolean,
+): number {
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (let i = 0; i < srcFreq.length; i++) {
+    const inWindow = fromLow ? srcFreq[i] <= fEnd : srcFreq[i] >= fEnd;
+    if (inWindow) {
+      xs.push(Math.log2(srcFreq[i]));
+      ys.push(srcMag[i]);
+    }
+  }
+  if (xs.length < 2) return 0;
+  let mx = 0, my = 0;
+  for (let i = 0; i < xs.length; i++) { mx += xs[i]; my += ys[i]; }
+  mx /= xs.length; my /= ys.length;
+  let num = 0, den = 0;
+  for (let i = 0; i < xs.length; i++) {
+    const dx = xs[i] - mx;
+    num += dx * (ys[i] - my);
+    den += dx * dx;
+  }
+  return den > 0 ? num / den : 0;
+}
+
+function nearestIdx(arr: number[], target: number): number {
+  let best = 0;
+  let bestD = Infinity;
+  for (let i = 0; i < arr.length; i++) {
+    const d = Math.abs(arr[i] - target);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return best;
+}
+
+export interface ResampleExtensionOptions {
+  /** Target curve magnitude on the targetFreq grid. When supplied, bins
+   *  outside the source's native range are filled with this curve, offset
+   *  so target ≡ measurement at the native boundary. Lets a band-limited
+   *  measurement be physically extended through its design target (e.g.
+   *  Gaussian HP rolloff for a tweeter measured only above 1 kHz). */
+  extensionTargetMag?: number[];
+  /** Fallback when extensionTargetMag is absent: linear extrapolation in
+   *  log2(freq) space using the slope of the last ~1/4 octave of source
+   *  data. Hits the right shape for full-range drivers without target. */
+  fallbackToTrend?: boolean;
+}
+
+export async function resampleOntoGrid(
   srcFreq: number[],
   srcMag: number[] | null,
   srcPhase: number[] | null,
   targetFreq: number[],
+  options?: ResampleExtensionOptions,
 ): Promise<{ mag: number[] | null; phase: number[] | null }> {
   if (srcMag === null) return { mag: null, phase: null };
   // interpolate_log handles both mag + phase in one call (phase optional).
@@ -507,35 +561,73 @@ async function resampleOntoGrid(
     },
   );
 
-  // b140.2.1.4: Rust's interp_single clamps to boundary values when the
-  // query freq is outside the source range — fine for legitimate paths
-  // (target evaluation extending below the lowest measurement bin) but
-  // catastrophic for SUM aggregation: a supertweeter measured from
-  // 1220 Hz upward would get its mag[0] ≈ +54 dB repeated all the way
-  // down to 20 Hz, contributing a phantom curve to the coherent sum.
-  // Fence the out-of-range bins to a silent magnitude so 10^(m/20)·sin/cos
-  // contributes effectively zero.
+  // b140.2.1.4 / .7: Rust's interp_single clamps to boundary values when
+  // the query freq is outside the source range. For SUM aggregation we
+  // replace those with a physically motivated extension:
+  //   • extensionTargetMag (offset so target meets meas at boundary), or
+  //   • log-linear trend extrapolation from the tail, or
+  //   • −200 dB silence fence (default — b140.2.1.4 behaviour).
   if (srcFreq.length === 0) return { mag, phase: phase ?? null };
   const fLo = srcFreq[0];
   const fHi = srcFreq[srcFreq.length - 1];
-  // Math.exp(Math.log(x)) and Math.pow(x, 1) drift by ~4 ULPs in IEEE 754,
-  // so a target grid built with the same f_min as the source may land
-  // 1e-15 below it at the first bin. A 1 ppb tolerance is far below any
-  // physically meaningful gap and avoids fencing those edge bins.
+  // Math.exp(Math.log(x)) drifts ~4 ULPs in IEEE 754 — 1 ppb tolerance
+  // keeps boundary bins inside while still catching genuine OOB queries.
   const tol = 1e-9;
   const lo = fLo * (1 - tol);
   const hi = fHi * (1 + tol);
-  const fencedMag = mag.map((v, i) => {
+
+  // Pre-compute target offsets so target shape meets measurement at the
+  // native boundary. Without this the extension would jump by whatever
+  // mismatch existed between target's analytical SPL and the measured one.
+  let targetOffsetLo = 0, targetOffsetHi = 0;
+  if (options?.extensionTargetMag) {
+    const lo_idx = nearestIdx(targetFreq, fLo);
+    const hi_idx = nearestIdx(targetFreq, fHi);
+    targetOffsetLo = srcMag[0] - options.extensionTargetMag[lo_idx];
+    targetOffsetHi = srcMag[srcMag.length - 1] - options.extensionTargetMag[hi_idx];
+  }
+
+  // Pre-compute tail slopes for trend extension. Window = ~1/4 octave at
+  // each end (factor 2^0.25 ≈ 1.189).
+  let lowSlope = 0, highSlope = 0;
+  if (options?.fallbackToTrend) {
+    lowSlope = tailSlope(srcFreq, srcMag, fLo * 1.189, true);
+    highSlope = tailSlope(srcFreq, srcMag, fHi / 1.189, false);
+  }
+
+  const ext = mag.map((v, i) => {
     const f = targetFreq[i];
-    return f < lo || f > hi ? -200 : v;
+    if (f >= lo && f <= hi) return v;
+    if (f < lo) {
+      if (options?.extensionTargetMag) {
+        return options.extensionTargetMag[i] + targetOffsetLo;
+      }
+      if (options?.fallbackToTrend) {
+        return srcMag[0] + lowSlope * Math.log2(f / fLo);
+      }
+      return -200;
+    }
+    // f > hi
+    if (options?.extensionTargetMag) {
+      return options.extensionTargetMag[i] + targetOffsetHi;
+    }
+    if (options?.fallbackToTrend) {
+      return srcMag[srcMag.length - 1] + highSlope * Math.log2(f / fHi);
+    }
+    return -200;
   });
+
+  // Phase: out-of-range bins still get phase=0 — no physical meaning to
+  // extrapolate phase outside measurement. Coherent sum sees the
+  // extended magnitude with phase 0; that contributes a real-axis vector
+  // which is the most neutral choice.
   const fencedPhase = phase
     ? phase.map((v, i) => {
         const f = targetFreq[i];
         return f < lo || f > hi ? 0 : v;
       })
     : null;
-  return { mag: fencedMag, phase: fencedPhase };
+  return { mag: ext, phase: fencedPhase };
 }
 
 function coherentSum(
@@ -652,11 +744,42 @@ export async function evaluateSum(
       targetMag: null, targetPhase: null,
       correctedMag: null, correctedPhase: null,
     };
+
+    // b140.2.1.7: target evaluated analytically on the COMMON grid (with
+    // globalRef shift). This is the physically correct extension shape
+    // for everything outside a band's native measurement range — gives
+    // the supertweeter its HP rolloff below 1 kHz instead of a flat
+    // boundary clamp or a hard −200 dB step.
+    let extensionTargetMag: number[] | undefined;
+    if (bands[i].targetEnabled) {
+      const refShift = globalRef ?? 0;
+      const tc = bands[i].target;
+      const tcWithRef = {
+        ...tc,
+        reference_level_db: (tc.reference_level_db ?? 0) + refShift,
+      };
+      try {
+        const resp = await invoke<TargetResponse>(
+          "evaluate_target",
+          { target: tcWithRef, freq },
+        );
+        extensionTargetMag = resp.magnitude;
+      } catch (_) {
+        extensionTargetMag = undefined;
+      }
+    }
+
     let resampledTargetMag: number[] | null = null;
     if (r.combinedTargetMag && r.combinedTargetPhase) {
       let tMag = r.combinedTargetMag;
       const tPhase = r.combinedTargetPhase;
-      const resampled = await resampleOntoGrid(r.freq, tMag, tPhase, freq);
+      const resampled = await resampleOntoGrid(
+        r.freq, tMag, tPhase, freq,
+        // Target's own extension uses target shape (smooths its rolloff
+        // through the analytical curve below/above the band's measurement
+        // grid), with trend fallback if no target is available.
+        { extensionTargetMag, fallbackToTrend: true },
+      );
       if (resampled.mag && resampled.phase) {
         let mag = resampled.mag;
         if (options?.normalizeTargetPerBand) {
@@ -677,6 +800,7 @@ export async function evaluateSum(
     if (r.correctedMag) {
       const resampled = await resampleOntoGrid(
         r.freq, r.correctedMag, r.correctedPhase ?? null, freq,
+        { extensionTargetMag, fallbackToTrend: true },
       );
       if (resampled.mag) {
         // b140.2.1.3 step B: per-band corrOffset. Legacy renderSumMode
@@ -724,6 +848,7 @@ export async function evaluateSum(
     if (r.measurementMag) {
       const resampled = await resampleOntoGrid(
         r.freq, r.measurementMag, r.measurementPhase ?? null, freq,
+        { extensionTargetMag, fallbackToTrend: true },
       );
       if (resampled.mag) {
         measurementMagsForFallback.push(resampled.mag);
