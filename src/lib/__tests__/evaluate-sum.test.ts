@@ -268,6 +268,50 @@ describe("evaluateSum — power-sum fallback (b140.2.0.5)", () => {
   });
 });
 
+describe("evaluateSum — Σ measurement (b140.2.1.1)", () => {
+  it("two flat measurements with phase sum to +6.02 dB coherent", async () => {
+    const bands = [flatBand("a"), flatBand("b")];
+    const result = await evaluateSum(bands);
+    expect(result.sumMeasurementMag).not.toBeNull();
+    expect(result.sumMeasurementPhase).not.toBeNull();
+    const idx1k = nearest(result.freq, 1000);
+    expect(result.coherentMeasurement).toBe(true);
+    expect(result.sumMeasurementMag![idx1k]).toBeCloseTo(6.02, 1);
+    expect(Math.abs(result.sumMeasurementPhase![idx1k])).toBeLessThan(0.01);
+  });
+
+  it("two flat measurements without phase fall back to power-sum +3.01 dB", async () => {
+    const bands = [flatBand("a"), flatBand("b")];
+    bands[0].measurement!.phase = null;
+    bands[1].measurement!.phase = null;
+    const result = await evaluateSum(bands);
+    expect(result.coherentMeasurement).toBe(false);
+    expect(result.sumMeasurementPhase).toBeNull();
+    const idx1k = nearest(result.freq, 1000);
+    expect(result.sumMeasurementMag![idx1k]).toBeCloseTo(3.01, 1);
+  });
+
+  it("polarity inversion under coherent measurement → cancellation", async () => {
+    const bands = [flatBand("a"), flatBand("b")];
+    bands[1].inverted = true;
+    const result = await evaluateSum(bands);
+    expect(result.coherentMeasurement).toBe(true);
+    const idx1k = nearest(result.freq, 1000);
+    expect(result.sumMeasurementMag![idx1k]).toBeLessThan(-60);
+  });
+
+  it("no measurements anywhere → sumMeasurement* null", async () => {
+    const bands = [flatBand("a"), flatBand("b")];
+    bands[0].measurement = null;
+    bands[1].measurement = null;
+    const result = await evaluateSum(bands);
+    expect(result.sumMeasurementMag).toBeNull();
+    expect(result.sumMeasurementPhase).toBeNull();
+    // Vacuous coherent flag stays true (no incoherent path was taken).
+    expect(result.coherentMeasurement).toBe(true);
+  });
+});
+
 describe("evaluateSum — common grid construction", () => {
   it("returns a freq grid covering the union of band ranges", async () => {
     const bands = [flatBand("a"), flatBand("b")];

@@ -3946,11 +3946,16 @@ export default function FrequencyPlot() {
   }
 
   // ----------------------------------------------------------------
-  // b140.2.1: SUM rendering via evaluateSum (parallel to legacy).
-  // Emits the same {uSeries, uData, legend} shape renderChart consumes.
-  // Per-band measurement / target curves are deliberately omitted here —
-  // this view focuses on the aggregated Σ Target / Σ Corrected. If the
-  // user wants per-band curves they can flip back to Legacy.
+  // b140.2.1 / b140.2.1.1: SUM rendering via evaluateSum (parallel to
+  // legacy). Emits the same {uSeries, uData, legend} shape renderChart
+  // consumes, AND populates per-band entries for the SUM legend matrix
+  // (Σ + each band column for measurement / target / corrected).
+  //
+  // Legend labels follow the legacy convention so findCellEntry maps
+  // them into the matrix without changes:
+  //   Σ measurement → "Σ meas"          per-band → bands[i].name
+  //   Σ target      → "Σ target"        per-band → bands[i].name + " tgt"
+  //   Σ corrected   → "Σ corrected"     per-band → bands[i].name + " corr+XO"
   // ----------------------------------------------------------------
   async function renderSumModeNew(showPhase: boolean, showMag: boolean, showTarget: boolean) {
     const gen = ++renderGen;
@@ -3966,7 +3971,36 @@ export default function FrequencyPlot() {
       const legend: LegendEntry[] = [];
       let sIdx = 1;
 
-      // Σ Target — always coherent. Magnitude + (optionally) phase.
+      // ----- Σ aggregates (visible by default — match legacy defaults) -----
+
+      // Σ Measurement (b140.2.1.1).
+      if (showMag && result.sumMeasurementMag) {
+        const incoh = !result.coherentMeasurement;
+        uSeries.push({
+          label: incoh ? "Σ meas (New, incoh)" : "Σ meas (New)",
+          stroke: SUM_MEAS_COLOR, width: 1.5, scale: "mag",
+        });
+        uData.push(result.sumMeasurementMag);
+        legend.push({
+          label: "Σ meas", color: SUM_MEAS_COLOR, dash: false,
+          visible: true, seriesIdx: sIdx, category: "measurement",
+        });
+        sIdx++;
+        if (showPhase && result.coherentMeasurement && result.sumMeasurementPhase) {
+          uSeries.push({
+            label: "Σ meas ° (New)", stroke: SUM_MEAS_COLOR,
+            width: 1, dash: [6, 3], scale: "phase",
+          });
+          uData.push(wrapPhase(result.sumMeasurementPhase));
+          legend.push({
+            label: "Σ meas °", color: SUM_MEAS_COLOR, dash: true,
+            visible: true, seriesIdx: sIdx, category: "measurement",
+          });
+          sIdx++;
+        }
+      }
+
+      // Σ Target.
       if (showTarget && result.sumTargetMag) {
         uSeries.push({
           label: "Σ tgt (New)", stroke: SUM_TARGET_COLOR, width: 2.5,
@@ -3974,7 +4008,7 @@ export default function FrequencyPlot() {
         });
         uData.push(result.sumTargetMag);
         legend.push({
-          label: "Σ target (New)", color: SUM_TARGET_COLOR, dash: true,
+          label: "Σ target", color: SUM_TARGET_COLOR, dash: true,
           visible: true, seriesIdx: sIdx, category: "target",
         });
         sIdx++;
@@ -3985,24 +4019,23 @@ export default function FrequencyPlot() {
           });
           uData.push(wrapPhase(result.sumTargetPhase));
           legend.push({
-            label: "Σ target ° (New)", color: SUM_TARGET_PHASE_COLOR,
-            dash: true, visible: true, seriesIdx: sIdx, category: "target",
+            label: "Σ target °", color: SUM_TARGET_PHASE_COLOR, dash: true,
+            visible: true, seriesIdx: sIdx, category: "target",
           });
           sIdx++;
         }
       }
 
-      // Σ Corrected — coherent or power-sum fallback (label flags it).
+      // Σ Corrected — label flags incoherent fallback when active.
       if (showMag && result.sumCorrectedMag) {
-        const corrLabel = result.coherent
-          ? "Σ corr (New)"
-          : "Σ corr (New, incoh)";
+        const incoh = !result.coherent;
         uSeries.push({
-          label: corrLabel, stroke: SUM_CORRECTED_COLOR, width: 3, scale: "mag",
+          label: incoh ? "Σ corr (New, incoh)" : "Σ corr (New)",
+          stroke: SUM_CORRECTED_COLOR, width: 3, scale: "mag",
         });
         uData.push(result.sumCorrectedMag);
         legend.push({
-          label: corrLabel, color: SUM_CORRECTED_COLOR, dash: false,
+          label: "Σ corrected", color: SUM_CORRECTED_COLOR, dash: false,
           visible: true, seriesIdx: sIdx, category: "corrected",
         });
         sIdx++;
@@ -4013,10 +4046,96 @@ export default function FrequencyPlot() {
           });
           uData.push(wrapPhase(result.sumCorrectedPhase));
           legend.push({
-            label: "Σ corr ° (New)", color: SUM_CORRECTED_COLOR,
-            dash: true, visible: true, seriesIdx: sIdx, category: "corrected",
+            label: "Σ corr °", color: SUM_CORRECTED_COLOR, dash: true,
+            visible: true, seriesIdx: sIdx, category: "corrected",
           });
           sIdx++;
+        }
+      }
+
+      // ----- Per-band entries (visible:false by default; user opts in
+      //       via the SUM matrix toggle on each band column). -----
+      for (let i = 0; i < result.perBand.length; i++) {
+        const r = result.perBand[i];
+        const band = bands[i];
+        if (!band) continue;
+        const cf = bandColorFamily(band.color);
+
+        // Per-band measurement.
+        if (showMag && r.measurementMag) {
+          uSeries.push({
+            label: `${band.name} dB`, stroke: cf.meas, width: 1.5, scale: "mag",
+          });
+          uData.push(r.measurementMag);
+          legend.push({
+            label: band.name, color: cf.meas, dash: false,
+            visible: false, seriesIdx: sIdx, category: "measurement",
+          });
+          sIdx++;
+          if (showPhase && r.measurementPhase) {
+            uSeries.push({
+              label: `${band.name} °`, stroke: cf.measPhase,
+              width: 1, dash: [6, 3], scale: "phase",
+            });
+            uData.push(wrapPhase(r.measurementPhase));
+            legend.push({
+              label: band.name + " °", color: cf.measPhase, dash: true,
+              visible: false, seriesIdx: sIdx, category: "measurement",
+            });
+            sIdx++;
+          }
+        }
+
+        // Per-band target.
+        if (showTarget && r.targetMag) {
+          uSeries.push({
+            label: `${band.name} tgt`, stroke: cf.target,
+            width: 1.5, dash: [8, 4], scale: "mag",
+          });
+          uData.push(r.targetMag);
+          legend.push({
+            label: band.name + " tgt", color: cf.target, dash: true,
+            visible: false, seriesIdx: sIdx, category: "target",
+          });
+          sIdx++;
+          if (showPhase && r.targetPhase) {
+            uSeries.push({
+              label: `${band.name} tgt °`, stroke: cf.targetPhase,
+              width: 1, dash: [4, 4], scale: "phase",
+            });
+            uData.push(wrapPhase(r.targetPhase));
+            legend.push({
+              label: band.name + " tgt °", color: cf.targetPhase, dash: true,
+              visible: false, seriesIdx: sIdx, category: "target",
+            });
+            sIdx++;
+          }
+        }
+
+        // Per-band corrected.
+        if (showMag && r.correctedMag) {
+          uSeries.push({
+            label: `${band.name} corr+XO`, stroke: cf.corrected,
+            width: 1.5, scale: "mag",
+          });
+          uData.push(r.correctedMag);
+          legend.push({
+            label: band.name + " corr+XO", color: cf.corrected, dash: false,
+            visible: false, seriesIdx: sIdx, category: "corrected",
+          });
+          sIdx++;
+          if (showPhase && r.correctedPhase) {
+            uSeries.push({
+              label: `${band.name} corr °`, stroke: cf.correctedPhase,
+              width: 1, dash: [4, 4], scale: "phase",
+            });
+            uData.push(wrapPhase(r.correctedPhase));
+            legend.push({
+              label: band.name + " corr°", color: cf.correctedPhase, dash: true,
+              visible: false, seriesIdx: sIdx, category: "corrected",
+            });
+            sIdx++;
+          }
         }
       }
 

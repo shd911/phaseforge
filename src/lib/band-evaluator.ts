@@ -433,10 +433,18 @@ export interface SumEvalResult {
    *  a measurement. */
   sumCorrectedMag: number[] | null;
   sumCorrectedPhase: number[] | null;
+  /** b140.2.1.1: Σ Measurement (per-band measurementMag/Phase summed).
+   *  Same coherent/incoherent semantics as the corrected sum. Null when
+   *  no band has a measurement. */
+  sumMeasurementMag: number[] | null;
+  sumMeasurementPhase: number[] | null;
   /** b140.2.0.5: true → coherent corrected sum; false → power-sum fallback
    *  (sumCorrectedPhase will be null in that case). Always true when there
    *  is no corrected sum to compute. */
   coherent: boolean;
+  /** b140.2.1.1: separate coherent flag for Σ Measurement. Same semantics
+   *  as `coherent`. */
+  coherentMeasurement: boolean;
   /** Optional IR of the corrected sum (compute_impulse on summed mag/phase). */
   ir?: { time: number[]; impulse: number[]; step: number[] };
 }
@@ -527,15 +535,19 @@ export async function evaluateSum(
   }
   const freq = options?.freq ?? buildLogGrid(nMax, fMin, fMax);
 
-  // 3. Resample target + corrected onto the common grid for each band.
+  // 3. Resample target / corrected / measurement onto the common grid per band.
   const targetData: Array<{ mag: number[]; phase: number[]; sign: 1 | -1; delay: number } | null> = [];
   const correctedData: Array<{ mag: number[]; phase: number[]; sign: 1 | -1; delay: number } | null> = [];
-  // b140.2.0.5: collect per-band corrected magnitudes separately for the
+  const measurementData: Array<{ mag: number[]; phase: number[]; sign: 1 | -1; delay: number } | null> = [];
+  // b140.2.0.5/.1.1: collect per-band magnitudes separately for the
   // power-sum fallback. The fallback is triggered when any band contributes
   // mag without phase — in that case ALL bands' mags participate, polarity
-  // ignored.
+  // ignored. Mirrored for corrected and measurement (target is always
+  // coherent because targetPhase is reconstructed analytically).
   const correctedMagsForFallback: number[][] = [];
   let anyCorrectedMagWithoutPhase = false;
+  const measurementMagsForFallback: number[][] = [];
+  let anyMeasurementMagWithoutPhase = false;
   for (let i = 0; i < bands.length; i++) {
     const r = perBand[i];
     const sign: 1 | -1 = bands[i].inverted ? -1 : 1;
@@ -578,10 +590,40 @@ export async function evaluateSum(
     } else {
       correctedData.push(null);
     }
+    if (r.measurementMag) {
+      const resampled = await resampleOntoGrid(
+        r.freq, r.measurementMag, r.measurementPhase ?? null, freq,
+      );
+      if (resampled.mag) {
+        measurementMagsForFallback.push(resampled.mag);
+        if (r.measurementPhase && resampled.phase) {
+          measurementData.push({ mag: resampled.mag, phase: resampled.phase, sign, delay });
+        } else {
+          anyMeasurementMagWithoutPhase = true;
+          measurementData.push(null);
+        }
+      } else {
+        measurementData.push(null);
+      }
+    } else {
+      measurementData.push(null);
+    }
   }
 
-  // 4. Sum.
+  // 4. Sum. Power-sum fallback shared between corrected and measurement.
+  const powerSum = (mags: number[][]): number[] => {
+    const n = freq.length;
+    const out = new Array<number>(n);
+    for (let j = 0; j < n; j++) {
+      let acc = 0;
+      for (const m of mags) acc += Math.pow(10, (m[j] ?? -200) / 10);
+      out[j] = acc > 0 ? 10 * Math.log10(acc) : -200;
+    }
+    return out;
+  };
+
   const targetSum = coherentSum(freq, targetData);
+
   let sumCorrectedMag: number[] | null;
   let sumCorrectedPhase: number[] | null;
   let coherent: boolean;
@@ -590,18 +632,7 @@ export async function evaluateSum(
     sumCorrectedPhase = null;
     coherent = true;
   } else if (anyCorrectedMagWithoutPhase) {
-    // Power sum: amp²[j] = Σ 10^(m_i[j] / 10) → 10·log10. Polarity ignored,
-    // phase undefined. Matches legacy renderSumMode mixed-phase behaviour.
-    const n = freq.length;
-    const mag = new Array<number>(n);
-    for (let j = 0; j < n; j++) {
-      let acc = 0;
-      for (const m of correctedMagsForFallback) {
-        acc += Math.pow(10, (m[j] ?? -200) / 10);
-      }
-      mag[j] = acc > 0 ? 10 * Math.log10(acc) : -200;
-    }
-    sumCorrectedMag = mag;
+    sumCorrectedMag = powerSum(correctedMagsForFallback);
     sumCorrectedPhase = null;
     coherent = false;
   } else {
@@ -609,6 +640,24 @@ export async function evaluateSum(
     sumCorrectedMag = cs?.mag ?? null;
     sumCorrectedPhase = cs?.phase ?? null;
     coherent = true;
+  }
+
+  let sumMeasurementMag: number[] | null;
+  let sumMeasurementPhase: number[] | null;
+  let coherentMeasurement: boolean;
+  if (measurementMagsForFallback.length === 0) {
+    sumMeasurementMag = null;
+    sumMeasurementPhase = null;
+    coherentMeasurement = true;
+  } else if (anyMeasurementMagWithoutPhase) {
+    sumMeasurementMag = powerSum(measurementMagsForFallback);
+    sumMeasurementPhase = null;
+    coherentMeasurement = false;
+  } else {
+    const cs = coherentSum(freq, measurementData);
+    sumMeasurementMag = cs?.mag ?? null;
+    sumMeasurementPhase = cs?.phase ?? null;
+    coherentMeasurement = true;
   }
 
   // 5. Optional IR for the corrected sum. Skipped when the power-sum
@@ -632,7 +681,10 @@ export async function evaluateSum(
     sumTargetPhase: targetSum?.phase ?? null,
     sumCorrectedMag,
     sumCorrectedPhase,
+    sumMeasurementMag,
+    sumMeasurementPhase,
     coherent,
+    coherentMeasurement,
     ir,
   };
 }
