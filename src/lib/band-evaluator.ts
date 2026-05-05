@@ -492,7 +492,36 @@ async function resampleOntoGrid(
       fMin: targetFreq[0], fMax: targetFreq[targetFreq.length - 1],
     },
   );
-  return { mag, phase: phase ?? null };
+
+  // b140.2.1.4: Rust's interp_single clamps to boundary values when the
+  // query freq is outside the source range — fine for legitimate paths
+  // (target evaluation extending below the lowest measurement bin) but
+  // catastrophic for SUM aggregation: a supertweeter measured from
+  // 1220 Hz upward would get its mag[0] ≈ +54 dB repeated all the way
+  // down to 20 Hz, contributing a phantom curve to the coherent sum.
+  // Fence the out-of-range bins to a silent magnitude so 10^(m/20)·sin/cos
+  // contributes effectively zero.
+  if (srcFreq.length === 0) return { mag, phase: phase ?? null };
+  const fLo = srcFreq[0];
+  const fHi = srcFreq[srcFreq.length - 1];
+  // Math.exp(Math.log(x)) and Math.pow(x, 1) drift by ~4 ULPs in IEEE 754,
+  // so a target grid built with the same f_min as the source may land
+  // 1e-15 below it at the first bin. A 1 ppb tolerance is far below any
+  // physically meaningful gap and avoids fencing those edge bins.
+  const tol = 1e-9;
+  const lo = fLo * (1 - tol);
+  const hi = fHi * (1 + tol);
+  const fencedMag = mag.map((v, i) => {
+    const f = targetFreq[i];
+    return f < lo || f > hi ? -200 : v;
+  });
+  const fencedPhase = phase
+    ? phase.map((v, i) => {
+        const f = targetFreq[i];
+        return f < lo || f > hi ? 0 : v;
+      })
+    : null;
+  return { mag: fencedMag, phase: fencedPhase };
 }
 
 function coherentSum(

@@ -268,6 +268,54 @@ describe("evaluateSum — power-sum fallback (b140.2.0.5)", () => {
   });
 });
 
+describe("evaluateSum — extrapolation fence (b140.2.1.4)", () => {
+  // A supertweeter measured only from 5 kHz upward must NOT contribute
+  // to the coherent sum on the bass — pre-fix Rust's interp_single
+  // clamped to mag[0], leaving the resampled curve at its boundary value
+  // all the way down to 20 Hz. Fence in resampleOntoGrid replaces those
+  // bins with -200 dB so 10^(m/20) ≈ 0 and the coherent sum sees nothing.
+  function bandWithRange(id: string, fMin: number, fMax: number, levelDb = 0): BandState {
+    const b = flatBand(id);
+    // Replace the freq grid with a band-limited one starting at fMin.
+    b.measurement!.freq = logGrid(fMin, fMax, N);
+    b.measurement!.magnitude = new Array(N).fill(levelDb);
+    b.measurement!.phase = new Array(N).fill(0);
+    return b;
+  }
+
+  it("supertweeter band only contributes inside its native freq range", async () => {
+    // Band 1: full 20 Hz – 20 kHz at 0 dB.
+    // Band 2: 5 kHz – 20 kHz at 0 dB (supertweeter).
+    const bands = [
+      bandWithRange("a", 20, 20000, 0),
+      bandWithRange("b", 5000, 20000, 0),
+    ];
+    const result = await evaluateSum(bands);
+
+    // 100 Hz: only Band 1 in its native range. Band 2 should be fenced.
+    // Σ measurement = single band at 0 dB = 0 dB (NOT +6 dB).
+    const idx100 = nearest(result.freq, 100);
+    expect(result.sumMeasurementMag![idx100]).toBeCloseTo(0, 1);
+
+    // 10 kHz: both bands native → coherent sum +6.02 dB.
+    const idx10k = nearest(result.freq, 10000);
+    expect(result.sumMeasurementMag![idx10k]).toBeCloseTo(6.02, 1);
+  });
+
+  it("out-of-range bins do not phantom-leak via large boundary mag", async () => {
+    // Same shape but Band 2 starts at 5 kHz with +30 dB level. Pre-fix the
+    // boundary clamp would push +30 dB across the whole low end and the
+    // sum at 100 Hz would shoot up. With fence, low end stays at 0 dB.
+    const bands = [
+      bandWithRange("a", 20, 20000, 0),
+      bandWithRange("b", 5000, 20000, 30),
+    ];
+    const result = await evaluateSum(bands);
+    const idx100 = nearest(result.freq, 100);
+    expect(result.sumMeasurementMag![idx100]).toBeCloseTo(0, 1);
+  });
+});
+
 describe("evaluateSum — globalRef + corrOffset (b140.2.1.3)", () => {
   // Multi-way fixture: band A's measurement averages 0 dB in the passband,
   // band B sits 30 dB lower. Pre-b140.2.1.3 the New pipeline used each
