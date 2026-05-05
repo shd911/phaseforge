@@ -39,6 +39,11 @@ export interface BandEvalRequest {
   fir?: FirRequestConfig;
   /** Generate IR + step via compute_impulse / compute_corrected_impulse. */
   includeIr?: boolean;
+  /** b140.2.1.3: when set, overrides the per-band autoRefLevel that
+   *  shifts target_curve.reference_level_db. evaluateSum uses this to
+   *  apply a project-wide globalRef so multi-way bands' targets line up
+   *  on the same SPL baseline (parity with renderSumMode). */
+  refLevelOverride?: number;
 }
 
 export interface BandEvalResult {
@@ -168,9 +173,14 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
   //        magnitude+phase along with the grid in a single Tauri round-trip
   //        — reuse it instead of calling evaluate_target a second time.
   const targetCurve = JSON.parse(JSON.stringify(band.target));
-  const refLevel = measurement
-    ? autoRefLevel(measurement.freq, measurement.magnitude, band.target.high_pass, band.target.low_pass)
-    : (targetCurve.reference_level_db ?? 0);
+  // b140.2.1.3: refLevelOverride lets evaluateSum align every band's target
+  // to a project-wide globalRef (max passband-avg across bands). When unset
+  // we fall back to the per-band autoRefLevel as before.
+  const refLevel = req.refLevelOverride !== undefined
+    ? req.refLevelOverride
+    : (measurement
+        ? autoRefLevel(measurement.freq, measurement.magnitude, band.target.high_pass, band.target.low_pass)
+        : (targetCurve.reference_level_db ?? 0));
 
   let freq: number[];
   let targetMag: number[] | null = null;
@@ -514,12 +524,48 @@ function coherentSum(
   return { mag, phase };
 }
 
+/** b140.2.1.3: project-wide reference level — average passband (200..2000 Hz)
+ *  of the LOUDEST band. Used by evaluateSum to align every band's target to
+ *  the same SPL baseline; mirrors renderSumMode's `globalRef`. */
+function passbandAvgDb(freq: number[], mag: number[], fLo: number, fHi: number): number | null {
+  let sum = 0;
+  let n = 0;
+  for (let i = 0; i < freq.length; i++) {
+    if (freq[i] >= fLo && freq[i] <= fHi) {
+      sum += mag[i];
+      n++;
+    }
+  }
+  return n > 0 ? sum / n : null;
+}
+
 export async function evaluateSum(
   bands: BandState[],
   options?: SumEvalOptions,
 ): Promise<SumEvalResult> {
-  // 1. Per-band evaluation on each band's native grid.
-  const perBand = await Promise.all(bands.map(b => evaluateBandFull({ band: b })));
+  // b140.2.1.3 step A: project-wide reference level. max passband-avg over
+  // raw measurements (200..2000 Hz) — multi-way fix so a tweeter's target
+  // doesn't sit 30 dB below a woofer's. Falls back to 0 dB when no band
+  // has a measurement (the standalone-target case).
+  let globalRef: number | undefined;
+  for (const b of bands) {
+    if (!b.measurement) continue;
+    const avg = passbandAvgDb(b.measurement.freq, b.measurement.magnitude, 200, 2000);
+    if (avg === null) continue;
+    if (globalRef === undefined || avg > globalRef) {
+      globalRef = avg;
+    }
+  }
+
+  // 1. Per-band evaluation. refLevelOverride aligns each band's target to
+  //    globalRef (when computable) so the coherent sum sees consistent
+  //    absolute SPL across the project.
+  const perBand = await Promise.all(
+    bands.map(b => evaluateBandFull({
+      band: b,
+      refLevelOverride: globalRef,
+    })),
+  );
 
   // 2. Build common log grid: union of band ranges, point count = max.
   let fMin = Infinity, fMax = -Infinity, nMax = 512;
@@ -552,6 +598,7 @@ export async function evaluateSum(
     const r = perBand[i];
     const sign: 1 | -1 = bands[i].inverted ? -1 : 1;
     const delay = bands[i].alignmentDelay ?? 0;
+    let resampledTargetMag: number[] | null = null;
     if (r.combinedTargetMag && r.combinedTargetPhase) {
       let tMag = r.combinedTargetMag;
       const tPhase = r.combinedTargetPhase;
@@ -563,6 +610,7 @@ export async function evaluateSum(
           for (const v of mag) if (v > peak) peak = v;
           mag = mag.map(v => v - peak);
         }
+        resampledTargetMag = mag;
         targetData.push({ mag, phase: resampled.phase, sign, delay });
       } else {
         targetData.push(null);
@@ -575,9 +623,34 @@ export async function evaluateSum(
         r.freq, r.correctedMag, r.correctedPhase ?? null, freq,
       );
       if (resampled.mag) {
-        correctedMagsForFallback.push(resampled.mag);
+        // b140.2.1.3 step B: per-band corrOffset. Legacy renderSumMode
+        // shifts each band's corrected curve so its 200..2000 Hz
+        // passband-average matches its target's. We do the same here so
+        // the coherent / power-sum aggregation sees consistent SPL across
+        // bands (parity with renderSumMode).
+        let corrected = resampled.mag;
+        if (resampledTargetMag) {
+          let tAcc = 0, cAcc = 0, count = 0;
+          for (let j = 0; j < freq.length; j++) {
+            if (freq[j] < 200 || freq[j] > 2000) continue;
+            const tv = resampledTargetMag[j];
+            const cv = corrected[j];
+            if (Number.isFinite(tv) && Number.isFinite(cv)) {
+              tAcc += tv;
+              cAcc += cv;
+              count++;
+            }
+          }
+          if (count > 0) {
+            const offset = (tAcc - cAcc) / count;
+            if (Math.abs(offset) > 0.01) {
+              corrected = corrected.map(v => v + offset);
+            }
+          }
+        }
+        correctedMagsForFallback.push(corrected);
         if (r.correctedPhase && resampled.phase) {
-          correctedData.push({ mag: resampled.mag, phase: resampled.phase, sign, delay });
+          correctedData.push({ mag: corrected, phase: resampled.phase, sign, delay });
         } else {
           // Mag-only contributor — coherent sum cannot include it; mark to
           // trigger the power-sum fallback below.

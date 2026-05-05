@@ -268,6 +268,44 @@ describe("evaluateSum — power-sum fallback (b140.2.0.5)", () => {
   });
 });
 
+describe("evaluateSum — globalRef + corrOffset (b140.2.1.3)", () => {
+  // Multi-way fixture: band A's measurement averages 0 dB in the passband,
+  // band B sits 30 dB lower. Pre-b140.2.1.3 the New pipeline used each
+  // band's own autoRef → band B's target floated 30 dB below band A's, the
+  // coherent sum was lopsided. After the fix globalRef = max passband-avg
+  // = 0 dB, both targets are aligned, sum behaves as in renderSumMode.
+  function flatBandAt(id: string, levelDb: number): BandState {
+    const b = flatBand(id);
+    b.measurement!.magnitude = new Array(N).fill(levelDb);
+    return b;
+  }
+
+  it("Σ Target uses globalRef across bands with different SPL", async () => {
+    const bands = [flatBandAt("a", 0), flatBandAt("b", -30)];
+    const result = await evaluateSum(bands);
+    const idx1k = nearest(result.freq, 1000);
+    // Both targets aligned to globalRef = 0 dB → coherent sum = +6.02 dB.
+    expect(result.sumTargetMag![idx1k]).toBeCloseTo(6.02, 1);
+  });
+
+  it("Σ Corrected pulls quiet band up to target via per-band corrOffset", async () => {
+    const bands = [flatBandAt("a", 0), flatBandAt("b", -30)];
+    const result = await evaluateSum(bands);
+    const idx1k = nearest(result.freq, 1000);
+    // Per-band corrOffset: band A no shift (0 vs 0), band B +30 dB to
+    // match its globalRef-aligned target. Σ Corrected = +6.02 dB.
+    expect(result.sumCorrectedMag![idx1k]).toBeCloseTo(6.02, 1);
+  });
+
+  it("single-band project: globalRef collapses to that band's passband avg", async () => {
+    const bands = [flatBandAt("a", -12.5)];
+    const result = await evaluateSum(bands);
+    const idx1k = nearest(result.freq, 1000);
+    // Single band's target shifted to globalRef = -12.5 dB.
+    expect(result.sumTargetMag![idx1k]).toBeCloseTo(-12.5, 1);
+  });
+});
+
 describe("evaluateSum — Σ measurement (b140.2.1.1)", () => {
   it("two flat measurements with phase sum to +6.02 dB coherent", async () => {
     const bands = [flatBand("a"), flatBand("b")];
