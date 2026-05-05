@@ -268,6 +268,61 @@ describe("evaluateSum — power-sum fallback (b140.2.0.5)", () => {
   });
 });
 
+describe("evaluateSum — perBandResampled (b140.2.1.5)", () => {
+  function bandWithRange(id: string, fMin: number, fMax: number, levelDb = 0): BandState {
+    const b = flatBand(id);
+    b.measurement!.freq = logGrid(fMin, fMax, N);
+    b.measurement!.magnitude = new Array(N).fill(levelDb);
+    b.measurement!.phase = new Array(N).fill(0);
+    return b;
+  }
+
+  it("perBandResampled arrays have length = common grid", async () => {
+    const bands = [
+      bandWithRange("a", 20, 22000),
+      bandWithRange("b", 1000, 22000),
+    ];
+    const result = await evaluateSum(bands);
+    expect(result.perBandResampled).toHaveLength(2);
+    for (const r of result.perBandResampled) {
+      if (r.measurementMag) expect(r.measurementMag.length).toBe(result.freq.length);
+      if (r.measurementPhase) expect(r.measurementPhase.length).toBe(result.freq.length);
+      if (r.targetMag) expect(r.targetMag.length).toBe(result.freq.length);
+      if (r.targetPhase) expect(r.targetPhase.length).toBe(result.freq.length);
+      if (r.correctedMag) expect(r.correctedMag.length).toBe(result.freq.length);
+      if (r.correctedPhase) expect(r.correctedPhase.length).toBe(result.freq.length);
+    }
+  });
+
+  it("supertweeter perBandResampled silent below native range", async () => {
+    const bands = [
+      bandWithRange("a", 20, 22000),
+      bandWithRange("b", 1000, 22000), // supertweeter
+    ];
+    const result = await evaluateSum(bands);
+    const idx100 = nearest(result.freq, 100);
+    const supertweeter = result.perBandResampled[1];
+    expect(supertweeter.measurementMag![idx100]).toBeLessThan(-150);
+    expect(supertweeter.correctedMag![idx100]).toBeLessThan(-150);
+    // In native range — non-silent.
+    const idx5k = nearest(result.freq, 5000);
+    expect(supertweeter.measurementMag![idx5k]).toBeGreaterThan(-50);
+  });
+
+  it("first band keeps its full-range data (no spurious fencing)", async () => {
+    const bands = [
+      bandWithRange("a", 20, 22000),
+      bandWithRange("b", 1000, 22000),
+    ];
+    const result = await evaluateSum(bands);
+    const wide = result.perBandResampled[0];
+    const idx100 = nearest(result.freq, 100);
+    const idx5k = nearest(result.freq, 5000);
+    expect(wide.measurementMag![idx100]).toBeCloseTo(0, 1);
+    expect(wide.measurementMag![idx5k]).toBeCloseTo(0, 1);
+  });
+});
+
 describe("evaluateSum — extrapolation fence (b140.2.1.4)", () => {
   // A supertweeter measured only from 5 kHz upward must NOT contribute
   // to the coherent sum on the bass — pre-fix Rust's interp_single

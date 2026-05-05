@@ -455,6 +455,20 @@ export interface SumEvalResult {
   /** b140.2.1.1: separate coherent flag for Σ Measurement. Same semantics
    *  as `coherent`. */
   coherentMeasurement: boolean;
+  /** b140.2.1.5: per-band data resampled onto the common grid, with the
+   *  out-of-range fence applied (b140.2.1.4). Lengths always equal
+   *  `freq.length`, so UI plots can use a single x axis without per-band
+   *  grid mismatches. Bins outside a band's native freq range carry
+   *  −200 dB and 0° (i.e. effectively silent), so the curves only appear
+   *  where the band actually has data. */
+  perBandResampled: Array<{
+    measurementMag: number[] | null;
+    measurementPhase: number[] | null;
+    targetMag: number[] | null;
+    targetPhase: number[] | null;
+    correctedMag: number[] | null;
+    correctedPhase: number[] | null;
+  }>;
   /** Optional IR of the corrected sum (compute_impulse on summed mag/phase). */
   ir?: { time: number[]; impulse: number[]; step: number[] };
 }
@@ -623,10 +637,21 @@ export async function evaluateSum(
   let anyCorrectedMagWithoutPhase = false;
   const measurementMagsForFallback: number[][] = [];
   let anyMeasurementMagWithoutPhase = false;
+  // b140.2.1.5: per-band data on the common grid for UI plotting. Same
+  // resampled arrays the aggregator sees, so curves never get stretched
+  // across the wrong x range.
+  const perBandResampled: SumEvalResult["perBandResampled"] = [];
   for (let i = 0; i < bands.length; i++) {
     const r = perBand[i];
     const sign: 1 | -1 = bands[i].inverted ? -1 : 1;
     const delay = bands[i].alignmentDelay ?? 0;
+    // Resampled values for UI consumption — populated alongside the
+    // aggregator-targeted resampled arrays so we never resample twice.
+    const ui: SumEvalResult["perBandResampled"][number] = {
+      measurementMag: null, measurementPhase: null,
+      targetMag: null, targetPhase: null,
+      correctedMag: null, correctedPhase: null,
+    };
     let resampledTargetMag: number[] | null = null;
     if (r.combinedTargetMag && r.combinedTargetPhase) {
       let tMag = r.combinedTargetMag;
@@ -640,6 +665,8 @@ export async function evaluateSum(
           mag = mag.map(v => v - peak);
         }
         resampledTargetMag = mag;
+        ui.targetMag = mag;
+        ui.targetPhase = resampled.phase;
         targetData.push({ mag, phase: resampled.phase, sign, delay });
       } else {
         targetData.push(null);
@@ -678,7 +705,9 @@ export async function evaluateSum(
           }
         }
         correctedMagsForFallback.push(corrected);
+        ui.correctedMag = corrected;
         if (r.correctedPhase && resampled.phase) {
+          ui.correctedPhase = resampled.phase;
           correctedData.push({ mag: corrected, phase: resampled.phase, sign, delay });
         } else {
           // Mag-only contributor — coherent sum cannot include it; mark to
@@ -698,7 +727,9 @@ export async function evaluateSum(
       );
       if (resampled.mag) {
         measurementMagsForFallback.push(resampled.mag);
+        ui.measurementMag = resampled.mag;
         if (r.measurementPhase && resampled.phase) {
+          ui.measurementPhase = resampled.phase;
           measurementData.push({ mag: resampled.mag, phase: resampled.phase, sign, delay });
         } else {
           anyMeasurementMagWithoutPhase = true;
@@ -710,6 +741,7 @@ export async function evaluateSum(
     } else {
       measurementData.push(null);
     }
+    perBandResampled.push(ui);
   }
 
   // 4. Sum. Power-sum fallback shared between corrected and measurement.
@@ -787,6 +819,7 @@ export async function evaluateSum(
     sumMeasurementPhase,
     coherent,
     coherentMeasurement,
+    perBandResampled,
     ir,
   };
 }

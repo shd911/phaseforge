@@ -4054,9 +4054,13 @@ export default function FrequencyPlot() {
       }
 
       // ----- Per-band entries (visible:false by default; user opts in
-      //       via the SUM matrix toggle on each band column). -----
-      for (let i = 0; i < result.perBand.length; i++) {
-        const r = result.perBand[i];
+      //       via the SUM matrix toggle on each band column). b140.2.1.5:
+      //       use perBandResampled (common-grid arrays with the
+      //       out-of-range fence) so curves don't get stretched across
+      //       the SUM x axis when bands have different native ranges.
+      const ui = result.perBandResampled;
+      for (let i = 0; i < ui.length; i++) {
+        const r = ui[i];
         const band = bands[i];
         if (!band) continue;
         const cf = bandColorFamily(band.color);
