@@ -888,6 +888,37 @@ export type PlotTab = "freq" | "ir" | "step" | "gd" | "export";
 export const [plotTab, setPlotTab] = createSignal<PlotTab>("freq");
 
 // ---------------------------------------------------------------------------
+// b140.2.1: SUM rendering pipeline. "legacy" → inline aggregation in
+// renderSumMode (battle-tested). "new" → evaluateSum from band-evaluator.
+// Persisted in localStorage so the user's choice survives reloads.
+// ---------------------------------------------------------------------------
+
+export type SumMode = "legacy" | "new";
+
+const SUM_MODE_KEY = "phaseforge.sumMode";
+
+function readStoredSumMode(): SumMode {
+  try {
+    const v = localStorage.getItem(SUM_MODE_KEY);
+    if (v === "new" || v === "legacy") return v;
+  } catch (_) {
+    // localStorage may be unavailable (SSR, sandboxed test) — default below.
+  }
+  return "legacy";
+}
+
+const [_sumMode, _setSumMode] = createSignal<SumMode>(readStoredSumMode());
+export const sumMode = _sumMode;
+export function setSumMode(mode: SumMode): void {
+  _setSumMode(mode);
+  try {
+    localStorage.setItem(SUM_MODE_KEY, mode);
+  } catch (_) {
+    // Best-effort persistence.
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Selected PEQ band index (for highlighting on graphs)
 // ---------------------------------------------------------------------------
 

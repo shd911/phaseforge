@@ -4,7 +4,7 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { invoke } from "@tauri-apps/api/core";
 import type { Measurement, TargetResponse, FilterType, FilterConfig, PeqBand, WindowType } from "../lib/types";
-import { appState, activeBand, isSum, activeTab, plotTab, setPlotTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, setPeqDragging, updatePeqBand, commitPeqBand, bandsVersion, exportSampleRate, setExportSampleRate, exportTaps, setExportTaps, exportWindow, setExportWindow, firIterations, firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess, firMaxBoost, firNoiseFloor, exportMetrics, setExportMetrics, plotSnapshots, addPlotSnapshot, clearPlotSnapshots, setAlignmentDelay, setBandSmoothing, beginInteraction, commitInteraction } from "../stores/bands";
+import { appState, activeBand, isSum, activeTab, plotTab, setPlotTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, setPeqDragging, updatePeqBand, commitPeqBand, bandsVersion, exportSampleRate, setExportSampleRate, exportTaps, setExportTaps, exportWindow, setExportWindow, firIterations, firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess, firMaxBoost, firNoiseFloor, exportMetrics, setExportMetrics, plotSnapshots, addPlotSnapshot, clearPlotSnapshots, setAlignmentDelay, setBandSmoothing, beginInteraction, commitInteraction, sumMode as sumModeSignal, setSumMode } from "../stores/bands";
 import type { SmoothingMode, BandState, FreqSnapshot } from "../stores/bands";
 import { needAutoFit, setNeedAutoFit } from "../App";
 import { computeFloorBounce } from "../lib/floor-bounce";
@@ -27,7 +27,7 @@ import {
   DEFAULT_IR_COLORS, DEFAULT_GD_COLORS, DEFAULT_EXPORT_COLORS,
 } from "../lib/plot-helpers";
 import { hasActiveSubsonicProtect } from "../lib/band-evaluation";
-import { evaluateBandFull, reconstructTargetPhase } from "../lib/band-evaluator";
+import { evaluateBandFull, evaluateSum, reconstructTargetPhase } from "../lib/band-evaluator";
 import { computeAutoAlign } from "../lib/auto-align";
 
 // Track which inputs have been explicitly clicked — wheel only fires when in set
@@ -1609,6 +1609,7 @@ export default function FrequencyPlot() {
     const dragging = peqDragging();
     const pTab = plotTab();
     const _irTrigger = irRenderTrigger(); // track: force IR re-render from legend band toggles
+    const _sumPipeline = sumModeSignal(); // b140.2.1: re-render on Legacy/New toggle
 
     if (debounceTimer) clearTimeout(debounceTimer);
 
@@ -3347,6 +3348,12 @@ export default function FrequencyPlot() {
   // SUM mode rendering
   // ----------------------------------------------------------------
   async function renderSumMode(showPhase: boolean, showMag: boolean, showTarget: boolean) {
+    // b140.2.1: optional New pipeline via evaluateSum. Default is Legacy
+    // (this function's existing body) to avoid surprising the user — the
+    // toggle is opt-in and persisted in localStorage.
+    if (sumModeSignal() === "new") {
+      return await renderSumModeNew(showPhase, showMag, showTarget);
+    }
     const gen = ++renderGen;
     zoomCenter = 0; // reset before async — will be recalculated from globalRef
     const bands: BandState[] = JSON.parse(JSON.stringify(appState.bands));
@@ -3935,6 +3942,97 @@ export default function FrequencyPlot() {
       });
     } catch (e) {
       console.error("SUM render failed:", e);
+    }
+  }
+
+  // ----------------------------------------------------------------
+  // b140.2.1: SUM rendering via evaluateSum (parallel to legacy).
+  // Emits the same {uSeries, uData, legend} shape renderChart consumes.
+  // Per-band measurement / target curves are deliberately omitted here —
+  // this view focuses on the aggregated Σ Target / Σ Corrected. If the
+  // user wants per-band curves they can flip back to Legacy.
+  // ----------------------------------------------------------------
+  async function renderSumModeNew(showPhase: boolean, showMag: boolean, showTarget: boolean) {
+    const gen = ++renderGen;
+    zoomCenter = 0;
+    const bands: BandState[] = JSON.parse(JSON.stringify(appState.bands));
+    try {
+      const result = await evaluateSum(bands, {});
+      if (gen !== renderGen) return;
+
+      const freq = result.freq;
+      const uSeries: uPlot.Series[] = [{}];
+      const uData: number[][] = [freq];
+      const legend: LegendEntry[] = [];
+      let sIdx = 1;
+
+      // Σ Target — always coherent. Magnitude + (optionally) phase.
+      if (showTarget && result.sumTargetMag) {
+        uSeries.push({
+          label: "Σ tgt (New)", stroke: SUM_TARGET_COLOR, width: 2.5,
+          dash: [8, 4], scale: "mag",
+        });
+        uData.push(result.sumTargetMag);
+        legend.push({
+          label: "Σ target (New)", color: SUM_TARGET_COLOR, dash: true,
+          visible: true, seriesIdx: sIdx, category: "target",
+        });
+        sIdx++;
+        if (showPhase && result.sumTargetPhase) {
+          uSeries.push({
+            label: "Σ tgt ° (New)", stroke: SUM_TARGET_PHASE_COLOR,
+            width: 1.5, dash: [4, 4], scale: "phase",
+          });
+          uData.push(wrapPhase(result.sumTargetPhase));
+          legend.push({
+            label: "Σ target ° (New)", color: SUM_TARGET_PHASE_COLOR,
+            dash: true, visible: true, seriesIdx: sIdx, category: "target",
+          });
+          sIdx++;
+        }
+      }
+
+      // Σ Corrected — coherent or power-sum fallback (label flags it).
+      if (showMag && result.sumCorrectedMag) {
+        const corrLabel = result.coherent
+          ? "Σ corr (New)"
+          : "Σ corr (New, incoh)";
+        uSeries.push({
+          label: corrLabel, stroke: SUM_CORRECTED_COLOR, width: 3, scale: "mag",
+        });
+        uData.push(result.sumCorrectedMag);
+        legend.push({
+          label: corrLabel, color: SUM_CORRECTED_COLOR, dash: false,
+          visible: true, seriesIdx: sIdx, category: "corrected",
+        });
+        sIdx++;
+        if (showPhase && result.coherent && result.sumCorrectedPhase) {
+          uSeries.push({
+            label: "Σ corr ° (New)", stroke: SUM_CORRECTED_COLOR,
+            width: 1.5, dash: [4, 4], scale: "phase",
+          });
+          uData.push(wrapPhase(result.sumCorrectedPhase));
+          legend.push({
+            label: "Σ corr ° (New)", color: SUM_CORRECTED_COLOR,
+            dash: true, visible: true, seriesIdx: sIdx, category: "corrected",
+          });
+          sIdx++;
+        }
+      }
+
+      if (gen !== renderGen) return;
+      requestAnimationFrame(() => {
+        if (gen !== renderGen) return;
+        renderChart({
+          freq,
+          uSeries,
+          uData,
+          hasMeasurements: result.perBand.some(b => b.measurementMag !== null),
+          legend,
+        });
+      });
+    } catch (e) {
+      console.error("SUM (New) render failed:", e);
     }
   }
 
@@ -4648,6 +4746,22 @@ export default function FrequencyPlot() {
             </div>
           )}
         </Show>
+      </Show>
+      <Show when={isSum() && plotTab() === "freq"}>
+        {/* b140.2.1: Legacy / New SUM pipeline toggle. Default Legacy. */}
+        <div class="sum-mode-toggle">
+          <span class="hint">Σ pipeline:</span>
+          <button
+            class={`pill ${sumModeSignal() === "legacy" ? "active" : ""}`}
+            onClick={() => setSumMode("legacy")}
+            title="Legacy: inline aggregation (battle-tested)"
+          >Legacy</button>
+          <button
+            class={`pill ${sumModeSignal() === "new" ? "active" : ""}`}
+            onClick={() => setSumMode("new")}
+            title="New: evaluateSum (b140.2.x)"
+          >New</button>
+        </div>
       </Show>
       <Show when={isSum() && legendEntries.length > 0 && plotTab() !== "gd" && plotTab() !== "export"}>
         {/* SUM matrix */}

@@ -583,6 +583,40 @@ body {
   flex-shrink: 0;
 }
 
+/* b140.2.1: Legacy/New SUM pipeline toggle (above SUM matrix on freq tab). */
+.sum-mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px var(--space-md);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.sum-mode-toggle .hint {
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary, #888);
+}
+.sum-mode-toggle .pill {
+  padding: 2px 10px;
+  font-size: var(--fs-xs);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary, #aaa);
+  cursor: pointer;
+  border-radius: 3px;
+  line-height: 1.4;
+}
+.sum-mode-toggle .pill:hover {
+  border-color: var(--accent);
+  color: var(--text-primary, #ddd);
+}
+.sum-mode-toggle .pill.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
 /* SUM Visibility Matrix Table (above chart in SUM mode) */
 .sum-vis-table {
   display: block;
