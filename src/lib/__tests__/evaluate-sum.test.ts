@@ -213,7 +213,11 @@ describe("evaluateSum — power-sum fallback (b140.2.0.5)", () => {
   // sum becomes 10·log10(Σ 10^(m/10)), polarity ignored, phase null.
   // Target sum is always coherent because targetPhase is reconstructed
   // analytically and never depends on measurement.phase.
-  it("two flat bands without phase → power sum +3.01 dB, coherent=false, phase null", async () => {
+  it("two flat bands without phase → power sum, post-shifted to target (+6.02 dB)", async () => {
+    // b140.2.2 Fix 2: power-sum fallback (incoherent corrected) is shifted
+    // to match the coherent target sum in the adaptive passband.
+    // Pre-fix the raw power-sum was +3.01 dB; the post-shift moves it to
+    // the target's level for parity with renderSumMode.
     const bands = [flatBand("a"), flatBand("b")];
     bands[0].measurement!.phase = null;
     bands[1].measurement!.phase = null;
@@ -221,17 +225,18 @@ describe("evaluateSum — power-sum fallback (b140.2.0.5)", () => {
     const idx1k = nearest(result.freq, 1000);
     expect(result.coherent).toBe(false);
     expect(result.sumCorrectedPhase).toBeNull();
-    expect(result.sumCorrectedMag![idx1k]).toBeCloseTo(3.01, 1);
+    expect(result.sumCorrectedMag![idx1k]).toBeCloseTo(6.02, 1);
   });
 
-  it("mixed phase (one band w/o phase) → fallback fires, +3.01 dB, coherent=false", async () => {
+  it("mixed phase → fallback fires, post-shift aligns with target (+6.02 dB)", async () => {
     const bands = [flatBand("a"), flatBand("b")];
     bands[1].measurement!.phase = null;
     const result = await evaluateSum(bands);
     const idx1k = nearest(result.freq, 1000);
     expect(result.coherent).toBe(false);
-    expect(result.sumCorrectedMag![idx1k]).toBeCloseTo(3.01, 1);
-    // Target sum unaffected — both targets coherent regardless.
+    // Power-sum corrected post-shifted to target level.
+    expect(result.sumCorrectedMag![idx1k]).toBeCloseTo(6.02, 1);
+    // Target sum unaffected.
     expect(result.sumTargetMag![idx1k]).toBeCloseTo(6.02, 1);
   });
 
@@ -457,6 +462,59 @@ describe("evaluateSum — Σ measurement (b140.2.1.1)", () => {
     expect(result.sumMeasurementPhase).toBeNull();
     // Vacuous coherent flag stays true (no incoherent path was taken).
     expect(result.coherentMeasurement).toBe(true);
+  });
+});
+
+describe("evaluateSum — Σ target avgRef + globalRef export (b140.2.2)", () => {
+  it("Σ target adds avgRef back so absolute SPL matches band's reference", async () => {
+    // Single flat band at -12.5 dB → globalRef = -12.5 → avgRef = -12.5.
+    // Per-band target (refLevel=-12.5) coherent-summed alone = -12.5 dB,
+    // built from normalised (target − refLevel = 0) sum + avgRef = -12.5.
+    const b = flatBand("a");
+    b.measurement!.magnitude = new Array(N).fill(-12.5);
+    const result = await evaluateSum([b]);
+    expect(result.globalRef).toBeCloseTo(-12.5, 1);
+    expect(result.avgRef).toBeCloseTo(-12.5, 1);
+    const idx1k = nearest(result.freq, 1000);
+    expect(result.sumTargetMag![idx1k]).toBeCloseTo(-12.5, 1);
+  });
+
+  it("globalRef tracks the loudest band's passband-avg", async () => {
+    const a = flatBand("a");
+    a.measurement!.magnitude = new Array(N).fill(80);
+    const b = flatBand("b");
+    b.measurement!.magnitude = new Array(N).fill(60);
+    const result = await evaluateSum([a, b]);
+    expect(result.globalRef).toBeCloseTo(80, 1);
+  });
+
+  it("Σ target = +6 dB above avgRef for two coherent flat bands", async () => {
+    const a = flatBand("a");
+    a.measurement!.magnitude = new Array(N).fill(80);
+    const b = flatBand("b");
+    b.measurement!.magnitude = new Array(N).fill(80);
+    const result = await evaluateSum([a, b]);
+    const idx1k = nearest(result.freq, 1000);
+    // Both targets at globalRef=80. Norm sum = +6.02. + avgRef (80) = +86.02.
+    expect(result.sumTargetMag![idx1k]).toBeCloseTo(86.02, 1);
+  });
+});
+
+describe("evaluateSum — sumIr (b140.2.2 Fix 3)", () => {
+  it("includeSumIr returns ir.measurement / target / corrected", async () => {
+    // Mock compute_impulse to confirm it gets invoked for each curve.
+    const bands = [flatBand("a"), flatBand("b")];
+    const result = await evaluateSum(bands, { includeSumIr: true });
+    expect(result.sumIr).toBeDefined();
+    expect(result.sumIr!.measurement).toBeDefined();
+    expect(result.sumIr!.target).toBeDefined();
+    expect(result.sumIr!.corrected).toBeDefined();
+  });
+
+  it("includeSumIr=false leaves sumIr undefined", async () => {
+    const bands = [flatBand("a"), flatBand("b")];
+    const result = await evaluateSum(bands);
+    expect(result.sumIr).toBeUndefined();
   });
 });
 

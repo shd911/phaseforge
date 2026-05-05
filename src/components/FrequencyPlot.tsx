@@ -3970,6 +3970,13 @@ export default function FrequencyPlot() {
       const uData: number[][] = [freq];
       const legend: LegendEntry[] = [];
       let sIdx = 1;
+      // b140.2.2 Fix 4: shift every magnitude curve by −globalRef so the
+      // SPL plot is rendered in dBr (0 dBr = the loudest band's
+      // passband-avg). Phase curves are unchanged.
+      const dbShift = result.globalRef ?? 0;
+      zoomCenter = 0; // post-shift center
+      const shift = (m: number[] | null | undefined): number[] | null =>
+        m ? m.map(v => v - dbShift) : null;
 
       // ----- Σ aggregates (visible by default — match legacy defaults) -----
 
@@ -3980,7 +3987,7 @@ export default function FrequencyPlot() {
           label: incoh ? "Σ meas (New, incoh)" : "Σ meas (New)",
           stroke: SUM_MEAS_COLOR, width: 1.5, scale: "mag",
         });
-        uData.push(result.sumMeasurementMag);
+        uData.push(shift(result.sumMeasurementMag)!);
         legend.push({
           label: "Σ meas", color: SUM_MEAS_COLOR, dash: false,
           visible: true, seriesIdx: sIdx, category: "measurement",
@@ -4006,7 +4013,7 @@ export default function FrequencyPlot() {
           label: "Σ tgt (New)", stroke: SUM_TARGET_COLOR, width: 2.5,
           dash: [8, 4], scale: "mag",
         });
-        uData.push(result.sumTargetMag);
+        uData.push(shift(result.sumTargetMag)!);
         legend.push({
           label: "Σ target", color: SUM_TARGET_COLOR, dash: true,
           visible: true, seriesIdx: sIdx, category: "target",
@@ -4033,7 +4040,7 @@ export default function FrequencyPlot() {
           label: incoh ? "Σ corr (New, incoh)" : "Σ corr (New)",
           stroke: SUM_CORRECTED_COLOR, width: 3, scale: "mag",
         });
-        uData.push(result.sumCorrectedMag);
+        uData.push(shift(result.sumCorrectedMag)!);
         legend.push({
           label: "Σ corrected", color: SUM_CORRECTED_COLOR, dash: false,
           visible: true, seriesIdx: sIdx, category: "corrected",
@@ -4070,7 +4077,7 @@ export default function FrequencyPlot() {
           uSeries.push({
             label: `${band.name} dB`, stroke: cf.meas, width: 1.5, scale: "mag",
           });
-          uData.push(r.measurementMag);
+          uData.push(shift(r.measurementMag)!);
           legend.push({
             label: band.name, color: cf.meas, dash: false,
             visible: false, seriesIdx: sIdx, category: "measurement",
@@ -4096,7 +4103,7 @@ export default function FrequencyPlot() {
             label: `${band.name} tgt`, stroke: cf.target,
             width: 1.5, dash: [8, 4], scale: "mag",
           });
-          uData.push(r.targetMag);
+          uData.push(shift(r.targetMag)!);
           legend.push({
             label: band.name + " tgt", color: cf.target, dash: true,
             visible: false, seriesIdx: sIdx, category: "target",
@@ -4122,7 +4129,7 @@ export default function FrequencyPlot() {
             label: `${band.name} corr+XO`, stroke: cf.corrected,
             width: 1.5, scale: "mag",
           });
-          uData.push(r.correctedMag);
+          uData.push(shift(r.correctedMag)!);
           legend.push({
             label: band.name + " corr+XO", color: cf.corrected, dash: false,
             visible: false, seriesIdx: sIdx, category: "corrected",
