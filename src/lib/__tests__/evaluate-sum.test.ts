@@ -208,21 +208,51 @@ describe("evaluateSum — alignment delay phase rotation", () => {
   });
 });
 
-describe("evaluateSum — phase availability (current behaviour)", () => {
-  // evaluateSum currently DROPS bands without correctedPhase / combinedTargetPhase;
-  // there is no power-sum fallback. These tests pin the actual behaviour so the
-  // b140.2.1 swap doesn't accidentally introduce a fallback regression.
-  it("band without measurement.phase → dropped from corrected sum (single-band magnitude remains)", async () => {
+describe("evaluateSum — power-sum fallback (b140.2.0.5)", () => {
+  // Mixed phase availability triggers the incoherent fallback: corrected
+  // sum becomes 10·log10(Σ 10^(m/10)), polarity ignored, phase null.
+  // Target sum is always coherent because targetPhase is reconstructed
+  // analytically and never depends on measurement.phase.
+  it("two flat bands without phase → power sum +3.01 dB, coherent=false, phase null", async () => {
+    const bands = [flatBand("a"), flatBand("b")];
+    bands[0].measurement!.phase = null;
+    bands[1].measurement!.phase = null;
+    const result = await evaluateSum(bands);
+    const idx1k = nearest(result.freq, 1000);
+    expect(result.coherent).toBe(false);
+    expect(result.sumCorrectedPhase).toBeNull();
+    expect(result.sumCorrectedMag![idx1k]).toBeCloseTo(3.01, 1);
+  });
+
+  it("mixed phase (one band w/o phase) → fallback fires, +3.01 dB, coherent=false", async () => {
     const bands = [flatBand("a"), flatBand("b")];
     bands[1].measurement!.phase = null;
     const result = await evaluateSum(bands);
-    expect(result.sumCorrectedMag).not.toBeNull();
     const idx1k = nearest(result.freq, 1000);
-    // band[0] alone → 0 dB (band[1] dropped because correctedPhase is null).
-    expect(result.sumCorrectedMag![idx1k]).toBeCloseTo(0, 1);
-    // Targets are unaffected (combinedTargetPhase doesn't depend on
-    // measurement.phase) — both bands still sum to +6 dB.
+    expect(result.coherent).toBe(false);
+    expect(result.sumCorrectedMag![idx1k]).toBeCloseTo(3.01, 1);
+    // Target sum unaffected — both targets coherent regardless.
     expect(result.sumTargetMag![idx1k]).toBeCloseTo(6.02, 1);
+  });
+
+  it("polarity ignored under power-sum fallback (no cancellation)", async () => {
+    const bands = [flatBand("a"), flatBand("b")];
+    bands[0].measurement!.phase = null;
+    bands[1].measurement!.phase = null;
+    bands[1].inverted = true; // would cancel under coherent sum
+    const result = await evaluateSum(bands);
+    const idx1k = nearest(result.freq, 1000);
+    expect(result.coherent).toBe(false);
+    expect(result.sumCorrectedMag![idx1k]).toBeCloseTo(3.01, 1);
+  });
+
+  it("all bands with phase → coherent=true, +6.02 dB (no fallback)", async () => {
+    const bands = [flatBand("a"), flatBand("b")];
+    const result = await evaluateSum(bands);
+    const idx1k = nearest(result.freq, 1000);
+    expect(result.coherent).toBe(true);
+    expect(result.sumCorrectedPhase).not.toBeNull();
+    expect(result.sumCorrectedMag![idx1k]).toBeCloseTo(6.02, 1);
   });
 
   it("band without targetEnabled → dropped from target sum", async () => {
@@ -232,7 +262,8 @@ describe("evaluateSum — phase availability (current behaviour)", () => {
     const idx1k = nearest(result.freq, 1000);
     // Only band[0] contributes a target.
     expect(result.sumTargetMag![idx1k]).toBeCloseTo(0, 1);
-    // Corrected still has both bands.
+    // Corrected still has both bands → coherent +6.02 dB.
+    expect(result.coherent).toBe(true);
     expect(result.sumCorrectedMag![idx1k]).toBeCloseTo(6.02, 1);
   });
 });

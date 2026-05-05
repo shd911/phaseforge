@@ -147,6 +147,44 @@ fn sum_delay_difference_cancels_two_bands() {
         mag[idx]);
 }
 
+/// b140.2.0.5 — incoherent power-sum fallback. Two flat bands at 0 dB,
+/// summed via 10·log10(Σ 10^(m/10)), should land at +3.01 dB regardless of
+/// polarity. This baseline matches evaluateSum's fallback when any band
+/// lacks measurement phase.
+fn power_sum(freq_len: usize, mags_db: &[Vec<f64>]) -> Vec<f64> {
+    let mut out = vec![0.0_f64; freq_len];
+    for j in 0..freq_len {
+        let mut acc = 0.0_f64;
+        for m in mags_db {
+            acc += 10f64.powf(m[j] / 10.0);
+        }
+        out[j] = if acc > 0.0 { 10.0 * acc.log10() } else { -200.0 };
+    }
+    out
+}
+
+#[test]
+fn sum_incoherent_two_bands_plus3db() {
+    let freq = log_grid(20.0, 20000.0, 512);
+    let mags = vec![vec![0.0_f64; freq.len()], vec![0.0_f64; freq.len()]];
+    let mag = power_sum(freq.len(), &mags);
+    let idx = nearest_idx(&freq, 1000.0);
+    assert!((mag[idx] - 3.0103).abs() < 0.01,
+        "two flat bands power-summed should give +3.01 dB, got {:.4}", mag[idx]);
+}
+
+#[test]
+fn sum_incoherent_polarity_irrelevant() {
+    // Power sum drops phase entirely → polarity inversion has no effect.
+    // (For coherent sum the inverted band would cancel; here it cannot.)
+    let freq = log_grid(20.0, 20000.0, 512);
+    let mags = vec![vec![0.0_f64; freq.len()], vec![0.0_f64; freq.len()]];
+    let mag = power_sum(freq.len(), &mags);
+    let idx = nearest_idx(&freq, 1000.0);
+    assert!((mag[idx] - 3.0103).abs() < 0.01,
+        "polarity must not affect power sum, got {:.4} dB", mag[idx]);
+}
+
 #[test]
 fn sum_partial_phase_offset_3db() {
     let freq = log_grid(20.0, 20000.0, 512);

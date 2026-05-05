@@ -426,10 +426,17 @@ export interface SumEvalResult {
    *  alignment_delay phase rotation. Null when no band has a target. */
   sumTargetMag: number[] | null;
   sumTargetPhase: number[] | null;
-  /** Coherent sum of perBand[i].correctedMag/Phase. Null when no band has
+  /** Sum of perBand[i].correctedMag/Phase. Coherent (re/im, polarity-aware)
+   *  when every contributing band has a phase; otherwise b140.2.0.5 falls
+   *  back to a power sum (10·log10(Σ 10^(m/10)), polarity ignored, phase
+   *  null) for parity with the legacy renderSumMode. Null when no band has
    *  a measurement. */
   sumCorrectedMag: number[] | null;
   sumCorrectedPhase: number[] | null;
+  /** b140.2.0.5: true → coherent corrected sum; false → power-sum fallback
+   *  (sumCorrectedPhase will be null in that case). Always true when there
+   *  is no corrected sum to compute. */
+  coherent: boolean;
   /** Optional IR of the corrected sum (compute_impulse on summed mag/phase). */
   ir?: { time: number[]; impulse: number[]; step: number[] };
 }
@@ -523,6 +530,12 @@ export async function evaluateSum(
   // 3. Resample target + corrected onto the common grid for each band.
   const targetData: Array<{ mag: number[]; phase: number[]; sign: 1 | -1; delay: number } | null> = [];
   const correctedData: Array<{ mag: number[]; phase: number[]; sign: 1 | -1; delay: number } | null> = [];
+  // b140.2.0.5: collect per-band corrected magnitudes separately for the
+  // power-sum fallback. The fallback is triggered when any band contributes
+  // mag without phase — in that case ALL bands' mags participate, polarity
+  // ignored.
+  const correctedMagsForFallback: number[][] = [];
+  let anyCorrectedMagWithoutPhase = false;
   for (let i = 0; i < bands.length; i++) {
     const r = perBand[i];
     const sign: 1 | -1 = bands[i].inverted ? -1 : 1;
@@ -545,10 +558,20 @@ export async function evaluateSum(
     } else {
       targetData.push(null);
     }
-    if (r.correctedMag && r.correctedPhase) {
-      const resampled = await resampleOntoGrid(r.freq, r.correctedMag, r.correctedPhase, freq);
-      if (resampled.mag && resampled.phase) {
-        correctedData.push({ mag: resampled.mag, phase: resampled.phase, sign, delay });
+    if (r.correctedMag) {
+      const resampled = await resampleOntoGrid(
+        r.freq, r.correctedMag, r.correctedPhase ?? null, freq,
+      );
+      if (resampled.mag) {
+        correctedMagsForFallback.push(resampled.mag);
+        if (r.correctedPhase && resampled.phase) {
+          correctedData.push({ mag: resampled.mag, phase: resampled.phase, sign, delay });
+        } else {
+          // Mag-only contributor — coherent sum cannot include it; mark to
+          // trigger the power-sum fallback below.
+          anyCorrectedMagWithoutPhase = true;
+          correctedData.push(null);
+        }
       } else {
         correctedData.push(null);
       }
@@ -557,18 +580,46 @@ export async function evaluateSum(
     }
   }
 
-  // 4. Coherent sum.
+  // 4. Sum.
   const targetSum = coherentSum(freq, targetData);
-  const correctedSum = coherentSum(freq, correctedData);
+  let sumCorrectedMag: number[] | null;
+  let sumCorrectedPhase: number[] | null;
+  let coherent: boolean;
+  if (correctedMagsForFallback.length === 0) {
+    sumCorrectedMag = null;
+    sumCorrectedPhase = null;
+    coherent = true;
+  } else if (anyCorrectedMagWithoutPhase) {
+    // Power sum: amp²[j] = Σ 10^(m_i[j] / 10) → 10·log10. Polarity ignored,
+    // phase undefined. Matches legacy renderSumMode mixed-phase behaviour.
+    const n = freq.length;
+    const mag = new Array<number>(n);
+    for (let j = 0; j < n; j++) {
+      let acc = 0;
+      for (const m of correctedMagsForFallback) {
+        acc += Math.pow(10, (m[j] ?? -200) / 10);
+      }
+      mag[j] = acc > 0 ? 10 * Math.log10(acc) : -200;
+    }
+    sumCorrectedMag = mag;
+    sumCorrectedPhase = null;
+    coherent = false;
+  } else {
+    const cs = coherentSum(freq, correctedData);
+    sumCorrectedMag = cs?.mag ?? null;
+    sumCorrectedPhase = cs?.phase ?? null;
+    coherent = true;
+  }
 
-  // 5. Optional IR for the corrected sum.
+  // 5. Optional IR for the corrected sum. Skipped when the power-sum
+  //    fallback fires — there is no phase to feed into compute_impulse.
   let ir: SumEvalResult["ir"];
-  if (options?.includeIr && correctedSum) {
+  if (options?.includeIr && coherent && sumCorrectedMag && sumCorrectedPhase) {
     try {
       const sr = bands.find(b => b.measurement)?.measurement?.sample_rate ?? 48000;
       const r = await invoke<{ time: number[]; impulse: number[]; step: number[] }>(
         "compute_impulse",
-        { freq, magnitude: correctedSum.mag, phase: correctedSum.phase, sampleRate: sr },
+        { freq, magnitude: sumCorrectedMag, phase: sumCorrectedPhase, sampleRate: sr },
       );
       ir = { time: r.time, impulse: r.impulse, step: r.step };
     } catch (_) {}
@@ -579,8 +630,9 @@ export async function evaluateSum(
     perBand,
     sumTargetMag: targetSum?.mag ?? null,
     sumTargetPhase: targetSum?.phase ?? null,
-    sumCorrectedMag: correctedSum?.mag ?? null,
-    sumCorrectedPhase: correctedSum?.phase ?? null,
+    sumCorrectedMag,
+    sumCorrectedPhase,
+    coherent,
     ir,
   };
 }
