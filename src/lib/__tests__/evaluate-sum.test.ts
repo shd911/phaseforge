@@ -385,6 +385,92 @@ describe("evaluateSum (b140.3.1.4) — width-aware global shift", () => {
     expect(mag[i500]).toBeLessThan(0);
   });
 
+});
+
+describe("evaluateSum (b140.3.1.5) — extension via target + Hilbert", () => {
+  function partialFlatBand(id: string, fMin: number, fMax: number, n = 256, phaseDeg = 0): BandState {
+    const b = flatBand(id);
+    const freq: number[] = new Array(n);
+    for (let i = 0; i < n; i++) freq[i] = fMin * Math.pow(fMax / fMin, i / (n - 1));
+    (b.measurement as any).freq = freq;
+    (b.measurement as any).magnitude = new Array(n).fill(0);
+    (b.measurement as any).phase = new Array(n).fill(phaseDeg);
+    return b;
+  }
+
+  it("magnitude extension follows target shape outside native (no -200 fence)", async () => {
+    // Band a: full 20–20000 (anchors common grid).
+    // Band b: native 1000–20000 only → bins below 1000 must be filled
+    // via target (flat 0 dB in mock) + boundary offset (=0).
+    const a = flatBand("a");
+    const b = partialFlatBand("b", 1000, 20000);
+    const result = await evaluateSum([a, b]);
+    const mag = result.perBandCorrected[1]!.mag;
+    const i100 = result.freq.findIndex(v => v >= 100);
+    // Without extension this would be fenced to -200; with extension it
+    // tracks the (flat) target.
+    expect(mag[i100]).toBeGreaterThan(-50);
+    expect(mag[i100]).toBeCloseTo(0, 1);
+  });
+
+  it("phase smoothly continues from native via Hilbert (no boundary jump)", async () => {
+    // Measurement.phase = 10° everywhere on native. Mocked Hilbert returns
+    // 0 → boundary offset = 10° → extended phase = 0 + 10 = 10° outside.
+    // Across the boundary the phase is continuous (10° on both sides).
+    const a = flatBand("a");
+    const b = partialFlatBand("b", 1000, 20000, 256, 10);
+    const result = await evaluateSum([a, b]);
+    const phase = result.perBandCorrected[1]!.phase;
+    const i100 = result.freq.findIndex(v => v >= 100);
+    const i1k = result.freq.findIndex(v => v >= 1000);
+    expect(phase[i1k]).toBeCloseTo(10, 1);
+    expect(phase[i100]).toBeCloseTo(10, 1);
+  });
+
+  it("no extensionTargetMag (targetEnabled=false) → fence -200 dB outside native", async () => {
+    const a = flatBand("a");
+    const b = partialFlatBand("b", 1000, 20000);
+    b.targetEnabled = false;
+    const result = await evaluateSum([a, b]);
+    const mag = result.perBandCorrected[1]!.mag;
+    const i100 = result.freq.findIndex(v => v >= 100);
+    expect(mag[i100]).toBeLessThan(-150);
+  });
+
+  it("phase=null in measurement → power-sum fallback (no Hilbert call)", async () => {
+    // Strip phase from a partial-range measurement → corrected phase null
+    // → power-sum at Σ level, no extPhase.
+    const a = flatBand("a");
+    const b = partialFlatBand("b", 1000, 20000);
+    (b.measurement as any).phase = null;
+    const result = await evaluateSum([a, b]);
+    expect(result.correctedCoherent).toBe(false);
+    expect(result.sumCorrectedPhase).toBeNull();
+  });
+});
+
+describe("evaluateSum (b140.3.1.4) — global shift extras", () => {
+  function bandWithFilters(): BandState {
+    const b = flatBand("a");
+    b.target.high_pass = {
+      filter_type: "Butterworth", order: 4, freq_hz: 200,
+      shape: null, linear_phase: true, q: null,
+    };
+    b.target.low_pass = {
+      filter_type: "Butterworth", order: 4, freq_hz: 2000,
+      shape: null, linear_phase: true, q: null,
+    };
+    return b;
+  }
+
+  function setMagInRange(band: BandState, fLo: number, fHi: number, value: number) {
+    const f = band.measurement!.freq;
+    const m = (band.measurement as any).magnitude as number[];
+    for (let i = 0; i < f.length; i++) {
+      if (f[i] >= fLo && f[i] <= fHi) m[i] = value;
+    }
+  }
+
   it("global shift moves entire corrected curve uniformly", async () => {
     const a = bandWithFilters();
     setMagInRange(a, 500, 1000, 20);

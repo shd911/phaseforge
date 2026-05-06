@@ -488,26 +488,37 @@ function buildCommonGrid(bands: BandState[]): number[] {
   return buildLogGrid(512, fMin, fMax);
 }
 
-/** Linear interp on log-freq from src grid onto dst grid, with a -200 dB /
- *  0° fence outside the source range (no extension). */
-function resampleOntoCommon(
+/** b140.3.1.5: linear interp on log-freq from src grid onto dst grid.
+ *  Outside native range:
+ *    • without `extensionTargetMag` → -200 dB / 0° fence (b140.2.1.4 fallback);
+ *    • with `extensionTargetMag` → magnitude follows target shape with a
+ *      boundary offset (`mag[boundary] − target[boundary]`); phase is
+ *      reconstructed via Hilbert (compute_minimum_phase) on the extended
+ *      magnitude with separate offsets at the low and high boundaries so
+ *      the curve continues smoothly. */
+async function resampleOntoCommon(
   srcFreq: number[],
   srcMag: number[],
   srcPhase: number[] | null,
   dstFreq: number[],
-): { mag: number[]; phase: number[] | null } | null {
+  options?: { extensionTargetMag?: number[] },
+): Promise<{ mag: number[]; phase: number[] | null } | null> {
   if (srcFreq.length < 2) return null;
   const n = dstFreq.length;
-  const mag = new Array<number>(n);
-  const phase = srcPhase ? new Array<number>(n) : null;
   const fLo = srcFreq[0], fHi = srcFreq[srcFreq.length - 1];
+
+  const nativeMag = new Array<number>(n);
+  const nativePhase = srcPhase ? new Array<number>(n) : null;
+  const inNative = new Array<boolean>(n);
   for (let k = 0; k < n; k++) {
     const f = dstFreq[k];
     if (f < fLo || f > fHi) {
-      mag[k] = -200;
-      if (phase) phase[k] = 0;
+      inNative[k] = false;
+      nativeMag[k] = -200;
+      if (nativePhase) nativePhase[k] = 0;
       continue;
     }
+    inNative[k] = true;
     let lo = 0, hi = srcFreq.length - 1;
     while (hi - lo > 1) {
       const mid = (lo + hi) >> 1;
@@ -515,12 +526,46 @@ function resampleOntoCommon(
     }
     const dt = srcFreq[hi] - srcFreq[lo];
     const frac = dt > 0 ? (f - srcFreq[lo]) / dt : 0;
-    mag[k] = srcMag[lo] + frac * (srcMag[hi] - srcMag[lo]);
-    if (phase && srcPhase) {
-      phase[k] = srcPhase[lo] + frac * (srcPhase[hi] - srcPhase[lo]);
+    nativeMag[k] = srcMag[lo] + frac * (srcMag[hi] - srcMag[lo]);
+    if (nativePhase && srcPhase) {
+      nativePhase[k] = srcPhase[lo] + frac * (srcPhase[hi] - srcPhase[lo]);
     }
   }
-  return { mag, phase };
+
+  const tgt = options?.extensionTargetMag;
+  if (!tgt) return { mag: nativeMag, phase: nativePhase };
+
+  let idxLo = -1, idxHi = -1;
+  for (let i = 0; i < n; i++) if (inNative[i]) { idxLo = i; break; }
+  for (let i = n - 1; i >= 0; i--) if (inNative[i]) { idxHi = i; break; }
+  if (idxLo < 0 || idxHi < 0) return { mag: nativeMag, phase: nativePhase };
+
+  const magOffsetLo = nativeMag[idxLo] - tgt[idxLo];
+  const magOffsetHi = nativeMag[idxHi] - tgt[idxHi];
+  const extMag = new Array<number>(n);
+  for (let k = 0; k < n; k++) {
+    if (inNative[k]) extMag[k] = nativeMag[k];
+    else if (k < idxLo) extMag[k] = tgt[k] + magOffsetLo;
+    else extMag[k] = tgt[k] + magOffsetHi;
+  }
+
+  let extPhase: number[] | null = null;
+  if (nativePhase) {
+    const recon = await invoke<number[]>("compute_minimum_phase", {
+      freq: dstFreq,
+      magnitude: extMag,
+    });
+    const phOffsetLo = nativePhase[idxLo] - recon[idxLo];
+    const phOffsetHi = nativePhase[idxHi] - recon[idxHi];
+    extPhase = new Array<number>(n);
+    for (let k = 0; k < n; k++) {
+      if (inNative[k]) extPhase[k] = nativePhase[k];
+      else if (k < idxLo) extPhase[k] = recon[k] + phOffsetLo;
+      else extPhase[k] = recon[k] + phOffsetHi;
+    }
+  }
+
+  return { mag: extMag, phase: extPhase };
 }
 
 /** b140.3.1.4: global-shift excess control. The passband ± 1 octave zone
@@ -691,8 +736,12 @@ export async function evaluateSum(
       continue;
     }
     anyCorrected = true;
-    const resampled = resampleOntoCommon(
+    // b140.3.1.5: extend corrected outside native via target shape +
+    // Hilbert phase. Falls back to fence -200 dB when no target curve.
+    const pbTargetForExt = perBandTarget[i];
+    const resampled = await resampleOntoCommon(
       r.freq, r.correctedMag, r.correctedPhase ?? null, freq,
+      pbTargetForExt ? { extensionTargetMag: pbTargetForExt.mag } : undefined,
     );
     if (!resampled) {
       perBandCorrected.push(null);
