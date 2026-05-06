@@ -160,4 +160,53 @@ describe("evaluateBandFull (b139.1)", () => {
       });
     }
   });
+
+  // b140.3.2: extension fields are populated when measurement+targetEnabled.
+  describe("extension fields (b140.3.2)", () => {
+    it("extendedFreq + nativeRange + extendedMeasurementMag set when target is enabled", async () => {
+      const band = fixtureBand(FIXTURE_CONFIGS[0].hp);
+      const r = await evaluateBandFull({ band });
+      expect(r.extendedFreq).not.toBeNull();
+      expect(r.extendedFreq!.length).toBe(512);
+      expect(r.extendedFreq![0]).toBeCloseTo(20, 0);
+      expect(r.extendedFreq![511]).toBeCloseTo(20000, 0);
+      expect(r.nativeRange).not.toBeNull();
+      expect(r.extendedMeasurementMag).not.toBeNull();
+      expect(r.extendedMeasurementMag!.length).toBe(512);
+      expect(r.extendedMeasurementPhase).not.toBeNull();
+    });
+
+    it("extendedCorrectedMag includes PEQ + cross-section like correctedMag does", async () => {
+      const band = fixtureBand(FIXTURE_CONFIGS[0].hp);
+      const r = await evaluateBandFull({ band });
+      expect(r.extendedCorrectedMag).not.toBeNull();
+      expect(r.extendedCorrectedMag!.length).toBe(512);
+    });
+
+    it("nativeRange reflects the measurement freq bounds", async () => {
+      const band = fixtureBand(FIXTURE_CONFIGS[0].hp);
+      const r = await evaluateBandFull({ band });
+      const f = band.measurement!.freq;
+      expect(r.nativeRange![0]).toBe(f[0]);
+      expect(r.nativeRange![1]).toBe(f[f.length - 1]);
+    });
+
+    it("extension fields are null when targetEnabled=false", async () => {
+      const band = fixtureBand(FIXTURE_CONFIGS[0].hp);
+      band.targetEnabled = false;
+      const r = await evaluateBandFull({ band });
+      expect(r.extendedFreq).toBeNull();
+      expect(r.nativeRange).toBeNull();
+      expect(r.extendedMeasurementMag).toBeNull();
+      expect(r.extendedCorrectedMag).toBeNull();
+    });
+
+    it("extension fields are null when no measurement", async () => {
+      const band = fixtureBand(FIXTURE_CONFIGS[0].hp);
+      (band as any).measurement = null;
+      const r = await evaluateBandFull({ band });
+      expect(r.extendedFreq).toBeNull();
+      expect(r.extendedMeasurementMag).toBeNull();
+    });
+  });
 });

@@ -78,6 +78,21 @@ export interface BandEvalResult {
 
   refLevel: number;
 
+  /** b140.3.2: standard wide grid (20–20000 Hz, 512 log) used for extension.
+   *  Populated when measurement+targetEnabled; null otherwise. */
+  extendedFreq: number[] | null;
+  /** Original measurement frequency bounds [fLo, fHi]. UI uses this to
+   *  separate "real" data from synthesized extension visually. */
+  nativeRange: [number, number] | null;
+  /** Measurement extended onto extendedFreq via target shape + boundary
+   *  offset (magnitude) and Hilbert + boundary offset (phase). Full
+   *  coverage of extendedFreq — caller masks via nativeRange when needed. */
+  extendedMeasurementMag: number[] | null;
+  extendedMeasurementPhase: number[] | null;
+  /** Same extension applied to corrected (measurement+PEQ+cross-section). */
+  extendedCorrectedMag: number[] | null;
+  extendedCorrectedPhase: number[] | null;
+
   fir?: {
     impulse: number[];
     timeMs: number[];
@@ -400,6 +415,50 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
     }
   }
 
+  // 8. b140.3.2: extension block. Single source of truth for "what does the
+  //    measurement / corrected look like outside the native range?". When
+  //    the band has measurement + targetEnabled we evaluate target on a
+  //    standard wide grid and extend both measurement and corrected via
+  //    target shape + boundary offset (magnitude) and Hilbert reconstruction
+  //    + boundary offsets (phase). evaluateSum and the band view both read
+  //    from these fields — no extension logic anywhere else.
+  let extendedFreq: number[] | null = null;
+  let nativeRange: [number, number] | null = null;
+  let extendedMeasurementMag: number[] | null = null;
+  let extendedMeasurementPhase: number[] | null = null;
+  let extendedCorrectedMag: number[] | null = null;
+  let extendedCorrectedPhase: number[] | null = null;
+
+  if (measurement && band.targetEnabled) {
+    extendedFreq = buildLogGrid(512, 20, 20000);
+    nativeRange = [measurement.freq[0], measurement.freq[measurement.freq.length - 1]];
+
+    // Target on extendedFreq for extension shape — mirrors the level
+    // adjustment the measurement-grid target eval used above so the boundary
+    // offset compensates for any constant level mismatch.
+    const tgtCurveExt = { ...targetCurve, reference_level_db: targetCurve.reference_level_db + refLevel };
+    const tgtRespExt = await invoke<TargetResponse>("evaluate_target", {
+      target: tgtCurveExt, freq: extendedFreq,
+    });
+    const tgtMagExt = tgtRespExt.magnitude;
+
+    const measExt = await computeExtension(
+      measurement.freq, measurement.magnitude,
+      measurement.phase ?? null, extendedFreq, tgtMagExt,
+    );
+    extendedMeasurementMag = measExt.mag;
+    extendedMeasurementPhase = measExt.phase;
+
+    if (correctedMag) {
+      const corrExt = await computeExtension(
+        measurement.freq, correctedMag, correctedPhase ?? null,
+        extendedFreq, tgtMagExt,
+      );
+      extendedCorrectedMag = corrExt.mag;
+      extendedCorrectedPhase = corrExt.phase;
+    }
+  }
+
   return {
     freq,
     measurementMag: measurement ? measurement.magnitude : null,
@@ -415,6 +474,12 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
     correctedMag,
     correctedPhase,
     refLevel,
+    extendedFreq,
+    nativeRange,
+    extendedMeasurementMag,
+    extendedMeasurementPhase,
+    extendedCorrectedMag,
+    extendedCorrectedPhase,
     fir,
     ir,
   };
@@ -488,22 +553,54 @@ function buildCommonGrid(bands: BandState[]): number[] {
   return buildLogGrid(512, fMin, fMax);
 }
 
-/** b140.3.1.5: linear interp on log-freq from src grid onto dst grid.
- *  Outside native range:
- *    • without `extensionTargetMag` → -200 dB / 0° fence (b140.2.1.4 fallback);
- *    • with `extensionTargetMag` → magnitude follows target shape with a
- *      boundary offset (`mag[boundary] − target[boundary]`); phase is
- *      reconstructed via Hilbert (compute_minimum_phase) on the extended
- *      magnitude with separate offsets at the low and high boundaries so
- *      the curve continues smoothly. */
-async function resampleOntoCommon(
+/** b140.3.2: linear interp on log-freq from src grid onto dst grid with a
+ *  -200 dB / 0° fence outside the source range (no extension). Extension is
+ *  now handled in evaluateBandFull via `computeExtension`. */
+function resampleOntoCommon(
   srcFreq: number[],
   srcMag: number[],
   srcPhase: number[] | null,
   dstFreq: number[],
-  options?: { extensionTargetMag?: number[] },
-): Promise<{ mag: number[]; phase: number[] | null } | null> {
+): { mag: number[]; phase: number[] | null } | null {
   if (srcFreq.length < 2) return null;
+  const n = dstFreq.length;
+  const fLo = srcFreq[0], fHi = srcFreq[srcFreq.length - 1];
+  const mag = new Array<number>(n);
+  const phase = srcPhase ? new Array<number>(n) : null;
+  for (let k = 0; k < n; k++) {
+    const f = dstFreq[k];
+    if (f < fLo || f > fHi) {
+      mag[k] = -200;
+      if (phase) phase[k] = 0;
+      continue;
+    }
+    let lo = 0, hi = srcFreq.length - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (srcFreq[mid] <= f) lo = mid; else hi = mid;
+    }
+    const dt = srcFreq[hi] - srcFreq[lo];
+    const frac = dt > 0 ? (f - srcFreq[lo]) / dt : 0;
+    mag[k] = srcMag[lo] + frac * (srcMag[hi] - srcMag[lo]);
+    if (phase && srcPhase) {
+      phase[k] = srcPhase[lo] + frac * (srcPhase[hi] - srcPhase[lo]);
+    }
+  }
+  return { mag, phase };
+}
+
+/** b140.3.2: extend a (mag, phase) curve from native srcFreq onto a wider
+ *  dstFreq using the target shape (with a boundary mag offset) for magnitude
+ *  and Hilbert reconstruction (with separate low/high boundary phase offsets)
+ *  for phase. Inside native, values are linearly interpolated from src;
+ *  outside, they follow target+offset / Hilbert+offset for smooth continuation. */
+async function computeExtension(
+  srcFreq: number[],
+  srcMag: number[],
+  srcPhase: number[] | null,
+  dstFreq: number[],
+  dstTargetMag: number[],
+): Promise<{ mag: number[]; phase: number[] | null }> {
   const n = dstFreq.length;
   const fLo = srcFreq[0], fHi = srcFreq[srcFreq.length - 1];
 
@@ -514,8 +611,8 @@ async function resampleOntoCommon(
     const f = dstFreq[k];
     if (f < fLo || f > fHi) {
       inNative[k] = false;
-      nativeMag[k] = -200;
-      if (nativePhase) nativePhase[k] = 0;
+      nativeMag[k] = NaN;
+      if (nativePhase) nativePhase[k] = NaN;
       continue;
     }
     inNative[k] = true;
@@ -532,28 +629,26 @@ async function resampleOntoCommon(
     }
   }
 
-  const tgt = options?.extensionTargetMag;
-  if (!tgt) return { mag: nativeMag, phase: nativePhase };
-
   let idxLo = -1, idxHi = -1;
   for (let i = 0; i < n; i++) if (inNative[i]) { idxLo = i; break; }
   for (let i = n - 1; i >= 0; i--) if (inNative[i]) { idxHi = i; break; }
-  if (idxLo < 0 || idxHi < 0) return { mag: nativeMag, phase: nativePhase };
+  if (idxLo < 0 || idxHi < 0) {
+    return { mag: nativeMag.map(v => isFinite(v) ? v : -200), phase: nativePhase };
+  }
 
-  const magOffsetLo = nativeMag[idxLo] - tgt[idxLo];
-  const magOffsetHi = nativeMag[idxHi] - tgt[idxHi];
+  const magOffsetLo = nativeMag[idxLo] - dstTargetMag[idxLo];
+  const magOffsetHi = nativeMag[idxHi] - dstTargetMag[idxHi];
   const extMag = new Array<number>(n);
   for (let k = 0; k < n; k++) {
     if (inNative[k]) extMag[k] = nativeMag[k];
-    else if (k < idxLo) extMag[k] = tgt[k] + magOffsetLo;
-    else extMag[k] = tgt[k] + magOffsetHi;
+    else if (k < idxLo) extMag[k] = dstTargetMag[k] + magOffsetLo;
+    else extMag[k] = dstTargetMag[k] + magOffsetHi;
   }
 
   let extPhase: number[] | null = null;
   if (nativePhase) {
     const recon = await invoke<number[]>("compute_minimum_phase", {
-      freq: dstFreq,
-      magnitude: extMag,
+      freq: dstFreq, magnitude: extMag,
     });
     const phOffsetLo = nativePhase[idxLo] - recon[idxLo];
     const phOffsetHi = nativePhase[idxHi] - recon[idxHi];
@@ -736,12 +831,14 @@ export async function evaluateSum(
       continue;
     }
     anyCorrected = true;
-    // b140.3.1.5: extend corrected outside native via target shape +
-    // Hilbert phase. Falls back to fence -200 dB when no target curve.
-    const pbTargetForExt = perBandTarget[i];
-    const resampled = await resampleOntoCommon(
-      r.freq, r.correctedMag, r.correctedPhase ?? null, freq,
-      pbTargetForExt ? { extensionTargetMag: pbTargetForExt.mag } : undefined,
+    // b140.3.2: prefer the extended-onto-wide-grid corrected from
+    // evaluateBandFull (single source of truth). Fall back to native
+    // corrected (with -200 dB fence outside) when no extension exists.
+    const sourceFreq = r.extendedFreq ?? r.freq;
+    const sourceMag = r.extendedCorrectedMag ?? r.correctedMag;
+    const sourcePhase = r.extendedCorrectedPhase ?? r.correctedPhase ?? null;
+    const resampled = resampleOntoCommon(
+      sourceFreq, sourceMag, sourcePhase, freq,
     );
     if (!resampled) {
       perBandCorrected.push(null);

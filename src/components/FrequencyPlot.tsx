@@ -3028,6 +3028,47 @@ export default function FrequencyPlot() {
       // unchanged. Equivalence proven by b139.1 unit tests (max diff 1e-9).
       const evalRes = await evaluateBandFull({ band });
       if (gen !== renderGen) return; // stale render, discard
+
+      // b140.3.2: when extension is available, switch the chart's display grid
+      // to the wide extendedFreq and resample existing native fields onto it
+      // with NaN outside native (so they render only inside native range — the
+      // synthesized "extension" portion is drawn separately as a faded series).
+      if (evalRes.extendedFreq && evalRes.nativeRange && evalRes.extendedMeasurementMag) {
+        const extFreq = evalRes.extendedFreq;
+        const srcFreq = evalRes.freq;
+        const fLo = srcFreq[0], fHi = srcFreq[srcFreq.length - 1];
+        const interp = (src: number[] | null): number[] | null => {
+          if (!src) return null;
+          const out = new Array<number>(extFreq.length);
+          for (let k = 0; k < extFreq.length; k++) {
+            const f = extFreq[k];
+            if (f < fLo || f > fHi) { out[k] = NaN; continue; }
+            let lo = 0, hi = srcFreq.length - 1;
+            while (hi - lo > 1) {
+              const mid = (lo + hi) >> 1;
+              if (srcFreq[mid] <= f) lo = mid; else hi = mid;
+            }
+            const dt = srcFreq[hi] - srcFreq[lo];
+            const frac = dt > 0 ? (f - srcFreq[lo]) / dt : 0;
+            out[k] = src[lo] + frac * (src[hi] - src[lo]);
+          }
+          return out;
+        };
+        evalRes.measurementMag = interp(evalRes.measurementMag);
+        evalRes.measurementPhase = interp(evalRes.measurementPhase);
+        evalRes.targetMag = interp(evalRes.targetMag);
+        evalRes.targetPhase = interp(evalRes.targetPhase);
+        evalRes.peqMag = interp(evalRes.peqMag) ?? new Array(extFreq.length).fill(0);
+        evalRes.peqPhase = interp(evalRes.peqPhase) ?? new Array(extFreq.length).fill(0);
+        evalRes.correctedMag = interp(evalRes.correctedMag);
+        evalRes.correctedPhase = interp(evalRes.correctedPhase);
+        evalRes.combinedTargetMag = interp(evalRes.combinedTargetMag);
+        evalRes.combinedTargetPhase = interp(evalRes.combinedTargetPhase);
+        evalRes.crossSectionMag = interp(evalRes.crossSectionMag);
+        evalRes.crossSectionPhase = interp(evalRes.crossSectionPhase);
+        evalRes.freq = extFreq;
+      }
+
       const result = {
         freq: evalRes.freq,
         targetMag: evalRes.targetMag,
@@ -3062,8 +3103,10 @@ export default function FrequencyPlot() {
 
         let s = 0, n = 0;
         for (let i = 0; i < result.measurement.freq.length; i++) {
+          const v = result.measurement.magnitude[i];
+          if (!isFinite(v)) continue; // b140.3.2: skip NaN bins outside native range
           if (result.measurement.freq[i] >= effLow && result.measurement.freq[i] <= effHigh) {
-            s += result.measurement.magnitude[i]; n++;
+            s += v; n++;
           }
         }
         zoomCenter = n > 0 ? s / n : 0;
@@ -3180,14 +3223,18 @@ export default function FrequencyPlot() {
             const eH = pbL < pbH ? pbH : 2000;
             let dSum = 0, dN = 0;
             for (let k = 0; k < result.measurement.freq.length; k++) {
+              const t = result.targetMag[k], c = fullCorrected[k];
+              if (!isFinite(t) || !isFinite(c)) continue; // b140.3.2 NaN-safe
               if (result.measurement.freq[k] >= eL && result.measurement.freq[k] <= eH) {
-                dSum += result.targetMag[k] - fullCorrected[k];
+                dSum += t - c;
                 dN++;
               }
             }
             const corrOffset = dN > 0 ? dSum / dN : 0;
             if (Math.abs(corrOffset) > 0.01) {
-              for (let k = 0; k < fullCorrected.length; k++) fullCorrected[k] += corrOffset;
+              for (let k = 0; k < fullCorrected.length; k++) {
+                if (isFinite(fullCorrected[k])) fullCorrected[k] += corrOffset;
+              }
             }
           }
 
@@ -3321,11 +3368,64 @@ export default function FrequencyPlot() {
         }
       }
 
+      // b140.3.2: faded extension series — measurement / corrected synthesized
+      // outside the native measurement range via target shape + Hilbert phase.
+      // null inside native (existing solid series covers it); values outside
+      // come from evaluateBandFull's extendedMeasurement/CorrectedMag.
+      if (
+        showMag &&
+        evalRes.extendedFreq && evalRes.nativeRange &&
+        evalRes.extendedMeasurementMag
+      ) {
+        const [fLo, fHi] = evalRes.nativeRange;
+        const fadedMeas = cf.meas.startsWith("#") && cf.meas.length === 7
+          ? cf.meas + "60" : cf.meas;
+        const extMeasOnly = evalRes.extendedFreq.map((f, j) =>
+          (f < fLo || f > fHi) ? evalRes.extendedMeasurementMag![j] : null,
+        );
+        uSeries.push({
+          label: "Meas (ext)",
+          stroke: fadedMeas,
+          width: 1.5,
+          dash: [3, 3],
+          scale: "mag",
+          spanGaps: false as any,
+        });
+        uData.push(extMeasOnly as unknown as number[]);
+        legend.push({
+          label: "Meas (ext)", color: fadedMeas, dash: true,
+          visible: !isTargetTab, seriesIdx: sIdx, category: "measurement",
+        });
+        sIdx++;
+
+        if (evalRes.extendedCorrectedMag && (hasPeq || hasFilters)) {
+          const fadedCorr = cf.corrected.startsWith("#") && cf.corrected.length === 7
+            ? cf.corrected + "60" : cf.corrected;
+          const extCorrOnly = evalRes.extendedFreq.map((f, j) =>
+            (f < fLo || f > fHi) ? evalRes.extendedCorrectedMag![j] : null,
+          );
+          uSeries.push({
+            label: "Corr (ext)",
+            stroke: fadedCorr,
+            width: 1.5,
+            dash: [3, 3],
+            scale: "mag",
+            spanGaps: false as any,
+          });
+          uData.push(extCorrOnly as unknown as number[]);
+          legend.push({
+            label: "Corr (ext)", color: fadedCorr, dash: true,
+            visible: true, seriesIdx: sIdx, category: "corrected",
+          });
+          sIdx++;
+        }
+      }
+
       // Normalize all mag series to dBr (0 = passband level)
       if (zoomCenter !== 0) {
         for (let i = 0; i < uSeries.length; i++) {
           if ((uSeries[i] as any).scale === "mag") {
-            uData[i] = uData[i].map((v: number) => v - zoomCenter);
+            uData[i] = uData[i].map((v: number) => isFinite(v) ? v - zoomCenter : v);
           }
         }
       }
