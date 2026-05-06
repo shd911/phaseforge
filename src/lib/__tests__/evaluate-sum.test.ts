@@ -120,4 +120,22 @@ describe("evaluateSum (minimal, b140.3.0) — Σ Target only", () => {
     // Only one band contributes → 0 dB, not +6 dB.
     expect(mag[mag.length / 2 | 0]).toBeCloseTo(0, 3);
   });
+
+  it("evaluateSum returns perBandTarget for enabled bands", async () => {
+    const result = await evaluateSum([flatBand("a"), flatBand("b")]);
+    expect(result.perBandTarget).toHaveLength(2);
+    expect(result.perBandTarget[0]).not.toBeNull();
+    expect(result.perBandTarget[1]).not.toBeNull();
+    expect(result.perBandTarget[0]!.mag).toHaveLength(result.freq.length);
+    expect(result.perBandTarget[0]!.phase).toHaveLength(result.freq.length);
+  });
+
+  it("perBandTarget is null for disabled bands", async () => {
+    const a = flatBand("a");
+    const b = flatBand("b", { targetEnabled: false });
+    const result = await evaluateSum([a, b]);
+    expect(result.perBandTarget).toHaveLength(2);
+    expect(result.perBandTarget[0]).not.toBeNull();
+    expect(result.perBandTarget[1]).toBeNull();
+  });
 });

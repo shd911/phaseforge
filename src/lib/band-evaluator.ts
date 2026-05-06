@@ -439,6 +439,10 @@ export interface SumEvalResult {
    *  targetEnabled=true. */
   sumTargetMag: number[] | null;
   sumTargetPhase: number[] | null;
+  /** Per-band target on the common grid (no polarity / alignment_delay
+   *  applied — those affect only the Σ aggregate). One entry per input
+   *  band, parallel to `bands`; null for bands where targetEnabled=false. */
+  perBandTarget: Array<{ mag: number[]; phase: number[] } | null>;
 }
 
 export interface SumEvalOptions {
@@ -509,10 +513,12 @@ export async function evaluateSum(
   const perBandTargetData: Array<
     { mag: number[]; phase: number[]; sign: 1 | -1; delay: number } | null
   > = [];
+  const perBandTarget: Array<{ mag: number[]; phase: number[] } | null> = [];
 
   for (const band of bands) {
     if (!band.targetEnabled) {
       perBandTargetData.push(null);
+      perBandTarget.push(null);
       continue;
     }
     const target = JSON.parse(JSON.stringify(band.target));
@@ -528,6 +534,7 @@ export async function evaluateSum(
       sign: band.inverted ? -1 : 1,
       delay: band.alignmentDelay ?? 0,
     });
+    perBandTarget.push({ mag: response.magnitude, phase });
   }
 
   const sum = coherentSum(freq, perBandTargetData);
@@ -536,6 +543,7 @@ export async function evaluateSum(
     freq,
     sumTargetMag: sum?.mag ?? null,
     sumTargetPhase: sum?.phase ?? null,
+    perBandTarget,
   };
 }
 

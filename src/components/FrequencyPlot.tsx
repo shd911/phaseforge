@@ -3969,28 +3969,60 @@ export default function FrequencyPlot() {
       const legend: LegendEntry[] = [];
       let sIdx = 1;
 
-      if (showTarget && result.sumTargetMag) {
-        uSeries.push({
-          label: "Σ tgt (New)", stroke: SUM_TARGET_COLOR, width: 2.5,
-          dash: [8, 4], scale: "mag",
-        });
-        uData.push(result.sumTargetMag);
-        legend.push({
-          label: "Σ target (New)", color: SUM_TARGET_COLOR, dash: true,
-          visible: true, seriesIdx: sIdx, category: "target",
-        });
-        sIdx++;
-        if (showPhase && result.sumTargetPhase) {
+      if (showTarget) {
+        // Per-band target curves (visible:false by default — populate the
+        // legend grid so each band has a Target cell to toggle on demand).
+        for (let i = 0; i < bands.length; i++) {
+          const pb = result.perBandTarget[i];
+          if (!pb) continue;
+          const cf = bandColorFamily(bands[i].color);
           uSeries.push({
-            label: "Σ tgt ° (New)", stroke: SUM_TARGET_PHASE_COLOR,
-            width: 1.5, dash: [4, 4], scale: "phase",
+            label: `${bands[i].name} tgt`, stroke: cf.target, width: 1.5,
+            dash: [8, 4], scale: "mag",
           });
-          uData.push(wrapPhase(result.sumTargetPhase));
+          uData.push(pb.mag);
           legend.push({
-            label: "Σ target ° (New)", color: SUM_TARGET_PHASE_COLOR, dash: true,
+            label: `${bands[i].name} tgt`, color: cf.target, dash: false,
+            visible: false, seriesIdx: sIdx, category: "target",
+          });
+          sIdx++;
+          if (showPhase) {
+            uSeries.push({
+              label: `${bands[i].name} tgt °`, stroke: cf.targetPhase,
+              width: 1, dash: [4, 4], scale: "phase",
+            });
+            uData.push(wrapPhase(pb.phase));
+            legend.push({
+              label: `${bands[i].name} tgt °`, color: cf.targetPhase, dash: true,
+              visible: false, seriesIdx: sIdx, category: "target",
+            });
+            sIdx++;
+          }
+        }
+
+        if (result.sumTargetMag) {
+          uSeries.push({
+            label: "Σ tgt (New)", stroke: SUM_TARGET_COLOR, width: 2.5,
+            dash: [8, 4], scale: "mag",
+          });
+          uData.push(result.sumTargetMag);
+          legend.push({
+            label: "Σ target (New)", color: SUM_TARGET_COLOR, dash: true,
             visible: true, seriesIdx: sIdx, category: "target",
           });
           sIdx++;
+          if (showPhase && result.sumTargetPhase) {
+            uSeries.push({
+              label: "Σ tgt ° (New)", stroke: SUM_TARGET_PHASE_COLOR,
+              width: 1.5, dash: [4, 4], scale: "phase",
+            });
+            uData.push(wrapPhase(result.sumTargetPhase));
+            legend.push({
+              label: "Σ target ° (New)", color: SUM_TARGET_PHASE_COLOR, dash: true,
+              visible: true, seriesIdx: sIdx, category: "target",
+            });
+            sIdx++;
+          }
         }
       }
 
