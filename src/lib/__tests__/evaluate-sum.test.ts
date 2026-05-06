@@ -19,6 +19,14 @@ vi.mock("@tauri-apps/api/core", () => ({
         phase: freq.map(() => 0),
       };
     }
+    if (cmd === "evaluate_target_standalone") {
+      const n = args.nPoints ?? 512;
+      const fMin = args.fMin ?? 5, fMax = args.fMax ?? 40000;
+      const refLevel = args.target?.reference_level_db ?? 0;
+      const freq = new Array(n);
+      for (let i = 0; i < n; i++) freq[i] = fMin * Math.pow(fMax / fMin, i / (n - 1));
+      return [freq, { magnitude: freq.map(() => refLevel), phase: freq.map(() => 0) }];
+    }
     if (cmd === "compute_minimum_phase") {
       const m = args.magnitude as number[];
       return new Array(m.length).fill(0);
@@ -137,5 +145,51 @@ describe("evaluateSum (minimal, b140.3.0) — Σ Target only", () => {
     expect(result.perBandTarget).toHaveLength(2);
     expect(result.perBandTarget[0]).not.toBeNull();
     expect(result.perBandTarget[1]).toBeNull();
+  });
+});
+
+describe("evaluateSum (b140.3.1) — Σ Corrected", () => {
+  it("two bands with measurement → coherent corrected sum +6 dB", async () => {
+    // Both bands flat 0 dB measurement + phase=0 → coherent sum +6 dB.
+    const result = await evaluateSum([flatBand("a"), flatBand("b")]);
+    expect(result.sumCorrectedMag).not.toBeNull();
+    expect(result.correctedCoherent).toBe(true);
+    const mag = result.sumCorrectedMag!;
+    const idx = mag.length / 2 | 0;
+    expect(mag[idx]).toBeCloseTo(6.0206, 1);
+  });
+
+  it("polarity inversion in corrected → cancellation", async () => {
+    const a = flatBand("a");
+    const b = flatBand("b", { inverted: true });
+    const result = await evaluateSum([a, b]);
+    expect(result.correctedCoherent).toBe(true);
+    const mag = result.sumCorrectedMag!;
+    expect(mag[mag.length / 2 | 0]).toBeLessThan(-150);
+  });
+
+  it("missing measurement phase → power-sum fallback, correctedCoherent=false", async () => {
+    const a = flatBand("a");
+    const b = flatBand("b");
+    // Strip phase from one band's measurement.
+    (b.measurement as any).phase = null;
+    const result = await evaluateSum([a, b]);
+    expect(result.correctedCoherent).toBe(false);
+    expect(result.sumCorrectedPhase).toBeNull();
+    // Power sum of two 0 dB sources = 10·log10(2) ≈ 3.0103 dB
+    const mag = result.sumCorrectedMag!;
+    expect(mag[mag.length / 2 | 0]).toBeCloseTo(3.0103, 2);
+  });
+
+  it("no band has measurement → sumCorrectedMag=null", async () => {
+    const a = flatBand("a");
+    const b = flatBand("b");
+    (a as any).measurement = null;
+    (b as any).measurement = null;
+    const result = await evaluateSum([a, b]);
+    expect(result.sumCorrectedMag).toBeNull();
+    expect(result.sumCorrectedPhase).toBeNull();
+    expect(result.perBandCorrected[0]).toBeNull();
+    expect(result.perBandCorrected[1]).toBeNull();
   });
 });

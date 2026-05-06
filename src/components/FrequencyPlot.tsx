@@ -3955,7 +3955,7 @@ export default function FrequencyPlot() {
   // target.reference_level_db. May differ visually from Legacy SUM —
   // that's intentional (no globalRef/avgRef/zoomCenter magic).
   // ----------------------------------------------------------------
-  async function renderSumModeNew(showPhase: boolean, _showMag: boolean, showTarget: boolean) {
+  async function renderSumModeNew(showPhase: boolean, showMag: boolean, showTarget: boolean) {
     const gen = ++renderGen;
     zoomCenter = 0;
     const bands: BandState[] = JSON.parse(JSON.stringify(appState.bands));
@@ -4023,6 +4023,50 @@ export default function FrequencyPlot() {
             });
             sIdx++;
           }
+        }
+      }
+
+      // b140.3.1: Σ Corrected + per-band corrected.
+      if (showMag && result.sumCorrectedMag) {
+        const sumLabel = result.correctedCoherent ? "Σ corr" : "Σ corr (incoh)";
+        uSeries.push({
+          label: sumLabel, stroke: SUM_CORRECTED_COLOR, width: 3, scale: "mag",
+        });
+        uData.push(result.sumCorrectedMag);
+        legend.push({
+          label: sumLabel, color: SUM_CORRECTED_COLOR, dash: false,
+          visible: true, seriesIdx: sIdx, category: "corrected",
+        });
+        sIdx++;
+        if (showPhase && result.correctedCoherent && result.sumCorrectedPhase) {
+          uSeries.push({
+            label: "Σ corr °", stroke: SUM_CORRECTED_COLOR,
+            width: 1.5, dash: [4, 4], scale: "phase",
+          });
+          uData.push(wrapPhase(result.sumCorrectedPhase));
+          legend.push({
+            label: "Σ corr °", color: SUM_CORRECTED_COLOR, dash: true,
+            visible: true, seriesIdx: sIdx, category: "corrected",
+          });
+          sIdx++;
+        }
+      }
+
+      if (showMag) {
+        for (let i = 0; i < bands.length; i++) {
+          const pb = result.perBandCorrected[i];
+          if (!pb) continue;
+          const cf = bandColorFamily(bands[i].color);
+          uSeries.push({
+            label: `${bands[i].name} corr+XO`,
+            stroke: cf.corrected, width: 1.5, scale: "mag",
+          });
+          uData.push(pb.mag);
+          legend.push({
+            label: `${bands[i].name} corr+XO`, color: cf.corrected, dash: false,
+            visible: false, seriesIdx: sIdx, category: "corrected",
+          });
+          sIdx++;
         }
       }
 

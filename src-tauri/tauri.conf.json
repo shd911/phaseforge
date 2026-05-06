@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "PhaseForge v0.1.0-b140.3.0.1",
+        "title": "PhaseForge v0.1.0-b140.3.1",
         "width": 1280,
         "height": 800,
         "minWidth": 900,

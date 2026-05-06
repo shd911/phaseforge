@@ -443,6 +443,19 @@ export interface SumEvalResult {
    *  applied — those affect only the Σ aggregate). One entry per input
    *  band, parallel to `bands`; null for bands where targetEnabled=false. */
   perBandTarget: Array<{ mag: number[]; phase: number[] } | null>;
+  /** b140.3.1: Σ Corrected = Σ (measurement + PEQ + cross-section).
+   *  Coherent sum when every contributing band has measurement phase;
+   *  power-sum fallback otherwise (correctedCoherent=false). Null when
+   *  no band has a measurement. */
+  sumCorrectedMag: number[] | null;
+  sumCorrectedPhase: number[] | null;
+  /** Per-band corrected on the common grid (resampled with -200 dB / 0°
+   *  fence outside native range — no extension). Null for bands without
+   *  measurement. */
+  perBandCorrected: Array<{ mag: number[]; phase: number[] } | null>;
+  /** True iff Σ Corrected was computed via coherentSum (all bands had
+   *  phase). False = power-sum fallback (no phase, no polarity). */
+  correctedCoherent: boolean;
 }
 
 export interface SumEvalOptions {
@@ -473,6 +486,54 @@ function buildCommonGrid(bands: BandState[]): number[] {
     fMin = 5; fMax = 40000;
   }
   return buildLogGrid(512, fMin, fMax);
+}
+
+/** Linear interp on log-freq from src grid onto dst grid, with a -200 dB /
+ *  0° fence outside the source range (no extension). */
+function resampleOntoCommon(
+  srcFreq: number[],
+  srcMag: number[],
+  srcPhase: number[] | null,
+  dstFreq: number[],
+): { mag: number[]; phase: number[] | null } | null {
+  if (srcFreq.length < 2) return null;
+  const n = dstFreq.length;
+  const mag = new Array<number>(n);
+  const phase = srcPhase ? new Array<number>(n) : null;
+  const fLo = srcFreq[0], fHi = srcFreq[srcFreq.length - 1];
+  for (let k = 0; k < n; k++) {
+    const f = dstFreq[k];
+    if (f < fLo || f > fHi) {
+      mag[k] = -200;
+      if (phase) phase[k] = 0;
+      continue;
+    }
+    let lo = 0, hi = srcFreq.length - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (srcFreq[mid] <= f) lo = mid; else hi = mid;
+    }
+    const dt = srcFreq[hi] - srcFreq[lo];
+    const frac = dt > 0 ? (f - srcFreq[lo]) / dt : 0;
+    mag[k] = srcMag[lo] + frac * (srcMag[hi] - srcMag[lo]);
+    if (phase && srcPhase) {
+      phase[k] = srcPhase[lo] + frac * (srcPhase[hi] - srcPhase[lo]);
+    }
+  }
+  return { mag, phase };
+}
+
+/** Power sum of magnitudes in dB (no phase). Returns -200 dB for empty bins. */
+function powerSumDb(magsDb: number[][]): number[] {
+  if (magsDb.length === 0) return [];
+  const n = magsDb[0].length;
+  const out = new Array<number>(n);
+  for (let j = 0; j < n; j++) {
+    let acc = 0;
+    for (const m of magsDb) acc += Math.pow(10, (m[j] ?? -200) / 10);
+    out[j] = acc > 0 ? 10 * Math.log10(acc) : -200;
+  }
+  return out;
 }
 
 function coherentSum(
@@ -539,11 +600,75 @@ export async function evaluateSum(
 
   const sum = coherentSum(freq, perBandTargetData);
 
+  // b140.3.1: per-band corrected via evaluateBandFull (gives correctedMag /
+  // correctedPhase with proper Gaussian/subsonic phase reconstruction). We
+  // do NOT pass req.freq — evaluateBandFull builds correctedMag from
+  // measurement.magnitude on measurement.freq, so we resample afterwards.
+  const perBandResults = await Promise.all(
+    bands.map(b => evaluateBandFull({ band: b })),
+  );
+
+  const perBandCorrected: Array<{ mag: number[]; phase: number[] } | null> = [];
+  const correctedDataForSum: Array<
+    { mag: number[]; phase: number[]; sign: 1 | -1; delay: number } | null
+  > = [];
+  let anyMissingPhase = false;
+  let anyCorrected = false;
+
+  for (let i = 0; i < bands.length; i++) {
+    const r = perBandResults[i];
+    if (!r.correctedMag) {
+      perBandCorrected.push(null);
+      correctedDataForSum.push(null);
+      continue;
+    }
+    anyCorrected = true;
+    const resampled = resampleOntoCommon(
+      r.freq, r.correctedMag, r.correctedPhase ?? null, freq,
+    );
+    if (!resampled) {
+      perBandCorrected.push(null);
+      correctedDataForSum.push(null);
+      continue;
+    }
+    const phaseArr = resampled.phase ?? new Array<number>(freq.length).fill(0);
+    perBandCorrected.push({ mag: resampled.mag, phase: phaseArr });
+    if (!resampled.phase) anyMissingPhase = true;
+    correctedDataForSum.push({
+      mag: resampled.mag,
+      phase: phaseArr,
+      sign: bands[i].inverted ? -1 : 1,
+      delay: bands[i].alignmentDelay ?? 0,
+    });
+  }
+
+  let sumCorrectedMag: number[] | null = null;
+  let sumCorrectedPhase: number[] | null = null;
+  let correctedCoherent = true;
+  if (anyCorrected) {
+    if (!anyMissingPhase) {
+      const cs = coherentSum(freq, correctedDataForSum);
+      sumCorrectedMag = cs?.mag ?? null;
+      sumCorrectedPhase = cs?.phase ?? null;
+    } else {
+      const mags = correctedDataForSum
+        .filter((d): d is NonNullable<typeof d> => d !== null)
+        .map(d => d.mag);
+      sumCorrectedMag = mags.length > 0 ? powerSumDb(mags) : null;
+      sumCorrectedPhase = null;
+      correctedCoherent = false;
+    }
+  }
+
   return {
     freq,
     sumTargetMag: sum?.mag ?? null,
     sumTargetPhase: sum?.phase ?? null,
     perBandTarget,
+    sumCorrectedMag,
+    sumCorrectedPhase,
+    perBandCorrected,
+    correctedCoherent,
   };
 }
 
