@@ -1342,6 +1342,10 @@ export default function FrequencyPlot() {
           (u: uPlot) => {
             const dots = activePeqDots;
             if (!dots || dots.dataIndices.size === 0) return;
+            // b140.3.1.6 defensive: dots are band-mode-only. If we somehow
+            // ended up in SUM with stale state, skip rather than draw onto
+            // an unrelated series.
+            if (isSum() || !activeBand()) return;
             const si = dots.seriesIdx;
             if (si >= u.series.length || !(u.series[si] as any).show) return;
             const ctx = u.ctx;
@@ -3354,6 +3358,9 @@ export default function FrequencyPlot() {
     if (sumModeSignal() === "new") {
       return await renderSumModeNew(showPhase, showMag, showTarget);
     }
+    // b140.3.1.6: PEQ dots are a band-mode artefact; clear stale state so
+    // the draw hook doesn't render them onto unrelated SUM series.
+    activePeqDots = null;
     const gen = ++renderGen;
     zoomCenter = 0; // reset before async — will be recalculated from globalRef
     const bands: BandState[] = JSON.parse(JSON.stringify(appState.bands));
@@ -3956,6 +3963,8 @@ export default function FrequencyPlot() {
   // that's intentional (no globalRef/avgRef/zoomCenter magic).
   // ----------------------------------------------------------------
   async function renderSumModeNew(showPhase: boolean, showMag: boolean, showTarget: boolean) {
+    // b140.3.1.6: PEQ dots are band-mode-only — clear before rendering SUM.
+    activePeqDots = null;
     const gen = ++renderGen;
     zoomCenter = 0;
     const bands: BandState[] = JSON.parse(JSON.stringify(appState.bands));
@@ -4070,6 +4079,23 @@ export default function FrequencyPlot() {
         }
       }
 
+      // b140.3.1.6: collect crossover points so handles render and mouse
+      // handlers (drag / dbl-click) work in New SUM, parity with Legacy.
+      const crossovers = getCrossovers();
+      if (result.sumTargetMag) {
+        for (const xo of crossovers) {
+          let bestIdx = 0;
+          let bestDist = Infinity;
+          const logXo = Math.log10(xo.freq);
+          for (let j = 0; j < freq.length; j++) {
+            const d = Math.abs(Math.log10(freq[j]) - logXo);
+            if (d < bestDist) { bestDist = d; bestIdx = j; }
+          }
+          const v = result.sumTargetMag[bestIdx];
+          if (isFinite(v)) xo.dbLevel = v;
+        }
+      }
+
       if (gen !== renderGen) return;
       requestAnimationFrame(() => {
         if (gen !== renderGen) return;
@@ -4079,6 +4105,7 @@ export default function FrequencyPlot() {
           uData,
           hasMeasurements: false,
           legend,
+          crossovers,
         });
       });
     } catch (e) {
