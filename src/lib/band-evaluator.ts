@@ -534,7 +534,7 @@ function limitExcessByWidth(
   hpFreqHz: number | null,
   lpFreqHz: number | null,
 ): number[] {
-  const EXCESS_THRESHOLD = 1.0;
+  const EXCESS_THRESHOLD = 0.1;
   const NARROW_OCT = 1 / 8;
   const WIDE_OCT = 1 / 2;
 

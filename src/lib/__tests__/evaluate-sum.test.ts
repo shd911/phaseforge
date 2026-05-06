@@ -300,17 +300,17 @@ describe("evaluateSum (b140.3.1.2) — width-aware excess limiter", () => {
     }
   }
 
-  it("wide excess (1 octave) clips to target + 1 dB", async () => {
+  it("wide excess (1 octave) clips to target + 0.1 dB", async () => {
     const a = bandWithFilters();
     // Large hump in [500, 1000] (1 oct) — large enough that even after
-    // normalize the excess remains far above 1 dB.
+    // normalize the excess remains far above the threshold.
     setMagInRange(a, 500, 1000, 20);
     const result = await evaluateSum([a]);
     const f = result.freq;
     const mag = result.perBandCorrected[0]!.mag;
     const i700 = f.findIndex(v => v >= 700);
-    // Wide region → clipFactor=1 → corrected = target + 1 dB. target=0.
-    expect(mag[i700]).toBeCloseTo(1, 1);
+    // Wide region → clipFactor=1 → corrected = target + 0.1 dB. target=0.
+    expect(mag[i700]).toBeCloseTo(0.1, 1);
   });
 
   it("narrow peak (≈ 1/16 oct) preserved", async () => {
