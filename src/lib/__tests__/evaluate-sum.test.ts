@@ -277,3 +277,92 @@ describe("evaluateSum (b140.3.1.1) — per-band corrected normalize", () => {
     expect(mag[idx]).toBeCloseTo(0, 4);
   });
 });
+
+describe("evaluateSum (b140.3.1.2) — width-aware excess limiter", () => {
+  function bandWithFilters(): BandState {
+    const b = flatBand("a");
+    b.target.high_pass = {
+      filter_type: "Butterworth", order: 4, freq_hz: 200,
+      shape: null, linear_phase: true, q: null,
+    };
+    b.target.low_pass = {
+      filter_type: "Butterworth", order: 4, freq_hz: 2000,
+      shape: null, linear_phase: true, q: null,
+    };
+    return b;
+  }
+
+  function setMagInRange(b: BandState, fLo: number, fHi: number, value: number) {
+    const f = b.measurement!.freq;
+    const m = (b.measurement as any).magnitude as number[];
+    for (let i = 0; i < f.length; i++) {
+      if (f[i] >= fLo && f[i] <= fHi) m[i] = value;
+    }
+  }
+
+  it("wide excess (1 octave) clips to target + 1 dB", async () => {
+    const a = bandWithFilters();
+    // Large hump in [500, 1000] (1 oct) — large enough that even after
+    // normalize the excess remains far above 1 dB.
+    setMagInRange(a, 500, 1000, 20);
+    const result = await evaluateSum([a]);
+    const f = result.freq;
+    const mag = result.perBandCorrected[0]!.mag;
+    const i700 = f.findIndex(v => v >= 700);
+    // Wide region → clipFactor=1 → corrected = target + 1 dB. target=0.
+    expect(mag[i700]).toBeCloseTo(1, 1);
+  });
+
+  it("narrow peak (≈ 1/16 oct) preserved", async () => {
+    const a = bandWithFilters();
+    // Very narrow hump around 1 kHz — width ≪ 1/8 oct.
+    setMagInRange(a, 990, 1010, 5);
+    const result = await evaluateSum([a]);
+    const f = result.freq;
+    const mag = result.perBandCorrected[0]!.mag;
+    const i1k = f.findIndex(v => v >= 999);
+    // Narrow → clipFactor=0 → peak preserved (offset is tiny since narrow).
+    expect(mag[i1k]).toBeGreaterThan(4);
+  });
+
+  it("medium width (≈ 1/4 oct) soft transition", async () => {
+    const a = bandWithFilters();
+    // 1/4 oct: 1000..1189 Hz. clipFactor = (0.25-0.125)/(0.5-0.125) = 0.333.
+    // Excess +5 → newEx ≈ 5*0.667 + 1*0.333 ≈ 3.67 (offset≈0 because the
+    // hump is small relative to passband).
+    setMagInRange(a, 1000, 1189, 5);
+    const result = await evaluateSum([a]);
+    const f = result.freq;
+    const mag = result.perBandCorrected[0]!.mag;
+    const i1100 = f.findIndex(v => v >= 1090);
+    // Should be clipped down from ~5 toward ~3.67 — strictly between them.
+    expect(mag[i1100]).toBeGreaterThan(2);
+    expect(mag[i1100]).toBeLessThan(4.5);
+  });
+
+  it("excess outside limiter zone (passband ± 1 oct) not clipped", async () => {
+    const a = bandWithFilters();
+    // HP=200, LP=2000 → passband [300,1400], zone [150, 2800].
+    // Hump well outside zone: 30..50 Hz. Should NOT be clipped.
+    setMagInRange(a, 30, 50, 10);
+    const result = await evaluateSum([a]);
+    const f = result.freq;
+    const mag = result.perBandCorrected[0]!.mag;
+    const i40 = f.findIndex(v => v >= 40);
+    // Out-of-zone bins are untouched by the limiter (offset is ~0 because
+    // the hump is outside the normalize passband too).
+    expect(mag[i40]).toBeGreaterThan(8);
+  });
+
+  it("targetEnabled=false → limiter not applied", async () => {
+    const a = bandWithFilters();
+    a.targetEnabled = false;
+    setMagInRange(a, 500, 1000, 20);
+    const result = await evaluateSum([a]);
+    const f = result.freq;
+    const mag = result.perBandCorrected[0]!.mag;
+    const i700 = f.findIndex(v => v >= 700);
+    // No target → no normalize, no limiter → corrected = measurement = 20.
+    expect(mag[i700]).toBeCloseTo(20, 1);
+  });
+});

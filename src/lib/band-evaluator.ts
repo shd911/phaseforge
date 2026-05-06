@@ -523,6 +523,63 @@ function resampleOntoCommon(
   return { mag, phase };
 }
 
+/** b140.3.1.2: width-aware excess limiter. Clips wide regions where
+ *  corrected exceeds target by > 1 dB, leaving narrow peaks (room modes,
+ *  natural resonances) intact. Applied within passband ± 1 octave only.
+ *  Magnitude only — phase untouched. */
+function limitExcessByWidth(
+  freq: number[],
+  corrected: number[],
+  target: number[],
+  hpFreqHz: number | null,
+  lpFreqHz: number | null,
+): number[] {
+  const EXCESS_THRESHOLD = 1.0;
+  const NARROW_OCT = 1 / 8;
+  const WIDE_OCT = 1 / 2;
+
+  const pbLow = hpFreqHz ? hpFreqHz * 1.5 : 20;
+  const pbHigh = lpFreqHz ? lpFreqHz * 0.7 : 20000;
+  const zoneLow = Math.max(20, pbLow / 2);
+  const zoneHigh = Math.min(20000, pbHigh * 2);
+
+  const result = [...corrected];
+
+  const finalize = (start: number, end: number) => {
+    const f0 = freq[start];
+    const f1 = freq[end];
+    const widthOct = f1 > 0 && f0 > 0 ? Math.log2(f1 / f0) : 0;
+    let clipFactor: number;
+    if (widthOct <= NARROW_OCT) clipFactor = 0;
+    else if (widthOct >= WIDE_OCT) clipFactor = 1;
+    else clipFactor = (widthOct - NARROW_OCT) / (WIDE_OCT - NARROW_OCT);
+    if (clipFactor === 0) return;
+    for (let k = start; k <= end; k++) {
+      const ex = corrected[k] - target[k];
+      const newEx = ex * (1 - clipFactor) + EXCESS_THRESHOLD * clipFactor;
+      result[k] = target[k] + newEx;
+    }
+  };
+
+  let regionStart = -1;
+  for (let j = 0; j < freq.length; j++) {
+    const inZone = freq[j] >= zoneLow && freq[j] <= zoneHigh;
+    const isExcess = inZone
+      && isFinite(corrected[j]) && isFinite(target[j])
+      && (corrected[j] - target[j]) > EXCESS_THRESHOLD;
+
+    if (isExcess && regionStart < 0) {
+      regionStart = j;
+    } else if (!isExcess && regionStart >= 0) {
+      finalize(regionStart, j - 1);
+      regionStart = -1;
+    }
+  }
+  if (regionStart >= 0) finalize(regionStart, freq.length - 1);
+
+  return result;
+}
+
 /** Power sum of magnitudes in dB (no phase). Returns -200 dB for empty bins. */
 function powerSumDb(magsDb: number[][]): number[] {
   if (magsDb.length === 0) return [];
@@ -660,6 +717,14 @@ export async function evaluateSum(
           correctedMag = correctedMag.map(v => v + offset);
         }
       }
+
+      // b140.3.1.2: width-aware excess limit — clip wide humps to
+      // target+1 dB, preserve narrow resonances.
+      correctedMag = limitExcessByWidth(
+        freq, correctedMag, pbTarget.mag,
+        bands[i].target.high_pass?.freq_hz ?? null,
+        bands[i].target.low_pass?.freq_hz ?? null,
+      );
     }
 
     const phaseArr = resampled.phase ?? new Array<number>(freq.length).fill(0);
