@@ -421,85 +421,29 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
 }
 
 // ---------------------------------------------------------------------------
-// b139.4c: SUM aggregator. Evaluates each band via evaluateBandFull on a
-// common log-spaced freq grid, then coherently sums target / corrected
-// curves with polarity and alignment_delay phase rotation. The resulting
-// sumMag/sumPhase/correctedSum* are what renderSumMode would draw on the
-// SPL chart; sumIR is the IFFT of the corrected sum (optional).
+// b140.3.0: minimal SUM aggregator — Σ Target only.
+//
+// Coherent sum of per-band target curves on a common log grid. No
+// measurement, no corrected, no IR, no globalRef/avgRef magic. Levels
+// come straight from each band's `target.reference_level_db`. The previous
+// b140.2.x pipeline tried to mimic the legacy renderSumMode and accumulated
+// 11 fix iterations without parity; this restart drops legacy mimicry and
+// exposes Σ Target as a clean coherent sum. Σ Measurement / Σ Corrected /
+// SUM IR will be added back in later sub-promts (b140.3.1, b140.3.2, …).
 // ---------------------------------------------------------------------------
 export interface SumEvalResult {
   freq: number[];
-  /** Per-band BandEvalResult resampled onto `freq`. Phase is unchanged
-   *  (each band's evalRes is computed on its own grid, then results merged). */
-  perBand: BandEvalResult[];
-  /** Coherent sum of perBand[i].combinedTargetMag/Phase with polarity +
-   *  alignment_delay phase rotation. Null when no band has a target. */
+  /** Coherent sum of per-band target curves (HP × LP × shelves × tilt
+   *  × subsonic, with Gaussian/subsonic min-phase reconstruction) with
+   *  polarity and alignment_delay phase rotation. Null when no band has
+   *  targetEnabled=true. */
   sumTargetMag: number[] | null;
   sumTargetPhase: number[] | null;
-  /** Sum of perBand[i].correctedMag/Phase. Coherent (re/im, polarity-aware)
-   *  when every contributing band has a phase; otherwise b140.2.0.5 falls
-   *  back to a power sum (10·log10(Σ 10^(m/10)), polarity ignored, phase
-   *  null) for parity with the legacy renderSumMode. Null when no band has
-   *  a measurement. */
-  sumCorrectedMag: number[] | null;
-  sumCorrectedPhase: number[] | null;
-  /** b140.2.1.1: Σ Measurement (per-band measurementMag/Phase summed).
-   *  Same coherent/incoherent semantics as the corrected sum. Null when
-   *  no band has a measurement. */
-  sumMeasurementMag: number[] | null;
-  sumMeasurementPhase: number[] | null;
-  /** b140.2.0.5: true → coherent corrected sum; false → power-sum fallback
-   *  (sumCorrectedPhase will be null in that case). Always true when there
-   *  is no corrected sum to compute. */
-  coherent: boolean;
-  /** b140.2.1.1: separate coherent flag for Σ Measurement. Same semantics
-   *  as `coherent`. */
-  coherentMeasurement: boolean;
-  /** b140.2.1.5: per-band data resampled onto the common grid, with the
-   *  out-of-range fence applied (b140.2.1.4). Lengths always equal
-   *  `freq.length`, so UI plots can use a single x axis without per-band
-   *  grid mismatches. Bins outside a band's native freq range carry
-   *  −200 dB and 0° (i.e. effectively silent), so the curves only appear
-   *  where the band actually has data. */
-  perBandResampled: Array<{
-    measurementMag: number[] | null;
-    measurementPhase: number[] | null;
-    targetMag: number[] | null;
-    targetPhase: number[] | null;
-    correctedMag: number[] | null;
-    correctedPhase: number[] | null;
-  }>;
-  /** b140.2.2 Fix 4: project-wide reference SPL (max passband-avg
-   *  across raw measurements). UI subtracts this from every magnitude
-   *  curve so 0 dBr aligns with the loudest band. */
-  globalRef: number;
-  /** b140.2.2 Fix 1: average of enabled-target bands' refLevel. Σ target
-   *  is shifted by this so its absolute SPL matches what the user expects
-   *  on a dB SPL plot. */
-  avgRef: number;
-  /** Optional IR of the corrected sum (compute_impulse on summed mag/phase). */
-  ir?: { time: number[]; impulse: number[]; step: number[] };
-  /** b140.2.2 Fix 3: structured Σ IR (compute_impulse on each summed
-   *  curve on the SUM IR grid — union of band ranges, ≥ 2048 pts, no
-   *  20-20k extension). Populated only when SumEvalOptions.includeSumIr
-   *  is true. */
-  sumIr?: {
-    measurement?: { time: number[]; impulse: number[]; step: number[] };
-    target?: { time: number[]; impulse: number[]; step: number[] };
-    corrected?: { time: number[]; impulse: number[]; step: number[] };
-  };
 }
 
 export interface SumEvalOptions {
+  /** Override the common freq grid. */
   freq?: number[];
-  includeIr?: boolean;
-  /** When true the per-band combined target is normalised (peak = 0 dB) before
-   *  the coherent sum — matches how renderSumMode treats target IR aggregation. */
-  normalizeTargetPerBand?: boolean;
-  /** b140.2.2 Fix 3: when true, evaluateSum builds its own SUM IR grid
-   *  (union of band ranges, ≥ 2048 pts, no 20-20k extension) and emits
-   *  ir.measurement / ir.target / ir.corrected via compute_impulse. */
-  includeSumIr?: boolean;
 }
 
 function buildLogGrid(n: number, fMin: number, fMax: number): number[] {
@@ -511,150 +455,25 @@ function buildLogGrid(n: number, fMin: number, fMax: number): number[] {
   return out;
 }
 
-/** b140.2.1.7: log-linear slope (dB / octave) over a tail window of the
- *  source data. Used for trend extension when no target shape is supplied. */
-function tailSlope(
-  srcFreq: number[],
-  srcMag: number[],
-  fEnd: number,
-  fromLow: boolean,
-): number {
-  const xs: number[] = [];
-  const ys: number[] = [];
-  for (let i = 0; i < srcFreq.length; i++) {
-    const inWindow = fromLow ? srcFreq[i] <= fEnd : srcFreq[i] >= fEnd;
-    if (inWindow) {
-      xs.push(Math.log2(srcFreq[i]));
-      ys.push(srcMag[i]);
-    }
+/** Common grid: union of band measurement ranges, 512 log-spaced points.
+ *  Falls back to 5–40000 Hz when no band has a measurement. */
+function buildCommonGrid(bands: BandState[]): number[] {
+  let fMin = Infinity, fMax = -Infinity;
+  for (const b of bands) {
+    if (!b.measurement || b.measurement.freq.length === 0) continue;
+    const f = b.measurement.freq;
+    if (f[0] < fMin) fMin = f[0];
+    if (f[f.length - 1] > fMax) fMax = f[f.length - 1];
   }
-  if (xs.length < 2) return 0;
-  let mx = 0, my = 0;
-  for (let i = 0; i < xs.length; i++) { mx += xs[i]; my += ys[i]; }
-  mx /= xs.length; my /= ys.length;
-  let num = 0, den = 0;
-  for (let i = 0; i < xs.length; i++) {
-    const dx = xs[i] - mx;
-    num += dx * (ys[i] - my);
-    den += dx * dx;
+  if (!isFinite(fMin) || !isFinite(fMax)) {
+    fMin = 5; fMax = 40000;
   }
-  return den > 0 ? num / den : 0;
-}
-
-function nearestIdx(arr: number[], target: number): number {
-  let best = 0;
-  let bestD = Infinity;
-  for (let i = 0; i < arr.length; i++) {
-    const d = Math.abs(arr[i] - target);
-    if (d < bestD) { bestD = d; best = i; }
-  }
-  return best;
-}
-
-export interface ResampleExtensionOptions {
-  /** Target curve magnitude on the targetFreq grid. When supplied, bins
-   *  outside the source's native range are filled with this curve, offset
-   *  so target ≡ measurement at the native boundary. Lets a band-limited
-   *  measurement be physically extended through its design target (e.g.
-   *  Gaussian HP rolloff for a tweeter measured only above 1 kHz). */
-  extensionTargetMag?: number[];
-  /** Fallback when extensionTargetMag is absent: linear extrapolation in
-   *  log2(freq) space using the slope of the last ~1/4 octave of source
-   *  data. Hits the right shape for full-range drivers without target. */
-  fallbackToTrend?: boolean;
-}
-
-export async function resampleOntoGrid(
-  srcFreq: number[],
-  srcMag: number[] | null,
-  srcPhase: number[] | null,
-  targetFreq: number[],
-  options?: ResampleExtensionOptions,
-): Promise<{ mag: number[] | null; phase: number[] | null }> {
-  if (srcMag === null) return { mag: null, phase: null };
-  // interpolate_log handles both mag + phase in one call (phase optional).
-  const [, mag, phase] = await invoke<[number[], number[], number[] | null]>(
-    "interpolate_log",
-    {
-      freq: srcFreq, magnitude: srcMag, phase: srcPhase,
-      nPoints: targetFreq.length,
-      fMin: targetFreq[0], fMax: targetFreq[targetFreq.length - 1],
-    },
-  );
-
-  // b140.2.1.4 / .7: Rust's interp_single clamps to boundary values when
-  // the query freq is outside the source range. For SUM aggregation we
-  // replace those with a physically motivated extension:
-  //   • extensionTargetMag (offset so target meets meas at boundary), or
-  //   • log-linear trend extrapolation from the tail, or
-  //   • −200 dB silence fence (default — b140.2.1.4 behaviour).
-  if (srcFreq.length === 0) return { mag, phase: phase ?? null };
-  const fLo = srcFreq[0];
-  const fHi = srcFreq[srcFreq.length - 1];
-  // Math.exp(Math.log(x)) drifts ~4 ULPs in IEEE 754 — 1 ppb tolerance
-  // keeps boundary bins inside while still catching genuine OOB queries.
-  const tol = 1e-9;
-  const lo = fLo * (1 - tol);
-  const hi = fHi * (1 + tol);
-
-  // Pre-compute target offsets so target shape meets measurement at the
-  // native boundary. Without this the extension would jump by whatever
-  // mismatch existed between target's analytical SPL and the measured one.
-  let targetOffsetLo = 0, targetOffsetHi = 0;
-  if (options?.extensionTargetMag) {
-    const lo_idx = nearestIdx(targetFreq, fLo);
-    const hi_idx = nearestIdx(targetFreq, fHi);
-    targetOffsetLo = srcMag[0] - options.extensionTargetMag[lo_idx];
-    targetOffsetHi = srcMag[srcMag.length - 1] - options.extensionTargetMag[hi_idx];
-  }
-
-  // Pre-compute tail slopes for trend extension. Window = ~1/4 octave at
-  // each end (factor 2^0.25 ≈ 1.189).
-  let lowSlope = 0, highSlope = 0;
-  if (options?.fallbackToTrend) {
-    lowSlope = tailSlope(srcFreq, srcMag, fLo * 1.189, true);
-    highSlope = tailSlope(srcFreq, srcMag, fHi / 1.189, false);
-  }
-
-  const ext = mag.map((v, i) => {
-    const f = targetFreq[i];
-    if (f >= lo && f <= hi) return v;
-    if (f < lo) {
-      if (options?.extensionTargetMag) {
-        return options.extensionTargetMag[i] + targetOffsetLo;
-      }
-      if (options?.fallbackToTrend) {
-        return srcMag[0] + lowSlope * Math.log2(f / fLo);
-      }
-      return -200;
-    }
-    // f > hi
-    if (options?.extensionTargetMag) {
-      return options.extensionTargetMag[i] + targetOffsetHi;
-    }
-    if (options?.fallbackToTrend) {
-      return srcMag[srcMag.length - 1] + highSlope * Math.log2(f / fHi);
-    }
-    return -200;
-  });
-
-  // Phase: out-of-range bins still get phase=0 — no physical meaning to
-  // extrapolate phase outside measurement. Coherent sum sees the
-  // extended magnitude with phase 0; that contributes a real-axis vector
-  // which is the most neutral choice.
-  const fencedPhase = phase
-    ? phase.map((v, i) => {
-        const f = targetFreq[i];
-        return f < lo || f > hi ? 0 : v;
-      })
-    : null;
-  return { mag: ext, phase: fencedPhase };
+  return buildLogGrid(512, fMin, fMax);
 }
 
 function coherentSum(
   freq: number[],
   bandsData: Array<{ mag: number[]; phase: number[]; sign: 1 | -1; delay: number } | null>,
-  refOffset?: number,
 ): { mag: number[]; phase: number[] } | null {
   const n = freq.length;
   const re = new Float64Array(n);
@@ -671,472 +490,55 @@ function coherentSum(
     }
   }
   if (!any) return null;
-  const off = refOffset ?? 0;
   const mag = new Array(n);
   const phase = new Array(n);
   for (let j = 0; j < n; j++) {
     const amplitude = Math.sqrt(re[j] * re[j] + im[j] * im[j]);
-    mag[j] = amplitude > 0 ? 20 * Math.log10(amplitude) + off : -200;
+    mag[j] = amplitude > 0 ? 20 * Math.log10(amplitude) : -200;
     phase[j] = Math.atan2(im[j], re[j]) * 180 / Math.PI;
   }
   return { mag, phase };
-}
-
-/** b140.2.1.3: project-wide reference level — average passband (200..2000 Hz)
- *  of the LOUDEST band. Used by evaluateSum to align every band's target to
- *  the same SPL baseline; mirrors renderSumMode's `globalRef`. */
-function passbandAvgDb(freq: number[], mag: number[], fLo: number, fHi: number): number | null {
-  let sum = 0;
-  let n = 0;
-  for (let i = 0; i < freq.length; i++) {
-    if (freq[i] >= fLo && freq[i] <= fHi) {
-      sum += mag[i];
-      n++;
-    }
-  }
-  return n > 0 ? sum / n : null;
 }
 
 export async function evaluateSum(
   bands: BandState[],
   options?: SumEvalOptions,
 ): Promise<SumEvalResult> {
-  // b140.2.1.3 step A: project-wide reference level. max passband-avg over
-  // raw measurements (200..2000 Hz) — multi-way fix so a tweeter's target
-  // doesn't sit 30 dB below a woofer's. Falls back to 0 dB when no band
-  // has a measurement (the standalone-target case).
-  let globalRef: number | undefined;
-  for (const b of bands) {
-    if (!b.measurement) continue;
-    const avg = passbandAvgDb(b.measurement.freq, b.measurement.magnitude, 200, 2000);
-    if (avg === null) continue;
-    if (globalRef === undefined || avg > globalRef) {
-      globalRef = avg;
+  const freq = options?.freq ?? buildCommonGrid(bands);
+
+  const perBandTargetData: Array<
+    { mag: number[]; phase: number[]; sign: 1 | -1; delay: number } | null
+  > = [];
+
+  for (const band of bands) {
+    if (!band.targetEnabled) {
+      perBandTargetData.push(null);
+      continue;
     }
+    const target = JSON.parse(JSON.stringify(band.target));
+    const response = await invoke<TargetResponse>("evaluate_target", {
+      target, freq,
+    });
+    const phase = await reconstructTargetPhase(
+      freq, response.phase, band.target.high_pass, band.target.low_pass,
+    );
+    perBandTargetData.push({
+      mag: response.magnitude,
+      phase,
+      sign: band.inverted ? -1 : 1,
+      delay: band.alignmentDelay ?? 0,
+    });
   }
 
-  // 1. Per-band evaluation. refLevelOverride aligns each band's target to
-  //    globalRef (when computable) so the coherent sum sees consistent
-  //    absolute SPL across the project.
-  const perBand = await Promise.all(
-    bands.map(b => evaluateBandFull({
-      band: b,
-      refLevelOverride: globalRef,
-    })),
-  );
-
-  // 2. Build common log grid: union of band ranges, point count = max.
-  let fMin = Infinity, fMax = -Infinity, nMax = 512;
-  for (const r of perBand) {
-    const f = r.freq;
-    if (f.length === 0) continue;
-    if (f[0] < fMin) fMin = f[0];
-    if (f[f.length - 1] > fMax) fMax = f[f.length - 1];
-    if (f.length > nMax) nMax = f.length;
-  }
-  if (!isFinite(fMin) || !isFinite(fMax)) {
-    fMin = 20; fMax = 20000;
-  }
-  const freq = options?.freq ?? buildLogGrid(nMax, fMin, fMax);
-
-  // 3. Resample target / corrected / measurement onto the common grid per band.
-  const targetData: Array<{ mag: number[]; phase: number[]; sign: 1 | -1; delay: number } | null> = [];
-  const correctedData: Array<{ mag: number[]; phase: number[]; sign: 1 | -1; delay: number } | null> = [];
-  const measurementData: Array<{ mag: number[]; phase: number[]; sign: 1 | -1; delay: number } | null> = [];
-  // b140.2.0.5/.1.1: collect per-band magnitudes separately for the
-  // power-sum fallback. The fallback is triggered when any band contributes
-  // mag without phase — in that case ALL bands' mags participate, polarity
-  // ignored. Mirrored for corrected and measurement (target is always
-  // coherent because targetPhase is reconstructed analytically).
-  const correctedMagsForFallback: number[][] = [];
-  let anyCorrectedMagWithoutPhase = false;
-  const measurementMagsForFallback: number[][] = [];
-  let anyMeasurementMagWithoutPhase = false;
-  // b140.2.1.5: per-band data on the common grid for UI plotting. Same
-  // resampled arrays the aggregator sees, so curves never get stretched
-  // across the wrong x range.
-  const perBandResampled: SumEvalResult["perBandResampled"] = [];
-  for (let i = 0; i < bands.length; i++) {
-    const r = perBand[i];
-    const sign: 1 | -1 = bands[i].inverted ? -1 : 1;
-    const delay = bands[i].alignmentDelay ?? 0;
-    // Resampled values for UI consumption — populated alongside the
-    // aggregator-targeted resampled arrays so we never resample twice.
-    const ui: SumEvalResult["perBandResampled"][number] = {
-      measurementMag: null, measurementPhase: null,
-      targetMag: null, targetPhase: null,
-      correctedMag: null, correctedPhase: null,
-    };
-
-    // b140.2.1.7: target evaluated analytically on the COMMON grid (with
-    // globalRef shift). This is the physically correct extension shape
-    // for everything outside a band's native measurement range — gives
-    // the supertweeter its HP rolloff below 1 kHz instead of a flat
-    // boundary clamp or a hard −200 dB step.
-    let extensionTargetMag: number[] | undefined;
-    if (bands[i].targetEnabled) {
-      const refShift = globalRef ?? 0;
-      const tc = bands[i].target;
-      const tcWithRef = {
-        ...tc,
-        reference_level_db: (tc.reference_level_db ?? 0) + refShift,
-      };
-      try {
-        const resp = await invoke<TargetResponse>(
-          "evaluate_target",
-          { target: tcWithRef, freq },
-        );
-        extensionTargetMag = resp.magnitude;
-      } catch (_) {
-        extensionTargetMag = undefined;
-      }
-    }
-
-    let resampledTargetMag: number[] | null = null;
-    if (r.combinedTargetMag && r.combinedTargetPhase) {
-      let tMag = r.combinedTargetMag;
-      const tPhase = r.combinedTargetPhase;
-      const resampled = await resampleOntoGrid(
-        r.freq, tMag, tPhase, freq,
-        // Target's own extension uses target shape (smooths its rolloff
-        // through the analytical curve below/above the band's measurement
-        // grid), with trend fallback if no target is available.
-        { extensionTargetMag, fallbackToTrend: true },
-      );
-      if (resampled.mag && resampled.phase) {
-        let mag = resampled.mag;
-        if (options?.normalizeTargetPerBand) {
-          let peak = -Infinity;
-          for (const v of mag) if (v > peak) peak = v;
-          mag = mag.map(v => v - peak);
-        }
-        resampledTargetMag = mag;
-        ui.targetMag = mag;
-        ui.targetPhase = resampled.phase;
-        // b140.2.2 Fix 1: pass band's mag minus its refLevel to the
-        // coherent sum, then add avgRef back globally. This matches
-        // legacy renderSumMode and avoids double-counting refLevel
-        // (combinedTargetMag already has refLevel baked in via
-        // evaluate_target with reference_level_db += refLevel).
-        const normMag = mag.map(v => v - r.refLevel);
-        targetData.push({ mag: normMag, phase: resampled.phase, sign, delay });
-      } else {
-        targetData.push(null);
-      }
-    } else {
-      targetData.push(null);
-    }
-    if (r.correctedMag) {
-      const resampled = await resampleOntoGrid(
-        r.freq, r.correctedMag, r.correctedPhase ?? null, freq,
-        { extensionTargetMag, fallbackToTrend: true },
-      );
-      if (resampled.mag) {
-        // b140.2.1.3 step B: per-band corrOffset. Legacy renderSumMode
-        // shifts each band's corrected curve so its 200..2000 Hz
-        // passband-average matches its target's. We do the same here so
-        // the coherent / power-sum aggregation sees consistent SPL across
-        // bands (parity with renderSumMode).
-        let corrected = resampled.mag;
-        if (resampledTargetMag) {
-          let tAcc = 0, cAcc = 0, count = 0;
-          for (let j = 0; j < freq.length; j++) {
-            if (freq[j] < 200 || freq[j] > 2000) continue;
-            const tv = resampledTargetMag[j];
-            const cv = corrected[j];
-            if (Number.isFinite(tv) && Number.isFinite(cv)) {
-              tAcc += tv;
-              cAcc += cv;
-              count++;
-            }
-          }
-          if (count > 0) {
-            const offset = (tAcc - cAcc) / count;
-            if (Math.abs(offset) > 0.01) {
-              corrected = corrected.map(v => v + offset);
-            }
-          }
-        }
-        correctedMagsForFallback.push(corrected);
-        ui.correctedMag = corrected;
-        if (r.correctedPhase && resampled.phase) {
-          ui.correctedPhase = resampled.phase;
-          correctedData.push({ mag: corrected, phase: resampled.phase, sign, delay });
-        } else {
-          // Mag-only contributor — coherent sum cannot include it; mark to
-          // trigger the power-sum fallback below.
-          anyCorrectedMagWithoutPhase = true;
-          correctedData.push(null);
-        }
-      } else {
-        correctedData.push(null);
-      }
-    } else {
-      correctedData.push(null);
-    }
-    if (r.measurementMag) {
-      const resampled = await resampleOntoGrid(
-        r.freq, r.measurementMag, r.measurementPhase ?? null, freq,
-        { extensionTargetMag, fallbackToTrend: true },
-      );
-      if (resampled.mag) {
-        measurementMagsForFallback.push(resampled.mag);
-        ui.measurementMag = resampled.mag;
-        if (r.measurementPhase && resampled.phase) {
-          ui.measurementPhase = resampled.phase;
-          measurementData.push({ mag: resampled.mag, phase: resampled.phase, sign, delay });
-        } else {
-          anyMeasurementMagWithoutPhase = true;
-          measurementData.push(null);
-        }
-      } else {
-        measurementData.push(null);
-      }
-    } else {
-      measurementData.push(null);
-    }
-    perBandResampled.push(ui);
-  }
-
-  // 4. Sum. Power-sum fallback shared between corrected and measurement.
-  const powerSum = (mags: number[][]): number[] => {
-    const n = freq.length;
-    const out = new Array<number>(n);
-    for (let j = 0; j < n; j++) {
-      let acc = 0;
-      for (const m of mags) acc += Math.pow(10, (m[j] ?? -200) / 10);
-      out[j] = acc > 0 ? 10 * Math.log10(acc) : -200;
-    }
-    return out;
-  };
-
-  // b140.2.2 Fix 1: avgRef = mean of enabled-target bands' refLevel.
-  // Σ target adds avgRef back so its absolute SPL matches what each band's
-  // target carries (legacy renderSumMode adds it post-coherent). Σ corrected
-  // and Σ measurement do NOT — they live at their own measured SPL.
-  let avgRef = 0;
-  {
-    let acc = 0, count = 0;
-    for (let i = 0; i < bands.length; i++) {
-      if (bands[i].targetEnabled && perBand[i].combinedTargetMag) {
-        acc += perBand[i].refLevel;
-        count++;
-      }
-    }
-    if (count > 0) avgRef = acc / count;
-  }
-
-  const targetSum = coherentSum(freq, targetData, avgRef);
-
-  let sumCorrectedMag: number[] | null;
-  let sumCorrectedPhase: number[] | null;
-  let coherent: boolean;
-  if (correctedMagsForFallback.length === 0) {
-    sumCorrectedMag = null;
-    sumCorrectedPhase = null;
-    coherent = true;
-  } else if (anyCorrectedMagWithoutPhase) {
-    sumCorrectedMag = powerSum(correctedMagsForFallback);
-    sumCorrectedPhase = null;
-    coherent = false;
-    // b140.2.2 Fix 2: power-sum corrected loses absolute SPL relative to
-    // target (per-band corrOffset doesn't apply — phase-less bands are
-    // mag-only). Shift the entire curve so its mean matches target's in
-    // the adaptive passband (target peak − 20 dB and above), where target
-    // actually has signal. Mirrors legacy renderSumMode's offset block.
-    if (sumCorrectedMag && targetSum?.mag) {
-      let targetPeak = -Infinity;
-      for (let j = 0; j < freq.length; j++) {
-        const v = targetSum.mag[j];
-        if (Number.isFinite(v) && v > targetPeak) targetPeak = v;
-      }
-      // Skip post-shift when the target sum is in a cancellation regime
-      // (e.g. polarity-inverted bands) — pulling corrected down to a
-      // degenerate target peak would destroy real signal. Real Σ Target
-      // peaks are typically ≥ 0 dBr; a threshold of −50 dB cleanly
-      // separates physical sums from cancellation residue.
-      if (Number.isFinite(targetPeak) && targetPeak > -50) {
-        const threshold = targetPeak - 20;
-        let dSum = 0, dN = 0;
-        for (let j = 0; j < freq.length; j++) {
-          const t = targetSum.mag[j];
-          const c = sumCorrectedMag[j];
-          if (!Number.isFinite(t) || !Number.isFinite(c)) continue;
-          if (t < threshold) continue;
-          if (c < -150) continue;
-          dSum += t - c;
-          dN++;
-        }
-        if (dN > 0) {
-          const off = dSum / dN;
-          if (Math.abs(off) > 0.01) {
-            sumCorrectedMag = sumCorrectedMag.map(v => v + off);
-          }
-        }
-      }
-    }
-  } else {
-    const cs = coherentSum(freq, correctedData);
-    sumCorrectedMag = cs?.mag ?? null;
-    sumCorrectedPhase = cs?.phase ?? null;
-    coherent = true;
-  }
-
-  let sumMeasurementMag: number[] | null;
-  let sumMeasurementPhase: number[] | null;
-  let coherentMeasurement: boolean;
-  if (measurementMagsForFallback.length === 0) {
-    sumMeasurementMag = null;
-    sumMeasurementPhase = null;
-    coherentMeasurement = true;
-  } else if (anyMeasurementMagWithoutPhase) {
-    sumMeasurementMag = powerSum(measurementMagsForFallback);
-    sumMeasurementPhase = null;
-    coherentMeasurement = false;
-  } else {
-    const cs = coherentSum(freq, measurementData);
-    sumMeasurementMag = cs?.mag ?? null;
-    sumMeasurementPhase = cs?.phase ?? null;
-    coherentMeasurement = true;
-  }
-
-  // 5. Optional IR for the corrected sum. Skipped when the power-sum
-  //    fallback fires — there is no phase to feed into compute_impulse.
-  let ir: SumEvalResult["ir"];
-  if (options?.includeIr && coherent && sumCorrectedMag && sumCorrectedPhase) {
-    try {
-      const sr = bands.find(b => b.measurement)?.measurement?.sample_rate ?? 48000;
-      const r = await invoke<{ time: number[]; impulse: number[]; step: number[] }>(
-        "compute_impulse",
-        { freq, magnitude: sumCorrectedMag, phase: sumCorrectedPhase, sampleRate: sr },
-      );
-      ir = { time: r.time, impulse: r.impulse, step: r.step };
-    } catch (_) {}
-  }
-
-  // 6. b140.2.2 Fix 3: structured Σ IR. Separate grid from the SPL
-  //    common grid: union of bands' native ranges, no 20-20k extension,
-  //    ≥ 2048 points so the IFFT has enough resolution. Per-band: resample
-  //    each measurement / target / corrected onto irFreq with target-shape
-  //    extension + trend fallback, normalise to 0 dB peak, apply polarity
-  //    + alignment_delay phase rotation, coherent-sum, then compute_impulse.
-  let sumIr: SumEvalResult["sumIr"];
-  if (options?.includeSumIr) {
-    let irMin = Infinity, irMax = -Infinity, irPts = 2048;
-    for (const r of perBand) {
-      if (!r.measurementMag) continue;
-      const f = r.freq;
-      if (f.length === 0) continue;
-      if (f[0] < irMin) irMin = f[0];
-      if (f[f.length - 1] > irMax) irMax = f[f.length - 1];
-      if (f.length > irPts) irPts = f.length;
-    }
-    if (Number.isFinite(irMin) && Number.isFinite(irMax)) {
-      const irFreq = buildLogGrid(irPts, irMin, irMax);
-      const sr = bands.find(b => b.measurement)?.measurement?.sample_rate ?? 48000;
-
-      // Helper: per-band resample → 0 dB peak normalise → polarity + delay.
-      const buildIrEntries = async (
-        kind: "measurement" | "target" | "corrected",
-      ): Promise<Array<{ mag: number[]; phase: number[]; sign: 1 | -1; delay: number } | null>> => {
-        const out: Array<{ mag: number[]; phase: number[]; sign: 1 | -1; delay: number } | null> = [];
-        for (let i = 0; i < bands.length; i++) {
-          const r = perBand[i];
-          let srcMag: number[] | null = null;
-          let srcPhase: number[] | null = null;
-          if (kind === "measurement") {
-            srcMag = r.measurementMag;
-            srcPhase = r.measurementPhase ?? null;
-          } else if (kind === "target") {
-            if (!bands[i].targetEnabled) { out.push(null); continue; }
-            srcMag = r.combinedTargetMag;
-            srcPhase = r.combinedTargetPhase ?? null;
-          } else {
-            srcMag = r.correctedMag;
-            srcPhase = r.correctedPhase ?? null;
-          }
-          if (!srcMag || !srcPhase) { out.push(null); continue; }
-          // Build per-band target on irFreq for OOB extension.
-          let extension: number[] | undefined;
-          if (bands[i].targetEnabled) {
-            const tc = bands[i].target;
-            const tcWithRef = {
-              ...tc,
-              reference_level_db: (tc.reference_level_db ?? 0) + (globalRef ?? 0),
-            };
-            try {
-              const resp = await invoke<TargetResponse>(
-                "evaluate_target",
-                { target: tcWithRef, freq: irFreq },
-              );
-              extension = resp.magnitude;
-            } catch (_) {}
-          }
-          const resampled = await resampleOntoGrid(
-            r.freq, srcMag, srcPhase, irFreq,
-            { extensionTargetMag: extension, fallbackToTrend: true },
-          );
-          if (!resampled.mag || !resampled.phase) { out.push(null); continue; }
-          // Normalise to 0 dB peak so each band contributes equally —
-          // legacy SUM IR convention.
-          let peak = -Infinity;
-          for (const v of resampled.mag) if (v > peak) peak = v;
-          const off = Number.isFinite(peak) ? -peak : 0;
-          const normMag = resampled.mag.map(v => v + off);
-          out.push({
-            mag: normMag,
-            phase: resampled.phase,
-            sign: bands[i].inverted ? -1 : 1,
-            delay: bands[i].alignmentDelay ?? 0,
-          });
-        }
-        return out;
-      };
-
-      const computeImpulse = async (mag: number[], phase: number[]) => {
-        try {
-          const r = await invoke<{ time: number[]; impulse: number[]; step: number[] }>(
-            "compute_impulse",
-            { freq: irFreq, magnitude: mag, phase, sampleRate: sr },
-          );
-          return { time: r.time, impulse: r.impulse, step: r.step };
-        } catch (_) {
-          return undefined;
-        }
-      };
-
-      const measEntries = await buildIrEntries("measurement");
-      const tgtEntries = await buildIrEntries("target");
-      const corrEntries = await buildIrEntries("corrected");
-      const measSum = coherentSum(irFreq, measEntries);
-      const tgtSum = coherentSum(irFreq, tgtEntries);
-      const corrSum = coherentSum(irFreq, corrEntries);
-      sumIr = {
-        measurement: measSum ? await computeImpulse(measSum.mag, measSum.phase) : undefined,
-        target: tgtSum ? await computeImpulse(tgtSum.mag, tgtSum.phase) : undefined,
-        corrected: corrSum ? await computeImpulse(corrSum.mag, corrSum.phase) : undefined,
-      };
-    }
-  }
+  const sum = coherentSum(freq, perBandTargetData);
 
   return {
     freq,
-    perBand,
-    sumTargetMag: targetSum?.mag ?? null,
-    sumTargetPhase: targetSum?.phase ?? null,
-    sumCorrectedMag,
-    sumCorrectedPhase,
-    sumMeasurementMag,
-    sumMeasurementPhase,
-    coherent,
-    coherentMeasurement,
-    perBandResampled,
-    globalRef: globalRef ?? 0,
-    avgRef,
-    ir,
-    sumIr,
+    sumTargetMag: sum?.mag ?? null,
+    sumTargetPhase: sum?.phase ?? null,
   };
 }
+
 
 export function createBandEvalResource(
   band: () => BandState,

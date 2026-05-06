@@ -3946,18 +3946,16 @@ export default function FrequencyPlot() {
   }
 
   // ----------------------------------------------------------------
-  // b140.2.1 / b140.2.1.1: SUM rendering via evaluateSum (parallel to
-  // legacy). Emits the same {uSeries, uData, legend} shape renderChart
-  // consumes, AND populates per-band entries for the SUM legend matrix
-  // (Σ + each band column for measurement / target / corrected).
+  // b140.3.0: SUM rendering via evaluateSum — Σ Target only. No Σ
+  // measurement / Σ corrected / per-band overlays / IR. They will return
+  // in subsequent sub-promts (b140.3.1, …) once the minimal pipeline is
+  // proven against real projects.
   //
-  // Legend labels follow the legacy convention so findCellEntry maps
-  // them into the matrix without changes:
-  //   Σ measurement → "Σ meas"          per-band → bands[i].name
-  //   Σ target      → "Σ target"        per-band → bands[i].name + " tgt"
-  //   Σ corrected   → "Σ corrected"     per-band → bands[i].name + " corr+XO"
+  // Note: levels are absolute SPL straight from each band's
+  // target.reference_level_db. May differ visually from Legacy SUM —
+  // that's intentional (no globalRef/avgRef/zoomCenter magic).
   // ----------------------------------------------------------------
-  async function renderSumModeNew(showPhase: boolean, showMag: boolean, showTarget: boolean) {
+  async function renderSumModeNew(showPhase: boolean, _showMag: boolean, showTarget: boolean) {
     const gen = ++renderGen;
     zoomCenter = 0;
     const bands: BandState[] = JSON.parse(JSON.stringify(appState.bands));
@@ -3970,52 +3968,15 @@ export default function FrequencyPlot() {
       const uData: number[][] = [freq];
       const legend: LegendEntry[] = [];
       let sIdx = 1;
-      // b140.2.2 Fix 4: shift every magnitude curve by −globalRef so the
-      // SPL plot is rendered in dBr (0 dBr = the loudest band's
-      // passband-avg). Phase curves are unchanged.
-      const dbShift = result.globalRef ?? 0;
-      zoomCenter = 0; // post-shift center
-      const shift = (m: number[] | null | undefined): number[] | null =>
-        m ? m.map(v => v - dbShift) : null;
 
-      // ----- Σ aggregates (visible by default — match legacy defaults) -----
-
-      // Σ Measurement (b140.2.1.1).
-      if (showMag && result.sumMeasurementMag) {
-        const incoh = !result.coherentMeasurement;
-        uSeries.push({
-          label: incoh ? "Σ meas (New, incoh)" : "Σ meas (New)",
-          stroke: SUM_MEAS_COLOR, width: 1.5, scale: "mag",
-        });
-        uData.push(shift(result.sumMeasurementMag)!);
-        legend.push({
-          label: "Σ meas", color: SUM_MEAS_COLOR, dash: false,
-          visible: true, seriesIdx: sIdx, category: "measurement",
-        });
-        sIdx++;
-        if (showPhase && result.coherentMeasurement && result.sumMeasurementPhase) {
-          uSeries.push({
-            label: "Σ meas ° (New)", stroke: SUM_MEAS_COLOR,
-            width: 1, dash: [6, 3], scale: "phase",
-          });
-          uData.push(wrapPhase(result.sumMeasurementPhase));
-          legend.push({
-            label: "Σ meas °", color: SUM_MEAS_COLOR, dash: true,
-            visible: true, seriesIdx: sIdx, category: "measurement",
-          });
-          sIdx++;
-        }
-      }
-
-      // Σ Target.
       if (showTarget && result.sumTargetMag) {
         uSeries.push({
           label: "Σ tgt (New)", stroke: SUM_TARGET_COLOR, width: 2.5,
           dash: [8, 4], scale: "mag",
         });
-        uData.push(shift(result.sumTargetMag)!);
+        uData.push(result.sumTargetMag);
         legend.push({
-          label: "Σ target", color: SUM_TARGET_COLOR, dash: true,
+          label: "Σ target (New)", color: SUM_TARGET_COLOR, dash: true,
           visible: true, seriesIdx: sIdx, category: "target",
         });
         sIdx++;
@@ -4026,127 +3987,10 @@ export default function FrequencyPlot() {
           });
           uData.push(wrapPhase(result.sumTargetPhase));
           legend.push({
-            label: "Σ target °", color: SUM_TARGET_PHASE_COLOR, dash: true,
+            label: "Σ target ° (New)", color: SUM_TARGET_PHASE_COLOR, dash: true,
             visible: true, seriesIdx: sIdx, category: "target",
           });
           sIdx++;
-        }
-      }
-
-      // Σ Corrected — label flags incoherent fallback when active.
-      if (showMag && result.sumCorrectedMag) {
-        const incoh = !result.coherent;
-        uSeries.push({
-          label: incoh ? "Σ corr (New, incoh)" : "Σ corr (New)",
-          stroke: SUM_CORRECTED_COLOR, width: 3, scale: "mag",
-        });
-        uData.push(shift(result.sumCorrectedMag)!);
-        legend.push({
-          label: "Σ corrected", color: SUM_CORRECTED_COLOR, dash: false,
-          visible: true, seriesIdx: sIdx, category: "corrected",
-        });
-        sIdx++;
-        if (showPhase && result.coherent && result.sumCorrectedPhase) {
-          uSeries.push({
-            label: "Σ corr ° (New)", stroke: SUM_CORRECTED_COLOR,
-            width: 1.5, dash: [4, 4], scale: "phase",
-          });
-          uData.push(wrapPhase(result.sumCorrectedPhase));
-          legend.push({
-            label: "Σ corr °", color: SUM_CORRECTED_COLOR, dash: true,
-            visible: true, seriesIdx: sIdx, category: "corrected",
-          });
-          sIdx++;
-        }
-      }
-
-      // ----- Per-band entries (visible:false by default; user opts in
-      //       via the SUM matrix toggle on each band column). b140.2.1.5:
-      //       use perBandResampled (common-grid arrays with the
-      //       out-of-range fence) so curves don't get stretched across
-      //       the SUM x axis when bands have different native ranges.
-      const ui = result.perBandResampled;
-      for (let i = 0; i < ui.length; i++) {
-        const r = ui[i];
-        const band = bands[i];
-        if (!band) continue;
-        const cf = bandColorFamily(band.color);
-
-        // Per-band measurement.
-        if (showMag && r.measurementMag) {
-          uSeries.push({
-            label: `${band.name} dB`, stroke: cf.meas, width: 1.5, scale: "mag",
-          });
-          uData.push(shift(r.measurementMag)!);
-          legend.push({
-            label: band.name, color: cf.meas, dash: false,
-            visible: false, seriesIdx: sIdx, category: "measurement",
-          });
-          sIdx++;
-          if (showPhase && r.measurementPhase) {
-            uSeries.push({
-              label: `${band.name} °`, stroke: cf.measPhase,
-              width: 1, dash: [6, 3], scale: "phase",
-            });
-            uData.push(wrapPhase(r.measurementPhase));
-            legend.push({
-              label: band.name + " °", color: cf.measPhase, dash: true,
-              visible: false, seriesIdx: sIdx, category: "measurement",
-            });
-            sIdx++;
-          }
-        }
-
-        // Per-band target.
-        if (showTarget && r.targetMag) {
-          uSeries.push({
-            label: `${band.name} tgt`, stroke: cf.target,
-            width: 1.5, dash: [8, 4], scale: "mag",
-          });
-          uData.push(shift(r.targetMag)!);
-          legend.push({
-            label: band.name + " tgt", color: cf.target, dash: true,
-            visible: false, seriesIdx: sIdx, category: "target",
-          });
-          sIdx++;
-          if (showPhase && r.targetPhase) {
-            uSeries.push({
-              label: `${band.name} tgt °`, stroke: cf.targetPhase,
-              width: 1, dash: [4, 4], scale: "phase",
-            });
-            uData.push(wrapPhase(r.targetPhase));
-            legend.push({
-              label: band.name + " tgt °", color: cf.targetPhase, dash: true,
-              visible: false, seriesIdx: sIdx, category: "target",
-            });
-            sIdx++;
-          }
-        }
-
-        // Per-band corrected.
-        if (showMag && r.correctedMag) {
-          uSeries.push({
-            label: `${band.name} corr+XO`, stroke: cf.corrected,
-            width: 1.5, scale: "mag",
-          });
-          uData.push(shift(r.correctedMag)!);
-          legend.push({
-            label: band.name + " corr+XO", color: cf.corrected, dash: false,
-            visible: false, seriesIdx: sIdx, category: "corrected",
-          });
-          sIdx++;
-          if (showPhase && r.correctedPhase) {
-            uSeries.push({
-              label: `${band.name} corr °`, stroke: cf.correctedPhase,
-              width: 1, dash: [4, 4], scale: "phase",
-            });
-            uData.push(wrapPhase(r.correctedPhase));
-            legend.push({
-              label: band.name + " corr°", color: cf.correctedPhase, dash: true,
-              visible: false, seriesIdx: sIdx, category: "corrected",
-            });
-            sIdx++;
-          }
         }
       }
 
@@ -4157,7 +4001,7 @@ export default function FrequencyPlot() {
           freq,
           uSeries,
           uData,
-          hasMeasurements: result.perBand.some(b => b.measurementMag !== null),
+          hasMeasurements: false,
           legend,
         });
       });
