@@ -631,11 +631,42 @@ export async function evaluateSum(
       correctedDataForSum.push(null);
       continue;
     }
+
+    // b140.3.1.1: per-band normalize corrected → target in this band's
+    // passband (HP·1.5 .. LP·0.7). Compensates for measurement-level
+    // miscalibration so Σ Corrected sits at Σ Target in the playing zone.
+    // Magnitude only — phase is untouched.
+    let correctedMag = resampled.mag;
+    const pbTarget = perBandTarget[i];
+    if (pbTarget) {
+      const hp = bands[i].target.high_pass;
+      const lp = bands[i].target.low_pass;
+      const pbLow = hp ? Math.max(20, hp.freq_hz * 1.5) : 20;
+      const pbHigh = lp ? Math.min(20000, lp.freq_hz * 0.7) : 20000;
+      const eL = pbLow < pbHigh ? pbLow : 200;
+      const eH = pbLow < pbHigh ? pbHigh : 2000;
+      let dSum = 0, dN = 0;
+      for (let j = 0; j < freq.length; j++) {
+        if (freq[j] < eL || freq[j] > eH) continue;
+        const t = pbTarget.mag[j];
+        const c = correctedMag[j];
+        if (!isFinite(t) || !isFinite(c) || c < -150) continue;
+        dSum += t - c;
+        dN++;
+      }
+      if (dN > 0) {
+        const offset = dSum / dN;
+        if (Math.abs(offset) > 0.01) {
+          correctedMag = correctedMag.map(v => v + offset);
+        }
+      }
+    }
+
     const phaseArr = resampled.phase ?? new Array<number>(freq.length).fill(0);
-    perBandCorrected.push({ mag: resampled.mag, phase: phaseArr });
+    perBandCorrected.push({ mag: correctedMag, phase: phaseArr });
     if (!resampled.phase) anyMissingPhase = true;
     correctedDataForSum.push({
-      mag: resampled.mag,
+      mag: correctedMag,
       phase: phaseArr,
       sign: bands[i].inverted ? -1 : 1,
       delay: bands[i].alignmentDelay ?? 0,

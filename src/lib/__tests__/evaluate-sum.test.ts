@@ -193,3 +193,87 @@ describe("evaluateSum (b140.3.1) — Σ Corrected", () => {
     expect(result.perBandCorrected[1]).toBeNull();
   });
 });
+
+describe("evaluateSum (b140.3.1.1) — per-band corrected normalize", () => {
+  function bandWithMag(id: string, magDb: number, overrides: Partial<BandState> = {}): BandState {
+    const b = flatBand(id, overrides);
+    (b.measurement as any).magnitude = new Array(N).fill(magDb);
+    return b;
+  }
+
+  it("corrected -3 dB, target 0 dB → after offset corrected = 0 dB", async () => {
+    const result = await evaluateSum([bandWithMag("a", -3)]);
+    expect(result.perBandCorrected[0]).not.toBeNull();
+    const mag = result.perBandCorrected[0]!.mag;
+    const idx = mag.length / 2 | 0;
+    expect(mag[idx]).toBeCloseTo(0, 2);
+  });
+
+  it("offset uses per-band passband (HP·1.5 .. LP·0.7)", async () => {
+    // Step measurement: -5 dB inside [300, 1400], 0 dB outside.
+    // HP=200/LP=2000 → passband 300..1400 → offset = 5 dB.
+    // Result: 0 dB inside passband, +5 dB outside.
+    const a = flatBand("a");
+    a.target.high_pass = {
+      filter_type: "Butterworth", order: 4, freq_hz: 200,
+      shape: null, linear_phase: true, q: null,
+    };
+    a.target.low_pass = {
+      filter_type: "Butterworth", order: 4, freq_hz: 2000,
+      shape: null, linear_phase: true, q: null,
+    };
+    const f = a.measurement!.freq;
+    const m = new Array(f.length);
+    for (let i = 0; i < f.length; i++) m[i] = (f[i] >= 300 && f[i] <= 1400) ? -5 : 0;
+    (a.measurement as any).magnitude = m;
+
+    const result = await evaluateSum([a]);
+    const mag = result.perBandCorrected[0]!.mag;
+    // 1 kHz is inside passband — was -5 dB, now 0 dB.
+    const i1k = result.freq.findIndex(v => v >= 1000);
+    expect(mag[i1k]).toBeCloseTo(0, 1);
+    // 100 Hz is outside passband — was 0 dB, now +5 dB.
+    const i100 = result.freq.findIndex(v => v >= 100);
+    expect(mag[i100]).toBeCloseTo(5, 1);
+  });
+
+  it("inverted passband (HP·1.5 ≥ LP·0.7) → fallback [200, 2000]", async () => {
+    // HP=15000, LP=20: pbLow=22500, pbHigh=14 → fallback [200, 2000].
+    const a = flatBand("a");
+    a.target.high_pass = {
+      filter_type: "Butterworth", order: 4, freq_hz: 15000,
+      shape: null, linear_phase: true, q: null,
+    };
+    a.target.low_pass = {
+      filter_type: "Butterworth", order: 4, freq_hz: 20,
+      shape: null, linear_phase: true, q: null,
+    };
+    // Measurement: -5 dB in [200, 2000], 0 elsewhere → offset = +5 (fallback band).
+    const f = a.measurement!.freq;
+    const m = new Array(f.length);
+    for (let i = 0; i < f.length; i++) m[i] = (f[i] >= 200 && f[i] <= 2000) ? -5 : 0;
+    (a.measurement as any).magnitude = m;
+
+    const result = await evaluateSum([a]);
+    const mag = result.perBandCorrected[0]!.mag;
+    const i1k = result.freq.findIndex(v => v >= 1000);
+    expect(mag[i1k]).toBeCloseTo(0, 1);
+  });
+
+  it("targetEnabled=false → no offset applied", async () => {
+    const a = bandWithMag("a", -3, { targetEnabled: false });
+    const result = await evaluateSum([a]);
+    const mag = result.perBandCorrected[0]!.mag;
+    // No target → no offset → corrected stays at measurement level (-3 dB).
+    const idx = mag.length / 2 | 0;
+    expect(mag[idx]).toBeCloseTo(-3, 2);
+  });
+
+  it("offset < 0.01 dB → not applied", async () => {
+    // measurement = 0 dB, target = 0 dB → offset ≈ 0 → no change.
+    const result = await evaluateSum([flatBand("a")]);
+    const mag = result.perBandCorrected[0]!.mag;
+    const idx = mag.length / 2 | 0;
+    expect(mag[idx]).toBeCloseTo(0, 4);
+  });
+});
