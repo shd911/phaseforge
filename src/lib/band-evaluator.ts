@@ -523,11 +523,13 @@ function resampleOntoCommon(
   return { mag, phase };
 }
 
-/** b140.3.1.2: width-aware excess limiter. Clips wide regions where
- *  corrected exceeds target by > 1 dB, leaving narrow peaks (room modes,
- *  natural resonances) intact. Applied within passband ± 1 octave only.
- *  Magnitude only — phase untouched. */
-function limitExcessByWidth(
+/** b140.3.1.4: global-shift excess control. The passband ± 1 octave zone
+ *  is the *control window*: if a wide excess (≥ 1/2 oct) is found there,
+ *  shift the entire corrected curve down so that excess collapses to the
+ *  threshold. Narrow peaks (≤ 1/8 oct — room modes / natural resonances)
+ *  are ignored. Soft transition between 1/8..1/2 oct. Magnitude only —
+ *  phase untouched. */
+function applyGlobalShiftIfWideExcess(
   freq: number[],
   corrected: number[],
   target: number[],
@@ -543,41 +545,50 @@ function limitExcessByWidth(
   const zoneLow = Math.max(20, pbLow / 2);
   const zoneHigh = Math.min(20000, pbHigh * 2);
 
-  const result = [...corrected];
+  let regionStart = -1;
+  let regionMaxExcess = 0;
+  let maxRequiredShift = 0;
 
-  const finalize = (start: number, end: number) => {
+  const finalize = (start: number, end: number, maxEx: number) => {
     const f0 = freq[start];
     const f1 = freq[end];
     const widthOct = f1 > 0 && f0 > 0 ? Math.log2(f1 / f0) : 0;
-    let clipFactor: number;
-    if (widthOct <= NARROW_OCT) clipFactor = 0;
-    else if (widthOct >= WIDE_OCT) clipFactor = 1;
-    else clipFactor = (widthOct - NARROW_OCT) / (WIDE_OCT - NARROW_OCT);
-    if (clipFactor === 0) return;
-    for (let k = start; k <= end; k++) {
-      const ex = corrected[k] - target[k];
-      const newEx = ex * (1 - clipFactor) + EXCESS_THRESHOLD * clipFactor;
-      result[k] = target[k] + newEx;
-    }
+    let factor: number;
+    if (widthOct <= NARROW_OCT) factor = 0;
+    else if (widthOct >= WIDE_OCT) factor = 1;
+    else factor = (widthOct - NARROW_OCT) / (WIDE_OCT - NARROW_OCT);
+    if (factor === 0) return;
+    const effectiveExcess = maxEx * factor;
+    const required = effectiveExcess - EXCESS_THRESHOLD;
+    if (required > maxRequiredShift) maxRequiredShift = required;
   };
 
-  let regionStart = -1;
   for (let j = 0; j < freq.length; j++) {
     const inZone = freq[j] >= zoneLow && freq[j] <= zoneHigh;
-    const isExcess = inZone
-      && isFinite(corrected[j]) && isFinite(target[j])
-      && (corrected[j] - target[j]) > EXCESS_THRESHOLD;
+    const ex = inZone && isFinite(corrected[j]) && isFinite(target[j])
+      ? corrected[j] - target[j]
+      : 0;
+    const isExcess = inZone && ex > EXCESS_THRESHOLD;
 
-    if (isExcess && regionStart < 0) {
-      regionStart = j;
-    } else if (!isExcess && regionStart >= 0) {
-      finalize(regionStart, j - 1);
+    if (isExcess) {
+      if (regionStart < 0) {
+        regionStart = j;
+        regionMaxExcess = ex;
+      } else if (ex > regionMaxExcess) {
+        regionMaxExcess = ex;
+      }
+    } else if (regionStart >= 0) {
+      finalize(regionStart, j - 1, regionMaxExcess);
       regionStart = -1;
+      regionMaxExcess = 0;
     }
   }
-  if (regionStart >= 0) finalize(regionStart, freq.length - 1);
+  if (regionStart >= 0) finalize(regionStart, freq.length - 1, regionMaxExcess);
 
-  return result;
+  if (maxRequiredShift > 0) {
+    return corrected.map(v => isFinite(v) ? v - maxRequiredShift : v);
+  }
+  return corrected;
 }
 
 /** Power sum of magnitudes in dB (no phase). Returns -200 dB for empty bins. */
@@ -718,9 +729,10 @@ export async function evaluateSum(
         }
       }
 
-      // b140.3.1.2: width-aware excess limit — clip wide humps to
-      // target+1 dB, preserve narrow resonances.
-      correctedMag = limitExcessByWidth(
+      // b140.3.1.4: global shift if a wide excess is detected in the
+      // passband ± 1 octave control zone. Whole curve moves uniformly;
+      // narrow resonances stay intact.
+      correctedMag = applyGlobalShiftIfWideExcess(
         freq, correctedMag, pbTarget.mag,
         bands[i].target.high_pass?.freq_hz ?? null,
         bands[i].target.low_pass?.freq_hz ?? null,

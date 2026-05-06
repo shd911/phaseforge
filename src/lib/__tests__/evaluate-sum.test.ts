@@ -210,9 +210,13 @@ describe("evaluateSum (b140.3.1.1) — per-band corrected normalize", () => {
   });
 
   it("offset uses per-band passband (HP·1.5 .. LP·0.7)", async () => {
-    // Step measurement: -5 dB inside [300, 1400], 0 dB outside.
-    // HP=200/LP=2000 → passband 300..1400 → offset = 5 dB.
-    // Result: 0 dB inside passband, +5 dB outside.
+    // Step measurement: +5 dB inside [300, 1400], 0 dB outside.
+    // HP=200/LP=2000 → passband 300..1400 → offset = -5 dB.
+    // After offset: 0 dB inside passband, -5 dB outside.
+    // (Sign chosen so that the side regions are *deficit*, not excess —
+    // otherwise the b140.3.1.4 global-shift kicks in. The test's purpose
+    // is to verify that normalize uses passband-only, which is preserved
+    // either way: inside-passband ends up at target.)
     const a = flatBand("a");
     a.target.high_pass = {
       filter_type: "Butterworth", order: 4, freq_hz: 200,
@@ -224,17 +228,17 @@ describe("evaluateSum (b140.3.1.1) — per-band corrected normalize", () => {
     };
     const f = a.measurement!.freq;
     const m = new Array(f.length);
-    for (let i = 0; i < f.length; i++) m[i] = (f[i] >= 300 && f[i] <= 1400) ? -5 : 0;
+    for (let i = 0; i < f.length; i++) m[i] = (f[i] >= 300 && f[i] <= 1400) ? 5 : 0;
     (a.measurement as any).magnitude = m;
 
     const result = await evaluateSum([a]);
     const mag = result.perBandCorrected[0]!.mag;
-    // 1 kHz is inside passband — was -5 dB, now 0 dB.
+    // 1 kHz is inside passband — was +5 dB, now 0 dB.
     const i1k = result.freq.findIndex(v => v >= 1000);
     expect(mag[i1k]).toBeCloseTo(0, 1);
-    // 100 Hz is outside passband — was 0 dB, now +5 dB.
+    // 100 Hz is outside passband — was 0 dB, now -5 dB (deficit, not clipped).
     const i100 = result.freq.findIndex(v => v >= 100);
-    expect(mag[i100]).toBeCloseTo(5, 1);
+    expect(mag[i100]).toBeCloseTo(-5, 1);
   });
 
   it("inverted passband (HP·1.5 ≥ LP·0.7) → fallback [200, 2000]", async () => {
@@ -278,7 +282,7 @@ describe("evaluateSum (b140.3.1.1) — per-band corrected normalize", () => {
   });
 });
 
-describe("evaluateSum (b140.3.1.2) — width-aware excess limiter", () => {
+describe("evaluateSum (b140.3.1.4) — width-aware global shift", () => {
   function bandWithFilters(): BandState {
     const b = flatBand("a");
     b.target.high_pass = {
@@ -354,7 +358,7 @@ describe("evaluateSum (b140.3.1.2) — width-aware excess limiter", () => {
     expect(mag[i40]).toBeGreaterThan(8);
   });
 
-  it("targetEnabled=false → limiter not applied", async () => {
+  it("targetEnabled=false → shift not applied", async () => {
     const a = bandWithFilters();
     a.targetEnabled = false;
     setMagInRange(a, 500, 1000, 20);
@@ -362,7 +366,38 @@ describe("evaluateSum (b140.3.1.2) — width-aware excess limiter", () => {
     const f = result.freq;
     const mag = result.perBandCorrected[0]!.mag;
     const i700 = f.findIndex(v => v >= 700);
-    // No target → no normalize, no limiter → corrected = measurement = 20.
+    // No target → no normalize, no shift → corrected = measurement = 20.
     expect(mag[i700]).toBeCloseTo(20, 1);
+  });
+
+  it("multiple wide regions → max-required shift applied", async () => {
+    const a = bandWithFilters();
+    setMagInRange(a, 400, 600, 10);   // wide region A (~0.585 oct)
+    setMagInRange(a, 800, 1200, 20);  // wide region B with bigger excess
+    const result = await evaluateSum([a]);
+    const f = result.freq;
+    const mag = result.perBandCorrected[0]!.mag;
+    // Shift is sized by region B's max excess → its peak collapses to ~0.1.
+    const i1k = f.findIndex(v => v >= 1000);
+    expect(mag[i1k]).toBeCloseTo(0.1, 0);
+    // Region A is over-shifted (its smaller excess gets the same big shift).
+    const i500 = f.findIndex(v => v >= 500);
+    expect(mag[i500]).toBeLessThan(0);
+  });
+
+  it("global shift moves entire corrected curve uniformly", async () => {
+    const a = bandWithFilters();
+    setMagInRange(a, 500, 1000, 20);
+    const result = await evaluateSum([a]);
+    const f = result.freq;
+    const mag = result.perBandCorrected[0]!.mag;
+    // Wide-excess shift propagates to bins OUTSIDE the control zone too:
+    // at 5 kHz (above zone[2800]) measurement is 0 dB but corrected is far
+    // negative because the same global shift moved the whole curve.
+    const i5k = f.findIndex(v => v >= 5000);
+    expect(mag[i5k]).toBeLessThan(-15);
+    // Inside the wide region, excess is brought down to the threshold (~0.1 dB).
+    const i700 = f.findIndex(v => v >= 700);
+    expect(mag[i700]).toBeCloseTo(0.1, 1);
   });
 });
