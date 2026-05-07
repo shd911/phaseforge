@@ -573,11 +573,24 @@ export interface SumEvalResult {
   /** True iff Σ Corrected was computed via coherentSum (all bands had
    *  phase). False = power-sum fallback (no phase, no polarity). */
   correctedCoherent: boolean;
+  /** b140.3.5: Σ IR/Step results (only set when options.includeIr=true).
+   *  Each curve is a coherent sum on a wide IR grid (5 Hz – Nyquist·0.95)
+   *  with polarity + alignment_delay applied per band, converted to time
+   *  domain via compute_impulse. */
+  ir?: {
+    measurement?: { time: number[]; impulse: number[]; step: number[] };
+    target?: { time: number[]; impulse: number[]; step: number[] };
+    corrected?: { time: number[]; impulse: number[]; step: number[] };
+  };
 }
 
 export interface SumEvalOptions {
   /** Override the common freq grid. */
   freq?: number[];
+  /** b140.3.5: also compute Σ IR/Step (measurement, target, corrected) by
+   *  coherent-summing per-band responses on a wide IR grid (5 Hz – Nyquist·0.95)
+   *  in the frequency domain, then taking compute_impulse of the result. */
+  includeIr?: boolean;
 }
 
 function buildLogGrid(n: number, fMin: number, fMax: number): number[] {
@@ -966,6 +979,147 @@ export async function evaluateSum(
     }
   }
 
+  // b140.3.5: Σ IR/Step. Coherent-sum per-band responses on a wide IR grid in
+  // the frequency domain (alignment_delay → phase rotation, polarity → sign),
+  // then compute_impulse for each category.
+  let irOut: SumEvalResult["ir"];
+  if (options?.includeIr) {
+    const irSr = Math.max(48000, ...bands.map(b => b.measurement?.sample_rate ?? 48000));
+    const irFMax = Math.min(40000, irSr / 2 * 0.95);
+    const irFreq = buildLogGrid(1024, 5, irFMax);
+    const N = irFreq.length;
+
+    const tgtRe = new Float64Array(N), tgtIm = new Float64Array(N);
+    const measRe = new Float64Array(N), measIm = new Float64Array(N);
+    const corrRe = new Float64Array(N), corrIm = new Float64Array(N);
+    let anyTgt = false, anyMeas = false, anyCorr = false;
+
+    for (const band of bands) {
+      const sign: 1 | -1 = band.inverted ? -1 : 1;
+      const delay = band.alignmentDelay ?? 0;
+
+      // Target on irFreq (also reused as extension shape for measurement / corrected).
+      let tgtMagOnIr: number[] | null = null;
+      if (band.targetEnabled) {
+        const target = JSON.parse(JSON.stringify(band.target));
+        const resp = await invoke<TargetResponse>("evaluate_target", {
+          target, freq: irFreq,
+        });
+        const tPhase = await reconstructTargetPhase(
+          irFreq, resp.phase, band.target.high_pass, band.target.low_pass,
+        );
+        tgtMagOnIr = resp.magnitude;
+        anyTgt = true;
+        for (let j = 0; j < N; j++) {
+          const amp = Math.pow(10, (resp.magnitude[j] ?? -200) / 20) * sign;
+          const phRad = ((tPhase[j] ?? 0) + 360 * irFreq[j] * delay) * Math.PI / 180;
+          tgtRe[j] += amp * Math.cos(phRad);
+          tgtIm[j] += amp * Math.sin(phRad);
+        }
+      }
+
+      if (!band.measurement) continue;
+
+      // Measurement on irFreq: extension via target shape when target is on,
+      // else fence outside native range.
+      let extMeasMag: number[] | null = null;
+      let extMeasPhase: number[] | null = null;
+      if (tgtMagOnIr) {
+        const ext = await computeExtension(
+          band.measurement.freq, band.measurement.magnitude,
+          band.measurement.phase ?? null, irFreq, tgtMagOnIr,
+        );
+        extMeasMag = ext.mag;
+        extMeasPhase = ext.phase;
+      } else {
+        const r = resampleOntoCommon(
+          band.measurement.freq, band.measurement.magnitude,
+          band.measurement.phase ?? null, irFreq,
+        );
+        extMeasMag = r?.mag ?? null;
+        extMeasPhase = r?.phase ?? null;
+      }
+      if (!extMeasMag) continue;
+      const measPhaseArr = extMeasPhase ?? new Array<number>(N).fill(0);
+
+      anyMeas = true;
+      for (let j = 0; j < N; j++) {
+        const amp = Math.pow(10, (extMeasMag[j] ?? -200) / 20) * sign;
+        const phRad = ((measPhaseArr[j] ?? 0) + 360 * irFreq[j] * delay) * Math.PI / 180;
+        measRe[j] += amp * Math.cos(phRad);
+        measIm[j] += amp * Math.sin(phRad);
+      }
+
+      // Corrected: measurement (extended) + PEQ + cross-section, on irFreq.
+      if (band.targetEnabled) {
+        const enabledPeq = (band.peqBands ?? []).filter((p: PeqBand) => p.enabled);
+        let irPeqMag: number[] = new Array(N).fill(0);
+        let irPeqPhase: number[] = new Array(N).fill(0);
+        if (enabledPeq.length > 0) {
+          const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", {
+            freq: irFreq, bands: enabledPeq,
+          });
+          irPeqMag = pm; irPeqPhase = pp;
+        }
+        let irXsMag: number[] = new Array(N).fill(0);
+        let irXsPhase: number[] = new Array(N).fill(0);
+        if (band.target.high_pass || band.target.low_pass) {
+          try {
+            const [xm, xp] = await invoke<[number[], number[], number]>(
+              "compute_cross_section",
+              { freq: irFreq, highPass: band.target.high_pass, lowPass: band.target.low_pass },
+            );
+            irXsMag = xm; irXsPhase = xp;
+          } catch (_) { /* leave zeros */ }
+        }
+        const corrMag = extMeasMag.map((m, j) => m + irPeqMag[j] + irXsMag[j]);
+        const baseP = measPhaseArr.map((p, j) => p + irPeqPhase[j] + irXsPhase[j]);
+        const corrPhase = await reconstructTargetPhase(
+          irFreq, baseP, band.target.high_pass, band.target.low_pass,
+        );
+        anyCorr = true;
+        for (let j = 0; j < N; j++) {
+          const amp = Math.pow(10, (corrMag[j] ?? -200) / 20) * sign;
+          const phRad = ((corrPhase[j] ?? 0) + 360 * irFreq[j] * delay) * Math.PI / 180;
+          corrRe[j] += amp * Math.cos(phRad);
+          corrIm[j] += amp * Math.sin(phRad);
+        }
+      }
+    }
+
+    irOut = {};
+    const toIR = async (re: Float64Array, im: Float64Array) => {
+      const mag = new Array<number>(N);
+      const phase = new Array<number>(N);
+      for (let j = 0; j < N; j++) {
+        const amp = Math.sqrt(re[j] * re[j] + im[j] * im[j]);
+        mag[j] = amp > 0 ? 20 * Math.log10(amp) : -200;
+        phase[j] = Math.atan2(im[j], re[j]) * 180 / Math.PI;
+      }
+      try {
+        const r = await invoke<{ time: number[]; impulse: number[]; step: number[] }>(
+          "compute_impulse",
+          { freq: irFreq, magnitude: mag, phase, sampleRate: irSr },
+        );
+        return { time: r.time, impulse: r.impulse, step: r.step };
+      } catch (_) {
+        return null;
+      }
+    };
+    if (anyMeas) {
+      const r = await toIR(measRe, measIm);
+      if (r) irOut.measurement = r;
+    }
+    if (anyTgt) {
+      const r = await toIR(tgtRe, tgtIm);
+      if (r) irOut.target = r;
+    }
+    if (anyCorr) {
+      const r = await toIR(corrRe, corrIm);
+      if (r) irOut.corrected = r;
+    }
+  }
+
   return {
     freq,
     sumTargetMag: sum?.mag ?? null,
@@ -975,6 +1129,7 @@ export async function evaluateSum(
     sumCorrectedPhase,
     perBandCorrected,
     correctedCoherent,
+    ir: irOut,
   };
 }
 

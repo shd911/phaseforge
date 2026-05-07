@@ -31,6 +31,24 @@ vi.mock("@tauri-apps/api/core", () => ({
       const m = args.magnitude as number[];
       return new Array(m.length).fill(0);
     }
+    if (cmd === "compute_peq_complex") {
+      const f = args.freq as number[];
+      return [new Array(f.length).fill(0), new Array(f.length).fill(0)];
+    }
+    if (cmd === "compute_cross_section") {
+      const f = args.freq as number[];
+      return [new Array(f.length).fill(0), new Array(f.length).fill(0), 0];
+    }
+    if (cmd === "compute_impulse") {
+      // Deterministic non-trivial mock so different inputs → different outputs.
+      const mag = args.magnitude as number[];
+      const phase = args.phase as number[];
+      return {
+        time: mag.map((_, i) => i / 48000),
+        impulse: [...mag],
+        step: [...phase],
+      };
+    }
     throw new Error(`Unmocked command: ${cmd}`);
   }),
 }));
@@ -279,6 +297,56 @@ describe("evaluateSum (b140.3.1.1) — per-band corrected normalize", () => {
     const mag = result.perBandCorrected[0]!.mag;
     const idx = mag.length / 2 | 0;
     expect(mag[idx]).toBeCloseTo(0, 4);
+  });
+});
+
+describe("evaluateSum (b140.3.5) — Σ IR/Step via includeIr", () => {
+  it("includeIr=false (default) → no ir field", async () => {
+    const result = await evaluateSum([flatBand("a"), flatBand("b")]);
+    expect(result.ir).toBeUndefined();
+  });
+
+  it("includeIr=true → ir.measurement / ir.target / ir.corrected populated", async () => {
+    const result = await evaluateSum(
+      [flatBand("a"), flatBand("b")],
+      { includeIr: true },
+    );
+    expect(result.ir).toBeTruthy();
+    expect(result.ir!.measurement).toBeTruthy();
+    expect(result.ir!.target).toBeTruthy();
+    expect(result.ir!.corrected).toBeTruthy();
+    // Wide IR grid → 1024 points.
+    expect(result.ir!.target!.impulse.length).toBe(1024);
+  });
+
+  it("ir.target absent when no band has targetEnabled", async () => {
+    const a = flatBand("a", { targetEnabled: false });
+    const b = flatBand("b", { targetEnabled: false });
+    const result = await evaluateSum([a, b], { includeIr: true });
+    expect(result.ir).toBeTruthy();
+    expect(result.ir!.target).toBeUndefined();
+  });
+
+  it("ir.measurement absent when no band has measurement", async () => {
+    const a = flatBand("a");
+    const b = flatBand("b");
+    (a as any).measurement = null;
+    (b as any).measurement = null;
+    const result = await evaluateSum([a, b], { includeIr: true });
+    expect(result.ir).toBeTruthy();
+    expect(result.ir!.measurement).toBeUndefined();
+  });
+
+  it("polarity inversion → cancellation in Σ target IR (impulse ≈ 0)", async () => {
+    // Two flat 0-dB target bands, one inverted → coherent sum cancels.
+    // The mock impulse forwards magnitude → cancellation shows as -200 dB
+    // magnitude bins, hence very small linear amplitudes in impulse.
+    const a = flatBand("a");
+    const b = flatBand("b", { inverted: true });
+    const result = await evaluateSum([a, b], { includeIr: true });
+    const imp = result.ir!.target!.impulse;
+    // Mock impulse = magnitude (in dB). Cancellation → -200 (floor).
+    expect(imp.every(v => v <= -150)).toBe(true);
   });
 });
 

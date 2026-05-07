@@ -2171,7 +2171,7 @@ export default function FrequencyPlot() {
           freq: sumFreq, magnitude: sumMeasMag, phase: sumMeasPh, sampleRate: sr,
         });
         if (gen !== renderGen) return;
-        const measSum = {
+        let measSum: { timeMs: number[]; impulse: number[]; step: number[] } | null = {
           timeMs: sumMeasResult.time.map(t => t * 1000),
           impulse: sumMeasResult.impulse,
           step: sumMeasResult.step,
@@ -2483,6 +2483,40 @@ export default function FrequencyPlot() {
         }, 20);
 
         // Save IR data for snapshot capture
+        // b140.3.5: New pipeline override — Σ IR/Step from evaluateSum's
+        // unified frequency-domain coherent sum (per-band data unchanged).
+        if (sumModeSignal() === "new") {
+          try {
+            const sumResult = await evaluateSum(allBands as BandState[], { includeIr: true });
+            if (gen === renderGen && sumResult.ir) {
+              if (sumResult.ir.measurement) {
+                measSum = {
+                  timeMs: sumResult.ir.measurement.time.map(t => t * 1000),
+                  impulse: sumResult.ir.measurement.impulse,
+                  step: sumResult.ir.measurement.step,
+                };
+              }
+              if (sumResult.ir.target) {
+                targetSum = {
+                  timeMs: sumResult.ir.target.time.map(t => t * 1000),
+                  impulse: sumResult.ir.target.impulse,
+                  step: sumResult.ir.target.step,
+                };
+              }
+              if (sumResult.ir.corrected) {
+                corrSum = {
+                  timeMs: sumResult.ir.corrected.time.map(t => t * 1000),
+                  impulse: sumResult.ir.corrected.impulse,
+                  step: sumResult.ir.corrected.step,
+                };
+              }
+            }
+          } catch (e) {
+            console.warn("SUM IR (New) failed, falling back to legacy:", e);
+          }
+          if (gen !== renderGen) return;
+        }
+
         // Priority: corrected → target → measurement
         {
           const src = corrSum ?? (corrBands.length > 0 ? corrBands[0] : null)
