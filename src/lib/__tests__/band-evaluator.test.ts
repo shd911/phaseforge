@@ -6,6 +6,7 @@
 // behaviour for the commands we actually call.
 
 import { describe, it, expect, vi } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
 import { fixtureMeasurement, FIXTURE_CONFIGS } from "./fixtures/eval-fixtures";
 import type { BandState } from "../../stores/bands";
 import type { FilterConfig, TargetCurve } from "../types";
@@ -207,6 +208,41 @@ describe("evaluateBandFull (b139.1)", () => {
       const r = await evaluateBandFull({ band });
       expect(r.extendedFreq).toBeNull();
       expect(r.extendedMeasurementMag).toBeNull();
+    });
+  });
+
+  // b140.3.3: target IR must use a wide standalone grid (5 Hz – Nyquist·0.95)
+  // independent of the measurement range, so out-of-band shaping (subsonic
+  // protect, supersonic rolloff) actually appears in the rendered impulse.
+  describe("target IR grid (b140.3.3)", () => {
+    it("target IR is computed on a wide grid starting at 5 Hz", async () => {
+      vi.mocked(invoke).mockClear();
+      const band = fixtureBand(FIXTURE_CONFIGS[0].hp);
+      const r = await evaluateBandFull({ band, includeIr: true });
+      expect(r.ir?.target).toBeTruthy();
+      const irCalls = vi.mocked(invoke).mock.calls.filter(c => c[0] === "compute_impulse");
+      const targetCall = irCalls.find(c => {
+        const f = (c[1] as any).freq as number[];
+        return f && f.length > 0 && f[0] < 10;
+      });
+      expect(targetCall).toBeTruthy();
+      const f = (targetCall![1] as any).freq as number[];
+      expect(f[0]).toBeCloseTo(5, 0);
+      expect(f[f.length - 1]).toBeGreaterThanOrEqual(20000);
+    });
+
+    it("measurement IR still uses measurement grid (not the wide IR grid)", async () => {
+      vi.mocked(invoke).mockClear();
+      const band = fixtureBand(FIXTURE_CONFIGS[0].hp);
+      const r = await evaluateBandFull({ band, includeIr: true });
+      expect(r.ir?.measurement).toBeTruthy();
+      const irCalls = vi.mocked(invoke).mock.calls.filter(c => c[0] === "compute_impulse");
+      const measCall = irCalls.find(c => {
+        const f = (c[1] as any).freq as number[];
+        // Measurement freq starts at the fixture's first bin, well above 5 Hz.
+        return f && f.length > 0 && f[0] >= 10;
+      });
+      expect(measCall).toBeTruthy();
     });
   });
 });

@@ -395,11 +395,28 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
         ir.measurement = { time: r.time, impulse: r.impulse, step: r.step };
       } catch (_) {}
     }
-    if (targetMag && targetPhase) {
+    // b140.3.3: target IR on a wide standalone grid (5 Hz – min(40 kHz,
+    // Nyquist·0.95)) instead of measurement.freq. Target is a model — its
+    // impulse must reflect rolloff outside the measurement range too,
+    // otherwise subsonic protect (active at HP/8 ≈ 5–80 Hz) and similar
+    // out-of-band shaping vanish from the rendered IR.
+    if (band.targetEnabled) {
       try {
+        const irFMax = Math.min(40000, sr / 2 * 0.95);
+        const irFreq = buildLogGrid(512, 5, irFMax);
+        const irTargetCurve = {
+          ...JSON.parse(JSON.stringify(targetCurve)),
+          reference_level_db: (targetCurve.reference_level_db ?? 0) + refLevel,
+        };
+        const irTargetResp = await invoke<TargetResponse>("evaluate_target", {
+          target: irTargetCurve, freq: irFreq,
+        });
+        const irTargetPhase = await reconstructTargetPhase(
+          irFreq, irTargetResp.phase, band.target.high_pass, band.target.low_pass,
+        );
         const r = await invoke<{ time: number[]; impulse: number[]; step: number[] }>(
           "compute_impulse",
-          { freq, magnitude: targetMag, phase: targetPhase, sampleRate: sr },
+          { freq: irFreq, magnitude: irTargetResp.magnitude, phase: irTargetPhase, sampleRate: sr },
         );
         ir.target = { time: r.time, impulse: r.impulse, step: r.step };
       } catch (_) {}
