@@ -245,4 +245,34 @@ describe("evaluateBandFull (b139.1)", () => {
       expect(measCall).toBeTruthy();
     });
   });
+
+  // b140.3.4: corrected IR also moves to the wide grid, with measurement
+  // extended via target shape + Hilbert phase before PEQ + cross-section.
+  describe("corrected IR grid (b140.3.4)", () => {
+    it("corrected IR is computed when measurement + targetEnabled", async () => {
+      const band = fixtureBand(FIXTURE_CONFIGS[0].hp);
+      const r = await evaluateBandFull({ band, includeIr: true });
+      expect(r.ir?.corrected).toBeTruthy();
+    });
+
+    it("corrected IR uses the wide grid (compute_impulse called twice with f[0] ≈ 5 Hz)", async () => {
+      vi.mocked(invoke).mockClear();
+      const band = fixtureBand(FIXTURE_CONFIGS[0].hp);
+      await evaluateBandFull({ band, includeIr: true });
+      const wideCalls = vi.mocked(invoke).mock.calls.filter(c => {
+        if (c[0] !== "compute_impulse") return false;
+        const f = (c[1] as any).freq as number[];
+        return f && f.length > 0 && f[0] < 10;
+      });
+      // One call for target IR, one for corrected IR.
+      expect(wideCalls.length).toBe(2);
+    });
+
+    it("no measurement → no corrected IR", async () => {
+      const band = fixtureBand(FIXTURE_CONFIGS[0].hp);
+      (band as any).measurement = null;
+      const r = await evaluateBandFull({ band, includeIr: true });
+      expect(r.ir?.corrected).toBeUndefined();
+    });
+  });
 });

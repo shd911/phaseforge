@@ -395,11 +395,14 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
         ir.measurement = { time: r.time, impulse: r.impulse, step: r.step };
       } catch (_) {}
     }
-    // b140.3.3: target IR on a wide standalone grid (5 Hz – min(40 kHz,
-    // Nyquist·0.95)) instead of measurement.freq. Target is a model — its
-    // impulse must reflect rolloff outside the measurement range too,
-    // otherwise subsonic protect (active at HP/8 ≈ 5–80 Hz) and similar
-    // out-of-band shaping vanish from the rendered IR.
+    // b140.3.3 + b140.3.4: target and corrected IR on a wide standalone
+    // grid (5 Hz – min(40 kHz, Nyquist·0.95)) instead of measurement.freq.
+    // Target is a model — its impulse must reflect rolloff outside the
+    // measurement range too, otherwise subsonic protect (active at HP/8 ≈
+    // 5–80 Hz) and supersonic shaping vanish from the rendered IR.
+    // Corrected reuses the same wide grid: measurement is extended via
+    // target shape + Hilbert phase (computeExtension), then PEQ and
+    // cross-section are recomputed on the wide grid before convolution.
     if (band.targetEnabled) {
       try {
         const irFMax = Math.min(40000, sr / 2 * 0.95);
@@ -419,15 +422,47 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
           { freq: irFreq, magnitude: irTargetResp.magnitude, phase: irTargetPhase, sampleRate: sr },
         );
         ir.target = { time: r.time, impulse: r.impulse, step: r.step };
-      } catch (_) {}
-    }
-    if (correctedMag && correctedPhase) {
-      try {
-        const r = await invoke<{ time: number[]; impulse: number[]; step: number[] }>(
-          "compute_impulse",
-          { freq, magnitude: correctedMag, phase: correctedPhase, sampleRate: sr },
-        );
-        ir.corrected = { time: r.time, impulse: r.impulse, step: r.step };
+
+        // b140.3.4: corrected IR on the same wide grid.
+        if (measurement) {
+          const extMeas = await computeExtension(
+            measurement.freq, measurement.magnitude,
+            measurement.phase ?? null, irFreq, irTargetResp.magnitude,
+          );
+
+          let irPeqMag: number[] = new Array(irFreq.length).fill(0);
+          let irPeqPhase: number[] = new Array(irFreq.length).fill(0);
+          if (enabledPeq.length > 0) {
+            const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", {
+              freq: irFreq, bands: enabledPeq,
+            });
+            irPeqMag = pm; irPeqPhase = pp;
+          }
+
+          let irXsMag: number[] = new Array(irFreq.length).fill(0);
+          let irXsPhase: number[] = new Array(irFreq.length).fill(0);
+          if (band.target.high_pass || band.target.low_pass) {
+            try {
+              const [xm, xp] = await invoke<[number[], number[], number]>(
+                "compute_cross_section",
+                { freq: irFreq, highPass: band.target.high_pass, lowPass: band.target.low_pass },
+              );
+              irXsMag = xm; irXsPhase = xp;
+            } catch (_) { /* leave zeros */ }
+          }
+
+          const irCorrMag = extMeas.mag.map((m, i) => m + irPeqMag[i] + irXsMag[i]);
+          const basePhase = (extMeas.phase ?? new Array<number>(irFreq.length).fill(0))
+            .map((p, i) => p + irPeqPhase[i] + irXsPhase[i]);
+          const irCorrPhase = await reconstructTargetPhase(
+            irFreq, basePhase, band.target.high_pass, band.target.low_pass,
+          );
+          const cr = await invoke<{ time: number[]; impulse: number[]; step: number[] }>(
+            "compute_impulse",
+            { freq: irFreq, magnitude: irCorrMag, phase: irCorrPhase, sampleRate: sr },
+          );
+          ir.corrected = { time: cr.time, impulse: cr.impulse, step: cr.step };
+        }
       } catch (_) {}
     }
   }
