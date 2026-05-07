@@ -14,15 +14,26 @@ use super::windowing::*;
 // Test-only capture for iterative_refine per-iteration errors. Production
 // `info!` logging stays untouched; this lets cargo tests see the same
 // numbers Kirill saw in the dev-server console.
+//
+// b140.3.8: thread_local instead of a shared Mutex<Vec<…>>. cargo test runs
+// tests in parallel threads and any `generate_model_fir` call pushes here,
+// so a global Mutex meant a test's `iter_stats_take()` saw rows from other
+// concurrent tests — producing the spurious DIVERGENCE seen in
+// `iterative_refine_converges_with_min_phase_subsonic`.
 #[cfg(test)]
 pub(crate) struct IterStats { pub iter: usize, pub max_err: f64, pub rms_err: f64 }
 #[cfg(test)]
-pub(crate) static ITER_STATS: std::sync::Mutex<Vec<IterStats>> = std::sync::Mutex::new(Vec::new());
+thread_local! {
+    pub(crate) static ITER_STATS: std::cell::RefCell<Vec<IterStats>>
+        = std::cell::RefCell::new(Vec::new());
+}
 #[cfg(test)]
-pub(crate) fn iter_stats_reset() { ITER_STATS.lock().unwrap().clear(); }
+pub(crate) fn iter_stats_reset() {
+    ITER_STATS.with(|s| s.borrow_mut().clear());
+}
 #[cfg(test)]
 pub(crate) fn iter_stats_take() -> Vec<IterStats> {
-    std::mem::take(&mut *ITER_STATS.lock().unwrap())
+    ITER_STATS.with(|s| std::mem::take(&mut *s.borrow_mut()))
 }
 
 // ---------------------------------------------------------------------------
@@ -173,7 +184,7 @@ pub(crate) fn iterative_refine(
         info!("iterative_refine: iter={}, max_err={:.3} dB, rms_err={:.3} dB", iter + 1, max_err, rms_err);
         #[cfg(test)]
         {
-            ITER_STATS.lock().unwrap().push(IterStats { iter: iter + 1, max_err, rms_err });
+            ITER_STATS.with(|s| s.borrow_mut().push(IterStats { iter: iter + 1, max_err, rms_err }));
         }
 
         // Early exit if error is already very small

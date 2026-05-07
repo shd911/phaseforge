@@ -115,8 +115,9 @@ export interface BandEvalResult {
 
 // ---------------------------------------------------------------------------
 // Phase reconstruction — the unified version that handles all four
-// Gaussian × subsonic combinations. Mirrors band-evaluation.ts:addGaussianMinPhase
-// but is callable on any (freq, basePhase) pair regardless of caller.
+// Gaussian × subsonic combinations. b139.4c: replaces the legacy
+// addGaussianMinPhase (since deleted from band-evaluation.ts) with one
+// callable that works on any (freq, basePhase) pair regardless of caller.
 // ---------------------------------------------------------------------------
 export async function reconstructTargetPhase(
   freq: number[],
