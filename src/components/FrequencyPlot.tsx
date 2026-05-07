@@ -2771,11 +2771,11 @@ export default function FrequencyPlot() {
     for (const rawBd of corrBands) {
       if (inSum) {
         const cf = bandColorFamily(rawBd.bandColor);
-        const bdDelay = untrack(() => appState.bands.find(b => b.name === rawBd.bandName)?.alignmentDelay ?? 0);
-        const dlSuffix = Math.abs(bdDelay) > 1e-6
-          ? ` [${bdDelay >= 0 ? "+" : ""}${(bdDelay * 1000).toFixed(2)} ms]`
-          : "";
-        addIrStepPair(rawBd.bandName + " corr+XO" + dlSuffix, cf.corrected, cf.correctedPhase, rawBd.timeMs, rawBd.impulse, rawBd.step, 1.5, "corrected", false);
+        // b140.3.7: stable label (no delay value in suffix). The delay
+        // changes after AUTO alignment; embedding it in the label flips the
+        // bandVisMap key, which lost user toggle state on every realign.
+        // Delay is still shown in the Delay column of the SUM table.
+        addIrStepPair(rawBd.bandName + " corr+XO", cf.corrected, cf.correctedPhase, rawBd.timeMs, rawBd.impulse, rawBd.step, 1.5, "corrected", false);
       } else {
         const cf = bandColorFamily(rawBd.bandColor);
         addIrStepPair("Corrected", cf.corrected, cf.correctedPhase, rawBd.timeMs, rawBd.impulse, rawBd.step, 2, "corrected", false);
