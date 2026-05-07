@@ -2674,6 +2674,32 @@ export default function FrequencyPlot() {
     };
 
     // Helper: add IR+Step series for a band or sum
+    // b140.3.6: linear-domain resample + cumsum-derived step. Resampling
+    // step independently with linear interp breaks impulse↔step coupling
+    // (step[i] should equal cumulative integral of impulse), which made
+    // corrected step appear visually offset from corrected impulse.
+    const resampleLinear = (srcTime: number[], srcData: number[]): number[] => {
+      return timeMs.map(t => {
+        if (t < srcTime[0] || t > srcTime[srcTime.length - 1]) return 0;
+        let lo = 0, hi2 = srcTime.length - 1;
+        while (hi2 - lo > 1) {
+          const mid = (lo + hi2) >> 1;
+          if (srcTime[mid] <= t) lo = mid; else hi2 = mid;
+        }
+        const dt = srcTime[hi2] - srcTime[lo];
+        const frac = dt > 0 ? (t - srcTime[lo]) / dt : 0;
+        return srcData[lo] + frac * (srcData[hi2] - srcData[lo]);
+      });
+    };
+    const stepFromImpulseCumsum = (impLinear: number[]): number[] => {
+      let acc = 0;
+      const raw = new Array<number>(impLinear.length);
+      for (let i = 0; i < impLinear.length; i++) { acc += impLinear[i]; raw[i] = acc; }
+      let peak = 0;
+      for (const v of raw) { const av = Math.abs(v); if (av > peak) peak = av; }
+      return peak > 0 ? raw.map(v => (v / peak) * 100) : raw;
+    };
+
     const addIrStepPair = (
       label: string, irColor: string, stepColor: string,
       bandTimeMs: number[], impulse: number[], step: number[],
@@ -2684,8 +2710,16 @@ export default function FrequencyPlot() {
       const sameGrid = bandTimeMs.length === timeMs.length
         && Math.abs((bandTimeMs[0] ?? 0) - (timeMs[0] ?? 0)) < 0.001
         && Math.abs((bandTimeMs[bandTimeMs.length - 1] ?? 0) - (timeMs[timeMs.length - 1] ?? 0)) < 0.001;
-      const irData = sameGrid ? applyDb(impulse) : resampleOnto(bandTimeMs, impulse);
-      const stData = sameGrid ? applyDb(step) : resampleOnto(bandTimeMs, step);
+      let irData: number[];
+      let stData: number[];
+      if (sameGrid) {
+        irData = applyDb(impulse);
+        stData = applyDb(step);
+      } else {
+        const impLin = resampleLinear(bandTimeMs, impulse);
+        irData = applyDb(impLin);
+        stData = applyDb(stepFromImpulseCumsum(impLin));
+      }
 
       uSeries.push({ label: label + " IR", stroke: irColor, width: lineWidth, scale: "y", show: true, dash: dash ? [6, 4] : undefined });
       uDataArr.push(irData);
