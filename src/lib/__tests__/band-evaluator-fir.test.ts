@@ -63,8 +63,12 @@ vi.mock("@tauri-apps/api/core", () => ({
       // exercised by the identity test).
       const mag = args.targetMag as number[];
       const peq = args.peqMag as number[];
-      const isFlat = mag.every((v) => Math.abs(v) < 1e-9)
-        && (peq.length === 0 || peq.every((v) => Math.abs(v) < 1e-9));
+      // b140.5: flat = passband ≈ 0 dB; noise-floor tail bins (≤ -100 dB)
+      // are ignored — they're explicit silence appended to extend the grid
+      // up to Nyquist, not part of the passband shape.
+      const isFlatBin = (v: number) => Math.abs(v) < 1e-9 || v <= -100;
+      const isFlat = mag.every(isFlatBin)
+        && (peq.length === 0 || peq.every(isFlatBin));
       impulse[peakIdx] = isFlat ? 1.0 : 0.5;
       return {
         impulse, time_ms: impulse.map((_, i) => i * 1000 / args.config.sample_rate),
@@ -208,22 +212,23 @@ describe("evaluateBandFull FIR grid (b139.5.3)", () => {
     return captured!;
   }
 
-  it("FIR grid is 512 log-spaced points 5..40k at sr=48k", async () => {
+  it("FIR grid is 512 log-spaced points 5..40k at sr=48k (+ b140.5 noise-floor tail to Nyquist)", async () => {
     const band = flatBand();
     const { freq } = await captureFirArgs2(band, 48000);
-    expect(freq.length).toBe(512);
+    // 512 main log-spaced points + 32-bin noise-floor tail up to Nyquist·0.999.
+    expect(freq.length).toBe(512 + 32);
     expect(freq[0]).toBeCloseTo(5, 5);
-    // sr/2 * 0.95 = 22800 < 40000 → fMax = 22800
-    expect(freq[freq.length - 1]).toBeCloseTo(48000 / 2 * 0.95, 0);
+    expect(freq[511]).toBeCloseTo(48000 / 2 * 0.95, 0);
+    expect(freq[freq.length - 1]).toBeCloseTo(48000 / 2 * 0.999, 0);
   });
 
-  it("FIR grid caps at 40 kHz when Nyquist · 0.95 > 40 kHz (sr=176.4k)", async () => {
+  it("FIR grid caps at 40 kHz when Nyquist · 0.95 > 40 kHz (sr=176.4k); tail still appended", async () => {
     const band = flatBand();
     const { freq } = await captureFirArgs2(band, 176400);
-    expect(freq.length).toBe(512);
+    expect(freq.length).toBe(512 + 32);
     expect(freq[0]).toBeCloseTo(5, 5);
-    // sr/2 * 0.95 = 83790 → capped at 40000
-    expect(freq[freq.length - 1]).toBeCloseTo(40000, 0);
+    expect(freq[511]).toBeCloseTo(40000, 0);
+    expect(freq[freq.length - 1]).toBeCloseTo(176400 / 2 * 0.999, 0);
   });
 
   it("FIR grid is independent of measurement grid", async () => {

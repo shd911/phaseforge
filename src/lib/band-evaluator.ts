@@ -161,6 +161,35 @@ async function applyMeasurementSmoothing(m: Measurement, mode: string | null | u
   return { ...m, magnitude: smoothed };
 }
 
+/** b140.5: extend a (freq, mag, phase) trio up to ~Nyquist with explicit
+ *  noise-floor magnitude bins (phase = 0). Without this, the Rust FFT
+ *  pipeline's linear interpolation onto FFT bins above the log grid's
+ *  fMax does a constant-clamp on the last value (e.g. target_mag at
+ *  22.8 kHz ≈ -85 dB on a 48 kHz LP=2 kHz). That "shelf" between the
+ *  log grid's fMax and Nyquist shows up as a rolloff shift in the
+ *  generated FIR. The explicit silent tail replaces that shelf. */
+function appendNoiseFloorTail(
+  freq: number[],
+  mag: number[],
+  phase: number[],
+  sampleRate: number,
+  noiseFloorDb = -150,
+  extraBins = 32,
+): { freq: number[]; mag: number[]; phase: number[] } {
+  const nyquist = sampleRate / 2;
+  const fHi = freq[freq.length - 1];
+  if (fHi >= nyquist * 0.999) return { freq, mag, phase };
+  const fEnd = nyquist * 0.999;
+  const out = { freq: [...freq], mag: [...mag], phase: [...phase] };
+  for (let i = 1; i <= extraBins; i++) {
+    const t = i / extraBins;
+    out.freq.push(fHi * Math.pow(fEnd / fHi, t));
+    out.mag.push(noiseFloorDb);
+    out.phase.push(0);
+  }
+  return out;
+}
+
 function autoRefLevel(freq: number[], magnitude: number[], hp: FilterConfig | null | undefined, lp: FilterConfig | null | undefined): number {
   const hpFreq = hp?.freq_hz ?? 20;
   const lpFreq = lp?.freq_hz ?? 20000;
@@ -318,14 +347,24 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
 
     // FIR-specific grid + target evaluation.
     const fMaxFir = Math.min(40000, cfg.sampleRate / 2 * 0.95);
-    const [firFreq, firResp] = await invoke<[number[], TargetResponse]>(
+    const [firFreqRaw, firResp] = await invoke<[number[], TargetResponse]>(
       "evaluate_target_standalone",
       { target: targetCurve, nPoints: 512, fMin: 5, fMax: fMaxFir },
     );
-    const firTargetMag = firResp.magnitude;
-    const firTargetPhase = await reconstructTargetPhase(
-      firFreq, firResp.phase, band.target.high_pass, band.target.low_pass,
+    const firTargetPhaseRaw = await reconstructTargetPhase(
+      firFreqRaw, firResp.phase, band.target.high_pass, band.target.low_pass,
     );
+
+    // b140.5: extend log grid + target trio up to Nyquist with a noise-floor
+    // tail to avoid Rust's constant boundary clamp on linear FFT bins above
+    // fMaxFir (was shifting apparent rolloff by ~½ oct at sr=44.1/48 kHz).
+    const firExt = appendNoiseFloorTail(
+      firFreqRaw, firResp.magnitude, firTargetPhaseRaw,
+      cfg.sampleRate, cfg.noiseFloorDb,
+    );
+    const firFreq = firExt.freq;
+    const firTargetMag = firExt.mag;
+    const firTargetPhase = firExt.phase;
 
     // PEQ on the FIR grid (biquads are sample-rate independent — same bands).
     let firPeqMag: number[] = new Array(firFreq.length).fill(0);
@@ -407,20 +446,28 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
     if (band.targetEnabled) {
       try {
         const irFMax = Math.min(40000, sr / 2 * 0.95);
-        const irFreq = buildLogGrid(512, 5, irFMax);
+        const irFreqRaw = buildLogGrid(512, 5, irFMax);
         const irTargetCurve = {
           ...JSON.parse(JSON.stringify(targetCurve)),
           reference_level_db: (targetCurve.reference_level_db ?? 0) + refLevel,
         };
         const irTargetResp = await invoke<TargetResponse>("evaluate_target", {
-          target: irTargetCurve, freq: irFreq,
+          target: irTargetCurve, freq: irFreqRaw,
         });
-        const irTargetPhase = await reconstructTargetPhase(
-          irFreq, irTargetResp.phase, band.target.high_pass, band.target.low_pass,
+        const irTargetPhaseRaw = await reconstructTargetPhase(
+          irFreqRaw, irTargetResp.phase, band.target.high_pass, band.target.low_pass,
         );
+        // b140.5: extend up to Nyquist with noise-floor tail to neutralise the
+        // Rust constant-clamp on linear FFT bins above irFMax.
+        const irExt = appendNoiseFloorTail(
+          irFreqRaw, irTargetResp.magnitude, irTargetPhaseRaw, sr,
+        );
+        const irFreq = irExt.freq;
+        const irTargetMag = irExt.mag;
+        const irTargetPhase = irExt.phase;
         const r = await invoke<{ time: number[]; impulse: number[]; step: number[] }>(
           "compute_impulse",
-          { freq: irFreq, magnitude: irTargetResp.magnitude, phase: irTargetPhase, sampleRate: sr },
+          { freq: irFreq, magnitude: irTargetMag, phase: irTargetPhase, sampleRate: sr },
         );
         ir.target = { time: r.time, impulse: r.impulse, step: r.step };
 
@@ -428,7 +475,7 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
         if (measurement) {
           const extMeas = await computeExtension(
             measurement.freq, measurement.magnitude,
-            measurement.phase ?? null, irFreq, irTargetResp.magnitude,
+            measurement.phase ?? null, irFreq, irTargetMag,
           );
 
           let irPeqMag: number[] = new Array(irFreq.length).fill(0);
@@ -987,7 +1034,15 @@ export async function evaluateSum(
   if (options?.includeIr) {
     const irSr = Math.max(48000, ...bands.map(b => b.measurement?.sample_rate ?? 48000));
     const irFMax = Math.min(40000, irSr / 2 * 0.95);
-    const irFreq = buildLogGrid(1024, 5, irFMax);
+    const irFreqBase = buildLogGrid(1024, 5, irFMax);
+    // b140.5: extend up to Nyquist with explicit silent tail. The dummy
+    // arrays satisfy the helper signature; only freq is reused for SUM IR
+    // since per-band target / measurement / corrected get re-evaluated on
+    // the extended grid below.
+    const irFreq = appendNoiseFloorTail(
+      irFreqBase, new Array(irFreqBase.length).fill(0), new Array(irFreqBase.length).fill(0),
+      irSr,
+    ).freq;
     const N = irFreq.length;
 
     const tgtRe = new Float64Array(N), tgtIm = new Float64Array(N);

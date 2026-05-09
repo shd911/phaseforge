@@ -315,8 +315,8 @@ describe("evaluateSum (b140.3.5) — Σ IR/Step via includeIr", () => {
     expect(result.ir!.measurement).toBeTruthy();
     expect(result.ir!.target).toBeTruthy();
     expect(result.ir!.corrected).toBeTruthy();
-    // Wide IR grid → 1024 points.
-    expect(result.ir!.target!.impulse.length).toBe(1024);
+    // Wide IR grid: 1024 main log bins + 32-bin noise-floor tail to Nyquist (b140.5).
+    expect(result.ir!.target!.impulse.length).toBe(1024 + 32);
   });
 
   it("ir.target absent when no band has targetEnabled", async () => {
