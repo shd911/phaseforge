@@ -161,6 +161,31 @@ async function applyMeasurementSmoothing(m: Measurement, mode: string | null | u
   return { ...m, magnitude: smoothed };
 }
 
+/** b140.6: linear interpolation of `srcVals` (defined at `srcFreq`) onto
+ *  `dstFreq`, in log-frequency space, with constant clamp at the source
+ *  boundaries. Used to bring realized FIR magnitude/phase from the FIR
+ *  generation grid (5..fMaxFir) onto the caller's display grid so plots
+ *  on the same x-axis line up. */
+function resampleOnLogGrid(srcFreq: number[], srcVals: number[], dstFreq: number[]): number[] {
+  const n = srcFreq.length;
+  if (n === 0) return dstFreq.map(() => 0);
+  if (n === 1) return dstFreq.map(() => srcVals[0]);
+  const logSrc = srcFreq.map(f => Math.log(Math.max(f, 1e-12)));
+  return dstFreq.map(f => {
+    if (f <= srcFreq[0]) return srcVals[0];
+    if (f >= srcFreq[n - 1]) return srcVals[n - 1];
+    const lf = Math.log(f);
+    let lo = 0, hi = n - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (logSrc[mid] <= lf) lo = mid; else hi = mid;
+    }
+    const dt = logSrc[hi] - logSrc[lo];
+    const t = dt > 0 ? (lf - logSrc[lo]) / dt : 0;
+    return srcVals[lo] + t * (srcVals[hi] - srcVals[lo]);
+  });
+}
+
 /** b140.5: extend a (freq, mag, phase) trio up to ~Nyquist with explicit
  *  noise-floor magnitude bins (phase = 0). Without this, the Rust FFT
  *  pipeline's linear interpolation onto FFT bins above the log grid's
@@ -403,11 +428,20 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
         nb_max_excess_db: cfg.nbMaxExcessDb,
       },
     });
+    // b140.6: realized_mag/phase come back on `firFreq` (5..fMaxFir, where
+    // fMaxFir = min(40000, sr·0.95/2)). At sr=44.1/48 kHz this is < 40 kHz,
+    // so its 512 points compress 0..fMaxFir while `freq` (the caller-side
+    // grid that the SPL/Export plot uses) covers up to 40 kHz. Plotting
+    // them positionally on a single x-axis shifted FIR by ~0.8 oct on
+    // rolloff. Resample onto `freq` here so every consumer gets FIR on the
+    // same grid as Model.
+    const realizedMagOnFreq = resampleOnLogGrid(firFreq, result.realized_mag, freq);
+    const realizedPhaseOnFreq = resampleOnLogGrid(firFreq, result.realized_phase, freq);
     fir = {
       impulse: result.impulse,
       timeMs: result.time_ms,
-      realizedMag: result.realized_mag,
-      realizedPhase: result.realized_phase,
+      realizedMag: realizedMagOnFreq,
+      realizedPhase: realizedPhaseOnFreq,
       taps: result.taps,
       sampleRate: result.sample_rate,
       normDb: result.norm_db,

@@ -274,3 +274,46 @@ describe("evaluateBandFull FIR identity (b139.3.1)", () => {
     expect(off).toBeLessThan(0.01);
   });
 });
+
+describe("evaluateBandFull FIR realized grid (b140.6)", () => {
+  it("realized_mag/phase resampled onto eval freq grid (sr=48k case)", async () => {
+    // At sr=48000 the FIR generation grid stops at fMaxFir≈22.8 kHz, while
+    // the eval grid (= measurement.freq, 20..20000 in flatBand) is fully
+    // inside that range. realized_mag/phase must come back on eval freq —
+    // not the FIR grid — so plot consumers index correctly.
+    const band = flatBand();
+    const result = await evaluateBandFull({
+      band,
+      fir: {
+        taps: 4096, sampleRate: 48000, window: "Blackman",
+        maxBoostDb: 24, noiseFloorDb: -150,
+        iterations: 1, freqWeighting: false,
+        narrowbandLimit: false, nbSmoothingOct: 0.333, nbMaxExcessDb: 6,
+      },
+    });
+    expect(result.fir).toBeDefined();
+    expect(result.fir!.realizedMag.length).toBe(result.freq.length);
+    expect(result.fir!.realizedPhase.length).toBe(result.freq.length);
+  });
+
+  it("realized_mag matches targetMag inside the eval grid for flat input", async () => {
+    // Identity FIR + flat target → realized ≈ target on every eval bin.
+    const band = flatBand();
+    const result = await evaluateBandFull({
+      band,
+      fir: {
+        taps: 4096, sampleRate: 48000, window: "Blackman",
+        maxBoostDb: 24, noiseFloorDb: -150,
+        iterations: 1, freqWeighting: false,
+        narrowbandLimit: false, nbSmoothingOct: 0.333, nbMaxExcessDb: 6,
+      },
+    });
+    const realized = result.fir!.realizedMag;
+    const target = result.targetMag!;
+    // Flat target = 0 dB; realized resampled from a 0-dB FIR grid (with
+    // a tiny noise-floor tail) → ≈ 0 dB on every bin.
+    for (let i = 0; i < realized.length; i++) {
+      expect(Math.abs(realized[i] - target[i])).toBeLessThan(0.5);
+    }
+  });
+});

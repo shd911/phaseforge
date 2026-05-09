@@ -187,6 +187,7 @@ pub(crate) fn iterative_refine(
             ITER_STATS.with(|s| s.borrow_mut().push(IterStats { iter: iter + 1, max_err, rms_err }));
         }
 
+
         // Early exit if error is already very small
         if max_err < 0.05 {
             info!("iterative_refine: converged at iter {} (max_err < 0.05 dB)", iter + 1);
