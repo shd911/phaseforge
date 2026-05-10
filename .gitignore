@@ -25,3 +25,4 @@ generate_doc.py
 .env
 .aider*
 test-fixtures/
+.test-logs/
