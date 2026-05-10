@@ -2,6 +2,24 @@
 
 All notable changes to PhaseForge are documented in this file.
 
+## b140.8 (2026-05-10) — IIR-based min-phase + REPhase parity
+
+Полный список изменений: `docs/release-notes-b140.8.md`. Ключевое:
+
+- **IIR-based Min-Phase FIR**: новый pipeline для не-Gaussian
+  filters (LR/Butterworth/Custom + PEQ). Решает REW phase mismatch
+  на 44.1/48 kHz WAV экспортах, который был регрессией b140.4–b140.6.
+- **REPhase reference parity**: 4 автоматических теста сравнивают
+  PhaseForge IIR output vs REPhase reference WAVs. Worst case
+  max Δmag 0.44 dB / Δphase 2.5° (sr=44.1k); best case 0.03 dB /
+  0.2° (sr=176.4k).
+- **UI: Slope dropdown** вместо Order numeric. LR4 теперь корректно
+  отображается как `48 dB/oct` (было `LR24`).
+- **FIR grid extensions** (b140.5/b140.6): noise-floor tail до
+  Nyquist + resample realized_mag/phase на eval grid — закрывают
+  display регрессии на 44.1/48 kHz.
+- 194 cargo + 104 vitest = 298 автоматических тестов PASS.
+
 ## b140.4 (2026-05-07) — Composite phase mode + unified SUM pipeline
 
 Большой пакет архитектурных улучшений с предыдущего релиза b139.5.3.
