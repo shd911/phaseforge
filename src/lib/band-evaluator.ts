@@ -403,31 +403,63 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
     }
     const firCombinedPhase = firTargetPhase.map((p, i) => p + firPeqPhase[i]);
 
-    const result = await invoke<{
-      impulse: number[]; time_ms: number[]; realized_mag: number[];
-      realized_phase: number[]; taps: number; sample_rate: number;
-      norm_db: number; causality: number;
-    }>("generate_model_fir", {
-      freq: firFreq,
-      targetMag: firTargetMag,
-      peqMag: firPeqMag,
-      modelPhase: firCombinedPhase,
-      config: {
-        taps: cfg.taps,
-        sample_rate: cfg.sampleRate,
-        max_boost_db: cfg.maxBoostDb,
-        noise_floor_db: cfg.noiseFloorDb,
-        window: cfg.window,
-        phase_mode: "Composite",
-        linear_phase_main: linearMain,
-        subsonic_cutoff_hz: subsonicCutoff,
-        iterations: cfg.iterations,
-        freq_weighting: cfg.freqWeighting,
-        narrowband_limit: cfg.narrowbandLimit,
-        nb_smoothing_oct: cfg.nbSmoothingOct,
-        nb_max_excess_db: cfg.nbMaxExcessDb,
-      },
-    });
+    // b140.7: route to the IIR cascade pipeline when the configuration is
+    // analytically realisable as digital biquads (LR / Butterworth / Custom
+    // HP+LP and PEQ peaking sections, no Gaussian, no subsonic protect, no
+    // Composite linear-phase main). The FFT cepstral path is retained for
+    // every other case (Gaussian filters, subsonic protect, linear-phase
+    // main, Bessel) — bug fix is scoped to where the cepstral artefact
+    // shows up in REW phase comparison.
+    const isIirRealizable = (f: FilterConfig | null | undefined): boolean => {
+      if (!f) return true;
+      return f.filter_type === "LinkwitzRiley"
+          || f.filter_type === "Butterworth"
+          || f.filter_type === "Custom";
+    };
+    const useIirPath = !linearMain
+      && subsonicCutoff === null
+      && isIirRealizable(band.target.high_pass)
+      && isIirRealizable(band.target.low_pass);
+
+    const sharedFirConfig = {
+      taps: cfg.taps,
+      sample_rate: cfg.sampleRate,
+      max_boost_db: cfg.maxBoostDb,
+      noise_floor_db: cfg.noiseFloorDb,
+      window: cfg.window,
+      phase_mode: "Composite",
+      linear_phase_main: linearMain,
+      subsonic_cutoff_hz: subsonicCutoff,
+      iterations: cfg.iterations,
+      freq_weighting: cfg.freqWeighting,
+      narrowband_limit: cfg.narrowbandLimit,
+      nb_smoothing_oct: cfg.nbSmoothingOct,
+      nb_max_excess_db: cfg.nbMaxExcessDb,
+    };
+
+    const result = useIirPath
+      ? await invoke<{
+          impulse: number[]; time_ms: number[]; realized_mag: number[];
+          realized_phase: number[]; taps: number; sample_rate: number;
+          norm_db: number; causality: number;
+        }>("generate_model_fir_iir", {
+          freq: firFreq,
+          hp: band.target.high_pass,
+          lp: band.target.low_pass,
+          peq: enabledPeq,
+          config: sharedFirConfig,
+        })
+      : await invoke<{
+          impulse: number[]; time_ms: number[]; realized_mag: number[];
+          realized_phase: number[]; taps: number; sample_rate: number;
+          norm_db: number; causality: number;
+        }>("generate_model_fir", {
+          freq: firFreq,
+          targetMag: firTargetMag,
+          peqMag: firPeqMag,
+          modelPhase: firCombinedPhase,
+          config: sharedFirConfig,
+        });
     // b140.6: realized_mag/phase come back on `firFreq` (5..fMaxFir, where
     // fMaxFir = min(40000, sr·0.95/2)). At sr=44.1/48 kHz this is < 40 kHz,
     // so its 512 points compress 0..fMaxFir while `freq` (the caller-side

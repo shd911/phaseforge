@@ -56,6 +56,7 @@ import {
   firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess,
 } from "../stores/bands";
 import { isGaussianMinPhase, gaussianFilterMagDb, CORRECTED_COLOR, PEQ_COLOR, STATUS_BAD } from "../lib/plot-helpers";
+import { evaluateBandFull } from "../lib/band-evaluator";
 import {
   tolerance, setTolerance,
   maxBands, setMaxBands,
@@ -1058,64 +1059,32 @@ function ExportTab() {
   }
 
 
-  // Core: generate FIR impulse for a band, return impulse array.
-  // Export is ALWAYS target + PEQ (model FIR), regardless of hybrid strategy.
-  // Hybrid only affects PEQ optimization stage, not FIR generation.
+  // b140.7: route through canonical evaluateBandFull so the IIR-cascade
+  // min-phase pipeline (introduced for non-Gaussian Min-Phase user choice)
+  // applies to WAV exports as well as the SPL plot. Previously this had a
+  // duplicate inline `generate_model_fir` call hard-coded to MinimumPhase
+  // mode, which produced a cepstral impulse with a constant group-delay
+  // artefact — REW saw a phase mismatch on sr=48 k WAV exports.
   async function generateBandImpulse(b: BandState): Promise<number[]> {
-    const sr = exportSampleRate();
-    const taps = exportTaps();
-    const win = exportWindow();
-    const peqBands = b.peqBands?.filter((p: PeqBand) => p.enabled) ?? [];
-
-    // 1. Evaluate pure target (HP/LP/shelf/tilt)
-    const [freq, response] = await invoke<[number[], { magnitude: number[]; phase: number[] }]>(
-      "evaluate_target_standalone",
-      { target: { ...b.target }, nPoints: 512, fMin: 5, fMax: 40000 }
-    );
-
-    const targetMag = response.magnitude;
-
-    // 2. Compute PEQ contribution separately (PEQ always min-phase)
-    let peqMagArr: number[] = [];
-    if (peqBands.length > 0) {
-      const [peqMag, peqPhase] = await invoke<[number[], number[]]>("compute_peq_complex", {
-        freq,
-        bands: peqBands,
-        sampleRate: sr,
-      });
-      peqMagArr = peqMag;
-    }
-
-    // 3. Generate FIR
-    // b138.4: see fir-export.ts — Gaussian HP + subsonic_protect demotes
-    // "linear" to MinimumPhase mode so the subsonic phase is reconstructed.
-    const isLin = (f: FilterConfig | null | undefined) =>
-      !f || (f.linear_phase && !hasActiveSubsonicProtect(f));
-
-    const firResult = await invoke<{
-      impulse: number[]; time_ms: number[]; realized_mag: number[];
-      realized_phase: number[]; taps: number; sample_rate: number; norm_db: number;
-    }>("generate_model_fir", {
-      freq,
-      targetMag,
-      peqMag: peqMagArr,
-      modelPhase: new Array(freq.length).fill(0),
-      config: {
-        taps,
-        sample_rate: sr,
-        max_boost_db: firMaxBoost(),
-        noise_floor_db: firNoiseFloor(),
-        window: win,
-        phase_mode: (isLin(b.target.high_pass) && isLin(b.target.low_pass)) ? "LinearPhase" : "MinimumPhase",
+    const result = await evaluateBandFull({
+      band: b,
+      fir: {
+        taps: exportTaps(),
+        sampleRate: exportSampleRate(),
+        window: exportWindow(),
+        maxBoostDb: firMaxBoost(),
+        noiseFloorDb: firNoiseFloor(),
         iterations: firIterations(),
-        freq_weighting: firFreqWeighting(),
-        narrowband_limit: firNarrowbandLimit(),
-        nb_smoothing_oct: firNbSmoothingOct(),
-        nb_max_excess_db: firNbMaxExcess(),
+        freqWeighting: firFreqWeighting(),
+        narrowbandLimit: firNarrowbandLimit(),
+        nbSmoothingOct: firNbSmoothingOct(),
+        nbMaxExcessDb: firNbMaxExcess(),
       },
     });
-
-    return firResult.impulse;
+    if (!result.fir) {
+      throw new Error("FIR generation failed");
+    }
+    return result.fir.impulse;
   }
 
   function bandFileName(b: BandState): string {

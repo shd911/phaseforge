@@ -3,6 +3,7 @@
 mod types;
 mod windowing;
 mod helpers;
+pub mod iir_path;
 
 pub use types::*;
 pub(crate) use windowing::*;

@@ -534,13 +534,43 @@ fn generate_model_fir(
         .map_err(|e| e.to_string())
 }
 
+/// b140.7: IIR-cascade min-phase FIR pipeline. Produces an analytical
+/// time-domain impulse for non-Gaussian crossovers (LR / Butterworth /
+/// Custom HP+LP and PEQ biquads), bypassing the cepstral path that
+/// caused REW-visible phase mismatch on min-phase exports. TS routes
+/// here only when the configuration is IIR-realisable; otherwise it
+/// keeps calling the original `generate_model_fir` above.
+#[tauri::command]
+fn generate_model_fir_iir(
+    freq: Vec<f64>,
+    hp: Option<target::FilterConfig>,
+    lp: Option<target::FilterConfig>,
+    peq: Vec<peq::PeqBand>,
+    config: FirConfig,
+) -> Result<FirModelResult, String> {
+    info!(
+        "generate_model_fir_iir: {} log points, taps={}, sr={}, hp={:?} lp={:?} peq_bands={}",
+        freq.len(), config.taps, config.sample_rate,
+        hp.as_ref().map(|h| (&h.filter_type, h.order, h.freq_hz)),
+        lp.as_ref().map(|l| (&l.filter_type, l.order, l.freq_hz)),
+        peq.iter().filter(|p| p.enabled).count(),
+    );
+    fir::iir_path::generate_min_phase_fir_iir(&fir::iir_path::IirPathInput {
+        freq: &freq,
+        hp: hp.as_ref(),
+        lp: lp.as_ref(),
+        peq: &peq,
+        config: &config,
+    }).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn export_fir_wav(impulse: Vec<f64>, sample_rate: f64, path: String) -> Result<(), String> {
     info!("export_fir_wav: {} samples, sr={}, path={}", impulse.len(), sample_rate, path);
-    
+
     // Validate path to prevent path traversal attacks
     let p = validate_export_path(&path)?;
-    
+
     fir::export_wav_f64(&impulse, sample_rate, &p).map_err(|e| e.to_string())
 }
 
@@ -553,7 +583,7 @@ pub fn run() {
         )
         .init();
 
-    info!("PhaseForge v0.1.0-b140.6 starting...");
+    info!("PhaseForge v0.1.0-b140.7.12 starting...");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -590,6 +620,7 @@ pub fn run() {
             generate_fir,
             generate_hybrid_fir,
             generate_model_fir,
+            generate_model_fir_iir,
             recommend_fir_taps,
             export_fir_wav,
             project::save_project,
