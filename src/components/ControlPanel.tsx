@@ -57,6 +57,7 @@ import {
 } from "../stores/bands";
 import { isGaussianMinPhase, gaussianFilterMagDb, CORRECTED_COLOR, PEQ_COLOR, STATUS_BAD } from "../lib/plot-helpers";
 import { evaluateBandFull } from "../lib/band-evaluator";
+import { orderToSlope, slopeToOrder, availableSlopes } from "../lib/slope";
 import {
   tolerance, setTolerance,
   maxBands, setMaxBands,
@@ -280,46 +281,7 @@ function FiltersTab() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// b140.7.13: Slope ↔ Order conversion. UI shows actual slope in dB/oct;
-// the storage / wire format keeps `filter.order` (1..8). LR is treated
-// per the PhaseForge convention `(BU-N)² = 2N effective order = 12N dB/oct`
-// — matches `target/mod.rs::filter_lp_response::LinkwitzRiley` which
-// doubles both magnitude (dB) and phase relative to BU-N.
-// ---------------------------------------------------------------------------
-
-const LR_SLOPES = [12, 24, 36, 48, 60, 72, 84, 96];
-const STD_SLOPES = [6, 12, 18, 24, 30, 36, 42, 48];
-
-function orderToSlope(filterType: string, order: number): number {
-  switch (filterType) {
-    case "LinkwitzRiley": return order * 12;
-    case "Butterworth":
-    case "Bessel":
-    case "Custom": return order * 6;
-    default: return 0;
-  }
-}
-
-function slopeToOrder(filterType: string, slope: number): number {
-  switch (filterType) {
-    case "LinkwitzRiley": return Math.round(slope / 12);
-    case "Butterworth":
-    case "Bessel":
-    case "Custom": return Math.round(slope / 6);
-    default: return 1;
-  }
-}
-
-function availableSlopes(filterType: string): number[] {
-  switch (filterType) {
-    case "LinkwitzRiley": return LR_SLOPES;
-    case "Butterworth":
-    case "Bessel":
-    case "Custom": return STD_SLOPES;
-    default: return [];
-  }
-}
+// b140.7.13/b140.8.2: Slope ↔ Order helpers extracted to lib/slope.ts for testing.
 
 // ---------------------------------------------------------------------------
 // FilterBlock (HP / LP)
@@ -417,7 +379,6 @@ function FilterBlock(props: FilterBlockProps) {
               <label class="fb-label">Slope</label>
               <select
                 class="fb-select"
-                value={String(orderToSlope(c()!.filter_type, c()!.order))}
                 onChange={(e) => {
                   const slope = parseInt(e.currentTarget.value, 10);
                   const order = slopeToOrder(c()!.filter_type, slope);
@@ -427,7 +388,10 @@ function FilterBlock(props: FilterBlockProps) {
                 }}
               >
                 {availableSlopes(c()!.filter_type).map((s) => (
-                  <option value={String(s)}>{`${s} dB/oct`}</option>
+                  <option
+                    value={String(s)}
+                    selected={s === orderToSlope(c()!.filter_type, c()!.order)}
+                  >{`${s} dB/oct`}</option>
                 ))}
               </select>
             </div>

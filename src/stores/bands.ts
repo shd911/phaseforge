@@ -122,6 +122,16 @@ function assignDefaultTargets(bands: BandState[]) {
   if (n <= 0) return;
   const xovers = equalOctaveCrossovers(n);
   for (let i = 0; i < n; i++) {
+    // b140.8.2: re-establish positional link to next band regardless of
+    // measurement presence. Was previously inside the measurement-skip
+    // block → measurement-driven projects lost link state after removeBand.
+    if (i < n - 1 && !bands[i].linkedToNext) {
+      setState("bands", i, "linkedToNext", true);
+    }
+    // Last band cannot be linked downstream; clear stale flag if any.
+    if (i === n - 1 && bands[i].linkedToNext) {
+      setState("bands", i, "linkedToNext", false);
+    }
     // Skip bands that already have a measurement — user configured them
     if (bands[i].measurement) continue;
     const hp = i > 0 ? { ...DEFAULT_FILTER, freq_hz: xovers[i - 1] } : null;
@@ -132,10 +142,6 @@ function assignDefaultTargets(bands: BandState[]) {
     setState("bands", i, "target", "low_pass", null);
     setState("bands", i, "target", "low_pass", lp);
     setState("bands", i, "targetEnabled", true);
-    // Link to next band
-    if (i < n - 1) {
-      setState("bands", i, "linkedToNext", true);
-    }
   }
 }
 
@@ -266,8 +272,12 @@ export function removeBand(id: string) {
   if (idx < 0) return;
   pushHistory("Remove band");
   batch(() => {
-    // Сбрасываем linkedToNext у предыдущей полосы (если была связана с удаляемой)
-    if (idx > 0 && state.bands[idx - 1].linkedToNext) {
+    // b140.8.2: linkedToNext describes positional coupling — after the
+    // filter() removes the deleted band, prev's link transfers to the new
+    // downstream neighbour. Only clear if the deleted band was last
+    // (no downstream neighbour exists anymore).
+    const wasLast = idx === state.bands.length - 1;
+    if (wasLast && idx > 0 && state.bands[idx - 1].linkedToNext) {
       setState("bands", idx - 1, "linkedToNext", false);
     }
     setState("bands", (prev) => prev.filter((b) => b.id !== id));
