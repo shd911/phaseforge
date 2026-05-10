@@ -1,6 +1,6 @@
 # PhaseForge — Project Rules
 
-> **Last reviewed:** 2026-05-07 (after b140.3.x clean SUM rebuild + b140.3.8 divergence fix).
+> **Last reviewed:** 2026-05-10 (after b140.8 IIR min-phase + REPhase parity release).
 > Файл актуализируется в конце каждой длинной сессии. Перед началом новой
 > — пробежать сверху вниз и удалить устаревшее.
 
@@ -8,7 +8,26 @@
 - **Stack**: Rust/Tauri 2 backend + SolidJS/TypeScript frontend. Do NOT assume Python/numpy for DSP code.
 - **Versioning**: bNN (b89, b89.1, etc.) — increment on each release
 - **Key dirs**: `src-tauri/src/` (Rust DSP, FIR, target eval), `src/components/` (SolidJS UI), `src/stores/` (state), `src/lib/` (helpers)
-- **Version files**: `src-tauri/tauri.conf.json` (version + title), `src-tauri/src/lib.rs` (startup log)
+- **Version files**: `src-tauri/tauri.conf.json` (version + title), `src-tauri/src/lib.rs` (startup log), `src/lib/version.ts`
+
+## DSP conventions
+- **Linkwitz-Riley**: PhaseForge LR-N response = `(BU-N)² = 12N dB/oct`
+  (`target/mod.rs::filter_lp_response::LinkwitzRiley` doubles BU-N
+  magnitude in dB and phase). Internally consistent and REPhase-validated;
+  textbook "LR-N = N total order" convention is NOT used here. UI Slope
+  dropdown reflects the actual slope (LR4 → 48 dB/oct, b140.7.13).
+- **FIR pipeline routing** (`src/lib/band-evaluator.ts`):
+  - **IIR analytical cascade** (`fir/iir_path.rs`) — Min-Phase main +
+    non-Gaussian (LR / Butterworth / Custom HP+LP + PEQ peaking) +
+    no subsonic. Peak-at-0 by construction, REPhase-parity tested.
+  - **FFT cepstral path** (`fir/mod.rs::generate_model_fir`) — every
+    other configuration: Linear-Phase main, Composite + subsonic,
+    Gaussian, Bessel, Custom measured targets.
+- **Bilinear digital cascade** (IIR path) has frequency-dependent
+  deviation up to ~20° vs analog reference accumulated over 8 biquads.
+  REPhase reference comparison gives tighter empirical bound (≤ 2.5° on
+  sr=44.1k). UI plot guardrail uses 25° tolerance — hard fail signals a
+  real regression beyond bilinear math.
 
 ## Debugging Rules
 - **NEVER guess at root cause.** Always add diagnostic logging first, get user's console output, then fix based on evidence.
@@ -26,14 +45,46 @@
 - After every fix, verify that existing functionality on OTHER tabs/views still works.
 - Fixes to one component must not regress others (Export fix must not break IR, snapshot fix must not break legends).
 - Before committing, mentally trace: "what else reads/writes this state?" — if unsure, grep for the variable name.
-- **Repro tests must use production parameters, not synthetic.** When writing a cargo test to reproduce a user-reported bug, copy ALL parameters from the user's logs (freq grid, taps, sample rate, narrowband_limit, etc.) — not simplified defaults. A test that uses `5–40 kHz` instead of the user's `20–20 kHz` may pass while the bug persists.
-- **Golden snapshots before refactor.** Before any architectural refactor (multi-stage migration, pipeline unification): capture golden snapshots / hashes of current outputs for the canonical fixtures. They are the only way to prove "no behaviour change" on each stage.
+- **Repro tests must use production parameters, not synthetic.** Copy ALL parameters from the user's logs (freq grid, taps, sample rate, narrowband_limit, etc.) — not simplified defaults. A test that uses `5–40 kHz` instead of the user's `20–20 kHz` may pass while the bug persists.
+- **Golden snapshots before refactor.** Before any architectural refactor: capture golden snapshots / hashes of current outputs for the canonical fixtures. Only way to prove "no behaviour change" on each stage.
+
+### DSP testing strategy (lesson from b140.7.x — 14+ iteration cycle)
+When a DSP bug has visual manifestation (REW, Plot, etc.) but the
+in-code behaviour reads correct:
+
+1. **External reference tests beat UI verify cycles.** Build a fixture
+   directory (`test-fixtures/<reference-tool>/`) with WAV/snapshot
+   output from an industry tool the user trusts (REPhase, Acourate,
+   REW). Cargo integration test compares PhaseForge output bin-by-bin
+   at key passband freqs. Tolerances calibrated to the math floor
+   (e.g. bilinear vs analog: ~3° passband). PASS → DSP correct,
+   problem is elsewhere (renderer, encoder, reader).
+2. **Test fixtures gitignored** — large binary files. Tests skip
+   cleanly when missing so CI / clean checkouts still pass.
+3. **Subjective UI verify is a tie-breaker, not the primary signal.**
+   Once REPhase tests PASS, treat user "still looks wrong" as a UI /
+   reader question, not a DSP regression.
+4. **Internal guardrail tests use loose tolerances** (20–25°). They
+   catch math broken beyond bilinear deviation, not bilinear vs
+   analog mismatch which is fundamental.
+5. **Iteration pacing**: if 3+ rounds of "fix → user says still
+   broken", STOP and demand external-reference fixtures. Continuing
+   without them is the entry to a 10-iteration cascade (see
+   `docs/archive/b140.7-min-phase-iir/`).
 
 ## Workflow
 - Commit after EACH completed block of changes — not after a giant batch.
 - Format: `type: description (bNN)` — feat/fix/cleanup/chore
 - Run code review (7-vector audit) before marking a feature complete.
 - Co-Authored-By trailer in every commit.
+
+## Versioning rule (с b140.7.1)
+Каждый промт / прим. fix / diagnostic patch (даже инкрементальный
+внутри одной major версии) — **обязан bump версию**: b140.7 →
+b140.7.1 → b140.7.2 etc. И tauri.conf.json title, и lib.rs startup,
+и version.ts — все три. Это даёт visual confirmation в title bar
+что новый код применён; без bump-а невозможно отличить пересборку
+от no-op (пользователь не знает старый бинарник запущен или новый).
 
 ## Build & Development
 - **Dev**: `cargo tauri dev`
@@ -42,8 +93,8 @@
 - If white/black screen after build: kill all processes on port 1420, rebuild clean
 
 ## End-of-prompt automation (с b140.3.x)
-В конце каждого промта где есть изменения кода — Code-сессия выполняет
-автоматически (без отдельной просьбы пользователя):
+В конце **каждого** промта (включая diagnostic patches без коммита) —
+Code-сессия выполняет автоматически (без отдельной просьбы пользователя):
 
 1. **Закрыть ВСЕ варианты запущенного PhaseForge** (dev, release, dmg):
    ```
@@ -67,6 +118,32 @@
 Это экономит время на каждом цикле — пользователь сразу видит результат
 без ручного перезапуска. Для финальной сборки `.dmg` (release) —
 по запросу пользователя, не автоматом.
+
+## Diagnostic patches — обязательный маркер (с b140.6)
+
+Любой временный diagnostic patch (без bump, без коммита) **обязан**
+добавить строку в startup log `src-tauri/src/lib.rs` рядом с версией:
+
+```rust
+tracing::info!("[DIAG ACTIVE] <тег>: <краткое описание>");
+```
+
+Пример: `[DIAG ACTIVE] MP-peak: post-IFFT/window/iter peak idx`.
+
+**Зачем**: версия `bNN` не меняется на diagnostic патчах →
+неотличимо «диагностика применена» vs «инкрементальная пересборка
+без изменений». Маркер виден в первой же строке после рестарта dev,
+путаницы нет.
+
+**Откат**: при удалении диагностики — убрать и маркер.
+
+**В каждый diagnostic промт включать step 0**:
+```
+cd /Users/olegryzhikov/phaseforge
+git diff --stat
+```
+Должны быть modified файлы в `src-tauri/`. Если пусто — патч не
+применён, не запускать build.
 
 ## Token Economy (Claude Max subscription)
 - **No progress narration.** Don't describe what you're about to do — just do it.
@@ -114,11 +191,22 @@
 Накопленные emergency hacks legacy не унифицируются — выкидывать и переоткрывать необходимые правила физически.
 
 ## Prompt effectiveness tracking
-С b140.2.2 каждый промт начинается с самооценки и заканчивается фактической после результата. Накопленные слабые места:
-- Synthetic тесты PASS, реальные FAIL — каждый промт делать fixture на копии реального проекта (`test-fixtures/` в `.gitignore`).
-- Phase domain не покрывается magnitude-тестами — acceptance явно проверяет phase где relevant.
-- При extension magnitude — phase должна быть согласована (та же target phase или Hilbert от extended magnitude).
-- Большие промты с N фиксами → partial реализация → каскад. Trade-off: малые промты сами по себе создают каскад. Найти баланс через pre-flight audit.
+С b140.2.2 каждый промт начинается с самооценки и заканчивается
+фактической после результата. Накопленные слабые места:
+- Synthetic tests PASS, real FAIL — fixture from real production
+  project (`test-fixtures/` gitignored). For DSP — external reference
+  WAVs (REPhase / Acourate), see `tests/rephase_compare.rs`.
+- Phase domain не покрывается magnitude-тестами — acceptance явно
+  проверяет phase где relevant.
+- При extension magnitude — phase должна быть согласована (та же
+  target phase или Hilbert от extended magnitude).
+- Большие промты с N фиксами → partial реализация → каскад.
+  Trade-off: малые промты сами по себе создают каскад. Pre-flight
+  audit перед промтом ловит false hypotheses.
+- **UI-driven debugging spawns cascades.** Если "пользователь видит
+  X неправильно" → объективные тесты должны быть до DSP правок.
+  Пример: b140.7.x от subjective REW screenshot → 14 итераций без
+  acceptance до того как добавили REPhase fixture tests.
 
 ## Early architectural detection — главный системный гайд
 Перед точечным фиксом в любой DSP/UI функции:
