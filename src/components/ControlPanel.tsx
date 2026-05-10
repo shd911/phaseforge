@@ -281,6 +281,47 @@ function FiltersTab() {
 }
 
 // ---------------------------------------------------------------------------
+// b140.7.13: Slope ↔ Order conversion. UI shows actual slope in dB/oct;
+// the storage / wire format keeps `filter.order` (1..8). LR is treated
+// per the PhaseForge convention `(BU-N)² = 2N effective order = 12N dB/oct`
+// — matches `target/mod.rs::filter_lp_response::LinkwitzRiley` which
+// doubles both magnitude (dB) and phase relative to BU-N.
+// ---------------------------------------------------------------------------
+
+const LR_SLOPES = [12, 24, 36, 48, 60, 72, 84, 96];
+const STD_SLOPES = [6, 12, 18, 24, 30, 36, 42, 48];
+
+function orderToSlope(filterType: string, order: number): number {
+  switch (filterType) {
+    case "LinkwitzRiley": return order * 12;
+    case "Butterworth":
+    case "Bessel":
+    case "Custom": return order * 6;
+    default: return 0;
+  }
+}
+
+function slopeToOrder(filterType: string, slope: number): number {
+  switch (filterType) {
+    case "LinkwitzRiley": return Math.round(slope / 12);
+    case "Butterworth":
+    case "Bessel":
+    case "Custom": return Math.round(slope / 6);
+    default: return 1;
+  }
+}
+
+function availableSlopes(filterType: string): number[] {
+  switch (filterType) {
+    case "LinkwitzRiley": return LR_SLOPES;
+    case "Butterworth":
+    case "Bessel":
+    case "Custom": return STD_SLOPES;
+    default: return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
 // FilterBlock (HP / LP)
 // ---------------------------------------------------------------------------
 
@@ -373,12 +414,22 @@ function FilterBlock(props: FilterBlockProps) {
           </div>
           <Show when={!isGaussian()}>
             <div class="fb-row">
-              <label class="fb-label">Order</label>
-              <NumberInput
-                value={c()!.order}
-                onChange={(v) => props.onChange(withOverride({ order: v }))}
-                min={1} max={8} step={1} precision={0}
-              />
+              <label class="fb-label">Slope</label>
+              <select
+                class="fb-select"
+                value={String(orderToSlope(c()!.filter_type, c()!.order))}
+                onChange={(e) => {
+                  const slope = parseInt(e.currentTarget.value, 10);
+                  const order = slopeToOrder(c()!.filter_type, slope);
+                  if (order !== c()!.order) {
+                    props.onChange(withOverride({ order }));
+                  }
+                }}
+              >
+                {availableSlopes(c()!.filter_type).map((s) => (
+                  <option value={String(s)}>{`${s} dB/oct`}</option>
+                ))}
+              </select>
             </div>
           </Show>
           <Show when={isGaussian()}>
@@ -1041,18 +1092,20 @@ function ExportTab() {
     const lp = b.target?.low_pass;
     if (hp) {
       const f = hp.freq_hz >= 1000 ? (hp.freq_hz / 1000).toFixed(1) + "k" : Math.round(hp.freq_hz).toString();
+      const slope = orderToSlope(hp.filter_type, hp.order);
       const t = hp.filter_type === "Gaussian" ? "Gauss" :
-        hp.filter_type === "LinkwitzRiley" ? "LR" + (hp.order * 6) :
-        hp.filter_type === "Butterworth" ? "BW" + (hp.order * 6) :
-        hp.filter_type === "Bessel" ? "Bes" + (hp.order * 6) : hp.filter_type;
+        hp.filter_type === "LinkwitzRiley" ? "LR" + slope :
+        hp.filter_type === "Butterworth" ? "BW" + slope :
+        hp.filter_type === "Bessel" ? "Bes" + slope : hp.filter_type;
       parts.push(`HP ${f} ${t}`);
     }
     if (lp) {
       const f = lp.freq_hz >= 1000 ? (lp.freq_hz / 1000).toFixed(1) + "k" : Math.round(lp.freq_hz).toString();
+      const slope = orderToSlope(lp.filter_type, lp.order);
       const t = lp.filter_type === "Gaussian" ? "Gauss" :
-        lp.filter_type === "LinkwitzRiley" ? "LR" + (lp.order * 6) :
-        lp.filter_type === "Butterworth" ? "BW" + (lp.order * 6) :
-        lp.filter_type === "Bessel" ? "Bes" + (lp.order * 6) : lp.filter_type;
+        lp.filter_type === "LinkwitzRiley" ? "LR" + slope :
+        lp.filter_type === "Butterworth" ? "BW" + slope :
+        lp.filter_type === "Bessel" ? "Bes" + slope : lp.filter_type;
       parts.push(`LP ${f} ${t}`);
     }
     return parts.length > 0 ? parts.join(" · ") : "\u2014";
