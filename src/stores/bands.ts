@@ -320,8 +320,8 @@ export function moveBand(fromIdx: number, toIdx: number) {
     ...b,
     target: {
       ...b.target,
-      high_pass: b.target.high_pass ? unwrapFilterConfig(b.target.high_pass) : null,
-      low_pass: b.target.low_pass ? unwrapFilterConfig(b.target.low_pass) : null,
+      high_pass: b.target.high_pass ? cloneFilterConfig(b.target.high_pass) : null,
+      low_pass: b.target.low_pass ? cloneFilterConfig(b.target.low_pass) : null,
     },
   }));
   const [moved] = bands.splice(fromIdx, 1);
@@ -496,8 +496,8 @@ export function toggleBandLinked(bandId: string) {
     const lp = state.bands[idx].target.low_pass;
     const nextIdx = idx + 1;
     if (lp && state.bands[nextIdx].target.high_pass) {
-      const nextHp = unwrapFilterConfig(state.bands[nextIdx].target.high_pass!);
-      const lpPlain = unwrapFilterConfig(lp);
+      const nextHp = cloneFilterConfig(state.bands[nextIdx].target.high_pass!);
+      const lpPlain = cloneFilterConfig(lp);
       setState("bands", nextIdx, "target", "high_pass", null);
       setState("bands", nextIdx, "target", "high_pass", {
         ...nextHp,
@@ -544,18 +544,12 @@ export function setBandTilt(bandId: string, dbPerOctave: number) {
   markDirty();
 }
 
-// b140.11: site-local `unwrapFilterConfig` removed — callers now use
-// `cloneFilterConfig` from src/lib/types.ts (single source of truth).
-// Alias kept locally for minimal diff to existing call sites; remove on
-// a follow-up sweep once any cross-file callers stabilise.
-const unwrapFilterConfig = cloneFilterConfig;
-
 export function setBandHighPass(bandId: string, config: import("../lib/types").FilterConfig | null) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
   pushHistory("Edit crossover");
   // Deep clone to prevent shared reference with LP in SolidJS store
-  if (config) config = unwrapFilterConfig(config);
+  if (config) config = cloneFilterConfig(config);
   // Валидация: HP freq не может быть >= LP freq (enforce 5% minimum gap)
   if (config) {
     const lpFreq = state.bands[idx].target.low_pass?.freq_hz;
@@ -583,7 +577,7 @@ export function setBandHighPass(bandId: string, config: import("../lib/types").F
       if (prevLp) {
         _propagating = true;
         try {
-          const plain = unwrapFilterConfig(prevLp);
+          const plain = cloneFilterConfig(prevLp);
           setState("bands", idx - 1, "target", "low_pass", null);
           setState("bands", idx - 1, "target", "low_pass", {
             ...plain,
@@ -606,7 +600,7 @@ export function setBandLowPass(bandId: string, config: import("../lib/types").Fi
   if (idx < 0) return;
   pushHistory("Edit crossover");
   // Deep clone to prevent shared reference with HP in SolidJS store
-  if (config) config = unwrapFilterConfig(config);
+  if (config) config = cloneFilterConfig(config);
   // Валидация: LP freq не может быть <= HP freq (enforce 5% minimum gap)
   if (config) {
     const hpFreq = state.bands[idx].target.high_pass?.freq_hz;
@@ -629,7 +623,7 @@ export function setBandLowPass(bandId: string, config: import("../lib/types").Fi
       if (nextHp) {
         _propagating = true;
         try {
-          const plain = unwrapFilterConfig(nextHp);
+          const plain = cloneFilterConfig(nextHp);
           setState("bands", idx + 1, "target", "high_pass", null);
           setState("bands", idx + 1, "target", "high_pass", {
             ...plain,
@@ -889,12 +883,10 @@ export const [activeTab, setActiveTab] = createSignal<ActiveTab>("measurements")
 export type PlotTab = "freq" | "ir" | "step" | "gd" | "export";
 export const [plotTab, setPlotTab] = createSignal<PlotTab>("freq");
 
-// b140.15: SUM rendering pipeline toggle removed. Legacy in-line
-// aggregation in renderSumMode was deleted; evaluateSum from
-// band-evaluator is now the single canonical SUM path. The
-// "phaseforge.sumMode" localStorage key is left intentionally
-// untouched — stale entries are harmless and self-clean on next
-// project save.
+// One-shot cleanup of the deleted SUM-mode toggle's localStorage key
+// (the toggle itself was removed in b140.15). Best-effort — silent
+// failure is fine if storage is unavailable.
+try { localStorage.removeItem("phaseforge.sumMode"); } catch (_) { /* ignore */ }
 
 // ---------------------------------------------------------------------------
 // Selected PEQ band index (for highlighting on graphs)

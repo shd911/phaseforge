@@ -26,7 +26,7 @@ import {
   STATUS_GOOD, STATUS_WARN, STATUS_BAD,
   DEFAULT_IR_COLORS, DEFAULT_GD_COLORS, DEFAULT_EXPORT_COLORS,
 } from "../lib/plot-helpers";
-import { hasActiveSubsonicProtect } from "../lib/band-evaluation";
+import { hasActiveSubsonicProtect } from "../lib/types";
 import { evaluateBandFull, evaluateSum, reconstructTargetPhase } from "../lib/band-evaluator";
 import { computeAutoAlign } from "../lib/auto-align";
 
@@ -2481,10 +2481,7 @@ export default function FrequencyPlot() {
           return hp && hp < min ? hp : min;
         }, 20);
 
-        // Save IR data for snapshot capture.
-        // b140.3.5: Σ IR/Step from evaluateSum's unified frequency-domain
-        // coherent sum (per-band data unchanged). b140.15: unconditional —
-        // legacy in-line aggregation deleted with the sumMode toggle.
+        // Σ IR/Step from evaluateSum's unified frequency-domain coherent sum.
         try {
           const sumResult = await evaluateSum(allBands as BandState[], { includeIr: true });
           if (gen === renderGen && sumResult.ir) {
@@ -3514,12 +3511,7 @@ export default function FrequencyPlot() {
     }
   }
 
-  // ----------------------------------------------------------------
-  // SUM mode rendering. b140.15: legacy in-line aggregation deleted —
-  // single canonical path through evaluateSum (b140.2.x → b140.3.5).
-  // Previously toggled at runtime via sumMode signal; toggle + signal +
-  // localStorage key removed in the same commit.
-  // ----------------------------------------------------------------
+  /** SUM mode rendering via evaluateSum. */
   async function renderSumMode(showPhase: boolean, showMag: boolean, showTarget: boolean) {
     // b140.3.1.6: PEQ dots are band-mode-only — clear before rendering SUM.
     activePeqDots = null;
@@ -4382,8 +4374,6 @@ export default function FrequencyPlot() {
           )}
         </Show>
       </Show>
-      {/* b140.15: Legacy / New SUM pipeline toggle removed — single
-          canonical path through evaluateSum. */}
       <Show when={isSum() && legendEntries.length > 0 && plotTab() !== "gd" && plotTab() !== "export"}>
         {/* SUM matrix */}
         <div class="sum-vis-table">

@@ -21,7 +21,7 @@ import {
   subsonicMagDb,
   smoothingConfig,
 } from "../plot-helpers";
-import { hasActiveSubsonicProtect } from "../band-evaluation";
+import { hasActiveSubsonicProtect } from "../types";
 import { buildLogGrid, buildCommonGrid, resampleOnLogGrid } from "./grid";
 import { dispatchFirInvoke } from "./route";
 import { appendNoiseFloorTail, autoRefLevel, computeExtension } from "./extension";

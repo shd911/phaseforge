@@ -68,11 +68,6 @@ function TestFilterBlock(props: {
   );
 }
 
-// b140.11: test mirror collapsed onto the unified `cloneFilterConfig`.
-// If production drifts, this test reflects the same drift — and the
-// dedicated filter-clone consistency suite catches it explicitly.
-const unwrapFilter = cloneFilterConfig;
-
 function makeFilter(type: string, freq: number, linPhase: boolean): FilterConfig {
   return {
     filter_type: type as any,
@@ -203,7 +198,7 @@ describe("Rendered FilterBlock interaction (DOM-attached)", () => {
         <div>
           <TestFilterBlock
             title="HP"
-            config={unwrapFilter(s.target.high_pass)}
+            config={cloneFilterConfig(s.target.high_pass)}
             onChange={(c) => {
               hpChanges.push(c);
               ss("target", "high_pass", c);
@@ -211,7 +206,7 @@ describe("Rendered FilterBlock interaction (DOM-attached)", () => {
           />
           <TestFilterBlock
             title="LP"
-            config={unwrapFilter(s.target.low_pass)}
+            config={cloneFilterConfig(s.target.low_pass)}
             onChange={(c) => {
               lpChanges.push(c);
               ss("target", "low_pass", c);
@@ -264,7 +259,7 @@ describe("Rendered FilterBlock interaction (DOM-attached)", () => {
         <div>
           <TestFilterBlock
             title="HP"
-            config={unwrapFilter(s.target.high_pass)}
+            config={cloneFilterConfig(s.target.high_pass)}
             onChange={(c) => {
               hpChanges.push(c);
               ss("target", "high_pass", c);
@@ -272,7 +267,7 @@ describe("Rendered FilterBlock interaction (DOM-attached)", () => {
           />
           <TestFilterBlock
             title="LP"
-            config={unwrapFilter(s.target.low_pass)}
+            config={cloneFilterConfig(s.target.low_pass)}
             onChange={(c) => {
               lpChanges.push(c);
               ss("target", "low_pass", c);
@@ -315,7 +310,7 @@ describe("Rendered FilterBlock interaction (DOM-attached)", () => {
         <div>
           <TestFilterBlock
             title="HP"
-            config={unwrapFilter(s.target.high_pass)}
+            config={cloneFilterConfig(s.target.high_pass)}
             onChange={(c) => {
               hpChanges.push(c);
               ss("target", "high_pass", c);
@@ -323,7 +318,7 @@ describe("Rendered FilterBlock interaction (DOM-attached)", () => {
           />
           <TestFilterBlock
             title="LP"
-            config={unwrapFilter(s.target.low_pass)}
+            config={cloneFilterConfig(s.target.low_pass)}
             onChange={(c) => {
               lpChanges.push(c);
               ss("target", "low_pass", c);
@@ -349,7 +344,7 @@ describe("Rendered FilterBlock interaction (DOM-attached)", () => {
 
   // --- Test 3: KNOWN SolidJS limitation — shared refs cause cross-contamination ---
   // This test documents the underlying SolidJS behavior. Application-level
-  // code MUST prevent shared references (unwrapFilterConfig, set-null-first).
+  // code MUST prevent shared references (cloneFilterConfig, set-null-first).
   it.skip("KNOWN: shared object ref causes cross-contamination (SolidJS limitation)", () => {
     const hpChanges: FilterConfig[] = [];
     const lpChanges: FilterConfig[] = [];
@@ -376,7 +371,7 @@ describe("Rendered FilterBlock interaction (DOM-attached)", () => {
         <div>
           <TestFilterBlock
             title="HP"
-            config={unwrapFilter(s.target.high_pass)}
+            config={cloneFilterConfig(s.target.high_pass)}
             onChange={(c) => {
               hpChanges.push(c);
               ss("target", "high_pass", c);
@@ -384,7 +379,7 @@ describe("Rendered FilterBlock interaction (DOM-attached)", () => {
           />
           <TestFilterBlock
             title="LP"
-            config={unwrapFilter(s.target.low_pass)}
+            config={cloneFilterConfig(s.target.low_pass)}
             onChange={(c) => {
               lpChanges.push(c);
               ss("target", "low_pass", c);
@@ -428,7 +423,7 @@ describe("Rendered FilterBlock interaction (DOM-attached)", () => {
         <div>
           <TestFilterBlock
             title="HP"
-            config={unwrapFilter(s.target.high_pass)}
+            config={cloneFilterConfig(s.target.high_pass)}
             onChange={(c) => {
               hpChanges.push(c);
               ss("target", "high_pass", c);
@@ -436,7 +431,7 @@ describe("Rendered FilterBlock interaction (DOM-attached)", () => {
           />
           <TestFilterBlock
             title="LP"
-            config={unwrapFilter(s.target.low_pass)}
+            config={cloneFilterConfig(s.target.low_pass)}
             onChange={(c) => {
               lpChanges.push(c);
               ss("target", "low_pass", c);

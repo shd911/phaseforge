@@ -71,7 +71,7 @@ import {
   handleOptimizePeq, handleClearPeq, peqStale,
 } from "../stores/peq-optimize";
 import { showStaleConfirmDialog } from "./StalePeqExportDialog";
-import { hasActiveSubsonicProtect } from "../lib/band-evaluation";
+import { hasActiveSubsonicProtect } from "../lib/types";
 import { qWarnAt } from "../lib/peq-quality";
 import { openHighQPopup } from "./HighQWarningPopup";
 import { invoke } from "@tauri-apps/api/core";
@@ -118,11 +118,6 @@ export default function ControlPanel(props: { rightPanel?: boolean }) {
 // ---------------------------------------------------------------------------
 // Filters Tab
 // ---------------------------------------------------------------------------
-
-// b140.11: site-local `unwrapFilter` removed — alias to the unified
-// `cloneFilterConfig` from src/lib/types.ts. The single source of truth
-// is enforced by src/lib/__tests__/filter-clone.test.ts.
-const unwrapFilter = cloneFilterConfig;
 
 function FiltersTab() {
   const band = () => activeBand();
@@ -223,12 +218,12 @@ function FiltersTab() {
         <FilterBlock
           title="High-Pass"
           isHighPass={true}
-          config={unwrapFilter(target()?.high_pass)}
+          config={cloneFilterConfig(target()?.high_pass)}
           linked={hpLinked()}
           onToggle={() => {
             const id = bandId();
             if (!id) return;
-            const cur = unwrapFilter(target()?.high_pass);
+            const cur = cloneFilterConfig(target()?.high_pass);
             if (cur) {
               lastHP.set(id, cur);
               setBandHighPass(id, null);
@@ -242,14 +237,14 @@ function FiltersTab() {
         {/* Low-Pass (🔗 кнопка, если не последняя полоса) */}
         <FilterBlock
           title="Low-Pass"
-          config={unwrapFilter(target()?.low_pass)}
+          config={cloneFilterConfig(target()?.low_pass)}
           linked={linked()}
           canLink={!isLastBand()}
           onLinkToggle={() => { const id = bandId(); if (id) toggleBandLinked(id); }}
           onToggle={() => {
             const id = bandId();
             if (!id) return;
-            const cur = unwrapFilter(target()?.low_pass);
+            const cur = cloneFilterConfig(target()?.low_pass);
             if (cur) {
               lastLP.set(id, cur);
               setBandLowPass(id, null);

@@ -36,6 +36,17 @@ export interface FilterConfig {
   subsonic_protect?: boolean | null;
 }
 
+/** True when the HP carries an active subsonic_protect that must
+ *  contribute min-phase even if the Gaussian itself is linear-phase.
+ *  b140.15.2: inlined here from the deleted src/lib/band-evaluation.ts
+ *  so callers don't traverse a one-function module to reach it. */
+export function hasActiveSubsonicProtect(hp: FilterConfig | null | undefined): boolean {
+  return !!hp
+    && hp.filter_type === "Gaussian"
+    && hp.subsonic_protect === true
+    && hp.freq_hz > 40;
+}
+
 /** Single source of truth for deep-copying a FilterConfig.
  *
  *  Reads each field explicitly to break any SolidJS store-proxy reference
