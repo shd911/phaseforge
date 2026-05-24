@@ -4,8 +4,10 @@ mod types;
 mod windowing;
 mod helpers;
 pub mod iir_path;
+pub mod dispatch;
 
 pub use types::*;
+pub use dispatch::{Route, route_for};
 pub(crate) use windowing::*;
 pub(crate) use helpers::*;
 

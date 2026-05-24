@@ -29,52 +29,21 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use phaseforge_lib::fir::iir_path::{generate_min_phase_fir_iir, IirPathInput};
-use phaseforge_lib::fir::{FirConfig, FirModelResult, PhaseMode, WindowType, generate_model_fir};
+use phaseforge_lib::fir::{
+    FirConfig, FirModelResult, PhaseMode, Route, WindowType,
+    generate_model_fir, route_for,
+};
 use phaseforge_lib::peq::{PeqBand, PeqFilterType};
 use phaseforge_lib::target::{
     self, FilterConfig as TargetFilterConfig, FilterType as TargetFilterType, TargetCurve,
 };
 
 // ---------------------------------------------------------------------------
-// Routing predicate — mirrors src/lib/fir-routing.ts pickFirRoute exactly.
-//
-// Phase 2 will move this into the Rust source tree as the single source of
-// truth and delete the JS copy (or vice versa). Until then, KEEPING THESE
-// TWO IN SYNC is enforced by the per-fixture `expected_route` assertions
-// below: if Rust and JS routing diverge, the JS routing-decision tests stay
-// green but this test fails on the first fixture whose route changes.
+// Routing predicate — b140.12: imported from production source
+// (`phaseforge_lib::fir::route_for`). The earlier in-test mirror was
+// removed; this test now LOCKS DOWN the production predicate's parity
+// with JS-side `pickFirRoute` via the table-driven test below.
 // ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Route {
-    Iir,
-    Cepstral,
-}
-
-fn is_iir_realizable(f: Option<&TargetFilterConfig>) -> bool {
-    match f {
-        None => true,
-        Some(c) => matches!(
-            c.filter_type,
-            TargetFilterType::LinkwitzRiley
-                | TargetFilterType::Butterworth
-                | TargetFilterType::Custom
-        ),
-    }
-}
-
-fn pick_route_rust(
-    hp: Option<&TargetFilterConfig>,
-    lp: Option<&TargetFilterConfig>,
-    linear_main: bool,
-    subsonic_cutoff_hz: Option<f64>,
-) -> Route {
-    if linear_main { return Route::Cepstral; }
-    if subsonic_cutoff_hz.is_some() { return Route::Cepstral; }
-    if !is_iir_realizable(hp) { return Route::Cepstral; }
-    if !is_iir_realizable(lp) { return Route::Cepstral; }
-    Route::Iir
-}
 
 // ---------------------------------------------------------------------------
 // Contract evaluator — the SINGLE entry that Phase 2 will replace.
@@ -87,7 +56,7 @@ fn evaluate_via_contract(
     cfg: &FirConfig,
     freq: &[f64],
 ) -> (Route, FirModelResult) {
-    let route = pick_route_rust(hp, lp, cfg.linear_phase_main, cfg.subsonic_cutoff_hz);
+    let route = route_for(hp, lp, cfg);
     let result = match route {
         Route::Iir => {
             generate_min_phase_fir_iir(&IirPathInput {
@@ -368,7 +337,8 @@ fn rust_routing_predicate_matches_js_decisions() {
     ];
 
     for (label, hp, lp, lin, sub, expected) in table {
-        let got = pick_route_rust(hp, lp, lin, sub);
+        let cfg = fir_config(lin, sub);
+        let got = route_for(hp, lp, &cfg);
         assert_eq!(got, expected, "{}", label);
     }
 }
