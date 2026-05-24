@@ -225,48 +225,11 @@ fn apply_filter(
 /// Butterworth LP poles for order N (left-half-plane only).
 /// Pole angles: θ_k = π(2k + N - 1) / (2N), k = 1..N
 /// Only poles with Re < 0 (all of them for proper Butterworth).
-fn butterworth_lp_complex(f: f64, fc: f64, n: u8) -> (f64, f64) {
-    // Normalized frequency
-    let w = f / fc;
-    let mut re_prod = 1.0_f64;
-    let mut im_prod = 0.0_f64;
-
-    for k in 0..n {
-        // Pole angle (on unit circle in s-plane)
-        let theta = PI * (2 * k as u32 + n as u32 + 1) as f64 / (2 * n as u32) as f64;
-        let pole_re = theta.cos(); // negative for left-half plane
-        let pole_im = theta.sin();
-
-        // H_k(jw) = 1 / (jw - s_k) where s_k = pole_re + j*pole_im
-        // jw - s_k = -pole_re + j*(w - pole_im)
-        let dr = -pole_re;
-        let di = w - pole_im;
-
-        // 1 / (dr + j*di) = (dr - j*di) / (dr² + di²)
-        let denom = dr * dr + di * di;
-        let inv_re = dr / denom;
-        let inv_im = -di / denom;
-
-        // Multiply into accumulator
-        let new_re = re_prod * inv_re - im_prod * inv_im;
-        let new_im = re_prod * inv_im + im_prod * inv_re;
-        re_prod = new_re;
-        im_prod = new_im;
-    }
-
-    // Magnitude in dB and phase in degrees
-    let mag_linear = (re_prod * re_prod + im_prod * im_prod).sqrt();
-    let mag_db = if mag_linear > 1e-30 { 20.0 * mag_linear.log10() } else { -600.0 };
-    let phase_deg = im_prod.atan2(re_prod) * (180.0 / PI);
-
-    (mag_db, phase_deg)
-}
-
-/// Butterworth HP: H_hp(s) = s^N / B_N(s)
-/// At jw: H_hp(jw) = (jw)^N * H_lp(jw) / (jw)^0...
-/// Simpler: HP(f) = LP(fc²/f) approach won't give phase.
-/// Use the transform s → wc/s: H_hp(jw) = H_lp(wc/(jw))
-fn butterworth_hp_complex(f: f64, fc: f64, n: u8) -> (f64, f64) {
+/// Raw complex transfer function H_lp(jw) for Butterworth LP order N.
+/// Returned as (re, im). Used directly by LR (square the complex) so the
+/// final atan2 happens on the doubled transfer function, not on a
+/// pre-wrapped phase. See b140.15.8 fix note in filter_lp_response.
+fn butterworth_lp_complex_raw(f: f64, fc: f64, n: u8) -> (f64, f64) {
     let w = f / fc;
     let mut re_prod = 1.0_f64;
     let mut im_prod = 0.0_f64;
@@ -275,27 +238,58 @@ fn butterworth_hp_complex(f: f64, fc: f64, n: u8) -> (f64, f64) {
         let theta = PI * (2 * k as u32 + n as u32 + 1) as f64 / (2 * n as u32) as f64;
         let pole_re = theta.cos();
         let pole_im = theta.sin();
-
-        // For HP, substitute s → wc/s, so at s=jw: s_hp = wc/(jw) = -j*wc/w = -j/w_norm
-        // H_k(s_hp) = 1/(s_hp - s_k) = 1/(-j/w - s_k)
-        // = 1/(-pole_re + j*(-1/w - pole_im))
         let dr = -pole_re;
-        let di = -1.0 / w - pole_im;
-
+        let di = w - pole_im;
         let denom = dr * dr + di * di;
         let inv_re = dr / denom;
         let inv_im = -di / denom;
-
         let new_re = re_prod * inv_re - im_prod * inv_im;
         let new_im = re_prod * inv_im + im_prod * inv_re;
         re_prod = new_re;
         im_prod = new_im;
     }
+    (re_prod, im_prod)
+}
 
+fn butterworth_lp_complex(f: f64, fc: f64, n: u8) -> (f64, f64) {
+    let (re_prod, im_prod) = butterworth_lp_complex_raw(f, fc, n);
     let mag_linear = (re_prod * re_prod + im_prod * im_prod).sqrt();
     let mag_db = if mag_linear > 1e-30 { 20.0 * mag_linear.log10() } else { -600.0 };
     let phase_deg = im_prod.atan2(re_prod) * (180.0 / PI);
+    (mag_db, phase_deg)
+}
 
+/// Butterworth HP: H_hp(s) = s^N / B_N(s)
+/// At jw: H_hp(jw) = (jw)^N * H_lp(jw) / (jw)^0...
+/// Simpler: HP(f) = LP(fc²/f) approach won't give phase.
+/// Use the transform s → wc/s: H_hp(jw) = H_lp(wc/(jw))
+fn butterworth_hp_complex_raw(f: f64, fc: f64, n: u8) -> (f64, f64) {
+    let w = f / fc;
+    let mut re_prod = 1.0_f64;
+    let mut im_prod = 0.0_f64;
+
+    for k in 0..n {
+        let theta = PI * (2 * k as u32 + n as u32 + 1) as f64 / (2 * n as u32) as f64;
+        let pole_re = theta.cos();
+        let pole_im = theta.sin();
+        let dr = -pole_re;
+        let di = -1.0 / w - pole_im;
+        let denom = dr * dr + di * di;
+        let inv_re = dr / denom;
+        let inv_im = -di / denom;
+        let new_re = re_prod * inv_re - im_prod * inv_im;
+        let new_im = re_prod * inv_im + im_prod * inv_re;
+        re_prod = new_re;
+        im_prod = new_im;
+    }
+    (re_prod, im_prod)
+}
+
+fn butterworth_hp_complex(f: f64, fc: f64, n: u8) -> (f64, f64) {
+    let (re_prod, im_prod) = butterworth_hp_complex_raw(f, fc, n);
+    let mag_linear = (re_prod * re_prod + im_prod * im_prod).sqrt();
+    let mag_db = if mag_linear > 1e-30 { 20.0 * mag_linear.log10() } else { -600.0 };
+    let phase_deg = im_prod.atan2(re_prod) * (180.0 / PI);
     (mag_db, phase_deg)
 }
 
@@ -484,9 +478,19 @@ fn filter_lp_response(f: f64, fc: f64, cfg: &FilterConfig) -> (f64, f64) {
             butterworth_lp_complex(f, fc, cfg.order)
         }
         FilterType::LinkwitzRiley => {
-            // LR = cascaded Butterworth: mag = 2*BW_mag, phase = 2*BW_phase
-            let (m, p) = butterworth_lp_complex(f, fc, cfg.order);
-            (2.0 * m, 2.0 * p)
+            // b140.15.8: LR_n = BW_n cascaded with BW_n (i.e. squared).
+            // Square the COMPLEX transfer before atan2 — pre-fix doubled
+            // the already-atan2-wrapped BW phase, producing a ±720°
+            // single-bin spike when the underlying BW phase crossed the
+            // ±180° wrap boundary near the cutoff (visible as a ~120° phase
+            // spike in SUM corrected on multi-band setups).
+            let (re, im) = butterworth_lp_complex_raw(f, fc, cfg.order);
+            let lr_re = re * re - im * im;
+            let lr_im = 2.0 * re * im;
+            let mag_linear = (lr_re * lr_re + lr_im * lr_im).sqrt();
+            let mag_db = if mag_linear > 1e-30 { 20.0 * mag_linear.log10() } else { -600.0 };
+            let phase_deg = lr_im.atan2(lr_re) * (180.0 / PI);
+            (mag_db, phase_deg)
         }
         FilterType::Bessel => {
             bessel_lp_complex(f, fc, cfg.order)
@@ -510,8 +514,14 @@ fn filter_hp_response(f: f64, fc: f64, cfg: &FilterConfig) -> (f64, f64) {
             butterworth_hp_complex(f, fc, cfg.order)
         }
         FilterType::LinkwitzRiley => {
-            let (m, p) = butterworth_hp_complex(f, fc, cfg.order);
-            (2.0 * m, 2.0 * p)
+            // b140.15.8: see matching note in filter_lp_response above.
+            let (re, im) = butterworth_hp_complex_raw(f, fc, cfg.order);
+            let lr_re = re * re - im * im;
+            let lr_im = 2.0 * re * im;
+            let mag_linear = (lr_re * lr_re + lr_im * lr_im).sqrt();
+            let mag_db = if mag_linear > 1e-30 { 20.0 * mag_linear.log10() } else { -600.0 };
+            let phase_deg = lr_im.atan2(lr_re) * (180.0 / PI);
+            (mag_db, phase_deg)
         }
         FilterType::Bessel => {
             bessel_hp_complex(f, fc, cfg.order)
@@ -897,6 +907,38 @@ mod tests {
         let g_m2 = gaussian_lp_linear(f_test, fc, 2.0);
         let g_m4 = gaussian_lp_linear(f_test, fc, 4.0);
         assert!(g_m1 > g_m2 && g_m2 > g_m4);
+    }
+
+    #[test]
+    fn lr4_phase_continuous_across_cutoff() {
+        // b140.15.8 regression test: LR4 LP phase used to jump ~720° in one
+        // bin near cutoff because the doubling was applied to atan2-wrapped
+        // BW phase. Post-fix the doubling happens on the complex value
+        // (squared), so adjacent-bin |Δphase| stays under one revolution
+        // (modulo 360 — we check wrapped distance).
+        let fc = 2000.0;
+        let cfg = FilterConfig {
+            filter_type: FilterType::LinkwitzRiley,
+            order: 4, freq_hz: fc, shape: None,
+            linear_phase: false, q: None, subsonic_protect: None,
+        };
+        // Sweep finely around the cutoff where the BW wrap used to fire.
+        let mut prev: Option<f64> = None;
+        for k in 0..200 {
+            let f = fc * 10f64.powf(-0.05 + 0.001 * k as f64); // ±5% in log freq
+            let (_, p_deg) = filter_lp_response(f, fc, &cfg);
+            if let Some(pp) = prev {
+                let raw = p_deg - pp;
+                let wrapped = raw - 360.0 * (raw / 360.0).round();
+                assert!(
+                    wrapped.abs() < 30.0,
+                    "LR4 LP phase jumped {:.1}° between bins at f={:.2}Hz (cutoff={:.0}); \
+                     pre-fix produced ~720° here",
+                    wrapped, f, fc,
+                );
+            }
+            prev = Some(p_deg);
+        }
     }
 
     #[test]
