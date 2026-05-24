@@ -227,17 +227,18 @@ export async function evaluateSum(
 ): Promise<SumEvalResult> {
   const freq = options?.freq ?? buildCommonGrid(bands);
 
+  // b140.15.4: per-band target eval runs in parallel (was serial for...of
+  // with await inside — ~N × IPC latency stacked). Bands are independent so
+  // Promise.all is safe; coherentSum below still requires the deterministic
+  // band order, hence indexed Array.from instead of a plain map.
   const perBandTargetData: Array<
     { mag: number[]; phase: number[]; sign: 1 | -1; delay: number } | null
-  > = [];
-  const perBandTarget: Array<{ mag: number[]; phase: number[] } | null> = [];
+  > = new Array(bands.length).fill(null);
+  const perBandTarget: Array<{ mag: number[]; phase: number[] } | null> =
+    new Array(bands.length).fill(null);
 
-  for (const band of bands) {
-    if (!band.targetEnabled) {
-      perBandTargetData.push(null);
-      perBandTarget.push(null);
-      continue;
-    }
+  await Promise.all(bands.map(async (band, i) => {
+    if (!band.targetEnabled) return;
     const target = JSON.parse(JSON.stringify(band.target));
     const response = await invoke<TargetResponse>("evaluate_target", {
       target, freq,
@@ -245,14 +246,14 @@ export async function evaluateSum(
     const phase = await reconstructTargetPhase(
       freq, response.phase, band.target.high_pass, band.target.low_pass,
     );
-    perBandTargetData.push({
+    perBandTargetData[i] = {
       mag: response.magnitude,
       phase,
       sign: band.inverted ? -1 : 1,
       delay: band.alignmentDelay ?? 0,
-    });
-    perBandTarget.push({ mag: response.magnitude, phase });
-  }
+    };
+    perBandTarget[i] = { mag: response.magnitude, phase };
+  }));
 
   const sum = coherentSum(freq, perBandTargetData);
 
@@ -385,9 +386,20 @@ export async function evaluateSum(
     const corrRe = new Float64Array(N), corrIm = new Float64Array(N);
     let anyTgt = false, anyMeas = false, anyCorr = false;
 
-    for (const band of bands) {
+    // b140.15.4: per-band IR build runs in parallel. Each band computes
+    // its own (tgt|meas|corr) Re/Im partials, then the main thread reduces
+    // them into the shared accumulator. Math is identical — accumulation
+    // is associative on f64 within the precision we care about.
+    interface IrPartial {
+      tgt: { re: Float64Array; im: Float64Array } | null;
+      meas: { re: Float64Array; im: Float64Array } | null;
+      corr: { re: Float64Array; im: Float64Array } | null;
+    }
+
+    const partials: IrPartial[] = await Promise.all(bands.map(async (band): Promise<IrPartial> => {
       const sign: 1 | -1 = band.inverted ? -1 : 1;
       const delay = band.alignmentDelay ?? 0;
+      const out: IrPartial = { tgt: null, meas: null, corr: null };
 
       // Target on irFreq (also reused as extension shape for measurement / corrected).
       let tgtMagOnIr: number[] | null = null;
@@ -400,16 +412,17 @@ export async function evaluateSum(
           irFreq, resp.phase, band.target.high_pass, band.target.low_pass,
         );
         tgtMagOnIr = resp.magnitude;
-        anyTgt = true;
+        const re = new Float64Array(N), im = new Float64Array(N);
         for (let j = 0; j < N; j++) {
           const amp = Math.pow(10, (resp.magnitude[j] ?? -200) / 20) * sign;
           const phRad = ((tPhase[j] ?? 0) + 360 * irFreq[j] * delay) * Math.PI / 180;
-          tgtRe[j] += amp * Math.cos(phRad);
-          tgtIm[j] += amp * Math.sin(phRad);
+          re[j] = amp * Math.cos(phRad);
+          im[j] = amp * Math.sin(phRad);
         }
+        out.tgt = { re, im };
       }
 
-      if (!band.measurement) continue;
+      if (!band.measurement) return out;
 
       // Measurement on irFreq: extension via target shape when target is on,
       // else fence outside native range.
@@ -430,15 +443,18 @@ export async function evaluateSum(
         extMeasMag = r?.mag ?? null;
         extMeasPhase = r?.phase ?? null;
       }
-      if (!extMeasMag) continue;
+      if (!extMeasMag) return out;
       const measPhaseArr = extMeasPhase ?? new Array<number>(N).fill(0);
 
-      anyMeas = true;
-      for (let j = 0; j < N; j++) {
-        const amp = Math.pow(10, (extMeasMag[j] ?? -200) / 20) * sign;
-        const phRad = ((measPhaseArr[j] ?? 0) + 360 * irFreq[j] * delay) * Math.PI / 180;
-        measRe[j] += amp * Math.cos(phRad);
-        measIm[j] += amp * Math.sin(phRad);
+      {
+        const re = new Float64Array(N), im = new Float64Array(N);
+        for (let j = 0; j < N; j++) {
+          const amp = Math.pow(10, (extMeasMag[j] ?? -200) / 20) * sign;
+          const phRad = ((measPhaseArr[j] ?? 0) + 360 * irFreq[j] * delay) * Math.PI / 180;
+          re[j] = amp * Math.cos(phRad);
+          im[j] = amp * Math.sin(phRad);
+        }
+        out.meas = { re, im };
       }
 
       // Corrected: measurement (extended) + PEQ + cross-section, on irFreq.
@@ -470,13 +486,31 @@ export async function evaluateSum(
         const corrPhase = await reconstructTargetPhase(
           irFreq, baseP, band.target.high_pass, band.target.low_pass,
         );
-        anyCorr = true;
+        const re = new Float64Array(N), im = new Float64Array(N);
         for (let j = 0; j < N; j++) {
           const amp = Math.pow(10, (corrMag[j] ?? -200) / 20) * sign;
           const phRad = ((corrPhase[j] ?? 0) + 360 * irFreq[j] * delay) * Math.PI / 180;
-          corrRe[j] += amp * Math.cos(phRad);
-          corrIm[j] += amp * Math.sin(phRad);
+          re[j] = amp * Math.cos(phRad);
+          im[j] = amp * Math.sin(phRad);
         }
+        out.corr = { re, im };
+      }
+
+      return out;
+    }));
+
+    for (const p of partials) {
+      if (p.tgt) {
+        anyTgt = true;
+        for (let j = 0; j < N; j++) { tgtRe[j] += p.tgt.re[j]; tgtIm[j] += p.tgt.im[j]; }
+      }
+      if (p.meas) {
+        anyMeas = true;
+        for (let j = 0; j < N; j++) { measRe[j] += p.meas.re[j]; measIm[j] += p.meas.im[j]; }
+      }
+      if (p.corr) {
+        anyCorr = true;
+        for (let j = 0; j < N; j++) { corrRe[j] += p.corr.re[j]; corrIm[j] += p.corr.im[j]; }
       }
     }
 
