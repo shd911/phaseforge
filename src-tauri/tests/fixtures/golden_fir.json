@@ -1,0 +1,10 @@
+{
+  "cep_01_gaussian_hp_subsonic_off": "11c1d7004955bfac8291a38bec9e88a27d67976f00849190e22ee38d7188a252",
+  "cep_02_gaussian_hp_subsonic_on": "5482af6e92667965ea12f61160abb5b37dee189cb65bc66a0aa457f1c18e5a43",
+  "cep_03_bessel_lp_500": "d9b4b859c9113c64396a794eb7da9fa5b3aec802450014edb73bf1d14ad45fe5",
+  "cep_04_lr4_bandpass_linear_main": "52291795962c3951523aea2ef3cfc0062b4e63325be4500792d3065522d41eac",
+  "iir_01_lr4_hp_80": "9a879f70c4ea7cb5d529b2b83afd021de00328349010ca60b095b8c3f1a116d4",
+  "iir_02_lr4_bandpass_with_peq": "f9f236fddd8c9646a4023226e7a521e0dc328dee3e3c26c4594c4af736bd2c1e",
+  "iir_03_bw2_hp_100": "4b6c8f9871a35374ef83fbd80e1be6c1d6b8e4cd9e8d756e51da1723d6dd50ff",
+  "iir_04_custom_bandpass": "6a9c459e107ad97bfcf664a090ae2a528b37d41ae040a6a32bdf7cc65a05c13d"
+}
