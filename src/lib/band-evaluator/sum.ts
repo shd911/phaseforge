@@ -6,18 +6,17 @@
  * `coherentSum`) out of band-evaluator.ts. The SumEvalResult and
  * SumEvalOptions interfaces move with them.
  *
- * Cycle note: this module imports `evaluateBandFull` and
- * `reconstructTargetPhase` from the parent band-evaluator.ts. The
- * parent in turn re-exports `evaluateSum` from this module for
- * backward compat. ESM cycles resolve at runtime here because both
- * directions only reference functions, not module-load-time values.
+ * No cycles: this module imports `evaluateBandFull` and
+ * `reconstructTargetPhase` directly from `./evaluate` (sibling). The
+ * parent `band-evaluator.ts` re-exports `evaluateSum` for backward
+ * compat but isn't imported back here.
  */
 import { invoke } from "@tauri-apps/api/core";
 import type { BandState } from "../../stores/bands";
 import type { PeqBand, TargetResponse } from "../types";
 import { buildCommonGrid, buildLogGrid } from "./grid";
 import { appendNoiseFloorTail, computeExtension } from "./extension";
-import { evaluateBandFull, reconstructTargetPhase } from "../band-evaluator";
+import { evaluateBandFull, reconstructTargetPhase } from "./evaluate";
 
 // ---------------------------------------------------------------------------
 // Public types
