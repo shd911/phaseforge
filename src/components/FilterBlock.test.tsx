@@ -13,6 +13,7 @@ import { createRoot, createSignal } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import { render } from "solid-js/web";
 import type { FilterConfig } from "../lib/types";
+import { cloneFilterConfig } from "../lib/types";
 
 // Minimal FilterBlock that reproduces the real component's pattern
 function TestFilterBlock(props: {
@@ -67,20 +68,10 @@ function TestFilterBlock(props: {
   );
 }
 
-/** Deep-copy a FilterConfig from SolidJS store proxy to a plain object.
- *  Mirrors unwrapFilter from ControlPanel.tsx exactly. */
-function unwrapFilter(f: FilterConfig | null | undefined): FilterConfig | null {
-  if (!f) return null;
-  return {
-    filter_type: f.filter_type,
-    order: f.order,
-    freq_hz: f.freq_hz,
-    shape: f.shape,
-    linear_phase: f.linear_phase,
-    q: f.q,
-    subsonic_protect: f.subsonic_protect ?? null,
-  };
-}
+// b140.11: test mirror collapsed onto the unified `cloneFilterConfig`.
+// If production drifts, this test reflects the same drift — and the
+// dedicated filter-clone consistency suite catches it explicitly.
+const unwrapFilter = cloneFilterConfig;
 
 function makeFilter(type: string, freq: number, linPhase: boolean): FilterConfig {
   return {

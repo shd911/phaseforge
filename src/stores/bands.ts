@@ -1,7 +1,7 @@
 import { createStore, reconcile } from "solid-js/store";
 import { createSignal, batch } from "solid-js";
 import type { Measurement, TargetCurve, MergeConfig, PeqBand, FirResult, WindowType, ExclusionZone, AnalysisResult, PeqOptimizedTarget } from "../lib/types";
-import { MEASUREMENT_COLORS } from "../lib/types";
+import { MEASUREMENT_COLORS, cloneFilterConfig } from "../lib/types";
 import {
   pushHistory,
   beginInteraction,
@@ -544,19 +544,11 @@ export function setBandTilt(bandId: string, dbPerOctave: number) {
   markDirty();
 }
 
-/** Unwrap a SolidJS store proxy FilterConfig into a plain object.
- *  Prevents cross-contamination when spreading proxy objects inside setState. */
-function unwrapFilterConfig(f: import("../lib/types").FilterConfig): import("../lib/types").FilterConfig {
-  return {
-    filter_type: f.filter_type,
-    order: f.order,
-    freq_hz: f.freq_hz,
-    shape: f.shape,
-    linear_phase: f.linear_phase,
-    q: f.q,
-    subsonic_protect: f.subsonic_protect ?? null,
-  };
-}
+// b140.11: site-local `unwrapFilterConfig` removed — callers now use
+// `cloneFilterConfig` from src/lib/types.ts (single source of truth).
+// Alias kept locally for minimal diff to existing call sites; remove on
+// a follow-up sweep once any cross-file callers stabilise.
+const unwrapFilterConfig = cloneFilterConfig;
 
 export function setBandHighPass(bandId: string, config: import("../lib/types").FilterConfig | null) {
   const idx = bandIndex(bandId);

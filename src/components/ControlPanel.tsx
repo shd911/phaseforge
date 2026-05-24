@@ -1,7 +1,7 @@
 import { createSignal, createEffect, on, onCleanup, Show } from "solid-js";
 import type { FilterType, FilterConfig, Measurement, MergeConfig, MergeResult, PeqBand, FirConfig, FirResult, WindowType, PhaseMode } from "../lib/types";
 import NumberInput from "./NumberInput";
-import { MEASUREMENT_COLORS } from "../lib/types";
+import { MEASUREMENT_COLORS, cloneFilterConfig } from "../lib/types";
 import {
   activeBand,
   appState,
@@ -119,21 +119,10 @@ export default function ControlPanel(props: { rightPanel?: boolean }) {
 // Filters Tab
 // ---------------------------------------------------------------------------
 
-/** Deep-copy a FilterConfig from SolidJS store proxy to a plain object.
- *  This breaks the proxy reference so that spread/read in event handlers
- *  never accidentally subscribes to or cross-contaminates sibling paths. */
-function unwrapFilter(f: import("../lib/types").FilterConfig | null | undefined): import("../lib/types").FilterConfig | null {
-  if (!f) return null;
-  return {
-    filter_type: f.filter_type,
-    order: f.order,
-    freq_hz: f.freq_hz,
-    shape: f.shape,
-    linear_phase: f.linear_phase,
-    q: f.q,
-    subsonic_protect: f.subsonic_protect ?? null,
-  };
-}
+// b140.11: site-local `unwrapFilter` removed — alias to the unified
+// `cloneFilterConfig` from src/lib/types.ts. The single source of truth
+// is enforced by src/lib/__tests__/filter-clone.test.ts.
+const unwrapFilter = cloneFilterConfig;
 
 function FiltersTab() {
   const band = () => activeBand();
@@ -303,21 +292,12 @@ function FilterBlock(props: FilterBlockProps) {
   const isGaussian = () => c()?.filter_type === "Gaussian";
   const isCustom = () => c()?.filter_type === "Custom";
 
-  /** Build a full FilterConfig from the current config, overriding specific fields.
-   *  Reads each field explicitly from the (already unwrapped) plain config object
-   *  to avoid any SolidJS proxy spread issues. */
+  /** Build a full FilterConfig from the current config, overriding specific
+   *  fields. Cloning first via `cloneFilterConfig` breaks the SolidJS store
+   *  proxy reference so the subsequent spread of `overrides` is safe.
+   *  b140.11: collapsed onto the unified clone helper. */
   const withOverride = (overrides: Partial<import("../lib/types").FilterConfig>): import("../lib/types").FilterConfig => {
-    const cur = c()!;
-    return {
-      filter_type: cur.filter_type,
-      order: cur.order,
-      freq_hz: cur.freq_hz,
-      shape: cur.shape,
-      linear_phase: cur.linear_phase,
-      q: cur.q,
-      subsonic_protect: cur.subsonic_protect ?? null,
-      ...overrides,
-    };
+    return { ...cloneFilterConfig(c()!), ...overrides };
   };
 
   return (

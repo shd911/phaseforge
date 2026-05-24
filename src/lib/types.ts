@@ -36,6 +36,34 @@ export interface FilterConfig {
   subsonic_protect?: boolean | null;
 }
 
+/** Single source of truth for deep-copying a FilterConfig.
+ *
+ *  Reads each field explicitly to break any SolidJS store-proxy reference
+ *  (spreading a proxy carries trap bindings that re-subscribe on read).
+ *  Normalises `subsonic_protect` to `null` when absent so downstream
+ *  comparators don't need to handle `undefined`.
+ *
+ *  b140.11: replaces three independent copies that had drifted in casing
+ *  and null-handling (`unwrapFilterConfig` in stores/bands.ts,
+ *  `unwrapFilter` in components/ControlPanel.tsx, `cloneFilter` in
+ *  lib/project-io.ts). See src/lib/__tests__/filter-clone.test.ts for
+ *  the consistency contract this function preserves. */
+export function cloneFilterConfig(f: FilterConfig): FilterConfig;
+export function cloneFilterConfig(f: null | undefined): null;
+export function cloneFilterConfig(f: FilterConfig | null | undefined): FilterConfig | null;
+export function cloneFilterConfig(f: FilterConfig | null | undefined): FilterConfig | null {
+  if (!f) return null;
+  return {
+    filter_type: f.filter_type,
+    order: f.order,
+    freq_hz: f.freq_hz,
+    shape: f.shape,
+    linear_phase: f.linear_phase,
+    q: f.q,
+    subsonic_protect: f.subsonic_protect ?? null,
+  };
+}
+
 export interface TargetResponse {
   magnitude: number[];
   phase: number[];

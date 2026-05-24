@@ -27,7 +27,7 @@ import {
   firMaxBoost, setFirMaxBoost,
   firNoiseFloor, setFirNoiseFloor,
 } from "../stores/bands";
-import { MEASUREMENT_COLORS } from "../lib/types";
+import { MEASUREMENT_COLORS, cloneFilterConfig } from "../lib/types";
 import type { FilterConfig } from "../lib/types";
 import { tolerance, setTolerance, maxBands, setMaxBands, gainRegularization, setGainRegularization, peqFloor, setPeqFloor, peqRangeMode, setPeqRangeMode, peqDirectLow, setPeqDirectLow, peqDirectHigh, setPeqDirectHigh } from "../stores/peq-optimize";
 import type { AppState, BandState, PerMeasurementSettings, FloorBounceConfig, MergeSource } from "../stores/bands";
@@ -372,10 +372,8 @@ function mapSettingsFromProject(s: ProjectSettings): PerMeasurementSettings {
   };
 }
 
-function cloneFilter(f: import("./types").FilterConfig | null | undefined): import("./types").FilterConfig | null {
-  if (!f) return null;
-  return { filter_type: f.filter_type, order: f.order, freq_hz: f.freq_hz, shape: f.shape, linear_phase: f.linear_phase, q: f.q, subsonic_protect: f.subsonic_protect ?? null };
-}
+// b140.11: site-local `cloneFilter` removed — replaced by direct calls to
+// `cloneFilterConfig` (single source of truth in src/lib/types.ts).
 
 function mapBandFromProject(b: ProjectBand, idx: number): BandState {
   return {
@@ -386,8 +384,8 @@ function mapBandFromProject(b: ProjectBand, idx: number): BandState {
     settings: b.settings ? mapSettingsFromProject(b.settings) : null,
     target: {
       ...b.target,
-      high_pass: cloneFilter(b.target.high_pass),
-      low_pass: cloneFilter(b.target.low_pass),
+      high_pass: cloneFilterConfig(b.target.high_pass),
+      low_pass: cloneFilterConfig(b.target.low_pass),
     },
     targetEnabled: b.target_enabled,
     inverted: b.inverted,
