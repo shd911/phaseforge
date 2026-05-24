@@ -451,15 +451,23 @@ fn compute_cross_section(
         return Err("cross_section: empty freq".into());
     }
 
-    // Step 1: compute user-specified filter response (as-is)
+    // b140.15.9: complex-accumulator path. Scalar phase summation produced
+    // 1-bin spikes (~358° jump) where HP or LP wrapped at ±180° on a single
+    // bin — visible as ~120° downward spikes in SUM corrected phase. The
+    // complex form is wrap-invariant (cos/sin are periodic) so the final
+    // atan2 sees the true product phase modulo 360° without ever crossing
+    // a wrong wrap boundary.
     let mut filt_mag = vec![0.0_f64; n];
-    let mut filt_phase = vec![0.0_f64; n];
+    let mut re_acc = vec![1.0_f64; n];
+    let mut im_acc = vec![0.0_f64; n];
     if let Some(hp) = &high_pass {
-        target::apply_filter_public(&mut filt_mag, &mut filt_phase, &freq, hp, false);
+        target::apply_filter_complex(&mut filt_mag, &mut re_acc, &mut im_acc, &freq, hp, false);
     }
     if let Some(lp) = &low_pass {
-        target::apply_filter_public(&mut filt_mag, &mut filt_phase, &freq, lp, true);
+        target::apply_filter_complex(&mut filt_mag, &mut re_acc, &mut im_acc, &freq, lp, true);
     }
+    let mut filt_phase = vec![0.0_f64; n];
+    target::complex_acc_to_phase_deg(&re_acc, &im_acc, &mut filt_phase);
 
     // Return filter-only response (no makeup).
     // Makeup was a preview artifact — FIR export recomputes correction from scratch.
@@ -620,7 +628,7 @@ pub fn run() {
         )
         .init();
 
-    info!("PhaseForge b140.15.8 starting...");
+    info!("PhaseForge b140.15.9 starting...");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())

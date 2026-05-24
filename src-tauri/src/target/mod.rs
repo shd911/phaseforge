@@ -70,6 +70,108 @@ pub fn apply_filter_public(
     apply_filter(mag, phase, freq, cfg, is_lowpass);
 }
 
+/// b140.15.9: complex-accumulator variant of `apply_filter`.
+///
+/// Pre-fix `apply_filter` accumulated phase scalarly (`phase[i] += p_deg`).
+/// When evaluate() chained HP + LP and the LR doubling-fixed but each
+/// component still wrapped at its own cutoff, the scalar sum produced
+/// ~720° jumps near wrap boundaries — visible as 1-bin phase spikes on
+/// SUM corrected phase (and on per-band corrected phase).
+///
+/// This version multiplies a unit-amplitude phasor `(cos p, sin p)` into
+/// a (re, im) accumulator. Complex multiplication is phase-addition
+/// modulo 360°, so the wrap is invisible — atan2 at the end produces a
+/// clean wrapped value. Magnitude continues to accumulate in dB
+/// (addition has no wrap concern).
+///
+/// Initialise (re, im) to (1, 0) per bin before chaining filters; convert
+/// to degrees via `complex_acc_to_phase_deg` after the last call.
+pub fn apply_filter_complex(
+    mag: &mut [f64],
+    re_acc: &mut [f64],
+    im_acc: &mut [f64],
+    freq: &[f64],
+    cfg: &FilterConfig,
+    is_lowpass: bool,
+) {
+    let fc = cfg.freq_hz;
+    if fc <= 0.0 { return; }
+
+    let subsonic_active = !is_lowpass
+        && matches!(cfg.filter_type, FilterType::Gaussian)
+        && cfg.subsonic_protect == Some(true)
+        && fc > 40.0;
+    let f_subsonic = fc / 8.0;
+    let is_gaussian = matches!(cfg.filter_type, FilterType::Gaussian);
+
+    for i in 0..freq.len() {
+        let f = freq[i];
+        let (mut m_db, p_deg) = if f <= 0.0 {
+            (if is_lowpass { 0.0 } else { -600.0 }, 0.0)
+        } else if is_lowpass {
+            filter_lp_response(f, fc, cfg)
+        } else {
+            filter_hp_response(f, fc, cfg)
+        };
+        if subsonic_active && f > 0.0 {
+            let ratio = (f_subsonic / f).powi(16);
+            m_db += -10.0 * (1.0 + ratio).log10();
+        }
+        mag[i] += m_db;
+
+        // Skip phase for linear_phase mode and Gaussian (matches pre-fix
+        // apply_filter contract).
+        if cfg.linear_phase || is_gaussian { continue; }
+
+        let p_rad = p_deg.to_radians();
+        let c = p_rad.cos();
+        let s = p_rad.sin();
+        let nr = re_acc[i] * c - im_acc[i] * s;
+        let ni = re_acc[i] * s + im_acc[i] * c;
+        re_acc[i] = nr;
+        im_acc[i] = ni;
+    }
+}
+
+/// b140.15.9: complex-accumulator variant of `apply_shelf`. Same fix as
+/// `apply_filter_complex`. Shelves don't have a wrap-prone phase
+/// internally, but they sit in the same evaluate() chain so they must
+/// also feed the complex accumulator.
+pub fn apply_shelf_complex(
+    mag: &mut [f64],
+    re_acc: &mut [f64],
+    im_acc: &mut [f64],
+    freq: &[f64],
+    cfg: &ShelfConfig,
+    is_low: bool,
+) {
+    let fc = cfg.freq_hz;
+    let gain = cfg.gain_db;
+    let q = cfg.q.max(0.1);
+    if fc <= 0.0 || gain.abs() < 1e-12 { return; }
+    for i in 0..freq.len() {
+        let f = freq[i];
+        if f <= 0.0 { continue; }
+        let (m_db, p_deg) = shelf_response(f, fc, gain, q, is_low);
+        mag[i] += m_db;
+        let p_rad = p_deg.to_radians();
+        let c = p_rad.cos();
+        let s = p_rad.sin();
+        let nr = re_acc[i] * c - im_acc[i] * s;
+        let ni = re_acc[i] * s + im_acc[i] * c;
+        re_acc[i] = nr;
+        im_acc[i] = ni;
+    }
+}
+
+/// b140.15.9: convert (re, im) phase accumulator → degrees wrapped to
+/// (-180, 180]. Use after a sequence of `apply_*_complex` calls.
+pub fn complex_acc_to_phase_deg(re_acc: &[f64], im_acc: &[f64], out: &mut [f64]) {
+    for i in 0..re_acc.len() {
+        out[i] = im_acc[i].atan2(re_acc[i]).to_degrees();
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Evaluation — returns both magnitude (dB) and phase (degrees)
 // ---------------------------------------------------------------------------
@@ -77,37 +179,39 @@ pub fn apply_filter_public(
 pub fn evaluate(target: &TargetCurve, freq: &[f64]) -> TargetResponse {
     let n = freq.len();
     let mut magnitude = vec![target.reference_level_db; n];
-    let mut phase = vec![0.0_f64; n];
+    // b140.15.9: phase accumulator in complex form. Each filter / shelf
+    // multiplies its (cos, sin) phasor in — phase addition modulo 360°
+    // is exact, no wrap accumulates across HP+LP+shelves.
+    let mut re_acc = vec![1.0_f64; n];
+    let mut im_acc = vec![0.0_f64; n];
 
-    // 1. Tilt (all-pass-like: adds magnitude slope, zero additional phase for simplicity)
+    // 1. Tilt (magnitude only)
     if target.tilt_db_per_octave.abs() > 1e-12 {
         add_tilt(&mut magnitude, freq, target.tilt_db_per_octave, target.tilt_ref_freq);
     }
 
     // 2. High-pass
     if let Some(hp) = &target.high_pass {
-        apply_filter(&mut magnitude, &mut phase, freq, hp, false);
+        apply_filter_complex(&mut magnitude, &mut re_acc, &mut im_acc, freq, hp, false);
     }
 
     // 3. Low-pass
     if let Some(lp) = &target.low_pass {
-        apply_filter(&mut magnitude, &mut phase, freq, lp, true);
+        apply_filter_complex(&mut magnitude, &mut re_acc, &mut im_acc, freq, lp, true);
     }
 
     // 4. Low shelf
     if let Some(ls) = &target.low_shelf {
-        apply_shelf(&mut magnitude, &mut phase, freq, ls, true);
+        apply_shelf_complex(&mut magnitude, &mut re_acc, &mut im_acc, freq, ls, true);
     }
 
     // 5. High shelf
     if let Some(hs) = &target.high_shelf {
-        apply_shelf(&mut magnitude, &mut phase, freq, hs, false);
+        apply_shelf_complex(&mut magnitude, &mut re_acc, &mut im_acc, freq, hs, false);
     }
 
-    // Wrap phase to [-180°, 180°] (REW convention)
-    for p in phase.iter_mut() {
-        *p = (*p + 180.0).rem_euclid(360.0) - 180.0;
-    }
+    let mut phase = vec![0.0_f64; n];
+    complex_acc_to_phase_deg(&re_acc, &im_acc, &mut phase);
 
     TargetResponse { magnitude, phase }
 }
@@ -907,6 +1011,52 @@ mod tests {
         let g_m2 = gaussian_lp_linear(f_test, fc, 2.0);
         let g_m4 = gaussian_lp_linear(f_test, fc, 4.0);
         assert!(g_m1 > g_m2 && g_m2 > g_m4);
+    }
+
+    #[test]
+    fn cross_section_phase_continuous_lr4_hp_lp() {
+        // b140.15.9 regression: HP=LR4@200 + LP=LR4@2000 used to produce
+        // single-bin ~360° jumps in cross-section phase wherever one of
+        // the two filters wrapped its atan2 result (visible to the user
+        // as ~120° downward spikes on SUM corrected phase). Complex
+        // accumulator fix eliminates them.
+        let hp = FilterConfig {
+            filter_type: FilterType::LinkwitzRiley,
+            order: 4, freq_hz: 200.0, shape: None,
+            linear_phase: false, q: None, subsonic_protect: None,
+        };
+        let lp = FilterConfig {
+            filter_type: FilterType::LinkwitzRiley,
+            order: 4, freq_hz: 2000.0, shape: None,
+            linear_phase: false, q: None, subsonic_protect: None,
+        };
+
+        // 512 log-spaced points 20..20k — matches the production SPL grid
+        // density where the user observed the spikes.
+        let n = 512;
+        let freq: Vec<f64> = (0..n).map(|i| 20.0 * (1000.0_f64).powf(i as f64 / (n - 1) as f64)).collect();
+
+        let mut mag = vec![0.0_f64; n];
+        let mut re = vec![1.0_f64; n];
+        let mut im = vec![0.0_f64; n];
+        apply_filter_complex(&mut mag, &mut re, &mut im, &freq, &hp, false);
+        apply_filter_complex(&mut mag, &mut re, &mut im, &freq, &lp, true);
+        let mut phase = vec![0.0_f64; n];
+        complex_acc_to_phase_deg(&re, &im, &mut phase);
+
+        // Each adjacent-bin |Δphase| must be < 30° modulo 360°. Pre-fix
+        // produced ~358° jumps; the complex-accumulator path collapses
+        // them to smooth transitions.
+        for i in 1..n {
+            let raw = phase[i] - phase[i - 1];
+            let wrapped = raw - 360.0 * (raw / 360.0).round();
+            assert!(
+                wrapped.abs() < 30.0,
+                "cross_section LR4@200+LR4@2000 phase jumped {:.1}° at bin {} (f={:.1}Hz); \
+                 pre-fix produced ~358° here",
+                wrapped, i, freq[i],
+            );
+        }
     }
 
     #[test]
