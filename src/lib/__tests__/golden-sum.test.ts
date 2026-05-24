@@ -66,6 +66,18 @@ vi.mock("@tauri-apps/api/core", () => ({
         step: [...phase],
       };
     }
+    if (cmd === "pick_fir_route") {
+      const { hp, lp, linearMain, subsonicCutoffHz } = args;
+      const realisable = (f: any) =>
+        !f || f.filter_type === "LinkwitzRiley"
+           || f.filter_type === "Butterworth"
+           || f.filter_type === "Custom";
+      if (linearMain) return "Cepstral";
+      if (subsonicCutoffHz !== null) return "Cepstral";
+      if (!realisable(hp)) return "Cepstral";
+      if (!realisable(lp)) return "Cepstral";
+      return "Iir";
+    }
     throw new Error(`Unmocked command: ${cmd}`);
   }),
 }));

@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import type { FilterConfig } from "./types";
 
 /** Decision: which Rust FIR pipeline should evaluate this band?
@@ -10,32 +11,25 @@ import type { FilterConfig } from "./types";
  *                 Used for Gaussian, Bessel, linear-phase main,
  *                 composite + subsonic, custom measured targets, etc.
  *
- *  Pure function — no Tauri / store / DOM access. Safe to unit-test
- *  in isolation and to call from anywhere.
- *
- *  Phase 0 (b140.10): extracted from band-evaluator.ts inline logic
- *  (lines 413–422) so the routing decision is testable as a single
- *  source of truth before the planned Phase-2 unification refactor.
+ *  b140.15.5: this used to be a JS-side textual mirror of Rust
+ *  `fir::route_for`. The audit flagged that both predicates could
+ *  drift identically and the parity test would not catch it.
+ *  Resolution: Rust is now the single source of truth — this function
+ *  is an async wrapper around the `pick_fir_route` Tauri command.
+ *  Adds one IPC round-trip per FIR generation (~ms; negligible vs
+ *  the FFT cost that follows).
  */
-export function pickFirRoute(
+export async function pickFirRoute(
   hp: FilterConfig | null | undefined,
   lp: FilterConfig | null | undefined,
   linearMain: boolean,
   subsonicCutoffHz: number | null,
-): "iir" | "cepstral" {
-  if (linearMain) return "cepstral";
-  if (subsonicCutoffHz !== null) return "cepstral";
-  if (!isIirRealizable(hp)) return "cepstral";
-  if (!isIirRealizable(lp)) return "cepstral";
-  return "iir";
-}
-
-/** Single filter is realisable by the digital biquad cascade. */
-function isIirRealizable(f: FilterConfig | null | undefined): boolean {
-  if (!f) return true;
-  return (
-    f.filter_type === "LinkwitzRiley" ||
-    f.filter_type === "Butterworth" ||
-    f.filter_type === "Custom"
-  );
+): Promise<"iir" | "cepstral"> {
+  const route = await invoke<string>("pick_fir_route", {
+    hp: hp ?? null,
+    lp: lp ?? null,
+    linearMain,
+    subsonicCutoffHz,
+  });
+  return route === "Iir" ? "iir" : "cepstral";
 }

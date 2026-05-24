@@ -564,6 +564,43 @@ fn generate_model_fir_iir(
     }).map_err(|e| e.to_string())
 }
 
+/// b140.15.5: Tauri-exposed FIR routing predicate — single source of truth.
+///
+/// JS-side `pickFirRoute` (src/lib/fir-routing.ts) was a textual mirror of
+/// `fir::route_for`. If both predicates drifted identically, the existing
+/// `pipeline_contract` test could not catch it. With this command JS calls
+/// into the Rust predicate directly; the JS-side mirror is now deleted.
+///
+/// Returns "Iir" or "Cepstral" as a plain string so the JS side doesn't
+/// need to mirror the enum.
+#[tauri::command]
+fn pick_fir_route(
+    hp: Option<target::FilterConfig>,
+    lp: Option<target::FilterConfig>,
+    linear_main: bool,
+    subsonic_cutoff_hz: Option<f64>,
+) -> String {
+    use fir::FirConfig;
+    // route_for() reads only linear_phase_main + subsonic_cutoff_hz from
+    // FirConfig — build a minimal struct with the rest zeroed. Avoids
+    // shipping the full FirConfig across the boundary just to check two
+    // fields.
+    let cfg = FirConfig {
+        taps: 0, sample_rate: 0.0,
+        max_boost_db: 0.0, noise_floor_db: 0.0,
+        window: fir::WindowType::Hann, phase_mode: fir::PhaseMode::Composite,
+        iterations: 0, freq_weighting: false,
+        narrowband_limit: false, nb_smoothing_oct: 0.0, nb_max_excess_db: 0.0,
+        gaussian_min_phase_filters: vec![],
+        linear_phase_main: linear_main,
+        subsonic_cutoff_hz,
+    };
+    match fir::route_for(hp.as_ref(), lp.as_ref(), &cfg) {
+        fir::Route::Iir => "Iir".into(),
+        fir::Route::Cepstral => "Cepstral".into(),
+    }
+}
+
 #[tauri::command]
 fn export_fir_wav(impulse: Vec<f64>, sample_rate: f64, path: String) -> Result<(), String> {
     info!("export_fir_wav: {} samples, sr={}, path={}", impulse.len(), sample_rate, path);
@@ -583,7 +620,7 @@ pub fn run() {
         )
         .init();
 
-    info!("PhaseForge b140.15.4 starting...");
+    info!("PhaseForge b140.15.5 starting...");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -621,6 +658,7 @@ pub fn run() {
             generate_hybrid_fir,
             generate_model_fir,
             generate_model_fir_iir,
+            pick_fir_route,
             recommend_fir_taps,
             export_fir_wav,
             project::save_project,

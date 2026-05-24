@@ -91,7 +91,7 @@ export async function dispatchFirInvoke(
   firCombinedPhase: number[],
   cfg: DispatchFirConfig,
 ): Promise<FirInvokeResult> {
-  const useIirPath = pickFirRoute(hp, lp, linearMain, subsonicCutoffHz) === "iir";
+  const useIirPath = (await pickFirRoute(hp, lp, linearMain, subsonicCutoffHz)) === "iir";
   const sharedFirConfig = buildSharedFirConfig(cfg, linearMain, subsonicCutoffHz);
 
   if (useIirPath) {

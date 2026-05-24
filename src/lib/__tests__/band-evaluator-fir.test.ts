@@ -76,6 +76,20 @@ vi.mock("@tauri-apps/api/core", () => ({
         taps, sample_rate: args.config.sample_rate, norm_db: 0, causality: 1,
       };
     }
+    if (cmd === "pick_fir_route") {
+      // b140.15.5: JS pickFirRoute is now an async wrapper around this
+      // Rust-side command. Mirror the routing predicate locally for tests.
+      const { hp, lp, linearMain, subsonicCutoffHz } = args;
+      const realisable = (f: any) =>
+        !f || f.filter_type === "LinkwitzRiley"
+           || f.filter_type === "Butterworth"
+           || f.filter_type === "Custom";
+      if (linearMain) return "Cepstral";
+      if (subsonicCutoffHz !== null) return "Cepstral";
+      if (!realisable(hp)) return "Cepstral";
+      if (!realisable(lp)) return "Cepstral";
+      return "Iir";
+    }
     throw new Error(`Unmocked command: ${cmd}`);
   }),
 }));
