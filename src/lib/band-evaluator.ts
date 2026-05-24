@@ -15,8 +15,8 @@ import {
   smoothingConfig,
 } from "./plot-helpers";
 import { hasActiveSubsonicProtect } from "./band-evaluation";
-import { pickFirRoute } from "./fir-routing";
 import { buildLogGrid, buildCommonGrid, resampleOnLogGrid } from "./band-evaluator/grid";
+import { dispatchFirInvoke } from "./band-evaluator/route";
 
 export interface FirRequestConfig {
   taps: number;
@@ -383,57 +383,18 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
     }
     const firCombinedPhase = firTargetPhase.map((p, i) => p + firPeqPhase[i]);
 
-    // b140.7: route to the IIR cascade pipeline when the configuration is
-    // analytically realisable as digital biquads (LR / Butterworth / Custom
-    // HP+LP and PEQ peaking sections, no Gaussian, no subsonic protect, no
-    // Composite linear-phase main). The FFT cepstral path is retained for
-    // every other case (Gaussian filters, subsonic protect, linear-phase
-    // main, Bessel) — bug fix is scoped to where the cepstral artefact
-    // shows up in REW phase comparison.
-    // b140.10: routing logic extracted to fir-routing.ts so it's testable
-    // in isolation (see src/lib/__tests__/routing-decision.test.ts).
-    const useIirPath =
-      pickFirRoute(band.target.high_pass, band.target.low_pass, linearMain, subsonicCutoff) === "iir";
-
-    const sharedFirConfig = {
-      taps: cfg.taps,
-      sample_rate: cfg.sampleRate,
-      max_boost_db: cfg.maxBoostDb,
-      noise_floor_db: cfg.noiseFloorDb,
-      window: cfg.window,
-      phase_mode: "Composite",
-      linear_phase_main: linearMain,
-      subsonic_cutoff_hz: subsonicCutoff,
-      iterations: cfg.iterations,
-      freq_weighting: cfg.freqWeighting,
-      narrowband_limit: cfg.narrowbandLimit,
-      nb_smoothing_oct: cfg.nbSmoothingOct,
-      nb_max_excess_db: cfg.nbMaxExcessDb,
-    };
-
-    const result = useIirPath
-      ? await invoke<{
-          impulse: number[]; time_ms: number[]; realized_mag: number[];
-          realized_phase: number[]; taps: number; sample_rate: number;
-          norm_db: number; causality: number;
-        }>("generate_model_fir_iir", {
-          freq: firFreq,
-          hp: band.target.high_pass,
-          lp: band.target.low_pass,
-          peq: enabledPeq,
-          config: sharedFirConfig,
-        })
-      : await invoke<{
-          impulse: number[]; time_ms: number[]; realized_mag: number[];
-          realized_phase: number[]; taps: number; sample_rate: number;
-          norm_db: number; causality: number;
-        }>("generate_model_fir", {
-          freq: firFreq,
-          targetMag: firTargetMag,
-          peqMag: firPeqMag,
-          modelPhase: firCombinedPhase,
-          config: sharedFirConfig,
-        });
+    // b140.14.1: routing predicate + Rust-side dispatch extracted to
+    // ./band-evaluator/route.ts so the JS-side dispatch surface (decision +
+    // Tauri payload mapping) has a single home. Behaviour unchanged.
+    const result = await dispatchFirInvoke(
+      band.target.high_pass,
+      band.target.low_pass,
+      enabledPeq,
+      linearMain,
+      subsonicCutoff,
+      firFreq, firTargetMag, firPeqMag, firCombinedPhase,
+      cfg,
+    );
     // b140.6: realized_mag/phase come back on `firFreq` (5..fMaxFir, where
     // fMaxFir = min(40000, sr·0.95/2)). At sr=44.1/48 kHz this is < 40 kHz,
     // so its 512 points compress 0..fMaxFir while `freq` (the caller-side
