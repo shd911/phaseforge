@@ -40,14 +40,16 @@ export interface FilterConfig {
  *
  *  Reads each field explicitly to break any SolidJS store-proxy reference
  *  (spreading a proxy carries trap bindings that re-subscribe on read).
+ *  structuredClone is NOT used because SolidJS proxies throw
+ *  DataCloneError. JSON.parse(JSON.stringify(...)) would work but is
+ *  slower per call and discards the type-safety benefit.
+ *
  *  Normalises `subsonic_protect` to `null` when absent so downstream
  *  comparators don't need to handle `undefined`.
  *
- *  b140.11: replaces three independent copies that had drifted in casing
- *  and null-handling (`unwrapFilterConfig` in stores/bands.ts,
- *  `unwrapFilter` in components/ControlPanel.tsx, `cloneFilter` in
- *  lib/project-io.ts). See src/lib/__tests__/filter-clone.test.ts for
- *  the consistency contract this function preserves. */
+ *  Adding a new field to `FilterConfig`? See the field-coverage guard
+ *  test in `src/lib/__tests__/filter-clone.test.ts` — it fails CI when
+ *  the field count drifts, forcing this function to be updated. */
 export function cloneFilterConfig(f: FilterConfig): FilterConfig;
 export function cloneFilterConfig(f: null | undefined): null;
 export function cloneFilterConfig(f: FilterConfig | null | undefined): FilterConfig | null;

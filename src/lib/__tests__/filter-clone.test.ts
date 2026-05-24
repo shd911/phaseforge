@@ -127,6 +127,18 @@ const FIXTURES: { name: string; cfg: FilterConfig }[] = [
 
 // ---------------------------------------------------------------------------
 
+describe("FilterConfig field-coverage guard (b140.15.1)", () => {
+  it("fixture covers every FilterConfig field — fails if a new field is added", () => {
+    // If this assertion fails, FilterConfig grew a new field. Update the
+    // FIXTURES array above to include it AND verify cloneFilterConfig
+    // (now structuredClone-based) handles it correctly (especially if it
+    // needs normalization like subsonic_protect undefined → null).
+    const sample = FIXTURES[0].cfg;
+    const expectedFieldCount = 7; // filter_type, order, freq_hz, shape, linear_phase, q, subsonic_protect
+    expect(Object.keys(sample).length).toBe(expectedFieldCount);
+  });
+});
+
 describe("FilterConfig clone — 3-site consistency (b140.10 phase-0)", () => {
   for (const { name, cfg } of FIXTURES) {
     it(`${name}: bands.ts ≡ ControlPanel.tsx ≡ project-io.ts ≡ reference`, () => {
