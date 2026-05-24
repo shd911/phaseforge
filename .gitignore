@@ -26,3 +26,4 @@ generate_doc.py
 .aider*
 test-fixtures/
 .test-logs/
+graphify-out/

@@ -15,6 +15,7 @@ import {
   smoothingConfig,
 } from "./plot-helpers";
 import { hasActiveSubsonicProtect } from "./band-evaluation";
+import { pickFirRoute } from "./fir-routing";
 
 export interface FirRequestConfig {
   taps: number;
@@ -410,16 +411,10 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
     // every other case (Gaussian filters, subsonic protect, linear-phase
     // main, Bessel) — bug fix is scoped to where the cepstral artefact
     // shows up in REW phase comparison.
-    const isIirRealizable = (f: FilterConfig | null | undefined): boolean => {
-      if (!f) return true;
-      return f.filter_type === "LinkwitzRiley"
-          || f.filter_type === "Butterworth"
-          || f.filter_type === "Custom";
-    };
-    const useIirPath = !linearMain
-      && subsonicCutoff === null
-      && isIirRealizable(band.target.high_pass)
-      && isIirRealizable(band.target.low_pass);
+    // b140.10: routing logic extracted to fir-routing.ts so it's testable
+    // in isolation (see src/lib/__tests__/routing-decision.test.ts).
+    const useIirPath =
+      pickFirRoute(band.target.high_pass, band.target.low_pass, linearMain, subsonicCutoff) === "iir";
 
     const sharedFirConfig = {
       taps: cfg.taps,
