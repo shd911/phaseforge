@@ -1,0 +1,30 @@
+{
+  "contract_01_lr4_hp_only": {
+    "route": "Iir",
+    "hash": "9a879f70c4ea7cb5d529b2b83afd021de00328349010ca60b095b8c3f1a116d4"
+  },
+  "contract_02_lr4_bandpass_with_peq": {
+    "route": "Iir",
+    "hash": "fb242d5d9b95ce9227dae38f58d8cbedd2265fe35b83c7f38e578d6bf81fd512"
+  },
+  "contract_03_bw2_hp_only": {
+    "route": "Iir",
+    "hash": "35abf1a61b9f775fd195dc01ca67550acc30b47a2bd19d725aab330c17461a19"
+  },
+  "contract_04_gaussian_hp_route_cepstral": {
+    "route": "Cepstral",
+    "hash": "11c1d7004955bfac8291a38bec9e88a27d67976f00849190e22ee38d7188a252"
+  },
+  "contract_05_bessel_lp_route_cepstral": {
+    "route": "Cepstral",
+    "hash": "d9b4b859c9113c64396a794eb7da9fa5b3aec802450014edb73bf1d14ad45fe5"
+  },
+  "contract_06_linear_main_forces_cepstral": {
+    "route": "Cepstral",
+    "hash": "52291795962c3951523aea2ef3cfc0062b4e63325be4500792d3065522d41eac"
+  },
+  "contract_07_subsonic_forces_cepstral": {
+    "route": "Cepstral",
+    "hash": "06514a52beb79ba1884c2647da506dd5bb8711f75f399ef7314573ca321fa07e"
+  }
+}
