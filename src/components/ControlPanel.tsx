@@ -290,9 +290,15 @@ function FilterBlock(props: FilterBlockProps) {
   /** Build a full FilterConfig from the current config, overriding specific
    *  fields. Cloning first via `cloneFilterConfig` breaks the SolidJS store
    *  proxy reference so the subsequent spread of `overrides` is safe.
-   *  b140.11: collapsed onto the unified clone helper. */
+   *  b140.15.3: null-guard added — `c()` can be null when the band has no
+   *  filter on this slot; the legacy code crashed with TypeError on `c()!`,
+   *  the post-b140.11 unaware code returned a malformed object. Now it
+   *  throws an explicit Error that the caller (always an onClick / onChange
+   *  handler inside a Show-when block) should never reach. */
   const withOverride = (overrides: Partial<import("../lib/types").FilterConfig>): import("../lib/types").FilterConfig => {
-    return { ...cloneFilterConfig(c()!), ...overrides };
+    const cur = c();
+    if (!cur) throw new Error("withOverride called with null FilterConfig — caller must guard on c() first");
+    return { ...cloneFilterConfig(cur), ...overrides };
   };
 
   return (

@@ -269,8 +269,11 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
       );
       crossSectionMag = xm;
       crossSectionPhase = xp;
-    } catch (_) {
-      // No filters → leave null; corrected = meas + PEQ alone.
+    } catch (e) {
+      // No filters → leave null; corrected = meas + PEQ alone. Most
+      // common cause: HP/LP both null. Logged so genuine compute
+      // failures (e.g. malformed config) surface in console.
+      console.warn("[evaluateBandFull] compute_cross_section failed:", e);
     }
   }
 
@@ -402,7 +405,9 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
           },
         );
         ir.measurement = { time: r.time, impulse: r.impulse, step: r.step };
-      } catch (_) {}
+      } catch (e) {
+        console.warn("[evaluateBandFull] measurement compute_impulse failed:", e);
+      }
     }
     // b140.3.3 + b140.3.4: target and corrected IR on a wide standalone
     // grid (5 Hz – min(40 kHz, Nyquist·0.95)) instead of measurement.freq.
@@ -465,7 +470,9 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
                 { freq: irFreq, highPass: band.target.high_pass, lowPass: band.target.low_pass },
               );
               irXsMag = xm; irXsPhase = xp;
-            } catch (_) { /* leave zeros */ }
+            } catch (e) {
+              console.warn("[evaluateBandFull] IR compute_cross_section failed (leaving zeros):", e);
+            }
           }
 
           const irCorrMag = extMeas.mag.map((m, i) => m + irPeqMag[i] + irXsMag[i]);
@@ -480,7 +487,9 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
           );
           ir.corrected = { time: cr.time, impulse: cr.impulse, step: cr.step };
         }
-      } catch (_) {}
+      } catch (e) {
+        console.warn("[evaluateBandFull] target/corrected IR pipeline failed:", e);
+      }
     }
   }
 

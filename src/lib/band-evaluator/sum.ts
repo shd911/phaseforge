@@ -461,7 +461,9 @@ export async function evaluateSum(
               { freq: irFreq, highPass: band.target.high_pass, lowPass: band.target.low_pass },
             );
             irXsMag = xm; irXsPhase = xp;
-          } catch (_) { /* leave zeros */ }
+          } catch (e) {
+            console.warn("[evaluateSum] IR compute_cross_section failed (leaving zeros):", e);
+          }
         }
         const corrMag = extMeasMag.map((m, j) => m + irPeqMag[j] + irXsMag[j]);
         const baseP = measPhaseArr.map((p, j) => p + irPeqPhase[j] + irXsPhase[j]);
@@ -493,7 +495,8 @@ export async function evaluateSum(
           { freq: irFreq, magnitude: mag, phase, sampleRate: irSr },
         );
         return { time: r.time, impulse: r.impulse, step: r.step };
-      } catch (_) {
+      } catch (e) {
+        console.warn("[evaluateSum] toIR compute_impulse failed:", e);
         return null;
       }
     };
