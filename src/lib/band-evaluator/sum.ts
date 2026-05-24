@@ -244,6 +244,27 @@ function coherentSum(
 // ---------------------------------------------------------------------------
 // Public entry — evaluateSum
 // ---------------------------------------------------------------------------
+//
+// Expected SUM characteristics (do not "fix" — these are LR / DSP properties):
+//
+//   1. ~0.1–0.5 dB smooth dip in sumCorrectedMag around each crossover
+//      frequency in 3-band LR4 in-phase configurations. The middle band
+//      has both HP+LP, and its LP contributes a small phase tail at the
+//      lower crossover (and HP a tail at the upper one) that prevents
+//      perfect coherent-sum complementarity. Verified bit-for-bit against
+//      the analytical sum BW²(LP) + BW²(HP) × BW²(LP_outer): the dip IS
+//      the expected mathematical residual, not an implementation bug.
+//      Inverting alternate band polarity or adding all-pass phase
+//      compensation removes it (DSP-design choice).
+//
+//   2. Phase wraps of sumCorrectedPhase at the crossover frequencies are
+//      ±180° smooth single-bin transitions in the WRAPPED display (the
+//      underlying complex value is continuous). The narrow ~120° spikes
+//      reported in 2026-05-24 / b140.15.8–.9 audit were a scalar-phase-
+//      summation bug in apply_filter; complex accumulator path fixed
+//      them. If new narrow spikes ever reappear, run:
+//         cargo test --test sum_3band_lr4_flat
+//         npx vitest run src/lib/__tests__/sum-3band-lr4-spikes.test.ts
 
 export async function evaluateSum(
   bands: BandState[],

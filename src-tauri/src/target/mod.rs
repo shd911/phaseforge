@@ -731,6 +731,10 @@ fn custom_hp_complex(f: f64, fc: f64, q: f64, order: u8) -> (f64, f64) {
 // Shelving filters (magnitude + phase)
 // ---------------------------------------------------------------------------
 
+/// Legacy scalar variant retained for tests that exercise the
+/// pre-b140.15.9 phase-summation path directly. Production code goes
+/// through `apply_shelf_complex`.
+#[cfg(test)]
 fn apply_shelf(
     mag: &mut [f64],
     phase: &mut [f64],

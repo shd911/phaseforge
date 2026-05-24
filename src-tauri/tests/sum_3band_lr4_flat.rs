@@ -253,10 +253,10 @@ fn sum_3band_lr4_flat_has_no_spikes() {
     let bands = vec![b0, b1, b2];
     let (sum_mag, sum_phase) = coherent_sum(&freq, &bands);
 
-    // Spike detection thresholds calibrated from the user's observed
-    // ~120° downward phase spikes and the new magnitude spikes.
-    const MAG_STEP: f64 = 1.0;      // dB
-    const MAG_NEIGHBOUR: f64 = 0.5; // dB
+    // Tightened thresholds (b140.15.10.1) — user's UI dips are 0.1–0.5
+    // dB; the prior 1 dB threshold missed them.
+    const MAG_STEP: f64 = 0.05;     // dB
+    const MAG_NEIGHBOUR: f64 = 0.02;
     const PHASE_STEP: f64 = 30.0;   // degrees (mod 360)
     const PHASE_NEIGHBOUR: f64 = 10.0;
 
@@ -274,6 +274,28 @@ fn sum_3band_lr4_flat_has_no_spikes() {
         &mag_spikes_per_band, &phase_spikes_per_band,
         &sum_mag_spikes, &sum_phase_spikes,
     );
+
+    // b140.15.10.1: scan for SMOOTH dips (not 1-bin spikes). LR property
+    // says |LR_LP(fc) + LR_HP(fc)| = 1.0 exactly at every f. Any dip > 0.05
+    // dB in sumMag means complex sum is losing magnitude somewhere.
+    let baseline = FLAT_MEAS_MAG_DB; // 75 dB
+    let mut dips: Vec<(usize, f64)> = Vec::new();
+    for (i, &m) in sum_mag.iter().enumerate() {
+        if (baseline - m) > 0.05 {
+            dips.push((i, baseline - m));
+        }
+    }
+    if !dips.is_empty() {
+        eprintln!("[smooth-dips] {} bin(s) deviate >0.05 dB from baseline {} dB:", dips.len(), baseline);
+        for &(i, d) in dips.iter().take(20) {
+            eprintln!("  bin {} @ {:.2}Hz: sum_mag={:.4} dB (dip {:.3} dB)",
+                i, freq[i], sum_mag[i], d);
+        }
+        let max_dip = dips.iter().map(|&(_, d)| d).fold(0.0_f64, f64::max);
+        eprintln!("[smooth-dips] max dip = {:.4} dB", max_dip);
+    } else {
+        eprintln!("[smooth-dips] sum_mag is flat within 0.05 dB ✓");
+    }
 
     let total_spikes = mag_spikes_per_band.iter().map(Vec::len).sum::<usize>()
         + phase_spikes_per_band.iter().map(Vec::len).sum::<usize>()
