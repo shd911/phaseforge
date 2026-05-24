@@ -4,7 +4,7 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { invoke } from "@tauri-apps/api/core";
 import type { Measurement, TargetResponse, FilterType, FilterConfig, PeqBand, WindowType } from "../lib/types";
-import { appState, activeBand, isSum, activeTab, plotTab, setPlotTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, setPeqDragging, updatePeqBand, commitPeqBand, bandsVersion, exportSampleRate, setExportSampleRate, exportTaps, setExportTaps, exportWindow, setExportWindow, firIterations, firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess, firMaxBoost, firNoiseFloor, exportMetrics, setExportMetrics, plotSnapshots, addPlotSnapshot, clearPlotSnapshots, setAlignmentDelay, setBandSmoothing, beginInteraction, commitInteraction, sumMode as sumModeSignal, setSumMode } from "../stores/bands";
+import { appState, activeBand, isSum, activeTab, plotTab, setPlotTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, setPeqDragging, updatePeqBand, commitPeqBand, bandsVersion, exportSampleRate, setExportSampleRate, exportTaps, setExportTaps, exportWindow, setExportWindow, firIterations, firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess, firMaxBoost, firNoiseFloor, exportMetrics, setExportMetrics, plotSnapshots, addPlotSnapshot, clearPlotSnapshots, setAlignmentDelay, setBandSmoothing, beginInteraction, commitInteraction } from "../stores/bands";
 import type { SmoothingMode, BandState, FreqSnapshot } from "../stores/bands";
 import { needAutoFit, setNeedAutoFit } from "../App";
 import { computeFloorBounce } from "../lib/floor-bounce";
@@ -1613,7 +1613,6 @@ export default function FrequencyPlot() {
     const dragging = peqDragging();
     const pTab = plotTab();
     const _irTrigger = irRenderTrigger(); // track: force IR re-render from legend band toggles
-    const _sumPipeline = sumModeSignal(); // b140.2.1: re-render on Legacy/New toggle
 
     if (debounceTimer) clearTimeout(debounceTimer);
 
@@ -2482,40 +2481,39 @@ export default function FrequencyPlot() {
           return hp && hp < min ? hp : min;
         }, 20);
 
-        // Save IR data for snapshot capture
-        // b140.3.5: New pipeline override — Σ IR/Step from evaluateSum's
-        // unified frequency-domain coherent sum (per-band data unchanged).
-        if (sumModeSignal() === "new") {
-          try {
-            const sumResult = await evaluateSum(allBands as BandState[], { includeIr: true });
-            if (gen === renderGen && sumResult.ir) {
-              if (sumResult.ir.measurement) {
-                measSum = {
-                  timeMs: sumResult.ir.measurement.time.map(t => t * 1000),
-                  impulse: sumResult.ir.measurement.impulse,
-                  step: sumResult.ir.measurement.step,
-                };
-              }
-              if (sumResult.ir.target) {
-                targetSum = {
-                  timeMs: sumResult.ir.target.time.map(t => t * 1000),
-                  impulse: sumResult.ir.target.impulse,
-                  step: sumResult.ir.target.step,
-                };
-              }
-              if (sumResult.ir.corrected) {
-                corrSum = {
-                  timeMs: sumResult.ir.corrected.time.map(t => t * 1000),
-                  impulse: sumResult.ir.corrected.impulse,
-                  step: sumResult.ir.corrected.step,
-                };
-              }
+        // Save IR data for snapshot capture.
+        // b140.3.5: Σ IR/Step from evaluateSum's unified frequency-domain
+        // coherent sum (per-band data unchanged). b140.15: unconditional —
+        // legacy in-line aggregation deleted with the sumMode toggle.
+        try {
+          const sumResult = await evaluateSum(allBands as BandState[], { includeIr: true });
+          if (gen === renderGen && sumResult.ir) {
+            if (sumResult.ir.measurement) {
+              measSum = {
+                timeMs: sumResult.ir.measurement.time.map(t => t * 1000),
+                impulse: sumResult.ir.measurement.impulse,
+                step: sumResult.ir.measurement.step,
+              };
             }
-          } catch (e) {
-            console.warn("SUM IR (New) failed, falling back to legacy:", e);
+            if (sumResult.ir.target) {
+              targetSum = {
+                timeMs: sumResult.ir.target.time.map(t => t * 1000),
+                impulse: sumResult.ir.target.impulse,
+                step: sumResult.ir.target.step,
+              };
+            }
+            if (sumResult.ir.corrected) {
+              corrSum = {
+                timeMs: sumResult.ir.corrected.time.map(t => t * 1000),
+                impulse: sumResult.ir.corrected.impulse,
+                step: sumResult.ir.corrected.step,
+              };
+            }
           }
-          if (gen !== renderGen) return;
+        } catch (e) {
+          console.warn("SUM IR failed:", e);
         }
+        if (gen !== renderGen) return;
 
         // Priority: corrected → target → measurement
         {
@@ -3517,620 +3515,12 @@ export default function FrequencyPlot() {
   }
 
   // ----------------------------------------------------------------
-  // SUM mode rendering
+  // SUM mode rendering. b140.15: legacy in-line aggregation deleted —
+  // single canonical path through evaluateSum (b140.2.x → b140.3.5).
+  // Previously toggled at runtime via sumMode signal; toggle + signal +
+  // localStorage key removed in the same commit.
   // ----------------------------------------------------------------
   async function renderSumMode(showPhase: boolean, showMag: boolean, showTarget: boolean) {
-    // b140.2.1: optional New pipeline via evaluateSum. Default is Legacy
-    // (this function's existing body) to avoid surprising the user — the
-    // toggle is opt-in and persisted in localStorage.
-    if (sumModeSignal() === "new") {
-      return await renderSumModeNew(showPhase, showMag, showTarget);
-    }
-    // b140.3.1.6: PEQ dots are a band-mode artefact; clear stale state so
-    // the draw hook doesn't render them onto unrelated SUM series.
-    activePeqDots = null;
-    const gen = ++renderGen;
-    zoomCenter = 0; // reset before async — will be recalculated from globalRef
-    const bands: BandState[] = JSON.parse(JSON.stringify(appState.bands));
-
-    try {
-      // b139.4c: unified entry point. Adapter preserves the {measurement,
-      // freq, targetMag, targetPhase} shape that the rest of renderSumMode
-      // reads — measurement object reconstructs from band + smoothed mag.
-      const results = await Promise.all(bands.map(async (b) => {
-        const r = await evaluateBandFull({ band: b });
-        const measurement = r.measurementMag && b.measurement
-          ? {
-              ...b.measurement,
-              magnitude: r.measurementMag,
-              phase: r.measurementPhase ?? b.measurement.phase ?? null,
-            }
-          : null;
-        return {
-          measurement,
-          freq: r.freq,
-          targetMag: r.targetMag,
-          targetPhase: r.targetPhase,
-        };
-      }));
-      if (gen !== renderGen) return; // stale render, discard
-
-      // Определяем общую частотную сетку (максимальное число точек, самый широкий диапазон)
-      let commonFreq: number[] | null = null;
-      let bestLen = 0;
-      for (const r of results) {
-        const f = r.measurement?.freq ?? r.freq;
-        if (f && f.length > bestLen) { commonFreq = f; bestLen = f.length; }
-      }
-      if (!commonFreq) {
-        for (const r of results) {
-          if (r.freq) { commonFreq = r.freq; break; }
-        }
-      }
-      if (!commonFreq || commonFreq.length === 0) {
-        try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
-        setShowLegend(false);
-        setCursorFreq("—"); setCursorSPL("—"); setCursorPhase("—");
-        return;
-      }
-
-      // Ensure SUM grid covers at least 20–20 kHz (extend via interpolation)
-      const rawFMin = commonFreq[0];
-      const rawFMax = commonFreq[commonFreq.length - 1];
-      const fMin = Math.min(rawFMin, 20);
-      const fMax = Math.max(rawFMax, 20000);
-      const nPts = commonFreq.length;
-      // If grid needs extending, all bands will be resampled via interpolate_log
-      const needResample = fMin < rawFMin || fMax > rawFMax;
-
-      // Build the common frequency grid (may be extended)
-      let freq: number[];
-      if (needResample) {
-        // Generate a new log-spaced grid covering the full range
-        const [newFreq] = await invoke<[number[], number[], number[] | null]>(
-          "interpolate_log",
-          { freq: commonFreq, magnitude: commonFreq.map(() => 0), phase: null, nPoints: nPts, fMin, fMax }
-        );
-        if (gen !== renderGen) return;
-        freq = newFreq;
-      } else {
-        freq = commonFreq;
-      }
-
-      // Ресемплируем каждый замер на общую сетку (если нужно)
-      interface ResampledMeas {
-        magnitude: number[];
-        phase: number[] | null;
-        name: string;
-      }
-      const resampled: (ResampledMeas | null)[] = [];
-
-      // Collect interpolation tasks for parallel execution
-      const interpTasks: { idx: number; m: any }[] = [];
-      for (let ri = 0; ri < results.length; ri++) {
-        const r = results[ri];
-        if (!r.measurement) { resampled.push(null); continue; }
-        const m = r.measurement;
-        if (!needResample && m.freq.length === nPts && m.freq[0] === fMin && m.freq[m.freq.length - 1] === fMax) {
-          // Уже на общей сетке
-          resampled.push({ magnitude: m.magnitude, phase: m.phase ?? null, name: m.name });
-        } else {
-          interpTasks.push({ idx: resampled.length, m });
-          resampled.push(null); // placeholder
-        }
-      }
-
-      // Run all interpolate_log calls in parallel
-      if (interpTasks.length > 0) {
-        const interpResults = await Promise.all(
-          interpTasks.map(t =>
-            invoke<[number[], number[], number[] | null]>(
-              "interpolate_log",
-              { freq: t.m.freq, magnitude: t.m.magnitude, phase: t.m.phase, nPoints: nPts, fMin, fMax }
-            ).catch(e => {
-              console.warn("Interpolation failed for", t.m.name, e);
-              return null;
-            })
-          )
-        );
-        if (gen !== renderGen) return;
-        for (let i = 0; i < interpTasks.length; i++) {
-          const t = interpTasks[i];
-          const result = interpResults[i];
-          if (result) {
-            const [, intMag, intPhase] = result;
-            resampled[t.idx] = { magnitude: intMag, phase: intPhase, name: t.m.name };
-          } else {
-            resampled[t.idx] = null;
-          }
-        }
-      }
-
-      // Общий reference level: среднее самого громкого бэнда в 200–2000 Hz
-      // (субвуфер и другие бэнды за пределами passband не сбивают reference)
-      let globalRef = 0;
-      {
-        let bestAvg = -Infinity;
-        for (const rm of resampled) {
-          if (!rm) continue;
-          let s = 0, n = 0;
-          for (let k = 0; k < freq.length; k++) {
-            if (freq[k] >= 200 && freq[k] <= 2000) { s += rm.magnitude[k]; n++; }
-          }
-          if (n > 0) {
-            const avg = s / n;
-            if (avg > bestAvg) bestAvg = avg;
-          }
-        }
-        if (isFinite(bestAvg)) globalRef = bestAvg;
-      }
-
-      // Пересчитываем ВСЕ включённые таргеты на общую сетку
-      const perBandTargetMags: (number[] | null)[] = [];
-      const perBandTargetNorm: (number[] | null)[] = [];
-      const perBandTargetNormPhase: (number[] | null)[] = [];
-      const refLevels: number[] = [];
-      for (let i = 0; i < bands.length; i++) {
-        if (!bands[i].targetEnabled) {
-          perBandTargetMags.push(null);
-          perBandTargetNorm.push(null);
-          perBandTargetNormPhase.push(null);
-          continue;
-        }
-        const targetCurve = JSON.parse(JSON.stringify(bands[i].target));
-        const totalRef = targetCurve.reference_level_db + globalRef;
-        refLevels.push(totalRef);
-
-        const curveWithRef = { ...targetCurve, reference_level_db: totalRef };
-        const response = await invoke<TargetResponse>("evaluate_target", {
-          target: curveWithRef, freq,
-        });
-        if (gen !== renderGen) return;
-        perBandTargetMags.push(response.magnitude);
-
-        // Normalized response = response with ref_level=0, which is just response.magnitude - totalRef
-        // (evaluate_target is linear in reference_level_db, so no second invoke needed)
-        const normMag = response.magnitude.map(v => v - totalRef);
-        perBandTargetNorm.push(normMag);
-        perBandTargetNormPhase.push(response.phase);
-      }
-
-      // Строим uPlot series + data + легенду
-      const uSeries: uPlot.Series[] = [{}];
-      const uData: number[][] = [freq];
-      const legend: LegendEntry[] = [];
-      let sIdx = 1;
-
-      // --- Per-band замеры (ресемплированные) ---
-      const measIndices: number[] = [];
-      for (let i = 0; i < resampled.length; i++) {
-        if (resampled[i]) measIndices.push(i);
-      }
-      if (showMag) {
-        for (const i of measIndices) {
-          const rm = resampled[i]!;
-          const bcf = bandColorFamily(bands[i].color);
-          uSeries.push({ label: bands[i].name + " dB", stroke: bcf.meas, width: 1, scale: "mag" });
-          uData.push(rm.magnitude);
-          legend.push({ label: bands[i].name, color: bcf.meas, dash: false, visible: false, seriesIdx: sIdx, category: "measurement" });
-          sIdx++;
-          if (showPhase && rm.phase) {
-            uSeries.push({ label: bands[i].name + " °", stroke: bcf.measPhase, width: 1, dash: [6, 3], scale: "phase" });
-            uData.push(wrapPhase(rm.phase));
-            legend.push({ label: bands[i].name + " °", color: bcf.measPhase, dash: true, visible: false, seriesIdx: sIdx, category: "measurement" });
-            sIdx++;
-          }
-        }
-      }
-
-      // --- Per-band таргеты ---
-      if (showTarget) {
-        for (let i = 0; i < bands.length; i++) {
-          const tMag = perBandTargetMags[i];
-          if (!tMag) continue;
-          const color = bandColorFamily(bands[i].color).target;
-          uSeries.push({ label: bands[i].name + " tgt", stroke: color, width: 1, dash: [6, 4], scale: "mag" });
-          uData.push(tMag);
-          legend.push({ label: bands[i].name + " tgt", color, dash: true, visible: false, seriesIdx: sIdx, category: "target" });
-          sIdx++;
-        }
-      }
-
-      // --- Per-band corrected кривые (measurement + PEQ + filters) ---
-      // Also store corrected phase (meas + PEQ + XO) for coherent Σ
-      const perBandCorrected: (number[] | null)[] = [];
-      const perBandCorrPhase: (number[] | null)[] = [];
-      if (showMag) {
-        for (let i = 0; i < bands.length; i++) {
-          const rm = resampled[i];
-          const tMag = perBandTargetMags[i];
-          if (!rm) { perBandCorrected.push(null); perBandCorrPhase.push(null); continue; }
-
-          const hasPeq = bands[i].peqBands && bands[i].peqBands.length > 0;
-          const hasFilters = bands[i].targetEnabled && (bands[i].target.high_pass || bands[i].target.low_pass);
-
-          if (!hasPeq && !hasFilters) { perBandCorrected.push(null); perBandCorrPhase.push(null); continue; }
-
-          try {
-            // Run PEQ and XO computations in parallel (independent operations)
-            const peqPromise = hasPeq
-              ? invoke<[number[], number[]]>("compute_peq_complex", {
-                  freq, bands: bands[i].peqBands,
-                })
-              : Promise.resolve(null);
-
-            const xsPromise = (hasFilters && tMag)
-              ? invoke<[number[], number[], number]>("compute_cross_section", {
-                  freq,
-                  highPass: bands[i].target.high_pass,
-                  lowPass: bands[i].target.low_pass,
-                })
-              : Promise.resolve(null);
-
-            const [peqResult, xsResult] = await Promise.all([peqPromise, xsPromise]);
-            if (gen !== renderGen) return;
-
-            let peqMag: number[] | null = null;
-            let peqPhase: number[] | null = null;
-            if (peqResult) {
-              peqMag = peqResult[0];
-              peqPhase = peqResult[1];
-            }
-
-            let xsMag: number[] | null = null;
-            let xsPhase: number[] | null = null;
-            if (xsResult) {
-              xsMag = xsResult[0];
-              xsPhase = xsResult[1];
-            }
-
-            const corrected = rm.magnitude.map(
-              (v: number, j: number) => v + (peqMag ? peqMag[j] : 0) + (xsMag ? xsMag[j] : 0)
-            );
-            // Per-band normalization: align corrected to target in passband
-            if (tMag) {
-              const hpF = bands[i].target.high_pass?.freq_hz ?? 20;
-              const lpF = bands[i].target.low_pass?.freq_hz ?? 20000;
-              const pbL = Math.max(20, hpF * 1.5);
-              const pbH = Math.min(20000, lpF * 0.7);
-              const eL = pbL < pbH ? pbL : 200;
-              const eH = pbL < pbH ? pbH : 2000;
-              let dS = 0, dN = 0;
-              for (let j = 0; j < freq.length; j++) {
-                if (freq[j] >= eL && freq[j] <= eH) {
-                  dS += tMag[j] - corrected[j];
-                  dN++;
-                }
-              }
-              const off = dN > 0 ? dS / dN : 0;
-              if (Math.abs(off) > 0.01) {
-                for (let j = 0; j < corrected.length; j++) corrected[j] += off;
-              }
-            }
-            perBandCorrected.push(corrected);
-
-            // Corrected phase = measurement phase + PEQ phase + XO phase
-            // unwrapDegrees ensures wrapped PEQ/XO phase adds correctly to unwrapped meas phase
-            if (rm.phase) {
-              let corrPhase = unwrapDegrees(rm.phase.map(
-                (v: number, j: number) => v + (peqPhase ? peqPhase[j] : 0) + (xsPhase ? xsPhase[j] : 0)
-              ));
-              // b139.4c: unified phase reconstruction (Gaussian + subsonic).
-              corrPhase = await reconstructTargetPhase(freq, corrPhase, bands[i].target.high_pass, bands[i].target.low_pass);
-              if (gen !== renderGen) return;
-              perBandCorrPhase.push(corrPhase);
-            } else {
-              perBandCorrPhase.push(null);
-            }
-
-            const color = bandColorFamily(bands[i].color).corrected;
-            const alignDelayCurr = bands[i].alignmentDelay ?? 0;
-            const delaySuffix = Math.abs(alignDelayCurr) > 1e-6
-              ? ` [${alignDelayCurr >= 0 ? "+" : ""}${(alignDelayCurr * 1000).toFixed(2)} ms]`
-              : "";
-            uSeries.push({ label: bands[i].name + " corr+XO", stroke: color, width: 2, scale: "mag" });
-            uData.push(corrected);
-            legend.push({ label: bands[i].name + " corr+XO" + delaySuffix, color, dash: false, visible: true, seriesIdx: sIdx, category: "corrected" });
-            sIdx++;
-
-            if (showPhase && perBandCorrPhase[i]) {
-              const phColor = bandColorFamily(bands[i].color).corrected + "60";
-              uSeries.push({ label: bands[i].name + " corr°", stroke: phColor, width: 1, dash: [4, 3], scale: "phase" });
-              uData.push(wrapPhase(perBandCorrPhase[i]!));
-              legend.push({ label: bands[i].name + " corr°", color: phColor, dash: true, visible: false, seriesIdx: sIdx, category: "corrected" });
-              sIdx++;
-            }
-          } catch (e) {
-            console.warn("SUM corrected failed for band", bands[i].name, e);
-            perBandCorrected.push(null);
-            perBandCorrPhase.push(null);
-          }
-        }
-
-        // --- Суммарный таргет (когерентное сложение — вычисляем ДО Σ corrected для нормализации) ---
-        let sumTargetArr: number[] | null = null;
-        {
-          const enabledNorm: number[][] = [];
-          const enabledPhase: number[][] = [];
-          const enabledInverted: boolean[] = [];
-          const enabledBandIdx: number[] = [];
-          for (let i = 0; i < bands.length; i++) {
-            if (perBandTargetNorm[i]) {
-              enabledNorm.push(perBandTargetNorm[i]!);
-              enabledPhase.push(perBandTargetNormPhase[i] ?? Array.from({ length: freq.length }, () => 0));
-              enabledInverted.push(bands[i].inverted);
-              enabledBandIdx.push(i);
-            }
-          }
-          if (enabledNorm.length > 0) {
-            const avgRef = refLevels.length > 0
-              ? refLevels.reduce((a, b) => a + b, 0) / refLevels.length
-              : 0;
-            const sumRe = new Float64Array(freq.length);
-            const sumIm = new Float64Array(freq.length);
-            for (let n = 0; n < enabledNorm.length; n++) {
-              const mag = enabledNorm[n];
-              const ph = enabledPhase[n];
-              const sign = enabledInverted[n] ? -1 : 1;
-              const alignDelay = bands[enabledBandIdx[n]].alignmentDelay ?? 0;
-              for (let j = 0; j < freq.length; j++) {
-                const amp = Math.pow(10, mag[j] / 20) * sign;
-                const phRad = (ph[j] + 360 * freq[j] * alignDelay) * Math.PI / 180;
-                sumRe[j] += amp * Math.cos(phRad);
-                sumIm[j] += amp * Math.sin(phRad);
-              }
-            }
-            const st = new Array(freq.length);
-            const stPhase = new Array(freq.length);
-            for (let j = 0; j < freq.length; j++) {
-              const re = sumRe[j];
-              const im = sumIm[j];
-              const amplitude = Math.sqrt(re * re + im * im);
-              st[j] = amplitude > 0 ? 20 * Math.log10(amplitude) + avgRef : -200;
-              stPhase[j] = Math.atan2(im, re) * 180 / Math.PI;
-            }
-            sumTargetArr = st;
-
-            if (showTarget) {
-              uSeries.push({ label: "\u03A3 tgt", stroke: SUM_TARGET_COLOR, width: 2.5, dash: [8, 4], scale: "mag" });
-              uData.push(st);
-              legend.push({ label: "\u03A3 target", color: SUM_TARGET_COLOR, dash: true, visible: true, seriesIdx: sIdx, category: "target" });
-              sIdx++;
-              if (showPhase) {
-                uSeries.push({ label: "\u03A3 tgt \u00B0", stroke: SUM_TARGET_PHASE_COLOR, width: 1.5, dash: [4, 4], scale: "phase" });
-                uData.push(wrapPhase(stPhase));
-                legend.push({ label: "\u03A3 target \u00B0", color: SUM_TARGET_PHASE_COLOR, dash: true, visible: true, seriesIdx: sIdx, category: "target" });
-                sIdx++;
-              }
-            }
-          }
-        }
-
-        // Σ corrected (когерентное сложение с учётом полной фазы: замер + PEQ + фильтры)
-        const corrIndices = perBandCorrected.map((c, i) => c ? i : -1).filter(i => i >= 0);
-        if (corrIndices.length > 0) {
-          const hasAllPhaseCorr = corrIndices.every(
-            (ci) => perBandCorrPhase[ci] && perBandCorrPhase[ci]!.length === freq.length
-          );
-          if (hasAllPhaseCorr) {
-            // Coherent sum of all corrected bands
-            const sumRe = new Float64Array(freq.length);
-            const sumIm = new Float64Array(freq.length);
-            for (const ci of corrIndices) {
-              const corr = perBandCorrected[ci]!;
-              const corrPh = perBandCorrPhase[ci]!;
-              const sign = bands[ci].inverted ? -1 : 1;
-              const alignDelay = bands[ci].alignmentDelay ?? 0;
-              for (let j = 0; j < freq.length; j++) {
-                const amp = Math.pow(10, corr[j] / 20) * sign;
-                const phRad = (corrPh[j] + 360 * freq[j] * alignDelay) * Math.PI / 180;
-                sumRe[j] += amp * Math.cos(phRad);
-                sumIm[j] += amp * Math.sin(phRad);
-              }
-            }
-            const sumCorrDb = new Array(freq.length);
-            const sumCorrPhase = new Array(freq.length);
-            for (let j = 0; j < freq.length; j++) {
-              const amplitude = Math.sqrt(sumRe[j] * sumRe[j] + sumIm[j] * sumIm[j]);
-              sumCorrDb[j] = amplitude > 0 ? 20 * Math.log10(amplitude) : -200;
-              sumCorrPhase[j] = Math.atan2(sumIm[j], sumRe[j]) * 180 / Math.PI;
-            }
-            // No Σ offset — per-band normalization already aligns each band to its target.
-            // Σ corrected is the pure coherent sum, showing real acoustic behavior (b101).
-            uSeries.push({ label: "\u03A3 corr", stroke: SUM_CORRECTED_COLOR, width: 3, scale: "mag" });
-            uData.push(sumCorrDb);
-            legend.push({ label: "\u03A3 corrected", color: SUM_CORRECTED_COLOR, dash: false, visible: true, seriesIdx: sIdx, category: "corrected" });
-            sIdx++;
-            // Σ corrected phase
-            if (showPhase) {
-              uSeries.push({ label: "\u03A3 corr °", stroke: SUM_CORRECTED_COLOR, width: 1.5, dash: [6, 3], scale: "phase" });
-              const sumCorrPhaseDisplay = new Array(freq.length);
-              for (let j = 0; j < freq.length; j++) {
-                let weightedDelay = 0;
-                let totalAmplitude = 0;
-                for (let i = 0; i < bands.length; i++) {
-                  if (!perBandCorrected[i]) continue;
-                  const amplitude = Math.pow(10, perBandCorrected[i]![j] / 20);
-                  const alignDelay = bands[i].alignmentDelay ?? 0;
-                  weightedDelay += amplitude * alignDelay;
-                  totalAmplitude += amplitude;
-                }
-                const avgDelay = totalAmplitude > 1e-30 ? weightedDelay / totalAmplitude : 0;
-                sumCorrPhaseDisplay[j] = sumCorrPhase[j] - 360 * freq[j] * avgDelay;
-              }
-              uData.push(wrapPhase(sumCorrPhaseDisplay));
-              legend.push({ label: "\u03A3 corr °", color: SUM_CORRECTED_COLOR, dash: true, visible: true, seriesIdx: sIdx, category: "corrected" });
-              sIdx++;
-            }
-          } else {
-            // Инкогерентное сложение (power sum, без фазы)
-            // Sum in power domain: Σ 10^(dB/10), then 10·log10(Σ)
-            const sumPower = new Float64Array(nPts);
-            for (const ci of corrIndices) {
-              const corr = perBandCorrected[ci]!;
-              for (let j = 0; j < nPts; j++) {
-                sumPower[j] += Math.pow(10, corr[j] / 10);
-              }
-            }
-            const sumCorrDb = Array.from(sumPower, (v: number) =>
-              v > 1e-30 ? 10 * Math.log10(v) : -200
-            );
-            // Normalize incoherent Σ corrected to Σ target in passband (b82.07)
-            if (sumTargetArr) {
-              let dSum = 0, dN = 0;
-              for (let j = 0; j < nPts; j++) {
-                if (freq[j] >= 200 && freq[j] <= 2000) {
-                  dSum += sumTargetArr[j] - sumCorrDb[j];
-                  dN++;
-                }
-              }
-              const corrOff = dN > 0 ? dSum / dN : 0;
-              if (Math.abs(corrOff) > 0.01) {
-                for (let j = 0; j < nPts; j++) sumCorrDb[j] += corrOff;
-              }
-            }
-            uSeries.push({ label: "\u03A3 corr", stroke: SUM_CORRECTED_COLOR, width: 3, scale: "mag" });
-            uData.push(sumCorrDb);
-            legend.push({ label: "\u03A3 corrected", color: SUM_CORRECTED_COLOR, dash: false, visible: true, seriesIdx: sIdx, category: "corrected" });
-            sIdx++;
-          }
-        }
-      }
-
-      // --- Суммарный замер (когерентное сложение с учётом фазы и инверсии) ---
-      if (showMag && measIndices.length > 0) {
-        const hasAllPhase = measIndices.every(
-          (mi) => resampled[mi]!.phase && resampled[mi]!.phase!.length === freq.length
-        );
-        if (hasAllPhase) {
-          const sumRe = new Float64Array(freq.length);
-          const sumIm = new Float64Array(freq.length);
-          for (const mi of measIndices) {
-            const rm = resampled[mi]!;
-            const sign = bands[mi].inverted ? -1 : 1;
-            const alignDelay = bands[mi].alignmentDelay ?? 0;
-            for (let j = 0; j < freq.length; j++) {
-              const amp = Math.pow(10, rm.magnitude[j] / 20) * sign;
-              const phRad = (rm.phase![j] + 360 * freq[j] * alignDelay) * Math.PI / 180;
-              sumRe[j] += amp * Math.cos(phRad);
-              sumIm[j] += amp * Math.sin(phRad);
-            }
-          }
-          const sumMagDb = new Array(freq.length);
-          const sumPhase = new Array(freq.length);
-          for (let j = 0; j < freq.length; j++) {
-            const re = sumRe[j];
-            const im = sumIm[j];
-            const amplitude = Math.sqrt(re * re + im * im);
-            sumMagDb[j] = amplitude > 0 ? 20 * Math.log10(amplitude) : -200;
-            sumPhase[j] = Math.atan2(im, re) * 180 / Math.PI;
-          }
-          uSeries.push({ label: "\u03A3 dB", stroke: SUM_MEAS_COLOR, width: 2, scale: "mag" });
-          uData.push(sumMagDb);
-          legend.push({ label: "\u03A3 meas", color: SUM_MEAS_COLOR, dash: false, visible: false, seriesIdx: sIdx, category: "measurement" });
-          sIdx++;
-          // Σ measurement phase
-          if (showPhase) {
-            uSeries.push({ label: "\u03A3 °", stroke: SUM_MEAS_COLOR, width: 1.5, dash: [6, 3], scale: "phase" });
-            const sumPhaseDisplay = new Array(nPts);
-            for (let j = 0; j < nPts; j++) {
-              let weightedDelay = 0;
-              let totalAmplitude = 0;
-              for (const mi of measIndices) {
-                const rm = resampled[mi]!;
-                const amplitude = Math.pow(10, rm.magnitude[j] / 20);
-                const alignDelay = bands[mi].alignmentDelay ?? 0;
-                weightedDelay += amplitude * alignDelay;
-                totalAmplitude += amplitude;
-              }
-              const avgDelay = totalAmplitude > 1e-30 ? weightedDelay / totalAmplitude : 0;
-              sumPhaseDisplay[j] = sumPhase[j] - 360 * freq[j] * avgDelay;
-            }
-            uData.push(wrapPhase(sumPhaseDisplay));
-            legend.push({ label: "\u03A3 meas °", color: SUM_MEAS_COLOR, dash: true, visible: true, seriesIdx: sIdx, category: "measurement" });
-            sIdx++;
-          }
-        } else {
-          // Incoherent sum: power domain (polarity irrelevant without phase)
-          const sumPower = new Float64Array(nPts);
-          for (const mi of measIndices) {
-            const rm = resampled[mi]!;
-            for (let j = 0; j < nPts; j++) {
-              sumPower[j] += Math.pow(10, rm.magnitude[j] / 10);
-            }
-          }
-          const sumMagDb = Array.from(sumPower, (v: number) =>
-            v > 1e-30 ? 10 * Math.log10(v) : -200
-          );
-          uSeries.push({ label: "\u03A3 dB", stroke: SUM_MEAS_COLOR, width: 2, scale: "mag" });
-          uData.push(sumMagDb);
-          legend.push({ label: "\u03A3 meas", color: SUM_MEAS_COLOR, dash: false, visible: false, seriesIdx: sIdx, category: "measurement" });
-          sIdx++;
-        }
-      }
-
-      // Collect crossover points for interactive markers (enrich with dB level)
-      const crossovers = getCrossovers();
-      for (const xo of crossovers) {
-        const tMag = perBandTargetMags[xo.bandIndex];
-        if (tMag && freq.length > 0) {
-          // Find closest freq index to crossover frequency (log-space)
-          let bestIdx = 0;
-          let bestDist = Infinity;
-          const logXo = Math.log10(xo.freq);
-          for (let j = 0; j < freq.length; j++) {
-            const d = Math.abs(Math.log10(freq[j]) - logXo);
-            if (d < bestDist) { bestDist = d; bestIdx = j; }
-          }
-          xo.dbLevel = tMag[bestIdx];
-        }
-      }
-
-      // Zoom anchor = globalRef (already computed from all measurements)
-      zoomCenter = globalRef;
-
-      // Normalize all mag series to dBr (0 = passband level)
-      if (zoomCenter !== 0) {
-        for (let i = 0; i < uSeries.length; i++) {
-          if ((uSeries[i] as any).scale === "mag") {
-            uData[i] = uData[i].map((v: number) => v - zoomCenter);
-          }
-        }
-        // Also normalize crossover dB levels
-        for (const xo of crossovers) {
-          if (xo.dbLevel != null) xo.dbLevel -= zoomCenter;
-        }
-      }
-      zoomCenter = 0; // after normalization, center is 0 dBr
-
-      if (gen !== renderGen) return; // stale after async work
-      requestAnimationFrame(() => {
-        if (gen !== renderGen) return;
-        renderChart({
-          freq,
-          uSeries,
-          uData,
-          hasMeasurements: measIndices.length > 0,
-          legend,
-          crossovers,
-        });
-      });
-    } catch (e) {
-      console.error("SUM render failed:", e);
-    }
-  }
-
-  // ----------------------------------------------------------------
-  // b140.3.0: SUM rendering via evaluateSum — Σ Target only. No Σ
-  // measurement / Σ corrected / per-band overlays / IR. They will return
-  // in subsequent sub-promts (b140.3.1, …) once the minimal pipeline is
-  // proven against real projects.
-  //
-  // Note: levels are absolute SPL straight from each band's
-  // target.reference_level_db. May differ visually from Legacy SUM —
-  // that's intentional (no globalRef/avgRef/zoomCenter magic).
-  // ----------------------------------------------------------------
-  async function renderSumModeNew(showPhase: boolean, showMag: boolean, showTarget: boolean) {
     // b140.3.1.6: PEQ dots are band-mode-only — clear before rendering SUM.
     activePeqDots = null;
     const gen = ++renderGen;
@@ -4992,22 +4382,8 @@ export default function FrequencyPlot() {
           )}
         </Show>
       </Show>
-      <Show when={isSum() && plotTab() === "freq"}>
-        {/* b140.2.1: Legacy / New SUM pipeline toggle. Default Legacy. */}
-        <div class="sum-mode-toggle">
-          <span class="hint">Σ pipeline:</span>
-          <button
-            class={`pill ${sumModeSignal() === "legacy" ? "active" : ""}`}
-            onClick={() => setSumMode("legacy")}
-            title="Legacy: inline aggregation (battle-tested)"
-          >Legacy</button>
-          <button
-            class={`pill ${sumModeSignal() === "new" ? "active" : ""}`}
-            onClick={() => setSumMode("new")}
-            title="New: evaluateSum (b140.2.x)"
-          >New</button>
-        </div>
-      </Show>
+      {/* b140.15: Legacy / New SUM pipeline toggle removed — single
+          canonical path through evaluateSum. */}
       <Show when={isSum() && legendEntries.length > 0 && plotTab() !== "gd" && plotTab() !== "export"}>
         {/* SUM matrix */}
         <div class="sum-vis-table">
