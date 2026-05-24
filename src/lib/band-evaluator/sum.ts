@@ -255,6 +255,12 @@ export async function evaluateSum(
   // with await inside — ~N × IPC latency stacked). Bands are independent so
   // Promise.all is safe; coherentSum below still requires the deterministic
   // band order, hence indexed Array.from instead of a plain map.
+  //
+  // Note: per-band target uses raw `band.target` (no refLevel shift) by
+  // design — perBandTarget represents the user's *intended* SPL while
+  // evaluateBandFull's internal target (with refLevel) is what perBandCorrected
+  // normalizes onto. Audit Logic-#3 proposed unifying them; tests confirm
+  // they MUST stay separate or per-band-corrected normalize stops working.
   const perBandTargetData: Array<
     { mag: number[]; phase: number[]; sign: 1 | -1; delay: number } | null
   > = new Array(bands.length).fill(null);
