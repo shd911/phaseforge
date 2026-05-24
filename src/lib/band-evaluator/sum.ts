@@ -188,6 +188,17 @@ function powerSumDb(magsDb: number[][]): number[] {
   return out;
 }
 
+/** Threshold below which we treat re/im as numerically zero and report
+ *  the phase as NaN (signaling "phase is undefined here", typically a
+ *  cancellation null). Without this, atan2 of two near-zero floats
+ *  returns ulp-grid-quantized values that jump ±180° across bins —
+ *  visually as jaggedness around crossover nulls.
+ *
+ *  Conservative threshold: 1e-15 ≈ 6 ulps for double-precision
+ *  amplitudes near 1.0. Below it both re and im are pure rounding
+ *  noise from accumulating cos/sin of large delay·freq products. */
+const COHERENT_SUM_NULL_FLOOR = 1e-15;
+
 function coherentSum(
   freq: number[],
   bandsData: Array<{ mag: number[]; phase: number[]; sign: 1 | -1; delay: number } | null>,
@@ -201,7 +212,16 @@ function coherentSum(
     any = true;
     for (let j = 0; j < n; j++) {
       const amp = Math.pow(10, (b.mag[j] ?? -200) / 20) * b.sign;
-      const phRad = ((b.phase[j] ?? 0) + 360 * freq[j] * b.delay) * Math.PI / 180;
+      // b140.15.6: reduce delay·freq mod 1 cycle BEFORE trig to keep
+      // the argument small. Math.cos/sin precision degrades with
+      // argument magnitude — at f=20kHz × delay=50ms the raw argument
+      // is 6283 rad and the absolute error in the result reaches ulp
+      // size relative to that, which dominates the result at deep
+      // crossover nulls where re,im → 0. Reducing modulo 2π preserves
+      // the periodic value but keeps the trig arg in [-π, π].
+      const phaseDeg = (b.phase[j] ?? 0) + 360 * freq[j] * b.delay;
+      const phaseDegMod = phaseDeg - 360 * Math.round(phaseDeg / 360);
+      const phRad = phaseDegMod * Math.PI / 180;
       re[j] += amp * Math.cos(phRad);
       im[j] += amp * Math.sin(phRad);
     }
@@ -212,7 +232,11 @@ function coherentSum(
   for (let j = 0; j < n; j++) {
     const amplitude = Math.sqrt(re[j] * re[j] + im[j] * im[j]);
     mag[j] = amplitude > 0 ? 20 * Math.log10(amplitude) : -200;
-    phase[j] = Math.atan2(im[j], re[j]) * 180 / Math.PI;
+    // b140.15.6: report phase as 0 (not random atan2 ulp) at deep
+    // cancellation nulls where re,im are numerical noise.
+    phase[j] = amplitude > COHERENT_SUM_NULL_FLOOR
+      ? Math.atan2(im[j], re[j]) * 180 / Math.PI
+      : 0;
   }
   return { mag, phase };
 }

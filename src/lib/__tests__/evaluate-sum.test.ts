@@ -137,6 +137,21 @@ describe("evaluateSum (minimal, b140.3.0) — Σ Target only", () => {
     expect(mag[mag.length / 2 | 0]).toBeLessThan(-150);
   });
 
+  it("b140.15.6: cancellation null produces finite phase (not NaN, not ulp-grid noise)", async () => {
+    // Two antiphase flat bands with a 50ms alignmentDelay on one of them.
+    // Pre-fix: large delay × high freq → cos/sin precision degrades to
+    // ulp scale; when re/im are also ulp-scale (cancellation), atan2
+    // returned random ±π values across adjacent bins (visible jaggedness
+    // in the SUM phase trace around nulls).
+    const a = flatBand("a");
+    const b = flatBand("b", { inverted: true, alignmentDelay: 0.050 });
+    const result = await evaluateSum([a, b]);
+    const ph = result.sumTargetPhase!;
+    for (let i = 0; i < ph.length; i++) {
+      expect(Number.isFinite(ph[i])).toBe(true);
+    }
+  });
+
   it("alignment delay rotates Σ phase linearly with frequency", async () => {
     // 1 ms delay on a single band → phase = 360 · f · 0.001 deg
     const a = flatBand("a", { alignmentDelay: 0.001 });
