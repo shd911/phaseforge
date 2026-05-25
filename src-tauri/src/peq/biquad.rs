@@ -30,10 +30,18 @@ pub fn peq_band_response(freq: &[f64], band: &PeqBand, sample_rate: f64) -> Vec<
 
 /// Compute the combined complex response (magnitude dB + phase degrees) of all PEQ bands.
 /// Bands with `enabled == false` are skipped.
+///
+/// b140.16: complex-accumulator path. Pre-fix this summed `phase_deg += per_band_phase`
+/// scalarly; each band's phase came wrapped to (-180, 180] from atan2 and the sum could
+/// land in (-360 × N, 360 × N], wrapping incorrectly across freq bins when one band's
+/// phase crossed ±180°. Same bug class as the apply_filter scalar sum fixed in b140.15.9.
+/// Complex multiplication of unit phasors is phase addition modulo 360° — wrap-invariant —
+/// so the final atan2 produces one clean (-180, 180] wrap per bin.
 pub fn apply_peq_complex(freq: &[f64], bands: &[PeqBand], sample_rate: f64) -> (Vec<f64>, Vec<f64>) {
     let n = freq.len();
     let mut total_mag = vec![0.0_f64; n];
-    let mut total_phase = vec![0.0_f64; n];
+    let mut re_acc = vec![1.0_f64; n];
+    let mut im_acc = vec![0.0_f64; n];
     for band in bands {
         if !band.enabled {
             continue;
@@ -41,12 +49,18 @@ pub fn apply_peq_complex(freq: &[f64], bands: &[PeqBand], sample_rate: f64) -> (
         for (i, &f) in freq.iter().enumerate() {
             let (mag_db, phase_deg) = peq_band_complex(f, band, sample_rate);
             total_mag[i] += mag_db;
-            total_phase[i] += phase_deg;
+            let p_rad = phase_deg.to_radians();
+            let c = p_rad.cos();
+            let s = p_rad.sin();
+            let nr = re_acc[i] * c - im_acc[i] * s;
+            let ni = re_acc[i] * s + im_acc[i] * c;
+            re_acc[i] = nr;
+            im_acc[i] = ni;
         }
     }
-    // Wrap phase to [-180, 180] (REW convention)
-    for p in total_phase.iter_mut() {
-        *p = (*p + 180.0).rem_euclid(360.0) - 180.0;
+    let mut total_phase = vec![0.0_f64; n];
+    for i in 0..n {
+        total_phase[i] = im_acc[i].atan2(re_acc[i]).to_degrees();
     }
 
     (total_mag, total_phase)
@@ -220,4 +234,69 @@ pub(crate) fn biquad_peaking_mag_db(f: f64, fc: f64, gain_db: f64, q: f64, sampl
     }
 
     10.0 * (num_mag_sq / den_mag_sq).log10()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::peq::types::{PeqBand, PeqFilterType};
+
+    /// b140.16 regression: apply_peq_complex used to sum each band's
+    /// wrapped phase scalarly. With 3+ peaking bands at moderate gain near
+    /// overlapping frequencies, individual phase wraps would accumulate
+    /// into ±540° / ±720° sums that wrap incorrectly across freq bins —
+    /// visible as 1-bin spikes on PEQ phase trace. Complex-accumulator
+    /// path eliminates this.
+    #[test]
+    fn apply_peq_complex_no_phase_spikes_multi_band() {
+        let sample_rate = 48_000.0;
+        // 5 PEQ bands at moderate gains spread across the audio band.
+        // Each individual biquad's phase wraps at ±180° somewhere; the
+        // scalar sum used to wrap-jump where multiple components crossed
+        // at adjacent freq bins.
+        let bands = vec![
+            PeqBand { freq_hz: 80.0,   gain_db:  6.0, q: 2.0, enabled: true, filter_type: PeqFilterType::Peaking },
+            PeqBand { freq_hz: 250.0,  gain_db: -8.0, q: 3.0, enabled: true, filter_type: PeqFilterType::Peaking },
+            PeqBand { freq_hz: 800.0,  gain_db:  4.0, q: 5.0, enabled: true, filter_type: PeqFilterType::Peaking },
+            PeqBand { freq_hz: 2500.0, gain_db: -6.0, q: 2.5, enabled: true, filter_type: PeqFilterType::Peaking },
+            PeqBand { freq_hz: 7000.0, gain_db:  3.0, q: 1.5, enabled: true, filter_type: PeqFilterType::Peaking },
+        ];
+        let n = 1024;
+        let freq: Vec<f64> = (0..n)
+            .map(|i| 20.0 * (1000.0_f64).powf(i as f64 / (n - 1) as f64))
+            .collect();
+
+        let (_mag, phase) = apply_peq_complex(&freq, &bands, sample_rate);
+
+        // Phase must be wrapped to (-180, 180] cleanly with no 1-bin spikes
+        // (defined as |Δ| > 30° vs both neighbours where neighbours agree
+        // within 10° modulo 360°).
+        let wrap = |x: f64| x - 360.0 * (x / 360.0).round();
+        let mut spikes = Vec::new();
+        for i in 1..n - 1 {
+            let a = phase[i - 1];
+            let b = phase[i];
+            let c = phase[i + 1];
+            let ab = wrap(b - a).abs();
+            let bc = wrap(b - c).abs();
+            let ac = wrap(a - c).abs();
+            if ab > 30.0 && bc > 30.0 && ac < 10.0 {
+                spikes.push((i, freq[i], a, b, c));
+            }
+        }
+        if !spikes.is_empty() {
+            let mut msg = format!("\n{} phase spike(s) in 5-band PEQ sum:\n", spikes.len());
+            for (i, f, a, b, c) in spikes.iter().take(6) {
+                msg.push_str(&format!("  bin {} f={:.1}Hz prev={:.2} spike={:.2} next={:.2}°\n",
+                    i, f, a, b, c));
+            }
+            panic!("{}", msg);
+        }
+
+        // Sanity: phase should remain in (-180, 180] (atan2 output range)
+        for (i, &p) in phase.iter().enumerate() {
+            assert!(p > -180.0 - 1e-9 && p <= 180.0 + 1e-9,
+                "bin {} f={:.1}Hz phase={} out of (-180, 180]", i, freq[i], p);
+        }
+    }
 }
