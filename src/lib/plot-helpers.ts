@@ -182,14 +182,22 @@ export function wrapPhase(phase: number[]): (number | null)[] {
     else if (w < -180) w += 360;
     out[i] = w;
   }
-  // Mark the FIRST bin AFTER a wrap as null (breaks uPlot's line).
-  // |Δ| > 180 in adjacent wrapped values can only happen via wrap.
+  // Mark BOTH bins adjacent to a wrap as null. Single-side null left a
+  // visible "stub" of the pre-wrap value at the chart edge; pairing it
+  // produces a clean 2-bin gap that visually reads as a wrap, not as
+  // missing data. (b140.15.11.1 follow-up to user-reported render
+  // artifact at ±180° boundary.)
+  const wrapIdx: number[] = [];
   for (let i = 1; i < out.length; i++) {
     const a = out[i - 1];
     const b = out[i];
     if (a !== null && b !== null && Math.abs(b - a) > 180) {
-      out[i] = null;
+      wrapIdx.push(i);
     }
+  }
+  for (const i of wrapIdx) {
+    out[i] = null;
+    if (i - 1 >= 0) out[i - 1] = null;
   }
   return out;
 }

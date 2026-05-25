@@ -129,6 +129,30 @@ fn sum_3band_lr4_no_meas_matches_user_flat_pfproj() {
         eprintln!("  bin {} f={:.2}Hz: prev={:.2} spike={:.2} next={:.2}", j, f, a, b, c);
     }
 
+    // Scan SUM MAG around crossover frequencies to characterise the LR
+    // ripple pattern that the user reports as "small negative spikes".
+    eprintln!("\n=== SUM MAG near 200 Hz crossover (LR ripple region) ===");
+    // freq[i] = 5 × 8000^(i/511). For 200 Hz: ln(40)/ln(8000) × 511 ≈ 211
+    let mut max_dip_200 = 0.0_f64;
+    let mut max_dip_200_bin = 0;
+    for i in 200..230 {
+        let dip = -sum_mag[i];
+        if dip > max_dip_200 { max_dip_200 = dip; max_dip_200_bin = i; }
+    }
+    eprintln!("  max dip in bins 200..230 = {:.4} dB at bin {} (f={:.2}Hz)",
+        max_dip_200, max_dip_200_bin, freq[max_dip_200_bin]);
+
+    eprintln!("\n=== SUM MAG near 2k Hz crossover ===");
+    // For 2000 Hz: ln(400)/ln(8000) × 511 ≈ 340
+    let mut max_dip_2k = 0.0_f64;
+    let mut max_dip_2k_bin = 0;
+    for i in 320..360 {
+        let dip = -sum_mag[i];
+        if dip > max_dip_2k { max_dip_2k = dip; max_dip_2k_bin = i; }
+    }
+    eprintln!("  max dip in bins 320..360 = {:.4} dB at bin {} (f={:.2}Hz)",
+        max_dip_2k, max_dip_2k_bin, freq[max_dip_2k_bin]);
+
     assert_eq!(phase_spikes.len(), 0,
         "sumTargetPhase has {} spike(s) — user-reported bug REPRODUCED",
         phase_spikes.len());
