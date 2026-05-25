@@ -288,33 +288,71 @@ export async function evaluateSum(
   const perBandTarget: Array<{ mag: number[]; phase: number[] } | null> =
     new Array(bands.length).fill(null);
 
-  await Promise.all(bands.map(async (band, i) => {
-    if (!band.targetEnabled) return;
-    const target = JSON.parse(JSON.stringify(band.target));
-    const response = await invoke<TargetResponse>("evaluate_target", {
-      target, freq,
-    });
-    const phase = await reconstructTargetPhase(
-      freq, response.phase, band.target.high_pass, band.target.low_pass,
+  // b140.16.3 Performance #2: in no-measurement projects, the standalone
+  // target evaluation that evaluateBandFull does internally is bit-identical
+  // to what the per-band target loop below would compute (same grid via
+  // buildCommonGrid fallback 5..40k, same target curve since no refLevel
+  // adjustment fires without measurement). Run evaluateBandFull FIRST and
+  // reuse its target output → saves N evaluate_target round-trips per
+  // SUM render. Per-band measurement case stays on the existing path
+  // (intentional refLevel difference, Logic-#3 audit).
+  const allBandsNoMeasurement = bands.every(
+    b => !b.measurement || b.measurement.freq.length === 0,
+  );
+
+  // Per-band corrected via evaluateBandFull. Order swapped vs pre-b140.16.3
+  // when reuse path is active so target output is available before the
+  // perBandTarget loop. For the measurement-case branch this happens
+  // strictly after — semantics unchanged.
+  let perBandResults: import("../band-evaluator").BandEvalResult[] = [];
+  if (allBandsNoMeasurement) {
+    // Pass `freq` explicitly so evaluateBandFull uses the same grid as
+    // sum.ts (would otherwise pick its own 5..40k standalone grid — same
+    // values typically, but we lock it down).
+    perBandResults = await Promise.all(
+      bands.map(b => evaluateBandFull({ band: b, freq })),
     );
-    perBandTargetData[i] = {
-      mag: response.magnitude,
-      phase,
-      sign: band.inverted ? -1 : 1,
-      delay: band.alignmentDelay ?? 0,
-    };
-    perBandTarget[i] = { mag: response.magnitude, phase };
-  }));
+    for (let i = 0; i < bands.length; i++) {
+      const band = bands[i];
+      const r = perBandResults[i];
+      if (!band.targetEnabled || !r.targetMag || !r.targetPhase) continue;
+      perBandTargetData[i] = {
+        mag: r.targetMag,
+        phase: r.targetPhase,
+        sign: band.inverted ? -1 : 1,
+        delay: band.alignmentDelay ?? 0,
+      };
+      perBandTarget[i] = { mag: r.targetMag, phase: r.targetPhase };
+    }
+  } else {
+    await Promise.all(bands.map(async (band, i) => {
+      if (!band.targetEnabled) return;
+      const target = JSON.parse(JSON.stringify(band.target));
+      const response = await invoke<TargetResponse>("evaluate_target", {
+        target, freq,
+      });
+      const phase = await reconstructTargetPhase(
+        freq, response.phase, band.target.high_pass, band.target.low_pass,
+      );
+      perBandTargetData[i] = {
+        mag: response.magnitude,
+        phase,
+        sign: band.inverted ? -1 : 1,
+        delay: band.alignmentDelay ?? 0,
+      };
+      perBandTarget[i] = { mag: response.magnitude, phase };
+    }));
+  }
 
   const sum = coherentSum(freq, perBandTargetData);
 
-  // b140.3.1: per-band corrected via evaluateBandFull (gives correctedMag /
-  // correctedPhase with proper Gaussian/subsonic phase reconstruction). We
-  // do NOT pass req.freq — evaluateBandFull builds correctedMag from
-  // measurement.magnitude on measurement.freq, so we resample afterwards.
-  const perBandResults = await Promise.all(
-    bands.map(b => evaluateBandFull({ band: b })),
-  );
+  // Measurement case: evaluateBandFull called here (after sumTarget).
+  // No-measurement case: already populated above.
+  if (!allBandsNoMeasurement) {
+    perBandResults = await Promise.all(
+      bands.map(b => evaluateBandFull({ band: b })),
+    );
+  }
 
   const perBandCorrected: Array<{ mag: number[]; phase: number[] } | null> = [];
   const correctedDataForSum: Array<

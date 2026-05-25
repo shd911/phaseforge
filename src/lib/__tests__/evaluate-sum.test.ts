@@ -108,6 +108,50 @@ function flatBand(id: string, overrides: Partial<BandState> = {}): BandState {
   };
 }
 
+describe("evaluateSum (b140.16.3) — no-measurement reuse path", () => {
+  function noMeasBand(id: string, lpFc: number | null, hpFc: number | null): BandState {
+    return {
+      id, name: id,
+      measurement: null,  // ← key: triggers Performance #2 reuse path
+      measurementFile: null,
+      settings: {
+        smoothing: "off", delay_seconds: null, distance_meters: null,
+        delay_removed: false, originalPhase: null, floorBounce: null,
+        mergeSource: null, analysis: null, analysisDismissed: false,
+      },
+      target: {
+        reference_level_db: 0, tilt_db_per_octave: 0, tilt_ref_freq: 1000,
+        high_pass: hpFc ? {
+          filter_type: "LinkwitzRiley", order: 4, freq_hz: hpFc,
+          shape: null, linear_phase: false, q: null,
+        } : null,
+        low_pass: lpFc ? {
+          filter_type: "LinkwitzRiley", order: 4, freq_hz: lpFc,
+          shape: null, linear_phase: false, q: null,
+        } : null,
+        low_shelf: null, high_shelf: null,
+      },
+      targetEnabled: true, inverted: false, linkedToNext: false,
+      peqBands: [], peqOptimizedTarget: null, exclusionZones: [],
+      firResult: null, crossNormDb: 0, color: "#888", alignmentDelay: 0,
+    };
+  }
+
+  it("3-band LR4 no-measurement: sumTarget populated, no corrected", async () => {
+    // Mirrors user's flat.pfproj scenario
+    const b0 = noMeasBand("a", 200, null);          // LP200
+    const b1 = noMeasBand("b", 2000, 200);          // HP200 + LP2000
+    const b2 = noMeasBand("c", null, 2000);         // HP2000
+    const r = await evaluateSum([b0, b1, b2]);
+    expect(r.sumTargetMag).not.toBeNull();
+    expect(r.sumTargetPhase).not.toBeNull();
+    expect(r.sumCorrectedMag).toBeNull();      // no measurement → no corrected
+    expect(r.sumCorrectedPhase).toBeNull();
+    expect(r.perBandTarget.length).toBe(3);
+    for (const pb of r.perBandTarget) expect(pb).not.toBeNull();
+  });
+});
+
 describe("evaluateSum (minimal, b140.3.0) — Σ Target only", () => {
   it("returns null sum when no band has targetEnabled", async () => {
     const result = await evaluateSum([
