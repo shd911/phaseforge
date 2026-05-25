@@ -11,7 +11,7 @@ pub mod recent;
 pub mod snapshots;
 pub mod target;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use dsp::SmoothingConfig;
@@ -628,7 +628,7 @@ pub fn run() {
         )
         .init();
 
-    info!("PhaseForge b140.16.1 starting...");
+    info!("PhaseForge b140.16.2 starting...");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())

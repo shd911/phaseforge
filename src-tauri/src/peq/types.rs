@@ -90,7 +90,8 @@ pub(crate) const SAMPLE_RATE: f64 = 48000.0;
 pub(crate) const MIN_BAND_DISTANCE_OCT: f64 = 0.333; // 1/3 octave
 /// Q limits
 pub(crate) const Q_MIN: f64 = 0.5;
-pub(crate) const Q_MAX: f64 = 10.0;
+// Q_MAX removed in b140.16.2: had no callers, replaced by Q_MAX_ABOVE_LP
+// for the LMA-specific use case.
 
 // LMA-specific constants
 /// Maximum Q above LP crossover (phase-safe wide filters)

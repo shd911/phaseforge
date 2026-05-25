@@ -60,6 +60,11 @@ pub struct TargetResponse {
 // Public filter application (for IPC: compute_filter_response)
 // ---------------------------------------------------------------------------
 
+/// b140.16.2: gated to `#[cfg(test)]`. Production code goes through
+/// `apply_filter_complex` (b140.15.9 fix). No production callers found
+/// via `grep -rn target::apply_filter` — only test fixtures still
+/// exercise the scalar phase-sum path for legacy comparison.
+#[cfg(test)]
 pub fn apply_filter_public(
     mag: &mut [f64],
     phase: &mut [f64],
@@ -250,6 +255,12 @@ fn add_tilt(result: &mut [f64], freq: &[f64], db_per_octave: f64, ref_freq: f64)
 // Unified filter application (magnitude + phase)
 // ---------------------------------------------------------------------------
 
+/// b140.16.2: gated to `#[cfg(test)]`. Production callers (compute_cross_section
+/// in lib.rs, target::evaluate above, the FIR pipeline modules) all switched
+/// to `apply_filter_complex` in b140.15.9. This scalar variant stays only
+/// because the in-file test module still imports it for legacy
+/// comparison fixtures (e.g., LR phase parity vs reference WAVs).
+#[cfg(test)]
 fn apply_filter(
     mag: &mut [f64],
     phase: &mut [f64],
