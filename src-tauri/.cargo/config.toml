@@ -1,0 +1,5 @@
+[alias]
+# Run the full release-readiness suite (Stages 1..5) against the
+# real 4-way fixture. Each stage produces target/release_report_*.json;
+# stage 5 aggregates them into target/release_report.json + .md.
+release-readiness = "test --tests release_readiness -- --test-threads=1 --nocapture"
