@@ -28,15 +28,11 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use phaseforge_lib::fir::iir_path::{generate_min_phase_fir_iir, IirPathInput};
 use phaseforge_lib::fir::{
-    FirConfig, FirModelResult, PhaseMode, Route, WindowType,
-    generate_model_fir, route_for,
+    FirConfig, FirModelResult, PhaseMode, Route, WindowType, route_for,
 };
 use phaseforge_lib::peq::{PeqBand, PeqFilterType};
-use phaseforge_lib::target::{
-    self, FilterConfig as TargetFilterConfig, FilterType as TargetFilterType, TargetCurve,
-};
+use phaseforge_lib::target::{FilterConfig as TargetFilterConfig, FilterType as TargetFilterType};
 
 // ---------------------------------------------------------------------------
 // Routing predicate — b140.12: imported from production source
@@ -46,7 +42,12 @@ use phaseforge_lib::target::{
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Contract evaluator — the SINGLE entry that Phase 2 will replace.
+// Contract evaluator — b140.16.1: switched to the production
+// `pick_pipeline` factory from src/fir/pipeline.rs. Pre-fix this test
+// had its own evaluate_via_contract helper; promoting that to a real
+// production module is the Phase 2 full deliverable. Baseline hashes
+// in pipeline_contract.json stay valid IFF the trait produces bit-
+// identical output to the prior direct calls.
 // ---------------------------------------------------------------------------
 
 fn evaluate_via_contract(
@@ -57,36 +58,8 @@ fn evaluate_via_contract(
     freq: &[f64],
 ) -> (Route, FirModelResult) {
     let route = route_for(hp, lp, cfg);
-    let result = match route {
-        Route::Iir => {
-            generate_min_phase_fir_iir(&IirPathInput {
-                freq, hp, lp, peq, config: cfg,
-            })
-            .expect("iir_path run")
-        }
-        Route::Cepstral => {
-            // Cepstral path consumes pre-evaluated arrays. The contract
-            // wrapper evaluates the target internally so callers pass only
-            // filter configs (the future trait signature).
-            let target = TargetCurve {
-                reference_level_db: 0.0,
-                tilt_db_per_octave: 0.0,
-                tilt_ref_freq: 1000.0,
-                high_pass: hp.cloned(),
-                low_pass: lp.cloned(),
-                low_shelf: None, high_shelf: None,
-            };
-            let resp = target::evaluate(&target, freq);
-            // PEQ is intentionally not folded into cepstral-path mag here.
-            // The production FrontEnd evaluates PEQ separately and routes
-            // its magnitude in via `peq_mag`. For contract bootstrap we
-            // mirror "peq disabled at cepstral level" — IIR-eligible
-            // configs are the ones that exercise PEQ inside this test.
-            let peq_mag: Vec<f64> = vec![];
-            generate_model_fir(freq, &resp.magnitude, &peq_mag, &resp.phase, cfg)
-                .expect("model_fir run")
-        }
-    };
+    let pipeline = phaseforge_lib::fir::pick_pipeline(hp, lp, cfg);
+    let result = pipeline.evaluate(hp, lp, peq, cfg, freq).expect("pipeline.evaluate");
     (route, result)
 }
 

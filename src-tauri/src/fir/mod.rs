@@ -8,12 +8,14 @@ mod legacy;
 mod cepstral;
 pub mod iir_path;
 pub mod dispatch;
+pub mod pipeline;
 
 pub use types::*;
 pub use dispatch::{Route, route_for};
 pub use wav::{export_wav_f32, export_wav_f64};
 pub use legacy::{generate_fir, generate_hybrid_fir};
 pub use cepstral::generate_model_fir;
+pub use pipeline::{FirPipeline, IirAnalyticalPipeline, CepstralFftPipeline, pick_pipeline};
 // b140.13.2: production code in `mod.rs` no longer imports these — the
 // last in-module pipeline (`generate_model_fir`) moved to
 // `fir/cepstral.rs`. The submodule re-exports below stay so the in-file
