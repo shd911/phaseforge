@@ -2112,69 +2112,8 @@ export default function FrequencyPlot() {
         const measResults = await Promise.all(measPromises);
         if (gen !== renderGen) return;
 
-
-        // Coherent sum measurement — resample all bands to a dense common grid first
-        // (SPL tab already does this via interpolate_log; IR SUM needs the same)
-        const nGrid = 2048;
-        // Common freq range: union of all bands' measurement grids
-        let sumFreqMin = Infinity, sumFreqMax = -Infinity;
-        for (const sb of allBands) {
-          const sf = sb.measurement!.freq;
-          if (sf[0] < sumFreqMin) sumFreqMin = sf[0];
-          if (sf[sf.length - 1] > sumFreqMax) sumFreqMax = sf[sf.length - 1];
-        }
-
-        // Build a log-spaced common grid using the widest-range band's point count
-        let maxPts = 0;
-        for (const sb of allBands) { maxPts = Math.max(maxPts, sb.measurement!.freq.length); }
-        const gridPts = Math.max(maxPts, nGrid);
-
-        // Resample each band onto the common grid
-        const interpTasks = allBands.map(async (sb) => {
-          const m = sb.measurement!;
-          const [rFreq, rMag, rPhase] = await invoke<[number[], number[], number[] | null]>(
-            "interpolate_log",
-            { freq: m.freq, magnitude: m.magnitude, phase: m.phase, nPoints: gridPts, fMin: sumFreqMin, fMax: sumFreqMax }
-          );
-          return { freq: rFreq, mag: rMag, phase: rPhase ?? rMag.map(() => 0), delay: irDelayByName[sb.name] ?? 0, inverted: sb.inverted };
-        });
-        const resampledBands = await Promise.all(interpTasks);
-        if (gen !== renderGen) return;
-        const sumFreq = resampledBands[0].freq;
-        const sumN = sumFreq.length;
-
-        const sumRe = new Float64Array(sumN);
-        const sumIm = new Float64Array(sumN);
-        for (const bd of resampledBands) {
-          let peakMag = -Infinity;
-          for (let j = 0; j < bd.mag.length; j++) {
-            if ((bd.mag[j] ?? -200) > peakMag) peakMag = bd.mag[j] ?? -200;
-          }
-          const offset = -peakMag;
-          const sign = bd.inverted ? -1 : 1;
-          for (let j = 0; j < sumN; j++) {
-            const amp = Math.pow(10, ((bd.mag[j] ?? -200) + offset) / 20) * sign;
-            const phRad = ((bd.phase[j] ?? 0) + 360 * sumFreq[j] * bd.delay) * Math.PI / 180;
-            sumRe[j] += amp * Math.cos(phRad);
-            sumIm[j] += amp * Math.sin(phRad);
-          }
-        }
-        const sumMeasMag: number[] = [];
-        const sumMeasPh: number[] = [];
-        for (let j = 0; j < sumN; j++) {
-          const amplitude = Math.sqrt(sumRe[j] * sumRe[j] + sumIm[j] * sumIm[j]);
-          sumMeasMag.push(amplitude > 0 ? 20 * Math.log10(amplitude) : -200);
-          sumMeasPh.push(Math.atan2(sumIm[j], sumRe[j]) * 180 / Math.PI);
-        }
-        const sumMeasResult = await invoke<{ time: number[]; impulse: number[]; step: number[]; raw_peak: number; step_raw_peak: number }>("compute_impulse", {
-          freq: sumFreq, magnitude: sumMeasMag, phase: sumMeasPh, sampleRate: sr,
-        });
-        if (gen !== renderGen) return;
-        let measSum: { timeMs: number[]; impulse: number[]; step: number[] } | null = {
-          timeMs: sumMeasResult.time.map(t => t * 1000),
-          impulse: sumMeasResult.impulse,
-          step: sumMeasResult.step,
-        };
+        // Σ measurement IR — populated by evaluateSum below (single source of truth).
+        let measSum: { timeMs: number[]; impulse: number[]; step: number[] } | null = null;
 
         // Build per-band measurement IrBandData — each normalized to 0dB peak (peak=100%)
         const measBands: IrBandData[] = [];
@@ -2194,12 +2133,6 @@ export default function FrequencyPlot() {
 
         // --- Per-band targets ---
         const targetBands: IrBandData[] = [];
-        // Common reference from SUM measurement level (200-2000 Hz)
-        let sumRef = 0, nRef = 0;
-        for (let i = 0; i < sumFreq.length; i++) {
-          if (sumFreq[i] >= 200 && sumFreq[i] <= 2000) { sumRef += sumMeasMag[i]; nRef++; }
-        }
-        const commonRef = nRef > 0 ? sumRef / nRef : 0;
 
         // Per-band target: use auto-ref from THAT band's measurement
         const tgtBandPromises = allBands.map(async (sb) => {
@@ -2252,85 +2185,8 @@ export default function FrequencyPlot() {
         if (gen !== renderGen) return;
         for (const r of tgtBandResults) { if (r) targetBands.push(r); }
 
-        // Coherent sum target (COMMON reference for all bands)
-        // Resample target responses onto the same dense common grid
+        // Σ target IR — populated by evaluateSum below (single source of truth).
         let targetSum: { timeMs: number[]; impulse: number[]; step: number[] } | null = null;
-        try {
-          const tgtSumData = bands.map(sb => ({
-            targetEnabled: sb.targetEnabled,
-            target: JSON.parse(JSON.stringify(sb.target)),
-            inverted: sb.inverted,
-            delay: irDelayByName[sb.name] ?? 0,
-          }));
-
-          // Evaluate targets and resample onto sumFreq grid
-          const tgtEvalTasks = tgtSumData.map(async (bd) => {
-            if (!bd.targetEnabled) return null;
-            const tc = { ...bd.target };
-            tc.reference_level_db += commonRef;
-            const tResp = await invoke<{ magnitude: number[]; phase: number[] }>("evaluate_target", { target: tc, freq });
-            if (gen !== renderGen) return null;
-            let tMag = tResp.magnitude;
-            let tPh = tResp.phase;
-            if (bd.target.high_pass || bd.target.low_pass) {
-              const [xm, xp] = await invoke<[number[], number[], number]>("compute_cross_section", {
-                freq, highPass: bd.target.high_pass, lowPass: bd.target.low_pass,
-              });
-              if (gen !== renderGen) return null;
-              tMag = tMag.map((v: number, i: number) => v + xm[i]);
-              tPh = tPh.map((v: number, i: number) => v + xp[i]);
-            }
-            // Resample onto dense common grid
-            const [rFreq, rMag, rPhase] = await invoke<[number[], number[], number[] | null]>(
-              "interpolate_log",
-              { freq, magnitude: tMag, phase: tPh, nPoints: sumN, fMin: sumFreqMin, fMax: sumFreqMax }
-            );
-            if (gen !== renderGen) return null;
-            return {
-              mag: rMag,
-              phase: rPhase ?? rMag.map(() => 0),
-              delay: bd.delay,
-              inverted: bd.inverted,
-            };
-          });
-          const tgtResampled = await Promise.all(tgtEvalTasks);
-          if (gen !== renderGen) return;
-
-          const tgtRe = new Float64Array(sumN);
-          const tgtIm = new Float64Array(sumN);
-          let anyTarget = false;
-          for (const bd of tgtResampled) {
-            if (!bd) continue;
-            anyTarget = true;
-            // Normalize by peak magnitude so bands contribute equally
-            let tPeakMag = -Infinity;
-            for (let j = 0; j < bd.mag.length; j++) {
-              if ((bd.mag[j] ?? -200) > tPeakMag) tPeakMag = bd.mag[j] ?? -200;
-            }
-            const tOffset = -tPeakMag;
-            const sign = bd.inverted ? -1 : 1;
-            for (let j = 0; j < sumN; j++) {
-              const amp = Math.pow(10, ((bd.mag[j] ?? -200) + tOffset) / 20) * sign;
-              const phRad = ((bd.phase[j] ?? 0) + 360 * sumFreq[j] * bd.delay) * Math.PI / 180;
-              tgtRe[j] += amp * Math.cos(phRad);
-              tgtIm[j] += amp * Math.sin(phRad);
-            }
-          }
-          if (anyTarget) {
-            const tgtMag: number[] = [];
-            const tgtPh: number[] = [];
-            for (let j = 0; j < sumN; j++) {
-              const amp = Math.sqrt(tgtRe[j] * tgtRe[j] + tgtIm[j] * tgtIm[j]);
-              tgtMag.push(amp > 0 ? 20 * Math.log10(amp) : -200);
-              tgtPh.push(Math.atan2(tgtIm[j], tgtRe[j]) * 180 / Math.PI);
-            }
-            const r = await invoke<{ time: number[]; impulse: number[]; step: number[]; raw_peak: number; step_raw_peak: number }>("compute_impulse", {
-              freq: sumFreq, magnitude: tgtMag, phase: tgtPh, sampleRate: sr,
-            });
-            if (gen !== renderGen) return;
-            targetSum = { timeMs: r.time.map(t => t * 1000), impulse: r.impulse, step: r.step };
-          }
-        } catch (e) { console.error("TGT SUM ERR:", e); }
 
         // --- Per-band corrected (all bands) ---
         const corrBands: IrBandData[] = [];
@@ -2385,95 +2241,8 @@ export default function FrequencyPlot() {
         if (gen !== renderGen) return;
         for (const r of corrBandResults) { if (r) corrBands.push(r); }
 
-        // Coherent sum corrected — resample corrected responses onto dense common grid
+        // Σ corrected IR — populated by evaluateSum below (single source of truth).
         let corrSum: { timeMs: number[]; impulse: number[]; step: number[] } | null = null;
-        try {
-          const corrSumData = bands.map(sb => ({
-            freq: [...sb.measurement!.freq],
-            magnitude: [...sb.measurement!.magnitude],
-            phase: [...sb.measurement!.phase!],
-            targetEnabled: sb.targetEnabled,
-            target: JSON.parse(JSON.stringify(sb.target)),
-            peqBands: sb.peqBands ? JSON.parse(JSON.stringify(sb.peqBands.filter((p: PeqBand) => p.enabled))) : [],
-            inverted: sb.inverted,
-            delay: irDelayByName[sb.name] ?? 0,
-          }));
-
-          // Process each band's corrected response, then resample onto sumFreq
-          const corrEvalTasks = corrSumData.map(async (bd) => {
-            const sbFreq = bd.freq;
-            let cMag = [...bd.magnitude];
-            let cPh = [...bd.phase];
-            if (bd.peqBands.length > 0) {
-              const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", { freq: sbFreq, bands: bd.peqBands });
-              if (gen !== renderGen) return null;
-              cMag = cMag.map((v, i) => v + (pm[i] ?? 0));
-              cPh = cPh.map((v, i) => v + (pp[i] ?? 0));
-            }
-            if (bd.targetEnabled && (bd.target.high_pass || bd.target.low_pass)) {
-              const [xm, xp] = await invoke<[number[], number[], number]>("compute_cross_section", {
-                freq: sbFreq, highPass: bd.target.high_pass, lowPass: bd.target.low_pass,
-              });
-              if (gen !== renderGen) return null;
-              cMag = cMag.map((v, i) => v + (xm[i] ?? 0));
-              cPh = cPh.map((v, i) => v + (xp[i] ?? 0));
-            }
-            // b139.4c: unified phase reconstruction (Gaussian + subsonic).
-            if (bd.targetEnabled) {
-              cPh = await reconstructTargetPhase(sbFreq, cPh, bd.target.high_pass, bd.target.low_pass);
-              if (gen !== renderGen) return null;
-            }
-            // Resample onto dense common grid
-            const [rFreq, rMag, rPhase] = await invoke<[number[], number[], number[] | null]>(
-              "interpolate_log",
-              { freq: sbFreq, magnitude: cMag, phase: cPh, nPoints: sumN, fMin: sumFreqMin, fMax: sumFreqMax }
-            );
-            if (gen !== renderGen) return null;
-            return {
-              mag: rMag,
-              phase: rPhase ?? rMag.map(() => 0),
-              delay: bd.delay,
-              inverted: bd.inverted,
-            };
-          });
-          const corrResampled = await Promise.all(corrEvalTasks);
-          if (gen !== renderGen) return;
-
-          const corrRe = new Float64Array(sumN);
-          const corrIm = new Float64Array(sumN);
-          let anyCorrected = false;
-          for (const bd of corrResampled) {
-            if (!bd) continue;
-            // Normalize by peak magnitude so bands contribute equally
-            let peakMag = -Infinity;
-            for (let j = 0; j < bd.mag.length; j++) {
-              if ((bd.mag[j] ?? -200) > peakMag) peakMag = bd.mag[j] ?? -200;
-            }
-            const offset = -peakMag;
-            const sign = bd.inverted ? -1 : 1;
-            for (let j = 0; j < sumN; j++) {
-              const amp = Math.pow(10, ((bd.mag[j] ?? -200) + offset) / 20) * sign;
-              const phRad = ((bd.phase[j] ?? 0) + 360 * sumFreq[j] * bd.delay) * Math.PI / 180;
-              corrRe[j] += amp * Math.cos(phRad);
-              corrIm[j] += amp * Math.sin(phRad);
-            }
-            anyCorrected = true;
-          }
-          if (anyCorrected) {
-            const cMagSum: number[] = [];
-            const cPhSum: number[] = [];
-            for (let j = 0; j < sumN; j++) {
-              const amp = Math.sqrt(corrRe[j] * corrRe[j] + corrIm[j] * corrIm[j]);
-              cMagSum.push(amp > 0 ? 20 * Math.log10(amp) : -200);
-              cPhSum.push(Math.atan2(corrIm[j], corrRe[j]) * 180 / Math.PI);
-            }
-            const r = await invoke<{ time: number[]; impulse: number[]; step: number[]; raw_peak: number; step_raw_peak: number }>("compute_impulse", {
-              freq: sumFreq, magnitude: cMagSum, phase: cPhSum, sampleRate: sr,
-            });
-            if (gen !== renderGen) return;
-            corrSum = { timeMs: r.time.map(t => t * 1000), impulse: r.impulse, step: r.step };
-          }
-        } catch (e) { console.error("CORR SUM ERR:", e); }
 
         // HP freq for masking zone (use lowest band's HP or 20)
         const hpFreq = bands.reduce((min, sb) => {
