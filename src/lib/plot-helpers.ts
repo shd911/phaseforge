@@ -163,13 +163,35 @@ export function smoothingConfig(mode: SmoothingMode): { variable: boolean; fixed
 }
 
 // --- Phase wrapping (returns new array, does NOT mutate input) ---
-export function wrapPhase(phase: number[]): number[] {
-  return phase.map(p => {
-    let w = p % 360;
+//
+// b140.15.11: also inserts `null` on bins where the wrapped value
+// crosses the ±180° boundary relative to the previous bin. uPlot would
+// otherwise draw a straight line from -178° to +178° through 0°,
+// rendering as a single ~180° downward "spike" that visually mimics
+// a DSP glitch (user-reported 2026-05-25 — see
+// tests/sum_3band_lr4_no_meas.rs for the diagnostic that proved the
+// underlying math is wrap-clean). Setting the post-wrap value to null
+// breaks the line cleanly; uPlot resumes the trace at the next sample.
+// One datapoint per wrap is hidden — acceptable trade-off vs the
+// visual artifact.
+export function wrapPhase(phase: number[]): (number | null)[] {
+  const out: (number | null)[] = new Array(phase.length);
+  for (let i = 0; i < phase.length; i++) {
+    let w = phase[i] % 360;
     if (w > 180) w -= 360;
     else if (w < -180) w += 360;
-    return w;
-  });
+    out[i] = w;
+  }
+  // Mark the FIRST bin AFTER a wrap as null (breaks uPlot's line).
+  // |Δ| > 180 in adjacent wrapped values can only happen via wrap.
+  for (let i = 1; i < out.length; i++) {
+    const a = out[i - 1];
+    const b = out[i];
+    if (a !== null && b !== null && Math.abs(b - a) > 180) {
+      out[i] = null;
+    }
+  }
+  return out;
 }
 
 // --- Frequency formatting ---

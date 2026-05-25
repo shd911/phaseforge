@@ -235,6 +235,51 @@ fn dump_fixture(
 // The test
 // ---------------------------------------------------------------------------
 
+/// b140.15.11: variant fixture — measurement.phase = 0 (no delay).
+/// User screenshot 2026-05-25 showed a 1-bin spike at ~110-115 Hz on
+/// SUM corrected/target phase. The default fixture (with -222µs delay)
+/// passes. This variant verifies whether the spike is specific to
+/// zero-phase synthetic input.
+#[test]
+fn sum_3band_lr4_zerophase_no_spikes() {
+    let freq = log_freq_grid();
+    let meas_phase: Vec<f64> = vec![0.0; freq.len()];
+
+    let lp_200 = lr4(200.0);
+    let hp_200 = lr4(200.0);
+    let lp_2000 = lr4(2000.0);
+    let hp_2000 = lr4(2000.0);
+
+    let b0 = band_corrected(&freq, FLAT_MEAS_MAG_DB, &meas_phase, None, Some(&lp_200));
+    let b1 = band_corrected(&freq, FLAT_MEAS_MAG_DB, &meas_phase, Some(&hp_200), Some(&lp_2000));
+    let b2 = band_corrected(&freq, FLAT_MEAS_MAG_DB, &meas_phase, Some(&hp_2000), None);
+    let bands = vec![b0, b1, b2];
+    let (sum_mag, sum_phase) = coherent_sum(&freq, &bands);
+
+    // Scan for 1-bin phase spikes near LR wrap points (~110-130 Hz, ~1100-1300 Hz)
+    let phase_spikes = find_spikes(&sum_phase, 30.0, 10.0, true);
+    let mag_spikes = find_spikes(&sum_mag, 1.0, 0.5, false);
+
+    eprintln!("[zerophase variant] sum_mag range [{:.3}, {:.3}], sum_phase range [{:.2}, {:.2}]",
+        sum_mag.iter().cloned().fold(f64::INFINITY, f64::min),
+        sum_mag.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
+        sum_phase.iter().cloned().fold(f64::INFINITY, f64::min),
+        sum_phase.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
+    );
+    eprintln!("[zerophase variant] mag spikes: {}, phase spikes: {}",
+        mag_spikes.len(), phase_spikes.len());
+    for s in mag_spikes.iter().take(6) {
+        eprintln!("  MAG spike bin {} @ {:.2}Hz: prev={:.3} spike={:.3} next={:.3} dB",
+            s.0, freq[s.0], s.1, s.2, s.3);
+    }
+    for s in phase_spikes.iter().take(6) {
+        eprintln!("  PHASE spike bin {} @ {:.2}Hz: prev={:.2} spike={:.2} next={:.2}°",
+            s.0, freq[s.0], s.1, s.2, s.3);
+    }
+    assert_eq!(phase_spikes.len(), 0, "zerophase variant produced {} phase spikes", phase_spikes.len());
+    assert_eq!(mag_spikes.len(), 0, "zerophase variant produced {} mag spikes", mag_spikes.len());
+}
+
 #[test]
 fn sum_3band_lr4_flat_has_no_spikes() {
     let freq = log_freq_grid();
