@@ -203,8 +203,21 @@ function App() {
           {/* Bottom panel removed (b126) — controls moved to plot toolbar */}
         </div>
 
-        {/* Right panel: Target + PEQ — always visible (hidden in SUM) */}
-        <Show when={!isSum()}>
+        {/* Right panel: Target + PEQ — editing surface (replaced by a hint in
+            SUM, where the view is a read-only overview). */}
+        <Show
+          when={!isSum()}
+          fallback={
+            <div class="right-panel">
+              <div class="sum-hint">
+                <div class="sum-hint-title">Режим «Сумма»</div>
+                <p>Это обзор суммарного отклика всех бэндов — только для просмотра.</p>
+                <p>Чтобы редактировать цель и PEQ, выберите вкладку бэнда сверху.</p>
+                <p>Двойной клик по линии раздела на графике — настройка кроссовера.</p>
+              </div>
+            </div>
+          }
+        >
           <div class="right-panel">
             <ControlPanel rightPanel={true} />
           </div>

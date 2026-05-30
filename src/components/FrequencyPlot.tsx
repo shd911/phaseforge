@@ -3807,10 +3807,10 @@ export default function FrequencyPlot() {
   return (
     <div class="plot-wrapper">
       <div class="plot-tabs-strip">
-        <button class={`plot-tab ${plotTab() === "freq" ? "active" : ""}`} onClick={() => setPlotTab("freq")}>SPL</button>
-        <button class={`plot-tab ${plotTab() === "ir" || plotTab() === "step" ? "active" : ""}`} onClick={() => setPlotTab("ir")}>IR/Step</button>
-        <button class={`plot-tab ${plotTab() === "gd" ? "active" : ""}`} onClick={() => setPlotTab("gd")}>GD</button>
-        <button class={`plot-tab ${plotTab() === "export" ? "active" : ""}`} onClick={() => setPlotTab("export")}>Export</button>
+        <button class={`plot-tab ${plotTab() === "freq" ? "active" : ""}`} onClick={() => setPlotTab("freq")} title="АЧХ + фаза (магнитуда и фаза по частоте)">SPL</button>
+        <button class={`plot-tab ${plotTab() === "ir" || plotTab() === "step" ? "active" : ""}`} onClick={() => setPlotTab("ir")} title="Импульсная и переходная характеристика">IR/Step</button>
+        <button class={`plot-tab ${plotTab() === "gd" ? "active" : ""}`} onClick={() => setPlotTab("gd")} title="Групповая задержка (мс)">GD</button>
+        <button class={`plot-tab ${plotTab() === "export" ? "active" : ""}`} onClick={() => setPlotTab("export")} title="Предпросмотр модели и FIR + экспорт WAV">Export</button>
       </div>
       <div class="cursor-readout">
         <div class="readout-curves-area">

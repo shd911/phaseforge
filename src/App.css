@@ -2914,3 +2914,18 @@ body {
 .peq-auto-section .peq-buttons-row { display: flex; align-items: center; gap: 4px; margin-top: 4px; }
 .peq-auto-section .peq-sidebar-header { margin-bottom: 4px; }
 .fb-hint { font-size: var(--fs-xs); color: var(--text-secondary); padding: 2px 0 0; text-align: center; opacity: 0.7; }
+
+/* b141.4: SUM-view hint (replaces the editing panel in read-only Sum mode) */
+.sum-hint {
+  padding: var(--space-xl);
+  color: var(--text-secondary);
+  font-size: var(--fs-base);
+  line-height: 1.5;
+}
+.sum-hint-title {
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  margin-bottom: var(--space-md);
+}
+.sum-hint p { margin: 0 0 var(--space-md); }

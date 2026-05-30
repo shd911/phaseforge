@@ -163,7 +163,7 @@ function FiltersTab() {
   const hpLinked = () => { const id = bandId(); return id ? isBandLinkedFromPrev(id) : false; };
 
   return (
-    <Show when={band()} fallback={<p class="meas-empty">No active band.</p>}>
+    <Show when={band()} fallback={<p class="meas-empty">Нет активного бэнда. Выберите вкладку бэнда выше.</p>}>
       <div class="filters-row">
         {/* General */}
         <div class="filter-block">
@@ -508,7 +508,7 @@ function MeasurementsTab() {
 
       <Show
         when={m()}
-        fallback={<p class="meas-empty">No measurement loaded.</p>}
+        fallback={<p class="meas-empty">Измерение не загружено. Нажмите «Импорт», чтобы загрузить файл.</p>}
       >
         <table class="meas-table">
           <thead>
