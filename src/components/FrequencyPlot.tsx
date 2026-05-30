@@ -1009,6 +1009,7 @@ export default function FrequencyPlot() {
         oldChart.over.removeEventListener("dblclick", handleXoDblClick);
         oldChart.over.removeEventListener("dblclick", handlePeqDblClick);
         oldChart.over.removeEventListener("mousedown", handlePeqMouseDown);
+        oldChart.over.removeEventListener("mousemove", handlePeqHover);
         oldChart.over.removeEventListener("wheel", handlePeqWheel);
         oldChart.over.removeEventListener("mousedown", handleZoomBoxDown);
         oldChart.over.removeEventListener("contextmenu", handleContextMenu);
@@ -1252,6 +1253,11 @@ export default function FrequencyPlot() {
             const plotBottom = plotTop + u.bbox.height;
             const dpr = devicePixelRatio || 1;
 
+            // PEQ series Y lookup (for the draggable dot handle position).
+            const peqSi = u.series.findIndex((s) => s.label === "PEQ dB");
+            const xData = u.data[0] as number[] | undefined;
+            const dragging = peqDragging();
+
             for (let i = 0; i < bd.peqBands.length; i++) {
               const pb = bd.peqBands[i];
               if (!pb.enabled) continue;
@@ -1268,12 +1274,41 @@ export default function FrequencyPlot() {
               ctx.lineTo(cx, plotBottom);
               ctx.stroke();
 
+              // b141.4: draw a filled circle handle at the (freq, gain) point so
+              // users can SEE that PEQ points are grabbable (was an invisible
+              // hit-zone). Mirrors the crossover-marker style below.
+              let cy: number | null = null;
+              if (peqSi >= 0 && xData && xData.length) {
+                let di = 0, dBest = Infinity;
+                for (let k = 0; k < xData.length; k++) {
+                  const dd = Math.abs(xData[k] - pb.freq_hz);
+                  if (dd < dBest) { dBest = dd; di = k; }
+                }
+                const yv = (u.data[peqSi] as (number | null)[] | undefined)?.[di];
+                if (yv != null && isFinite(yv)) cy = u.valToPos(yv, "mag", true);
+              }
+              if (cy != null && cy >= plotTop && cy <= plotBottom) {
+                const r = (isSel ? 5 : 3.5) * dpr;
+                ctx.setLineDash([]);
+                ctx.fillStyle = isSel ? PEQ_COLOR : "rgba(255,159,67,0.55)";
+                ctx.strokeStyle = "#1e1e24";
+                ctx.lineWidth = 1.5 * dpr;
+                ctx.beginPath();
+                ctx.arc(cx, cy, r, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+              }
+
               if (isSel) {
                 ctx.setLineDash([]);
                 ctx.fillStyle = PEQ_COLOR;
                 ctx.font = `${Math.round(10 * dpr)}px sans-serif`;
                 ctx.textAlign = "center";
-                const label = pb.freq_hz >= 1000 ? (pb.freq_hz / 1000).toFixed(1) + "k" : Math.round(pb.freq_hz).toString();
+                const fLabel = pb.freq_hz >= 1000 ? (pb.freq_hz / 1000).toFixed(1) + "k" : Math.round(pb.freq_hz).toString();
+                // During an active drag show live freq · gain · Q.
+                const label = dragging
+                  ? `${fLabel} · ${pb.gain_db >= 0 ? "+" : ""}${pb.gain_db.toFixed(1)}dB · Q${pb.q.toFixed(2)}`
+                  : fLabel;
                 ctx.fillText(label, cx, plotTop - 4 * dpr);
               }
               ctx.restore();
@@ -1424,6 +1459,7 @@ export default function FrequencyPlot() {
     if (chart && chart.over) {
       chart.over.addEventListener("dblclick", handlePeqDblClick);
       chart.over.addEventListener("mousedown", handlePeqMouseDown);
+      chart.over.addEventListener("mousemove", handlePeqHover);
       chart.over.addEventListener("wheel", handlePeqWheel, { passive: false });
     }
 
@@ -3595,7 +3631,47 @@ export default function FrequencyPlot() {
   let peqDragBandId = "";
   let peqDragActive = false;
   let peqDragMoved = false; // true if mouse actually moved during drag
+  let peqDragStartX = 0; // b141.4: mousedown position for the drag dead-zone
+  let peqDragStartY = 0;
   let peqDragTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  // b141.4: shared PEQ-dot hit-test (closest enabled dot within radius, or -1).
+  // Used by both mousedown (drag) and hover (grab cursor) — single source.
+  function peqHitTest(mx: number, my: number): number {
+    const bd = activeBand();
+    if (!chart || !bd?.peqBands?.length) return -1;
+    const peqSeries = chart.series.findIndex((s) => s.label === "PEQ dB");
+    if (peqSeries < 0) return -1;
+    const xData = chart.data[0];
+    if (!xData?.length) return -1;
+    const hitRadius = 12; // px
+    let bestDist = Infinity;
+    let bestIdx = -1;
+    for (let i = 0; i < bd.peqBands.length; i++) {
+      const pb = bd.peqBands[i];
+      if (!pb.enabled) continue;
+      const cx = chart.valToPos(pb.freq_hz, "x");
+      let dataIdx = 0, dBest = Infinity;
+      for (let k = 0; k < xData.length; k++) {
+        const dd = Math.abs(xData[k] - pb.freq_hz);
+        if (dd < dBest) { dBest = dd; dataIdx = k; }
+      }
+      const yVal = chart.data[peqSeries][dataIdx];
+      if (yVal == null) continue;
+      const cy = chart.valToPos(yVal, "mag");
+      const dist = Math.hypot(mx - cx, my - cy);
+      if (dist < hitRadius && dist < bestDist) { bestDist = dist; bestIdx = i; }
+    }
+    return bestIdx;
+  }
+
+  // Hover: show a grab cursor over draggable PEQ dots (discoverability).
+  function handlePeqHover(e: MouseEvent) {
+    if (peqDragActive || isSum() || !chart?.over) return;
+    const rect = chart.over.getBoundingClientRect();
+    const hit = peqHitTest(e.clientX - rect.left, e.clientY - rect.top);
+    chart.over.style.cursor = hit >= 0 ? "grab" : "";
+  }
 
   function handlePeqMouseDown(e: MouseEvent) {
     if (isSum() || !chart) return;
@@ -3608,36 +3684,7 @@ export default function FrequencyPlot() {
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
 
-    // Find closest PEQ dot within hit radius
-    const hitRadius = 12; // px
-    let bestDist = Infinity;
-    let bestIdx = -1;
-
-    for (let i = 0; i < bd.peqBands.length; i++) {
-      const pb = bd.peqBands[i];
-      if (!pb.enabled) continue;
-      const cx = chart.valToPos(pb.freq_hz, "x");
-      // PEQ gain on the PEQ-only curve = gain_db (since PEQ curve is 0 dB baseline + peqMag)
-      // But on chart the PEQ value is peqMag[at freq] which includes all bands
-      // Simpler: use the PEQ series data if available
-      const peqSeries = chart.series.findIndex(s => s.label === "PEQ dB");
-      if (peqSeries < 0) continue;
-      // Find data index closest to pb.freq_hz
-      const xData = chart.data[0];
-      let dataIdx = 0, dBest = Infinity;
-      for (let k = 0; k < xData.length; k++) {
-        const dd = Math.abs(xData[k] - pb.freq_hz);
-        if (dd < dBest) { dBest = dd; dataIdx = k; }
-      }
-      const yVal = chart.data[peqSeries][dataIdx];
-      if (yVal == null) continue;
-      const cy = chart.valToPos(yVal, "mag");
-      const dist = Math.sqrt((mx - cx) ** 2 + (my - cy) ** 2);
-      if (dist < hitRadius && dist < bestDist) {
-        bestDist = dist;
-        bestIdx = i;
-      }
-    }
+    const bestIdx = peqHitTest(mx, my);
 
     if (bestIdx >= 0) {
       e.preventDefault();
@@ -3646,6 +3693,8 @@ export default function FrequencyPlot() {
       peqDragBandId = bd.id;
       peqDragActive = true;
       peqDragMoved = false;
+      peqDragStartX = mx;
+      peqDragStartY = my;
       setSelectedPeqIdx(bestIdx);
       window.addEventListener("mousemove", handlePeqDragMove);
       window.addEventListener("mouseup", handlePeqDragUp);
@@ -3654,13 +3703,20 @@ export default function FrequencyPlot() {
 
   function handlePeqDragMove(e: MouseEvent) {
     if (!peqDragActive || !chart || peqDragIdx < 0) return;
-    if (!peqDragMoved) { peqDragMoved = true; beginInteraction("PEQ drag"); setPeqDragging(true); }
     const overEl = chart.over ?? containerRef;
     const rect = overEl?.getBoundingClientRect();
     if (!rect) return;
 
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
+
+    // b141.4: dead-zone — ignore sub-3px movement so a slightly-shaky click
+    // doesn't commit a freq/gain change. Drag begins only past the threshold.
+    if (!peqDragMoved) {
+      if (Math.hypot(mx - peqDragStartX, my - peqDragStartY) < 3) return;
+      peqDragMoved = true; beginInteraction("PEQ drag"); setPeqDragging(true);
+      if (chart.over) chart.over.style.cursor = "grabbing";
+    }
 
     let freq = chart.posToVal(mx, "x");
     if (!isFinite(freq)) return;
@@ -3702,6 +3758,8 @@ export default function FrequencyPlot() {
     peqDragActive = false;
     peqDragIdx = -1;
     peqDragMoved = false;
+    if (chart?.over) chart.over.style.cursor = "grab"; // still over the dot post-release
+
   }
 
   // Scroll wheel on chart → change Q of selected PEQ band
