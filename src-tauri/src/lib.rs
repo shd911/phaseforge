@@ -19,7 +19,7 @@ use dsp::impulse::ImpulseResult;
 use dsp::baffle::{BaffleConfig, BaffleStepPreview};
 use dsp::merge::{MergeConfig, MergeResult};
 use io::Measurement;
-use fir::{FirConfig, FirResult, FirModelResult};
+use fir::{FirConfig, FirModelResult};
 use peq::{ExclusionZone, PeqBand, PeqConfig, PeqResult};
 use target::{TargetCurve, TargetResponse};
 use tauri::{Emitter, Manager, WindowEvent};
@@ -487,44 +487,11 @@ fn compute_cross_section(
 // Auto Align: FIR commands
 // ---------------------------------------------------------------------------
 
-#[tauri::command]
-fn generate_fir(
-    freq: Vec<f64>,
-    meas_mag: Vec<f64>,
-    target_mag: Vec<f64>,
-    peq_correction: Vec<f64>,
-    config: FirConfig,
-    crossover_range: (f64, f64),
-) -> Result<FirResult, String> {
-    info!(
-        "generate_fir: {} points, taps={}, sr={}",
-        freq.len(), config.taps, config.sample_rate
-    );
-    fir::generate_fir(&freq, &meas_mag, &target_mag, &peq_correction, &config, crossover_range)
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn recommend_fir_taps(lowest_freq: f64, sample_rate: f64) -> Result<usize, String> {
-    Ok(fir::recommend_taps(lowest_freq, sample_rate))
-}
-
-#[tauri::command]
-fn generate_hybrid_fir(
-    freq: Vec<f64>,
-    meas_mag: Vec<f64>,
-    target_mag: Vec<f64>,
-    peq_correction: Vec<f64>,
-    config: FirConfig,
-    crossover_range: (f64, f64),
-) -> Result<FirModelResult, String> {
-    info!(
-        "generate_hybrid_fir: {} points, taps={}, sr={}",
-        freq.len(), config.taps, config.sample_rate
-    );
-    fir::generate_hybrid_fir(&freq, &meas_mag, &target_mag, &peq_correction, &config, crossover_range)
-        .map_err(|e| e.to_string())
-}
+// b141.2: removed dead Tauri commands `generate_fir`, `generate_hybrid_fir`,
+// `recommend_fir_taps` — the frontend never invoked them (production FIR routes
+// through generate_model_fir / generate_model_fir_iir). The underlying
+// fir::generate_fir / generate_hybrid_fir live on under cfg(test) as the
+// golden-snapshot baseline; fir::recommend_taps remains for tests.
 
 #[tauri::command]
 fn generate_model_fir(
@@ -628,7 +595,7 @@ pub fn run() {
         )
         .init();
 
-    info!("PhaseForge b141.1 starting...");
+    info!("PhaseForge b141.2 starting...");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -662,12 +629,9 @@ pub fn run() {
             compute_peq_response,
             compute_peq_complex,
             compute_cross_section,
-            generate_fir,
-            generate_hybrid_fir,
             generate_model_fir,
             generate_model_fir_iir,
             pick_fir_route,
-            recommend_fir_taps,
             export_fir_wav,
             project::save_project,
             project::load_project,

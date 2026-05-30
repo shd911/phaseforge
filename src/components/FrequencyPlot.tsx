@@ -1594,7 +1594,7 @@ export default function FrequencyPlot() {
 
       chart.setData(newData as uPlot.AlignedData, false);
       chart.redraw(false, false);
-    } catch (_) {}
+    } catch (e) { console.error("[PEQ drag] fast update failed:", e); }
   }
 
   // ----------------------------------------------------------------
@@ -1613,6 +1613,17 @@ export default function FrequencyPlot() {
     const dragging = peqDragging();
     const pTab = plotTab();
     const _irTrigger = irRenderTrigger(); // track: force IR re-render from legend band toggles
+
+    // b141.2: Export-tab preview is computed inside renderExportTab from the
+    // export/FIR signals below. Read them HERE so the effect registers them as
+    // dependencies — otherwise changing Sample Rate / Taps / Window / any FIR
+    // param leaves the preview stale until some other tracked signal fires,
+    // while the exported WAV already uses the new values (preview ≠ export).
+    if (pTab === "export") {
+      exportSampleRate(); exportTaps(); exportWindow();
+      firMaxBoost(); firNoiseFloor(); firIterations(); firFreqWeighting();
+      firNarrowbandLimit(); firNbSmoothingOct(); firNbMaxExcess();
+    }
 
     if (debounceTimer) clearTimeout(debounceTimer);
 
@@ -2024,7 +2035,7 @@ export default function FrequencyPlot() {
         // b139.4b: target / corrected GD share BandEvaluator's
         // target+peq computation on the measurement grid.
         const gdEval = (!sumMode && band && band.targetEnabled)
-          ? await evaluateBandFull({ band, freq }).catch(() => null)
+          ? await evaluateBandFull({ band, freq }).catch((e) => { console.error("[GD] band eval failed:", e); return null; })
           : null;
         if (gen !== renderGen) return;
 
@@ -2107,7 +2118,7 @@ export default function FrequencyPlot() {
           return invoke<{ time: number[]; impulse: number[]; step: number[]; raw_peak: number; step_raw_peak: number }>(
             "compute_impulse",
             { freq: sbFreq, magnitude: normMag, phase: rotatedPhase, sampleRate: sbSr }
-          ).catch(() => null);
+          ).catch((e) => { console.error("[SUM IR] compute_impulse failed for band:", e); return null; });
         });
         const measResults = await Promise.all(measPromises);
         if (gen !== renderGen) return;
@@ -2305,7 +2316,7 @@ export default function FrequencyPlot() {
         // impulses in one shot. No inline compute_impulse, compute_cross_section
         // or addGaussianMinPhase here — single source of truth.
         const irEval = await evaluateBandFull({ band: band!, freq, includeIr: true })
-          .catch(() => null);
+          .catch((e) => { console.error("[IR] band eval failed:", e); return null; });
         if (gen !== renderGen) return;
         if (!irEval || !irEval.ir?.measurement) {
           return;

@@ -85,7 +85,17 @@ async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBa
     const frozenCorrection = await invoke<number[]>("compute_peq_response", {
       freq: meas.freq, bands: frozenBands.map((fb) => ({ ...fb, enabled: true })),
     });
-    measMag = meas.magnitude.map((v, i) => v + frozenCorrection[i]);
+    // b141.2: guard length mismatch (backend error path can return []). Mirrors
+    // the auto-align guard; without it `v + undefined = NaN` silently poisons
+    // the fit fed into auto_peq_lma. Skip baking rather than corrupt the input.
+    if (frozenCorrection.length === meas.magnitude.length) {
+      measMag = meas.magnitude.map((v, i) => v + frozenCorrection[i]);
+    } else {
+      console.error(
+        `[PEQ optimize] frozen correction length ${frozenCorrection.length} ≠ ` +
+        `measurement ${meas.magnitude.length}; skipping frozen-band bake`,
+      );
+    }
   }
 
   const isHybrid = exportHybridPhase();

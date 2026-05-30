@@ -74,7 +74,7 @@ fn interp_1d_phase_edges(x_data: &[f64], y_data: &[f64], x_query: &[f64]) -> Vec
                 return 0.0;
             }
             if xq >= x_data[0] {
-                return interp_single(x_data, y_data, xq);
+                return interp_single_phase(x_data, y_data, xq);
             }
             // Below measurement range: blend phase from 0 (at DC) to phase[0]
             if x_data[0] <= 0.0 {
@@ -114,9 +114,70 @@ fn interp_single(x_data: &[f64], y_data: &[f64], xq: f64) -> f64 {
     y0 + t * (y1 - y0)
 }
 
+/// Wrap-aware phase interpolation (degrees in, degrees out, range (-180, 180]).
+///
+/// Identical to `interp_single` whenever the two bracketing samples differ by
+/// ≤ 180° (the dense-grid case), so existing golden snapshots are unchanged.
+/// When the bracketing samples straddle the ±180° wrap (|Δ| > 180°), the
+/// endpoint is unwrapped before the linear blend and the result re-wrapped —
+/// taking the shortest arc instead of producing a phantom mid-value (e.g.
+/// +179° and −179° interpolate to ±180°, not 0°).
+fn interp_single_phase(x_data: &[f64], y_data: &[f64], xq: f64) -> f64 {
+    if x_data.is_empty() {
+        return 0.0;
+    }
+    if xq <= x_data[0] {
+        return y_data[0];
+    }
+    if xq >= x_data[x_data.len() - 1] {
+        return y_data[y_data.len() - 1];
+    }
+    let idx = match x_data.binary_search_by(|v| v.partial_cmp(&xq).unwrap_or(std::cmp::Ordering::Equal)) {
+        Ok(i) => return y_data[i],
+        Err(i) => i,
+    };
+    let x0 = x_data[idx - 1];
+    let x1 = x_data[idx];
+    let y0 = y_data[idx - 1];
+    let mut y1 = y_data[idx];
+
+    // Unwrap a single ±360° jump so the blend follows the shortest arc.
+    let d = y1 - y0;
+    if d > 180.0 {
+        y1 -= 360.0;
+    } else if d < -180.0 {
+        y1 += 360.0;
+    }
+
+    let t = (xq - x0) / (x1 - x0);
+    let interp = y0 + t * (y1 - y0);
+    // Re-wrap to (-180, 180]. No-op when no wrap was crossed.
+    interp - 360.0 * ((interp + 180.0) / 360.0 - 1.0).ceil()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn phase_interp_across_wrap_takes_shortest_arc() {
+        // Sparse grid straddling the ±180° wrap: true continuous phase
+        // runs 179° → 181° (≡ −179°). Midpoint must be 180°, not 0°.
+        let x = vec![100.0, 300.0];
+        let y = vec![179.0, -179.0];
+        let out = interp_1d_phase_edges(&x, &y, &[200.0])[0];
+        let w = out - 360.0 * (out / 360.0).round();
+        assert!((w.abs() - 180.0).abs() < 1.0, "phantom phase: got {out}°");
+    }
+
+    #[test]
+    fn phase_interp_no_wrap_matches_linear() {
+        // |Δ| ≤ 180° → must be bit-identical to plain linear interp.
+        let x = vec![100.0, 300.0];
+        let y = vec![10.0, 50.0];
+        let out = interp_1d_phase_edges(&x, &y, &[200.0])[0];
+        assert!((out - 30.0).abs() < 1e-12, "got {out}");
+    }
 
     #[test]
     fn test_interp_single_exact() {
