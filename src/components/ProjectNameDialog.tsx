@@ -38,23 +38,23 @@ export default function ProjectNameDialog() {
     <Show when={promptVisible()}>
       <div class="pn-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) handleCancel(); }}>
         <div class="pn-dialog">
-          <div class="pn-title">{isSaveAs() ? "Save As" : "New Project"}</div>
+          <div class="pn-title">{isSaveAs() ? "Сохранить как" : "Новый проект"}</div>
 
-          <label class="pn-label">Project name</label>
+          <label class="pn-label">Название проекта</label>
           <input
             ref={(el) => {
               requestAnimationFrame(() => el.focus());
             }}
             class="pn-input"
             type="text"
-            placeholder="My Project"
+            placeholder="Мой проект"
             value={name()}
             onInput={(e) => setName(e.currentTarget.value)}
             onKeyDown={handleKeyDown}
           />
 
           <Show when={!isSaveAs()}>
-            <label class="pn-label">Number of bands</label>
+            <label class="pn-label">Количество бэндов</label>
             <div class="pn-band-count">
               <button class="pn-bc-btn" onClick={decBands} disabled={bandCount() <= 1}>−</button>
               <span class="pn-bc-value">{bandCount()}</span>
@@ -63,12 +63,12 @@ export default function ProjectNameDialog() {
           </Show>
 
           <div class="pn-buttons">
-            <button class="dlg-btn" onClick={handleCancel}>Cancel</button>
+            <button class="dlg-btn" onClick={handleCancel}>Отмена</button>
             <button
               class="dlg-btn dlg-btn-primary"
               onClick={handleCreate}
               disabled={!name().trim()}
-            >{isSaveAs() ? "Save" : "Create"}</button>
+            >{isSaveAs() ? "Сохранить" : "Создать"}</button>
           </div>
         </div>
       </div>

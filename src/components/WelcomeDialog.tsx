@@ -30,20 +30,20 @@ export default function WelcomeDialog() {
         <div class="welcome-dialog">
           <img src="/logo.png" class="welcome-logo-img" alt="ClearWave Systems" />
           <div class="welcome-logo">PhaseForge</div>
-          <div class="welcome-subtitle">DSP Room & Speaker Correction</div>
+          <div class="welcome-subtitle">DSP-коррекция АС и помещения</div>
 
           <div class="welcome-actions">
             <button class="dlg-btn dlg-btn-lg dlg-btn-primary" onClick={() => newProject()}>
-              New Project
+              Новый проект
             </button>
             <button class="dlg-btn dlg-btn-lg" onClick={() => loadProject()}>
-              Open Project
+              Открыть проект
             </button>
           </div>
 
           <Show when={recentProjects().length > 0}>
             <div class="welcome-recent">
-              <div class="welcome-recent-title">Recent Projects</div>
+              <div class="welcome-recent-title">Недавние проекты</div>
               <For each={recentProjects()}>
                 {(proj) => (
                   <button

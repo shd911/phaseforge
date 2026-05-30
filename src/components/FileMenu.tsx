@@ -114,18 +114,18 @@ export default function FileMenu() {
         class={`tb-btn file-menu-trigger ${isOpen() ? "active" : ""}`}
         onClick={toggleMenu}
       >
-        File{isDirty() ? " \u2022" : ""}
+        Файл{isDirty() ? " \u2022" : ""}
       </button>
 
       <Show when={isOpen()}>
         <div class="file-menu">
           <button class="file-menu-item" onClick={handleNew}>
-            <span class="file-menu-label">New Project</span>
+            <span class="file-menu-label">Новый проект</span>
             <span class="file-menu-shortcut">{"\u2318"}N</span>
           </button>
 
           <button class="file-menu-item" onClick={handleOpen}>
-            <span class="file-menu-label">Open...</span>
+            <span class="file-menu-label">Открыть…</span>
             <span class="file-menu-shortcut">{"\u2318"}O</span>
           </button>
 
@@ -135,7 +135,7 @@ export default function FileMenu() {
             onMouseEnter={onRecentEnter}
             onMouseLeave={onRecentLeave}
           >
-            <span class="file-menu-label">Recent Projects</span>
+            <span class="file-menu-label">Недавние проекты</span>
             <span class="file-menu-arrow">{"\u25B6"}</span>
 
             <Show when={showRecent()}>
@@ -145,7 +145,7 @@ export default function FileMenu() {
                 onMouseLeave={onRecentLeave}
               >
                 <Show when={recentPaths().length > 0} fallback={
-                  <span class="file-menu-item file-menu-disabled">No recent projects</span>
+                  <span class="file-menu-item file-menu-disabled">Нет недавних проектов</span>
                 }>
                   <For each={recentPaths()}>
                     {(path) => (
@@ -160,7 +160,7 @@ export default function FileMenu() {
                   </For>
                   <div class="file-menu-sep" />
                   <button class="file-menu-item" onClick={handleClearRecent}>
-                    Clear Recent
+                    Очистить список
                   </button>
                 </Show>
               </div>
@@ -174,7 +174,7 @@ export default function FileMenu() {
             onClick={handleSave}
             title="\u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C \u043F\u0440\u043E\u0435\u043A\u0442 (Cmd+S)"
           >
-            <span class="file-menu-label">Save</span>
+            <span class="file-menu-label">Сохранить</span>
             <span class="file-menu-shortcut">{"\u2318"}S</span>
           </button>
 
@@ -183,7 +183,7 @@ export default function FileMenu() {
             onClick={handleSaveAs}
             title="\u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C \u043F\u0440\u043E\u0435\u043A\u0442 \u043F\u043E\u0434 \u043D\u043E\u0432\u044B\u043C \u0438\u043C\u0435\u043D\u0435\u043C (Cmd+Shift+S)"
           >
-            <span class="file-menu-label">Save As...</span>
+            <span class="file-menu-label">Сохранить как…</span>
             <span class="file-menu-shortcut">{"\u21E7\u2318"}S</span>
           </button>
 

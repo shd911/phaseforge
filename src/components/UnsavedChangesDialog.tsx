@@ -22,17 +22,17 @@ export default function UnsavedChangesDialog() {
         onKeyDown={handleKeyDown}
       >
         <div class="pn-dialog">
-          <div class="pn-title">Unsaved Changes</div>
+          <div class="pn-title">Несохранённые изменения</div>
           <div class="pn-label" style={{ "margin-bottom": "16px" }}>
-            You have unsaved changes. Do you want to save them?
+            Есть несохранённые изменения. Сохранить их?
           </div>
           <div class="pn-buttons">
-            <button class="dlg-btn" onClick={() => resolveUnsavedDialog("cancel")}>Cancel</button>
-            <button class="dlg-btn" onClick={() => resolveUnsavedDialog("discard")}>Don't Save</button>
+            <button class="dlg-btn" onClick={() => resolveUnsavedDialog("cancel")}>Отмена</button>
+            <button class="dlg-btn" onClick={() => resolveUnsavedDialog("discard")}>Не сохранять</button>
             <button
               class="dlg-btn dlg-btn-primary"
               onClick={() => resolveUnsavedDialog("save")}
-            >Save</button>
+            >Сохранить</button>
           </div>
         </div>
       </div>

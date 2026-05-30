@@ -718,7 +718,7 @@ export default function FrequencyPlot() {
         const sigmaPhaseMap: Record<string, string> = {
           "\u03A3 corrected": "\u03A3 corr \u00B0",
           "\u03A3 meas": "\u03A3 meas \u00B0",
-          "\u03A3 target": "\u03A3 target \u00B0",
+          "\u03A3 \u0446\u0435\u043B\u044C": "\u03A3 \u0446\u0435\u043B\u044C \u00B0", // b141.4: "\u03A3 \u0446\u0435\u043B\u044C" (was stale "\u03A3 target")
         };
         const sigmaPhLabel = sigmaPhaseMap[entry.label];
         if (sigmaPhLabel) {
