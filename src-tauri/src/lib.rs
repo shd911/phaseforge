@@ -95,24 +95,6 @@ fn get_smoothed(
     Ok(dsp::variable_smoothing(&freq, &magnitude, &config))
 }
 
-#[tauri::command]
-fn interpolate_log(
-    freq: Vec<f64>,
-    magnitude: Vec<f64>,
-    phase: Option<Vec<f64>>,
-    n_points: usize,
-    f_min: f64,
-    f_max: f64,
-) -> Result<(Vec<f64>, Vec<f64>, Option<Vec<f64>>), String> {
-    Ok(dsp::interpolate_log_grid(
-        &freq,
-        &magnitude,
-        phase.as_deref(),
-        n_points,
-        f_min,
-        f_max,
-    ))
-}
 
 #[tauri::command]
 fn evaluate_target(target: TargetCurve, freq: Vec<f64>) -> Result<TargetResponse, String> {
@@ -276,54 +258,6 @@ fn compute_minimum_phase(
     Ok(phase_deg)
 }
 
-/// Compute corrected impulse: measurement convolved with FIR correction.
-/// Adds realized_mag/phase to interpolated measurement, then IFFT.
-#[tauri::command]
-fn compute_corrected_impulse(
-    meas_freq: Vec<f64>,
-    meas_mag: Vec<f64>,
-    meas_phase: Vec<f64>,
-    realized_mag: Vec<f64>,
-    realized_phase: Vec<f64>,
-    fir_freq: Vec<f64>,
-    sample_rate: f64,
-) -> Result<ImpulseResult, String> {
-    let n = fir_freq.len();
-    if n == 0 || realized_mag.len() != n || realized_phase.len() != n {
-        return Err("corrected_impulse: freq/mag/phase length mismatch".into());
-    }
-    // Interpolate measurement onto FIR freq grid
-    // Outside measurement range: decay to -200 dB (for magnitude) or 0 (for phase)
-    let interp_mag = |f: f64, src_f: &[f64], src_d: &[f64]| -> f64 {
-        if src_f.is_empty() { return -200.0; }
-        if f < src_f[0] { return -200.0; }
-        if f > src_f[src_f.len() - 1] { return -200.0; }
-        let idx = src_f.partition_point(|&x| x <= f);
-        if idx == 0 { return src_d[0]; }
-        if idx >= src_f.len() { return src_d[src_f.len() - 1]; }
-        let t = (f - src_f[idx - 1]) / (src_f[idx] - src_f[idx - 1]);
-        src_d[idx - 1] + t * (src_d[idx] - src_d[idx - 1])
-    };
-    let interp_phase = |f: f64, src_f: &[f64], src_d: &[f64]| -> f64 {
-        if src_f.is_empty() { return 0.0; }
-        if f < src_f[0] { return src_d[0]; }
-        if f > src_f[src_f.len() - 1] { return src_d[src_f.len() - 1]; }
-        let idx = src_f.partition_point(|&x| x <= f);
-        if idx == 0 { return src_d[0]; }
-        if idx >= src_f.len() { return src_d[src_f.len() - 1]; }
-        let t = (f - src_f[idx - 1]) / (src_f[idx] - src_f[idx - 1]);
-        src_d[idx - 1] + t * (src_d[idx] - src_d[idx - 1])
-    };
-    let corr_mag: Vec<f64> = fir_freq.iter().enumerate()
-        .map(|(i, &f)| interp_mag(f, &meas_freq, &meas_mag) + realized_mag[i])
-        .collect();
-    let corr_phase: Vec<f64> = fir_freq.iter().enumerate()
-        .map(|(i, &f)| interp_phase(f, &meas_freq, &meas_phase) + realized_phase[i])
-        .collect();
-    info!("compute_corrected_impulse: {} points, sr={}", n, sample_rate);
-    Ok(dsp::impulse::compute_impulse_response(&fir_freq, &corr_mag, &corr_phase, sample_rate))
-}
-
 #[tauri::command]
 fn merge_measurements(
     nf_path: String,
@@ -353,32 +287,9 @@ fn preview_baffle_step(config: BaffleConfig) -> Result<BaffleStepPreview, String
 // Auto Align: PEQ commands
 // ---------------------------------------------------------------------------
 
-#[tauri::command]
-fn auto_peq(
-    freq: Vec<f64>,
-    measurement_mag: Vec<f64>,
-    target_mag: Vec<f64>,
-    config: PeqConfig,
-) -> Result<PeqResult, String> {
-    info!("auto_peq: {} points, range={:?}", freq.len(), config.freq_range);
-    peq::auto_peq(&measurement_mag, &target_mag, &freq, &config).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn auto_peq_above_lp(
-    freq: Vec<f64>,
-    measurement_mag: Vec<f64>,
-    config: PeqConfig,
-    lp_freq: f64,
-    hp_freq: f64,
-) -> Result<PeqResult, String> {
-    info!(
-        "auto_peq_above_lp: {} points, lp={}, hp={}",
-        freq.len(), lp_freq, hp_freq
-    );
-    peq::auto_peq_above_lp(&measurement_mag, &freq, &config, lp_freq, hp_freq)
-        .map_err(|e| e.to_string())
-}
+// b141.2: removed dead Tauri commands `auto_peq`, `auto_peq_above_lp` (frontend
+// uses only `auto_peq_lma`). The underlying peq::auto_peq / auto_peq_above_lp
+// remain for the peq module's own tests.
 
 #[tauri::command]
 fn auto_peq_lma(
@@ -612,7 +523,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             import_measurement,
             get_smoothed,
-            interpolate_log,
             evaluate_target,
             evaluate_target_standalone,
             compute_delay_info,
@@ -620,11 +530,8 @@ pub fn run() {
             apply_manual_delay,
             compute_impulse,
             compute_minimum_phase,
-            compute_corrected_impulse,
             merge_measurements,
             preview_baffle_step,
-            auto_peq,
-            auto_peq_above_lp,
             auto_peq_lma,
             compute_peq_response,
             compute_peq_complex,

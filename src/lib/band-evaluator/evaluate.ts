@@ -315,6 +315,13 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
   if (req.fir && band.targetEnabled) {
     const isUserLin = (f: FilterConfig | null | undefined) =>
       !f || f.linear_phase === true;
+    // b141.2 (audit): AND-collapse is intentional. A single FIR cannot realise a
+    // mixed-phase main (HP linear + LP min) — physical limitation, see CLAUDE.md.
+    // So "both linear" → linear FIR, otherwise → min-phase IIR path. A user who
+    // sets only one crossover to linear via the per-block toggle gets a min-phase
+    // FIR (the displayed per-filter target may then differ from the realised FIR
+    // for that filter). Left as-is by product decision — this combination is not
+    // a supported configuration.
     const linearMain =
       isUserLin(band.target.high_pass) && isUserLin(band.target.low_pass);
     const hp = band.target.high_pass;

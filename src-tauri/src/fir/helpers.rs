@@ -5,6 +5,7 @@ use num_complex::Complex64;
 use tracing::info;
 
 use crate::dsp::fft::FftEngine;
+#[cfg(test)] // b141.2: only build_effective_target (legacy, gated) uses this.
 use crate::dsp::fractional_octave_smooth;
 use crate::dsp::minimum_phase_from_magnitude;
 
@@ -283,6 +284,10 @@ pub(crate) fn iterative_refine(
 /// This prevents the filter from aggressively boosting narrow measurement dips
 /// (caused by diffraction, interference, comb filtering) which are position-dependent
 /// and harmful to amplify.
+// b141.2: only the (cfg(test)) legacy pipeline calls this — the production
+// cepstral path does its own narrowband limiting. Gated so it isn't dead in
+// release builds.
+#[cfg(test)]
 pub(crate) fn limit_narrowband_boost(correction_db: &mut [f64], df: f64, smoothing_oct: f64, max_excess_db: f64) {
     let n = correction_db.len();
     if n < 4 || df <= 0.0 { return; }
@@ -369,6 +374,7 @@ pub(crate) fn compute_causality(impulse: &[f64]) -> f64 {
 /// - Below HP: 1/2-octave smoothed measurement (follow natural rolloff)
 /// - Above LP: 1/2-octave smoothed measurement (follow natural rolloff)
 /// - Smooth sigmoid blend ±0.5 octave around crossover frequencies
+#[cfg(test)] // b141.2: only the gated legacy pipeline builds an effective target.
 pub(crate) fn build_effective_target(
     freq: &[f64],
     meas_mag: &[f64],
@@ -405,6 +411,7 @@ pub(crate) fn build_effective_target(
 
 /// Sigmoid blend: returns 0.0 well below `center_freq`, 1.0 well above.
 /// Transition width is `octaves` (centered on `center_freq`).
+#[cfg(test)] // b141.2: used only by build_effective_target (legacy) and its own test.
 pub(crate) fn sigmoid_blend(freq: f64, center_freq: f64, octaves: f64) -> f64 {
     if freq <= 0.0 || center_freq <= 0.0 {
         return 0.0;
