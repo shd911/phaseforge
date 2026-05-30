@@ -96,11 +96,11 @@ export default function CrossoverDialog() {
         <div class="xo-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) handleCancel(); }} onKeyDown={handleKeyDown}>
           <div class="xo-dialog">
             <div class="xo-title">
-              Crossover: {data().bandName} / {data().nextBandName}
+              Кроссовер: {data().bandName} / {data().nextBandName}
             </div>
 
             <div class="xo-row">
-              <span class="xo-label">Frequency</span>
+              <span class="xo-label">Частота</span>
               <input
                 ref={(el) => requestAnimationFrame(() => { el.focus(); el.select(); })}
                 class="xo-input"
@@ -116,7 +116,7 @@ export default function CrossoverDialog() {
             </div>
 
             <div class="xo-row">
-              <span class="xo-label">Type</span>
+              <span class="xo-label">Тип</span>
               <select
                 class="xo-select"
                 value={filterType()}
@@ -140,14 +140,14 @@ export default function CrossoverDialog() {
                 <option value="Butterworth">Butterworth</option>
                 <option value="Bessel">Bessel</option>
                 <option value="Gaussian">Gaussian</option>
-                <option value="Custom">Custom Q</option>
+                <option value="Custom">Произвольный Q</option>
               </select>
             </div>
 
             {/* Order — for non-Gaussian types */}
             <Show when={!isGaussian()}>
               <div class="xo-row">
-                <span class="xo-label">Order</span>
+                <span class="xo-label">Порядок</span>
                 <select
                   class="xo-select"
                   value={order()}
@@ -193,7 +193,7 @@ export default function CrossoverDialog() {
                 />
               </div>
               <div class="xo-hint">
-                0.500 = LR · 0.577 = Bessel · 0.707 = BW · &gt;0.707 = resonant
+                0.500 = LR · 0.577 = Bessel · 0.707 = BW · &gt;0.707 = резонанс
               </div>
             </Show>
 
@@ -205,13 +205,13 @@ export default function CrossoverDialog() {
                 onChange={(e) => setLinearPhase(e.currentTarget.checked)}
               />
               <label class="xo-checkbox-label" for="xo-lin-phase">
-                Linear Phase
+                Линейная фаза
               </label>
             </div>
 
             <div class="xo-buttons">
-              <button class="dlg-btn" onClick={handleCancel}>Cancel</button>
-              <button class="dlg-btn dlg-btn-primary" onClick={handleApply}>Apply</button>
+              <button class="dlg-btn" onClick={handleCancel}>Отмена</button>
+              <button class="dlg-btn dlg-btn-primary" onClick={handleApply}>Применить</button>
             </div>
           </div>
         </div>

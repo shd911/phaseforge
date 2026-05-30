@@ -40,7 +40,7 @@ export default function MergeDialog(props: MergeDialogProps) {
     try {
       const selected = await open({
         multiple: false,
-        filters: [{ name: "Measurement Files", extensions: ["txt", "frd"] }],
+        filters: [{ name: "Файлы измерений", extensions: ["txt", "frd"] }],
       });
       if (!selected) return;
       const filePath = Array.isArray(selected) ? selected[0] : selected;
@@ -125,7 +125,7 @@ export default function MergeDialog(props: MergeDialogProps) {
       <div class="merge-dialog" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div class="merge-header">
-          <span class="merge-title">Merge NF + FF</span>
+          <span class="merge-title">Слияние NF + FF</span>
           <button class="merge-close" onClick={props.onClose}>
             ×
           </button>
@@ -135,15 +135,15 @@ export default function MergeDialog(props: MergeDialogProps) {
         <div class="merge-body">
           {/* File selectors */}
           <div class="merge-file-row">
-            <label class="merge-label">Near-Field</label>
+            <label class="merge-label">Ближнее поле (NF)</label>
             <button class="merge-file-btn" onClick={() => selectFile("nf")}>
-              {nfName() || "Select NF file…"}
+              {nfName() || "Выбрать файл NF…"}
             </button>
           </div>
           <div class="merge-file-row">
-            <label class="merge-label">Far-Field</label>
+            <label class="merge-label">Дальнее поле (FF)</label>
             <button class="merge-file-btn" onClick={() => selectFile("ff")}>
-              {ffName() || "Select FF file…"}
+              {ffName() || "Выбрать файл FF…"}
             </button>
           </div>
 
@@ -151,7 +151,7 @@ export default function MergeDialog(props: MergeDialogProps) {
           <Show when={nfPath() && ffPath()}>
             <div class="merge-params">
               <div class="merge-param-row">
-                <label class="merge-label">Splice Freq</label>
+                <label class="merge-label">Частота сшивки</label>
                 <NumberInput
                   value={spliceFreq()}
                   onChange={(v) => setSpliceFreq(v)}
@@ -164,7 +164,7 @@ export default function MergeDialog(props: MergeDialogProps) {
               </div>
 
               <div class="merge-param-row">
-                <label class="merge-label">Blend Width</label>
+                <label class="merge-label">Ширина перехода</label>
                 <select
                   class="merge-select"
                   value={blendOctaves()}
@@ -179,7 +179,7 @@ export default function MergeDialog(props: MergeDialogProps) {
               </div>
 
               <div class="merge-param-row">
-                <label class="merge-label">Level Offset</label>
+                <label class="merge-label">Сдвиг уровня</label>
                 <span class="merge-auto-val">
                   Auto:{" "}
                   {autoOffset() !== null
@@ -241,14 +241,14 @@ export default function MergeDialog(props: MergeDialogProps) {
         {/* Footer */}
         <div class="merge-footer">
           <button class="dlg-btn" onClick={props.onClose}>
-            Cancel
+            Отмена
           </button>
           <button
             class="dlg-btn dlg-btn-primary"
             disabled={!nfPath() || !ffPath() || merging()}
             onClick={handleMerge}
           >
-            {merging() ? "Merging…" : "Merge"}
+            {merging() ? "Слияние…" : "Слить"}
           </button>
         </div>
       </div>

@@ -58,11 +58,11 @@ export default function FirSettingsDialog() {
     <Show when={(() => { const v = visible(); if (v) initFromStore(); return v; })()}>
       <div class="xo-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) handleCancel(); }} onKeyDown={handleKeyDown}>
         <div class="xo-dialog" style="min-width: 360px">
-          <div class="xo-title">Optimization Settings</div>
+          <div class="xo-title">Настройки оптимизации</div>
 
           {/* Iterations */}
           <div class="xo-row">
-            <span class="xo-label">WLS iterations</span>
+            <span class="xo-label">Итерации (WLS)</span>
             <input
               class="xo-input"
               type="number" min="0" max="20" step="1"
@@ -72,7 +72,7 @@ export default function FirSettingsDialog() {
               ref={(el) => requestAnimationFrame(() => { el.focus(); el.select(); })}
             />
           </div>
-          <div class="xo-hint">Iterative error correction passes. 0 = off, 3-5 optimal</div>
+          <div class="xo-hint">Проходы итеративной коррекции ошибки. 0 = выкл, 3-5 оптимально</div>
 
           {/* Freq weighting */}
           <div class="xo-checkbox">
@@ -82,10 +82,10 @@ export default function FirSettingsDialog() {
               onChange={(e) => setFreqWeight(e.currentTarget.checked)}
             />
             <label class="xo-checkbox-label" for="fir-freq-weight">
-              Frequency-dependent weighting
+              Частотно-зависимое взвешивание
             </label>
           </div>
-          <div class="xo-hint">Higher priority for crossover and speech bands (200-4k Hz)</div>
+          <div class="xo-hint">Приоритет зонам кроссовера и речи (200-4k Hz)</div>
 
           {/* Narrowband limit */}
           <div class="xo-checkbox">
@@ -95,15 +95,15 @@ export default function FirSettingsDialog() {
               onChange={(e) => setNbLimit(e.currentTarget.checked)}
             />
             <label class="xo-checkbox-label" for="fir-nb-limit">
-              Narrowband boost limiting
+              Ограничение узкополосного подъёма
             </label>
           </div>
-          <div class="xo-hint">Clamp sharp correction peaks that exceed smoothed curve</div>
+          <div class="xo-hint">Срезает острые пики коррекции выше сглаженной кривой</div>
 
           {/* NB smoothing — only when NB limit is on */}
           <Show when={nbLimit()}>
             <div class="xo-row">
-              <span class="xo-label">NB smoothing</span>
+              <span class="xo-label">Сглаживание (узкопол.)</span>
               <input
                 class="xo-input"
                 type="number" min="0.05" max="2" step="0.01"
@@ -113,10 +113,10 @@ export default function FirSettingsDialog() {
               />
               <span class="xo-unit">oct</span>
             </div>
-            <div class="xo-hint">Smoothing window width. Smaller = more precise, larger = more aggressive</div>
+            <div class="xo-hint">Ширина окна сглаживания. Меньше = точнее, больше = агрессивнее</div>
 
             <div class="xo-row">
-              <span class="xo-label">NB max excess</span>
+              <span class="xo-label">Макс. превышение (узкопол.)</span>
               <input
                 class="xo-input"
                 type="number" min="1" max="24" step="0.5"
@@ -126,12 +126,12 @@ export default function FirSettingsDialog() {
               />
               <span class="xo-unit">dB</span>
             </div>
-            <div class="xo-hint">Max allowed boost above smoothed correction curve</div>
+            <div class="xo-hint">Макс. подъём над сглаженной кривой коррекции</div>
           </Show>
 
           {/* Max boost */}
           <div class="xo-row">
-            <span class="xo-label">Max boost</span>
+            <span class="xo-label">Макс. подъём</span>
             <input
               class="xo-input"
               type="number" min="0" max="60" step="1"
@@ -141,11 +141,11 @@ export default function FirSettingsDialog() {
             />
             <span class="xo-unit">dB</span>
           </div>
-          <div class="xo-hint">Global limit on correction boost. Lower = safer for amplifier</div>
+          <div class="xo-hint">Глобальный лимит подъёма. Ниже = безопаснее для усилителя</div>
 
           {/* Noise floor */}
           <div class="xo-row">
-            <span class="xo-label">Noise floor</span>
+            <span class="xo-label">Шумовой порог</span>
             <input
               class="xo-input"
               type="number" min="-200" max="-40" step="5"
@@ -155,11 +155,11 @@ export default function FirSettingsDialog() {
             />
             <span class="xo-unit">dB</span>
           </div>
-          <div class="xo-hint">Correction below this level is ignored. Raise if measurement is noisy</div>
+          <div class="xo-hint">Коррекция ниже этого уровня игнорируется. Поднимите при шумном измерении</div>
 
           <div class="xo-buttons">
-            <button class="dlg-btn" onClick={handleCancel}>Cancel</button>
-            <button class="dlg-btn dlg-btn-primary" onClick={handleApply}>Apply</button>
+            <button class="dlg-btn" onClick={handleCancel}>Отмена</button>
+            <button class="dlg-btn dlg-btn-primary" onClick={handleApply}>Применить</button>
           </div>
         </div>
       </div>

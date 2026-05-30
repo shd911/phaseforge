@@ -176,7 +176,7 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
       <div class="baffle-dialog" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div class="merge-header">
-          <span class="merge-title">Baffle Step Correction</span>
+          <span class="merge-title">Коррекция baffle step</span>
           <button class="merge-close" onClick={props.onClose}>
             ×
           </button>
@@ -186,7 +186,7 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
         <div class="merge-body">
           {/* Dimension inputs */}
           <div class="merge-param-row">
-            <label class="merge-label">Baffle Width</label>
+            <label class="merge-label">Ширина панели</label>
             <NumberInput
               value={width()}
               onChange={setWidth}
@@ -197,7 +197,7 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
             />
           </div>
           <div class="merge-param-row">
-            <label class="merge-label">Baffle Height</label>
+            <label class="merge-label">Высота панели</label>
             <NumberInput
               value={height()}
               onChange={setHeight}
@@ -208,7 +208,7 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
             />
           </div>
           <div class="merge-param-row">
-            <label class="merge-label">Driver X</label>
+            <label class="merge-label">Динамик X</label>
             <NumberInput
               value={offsetX()}
               onChange={setOffsetX}
@@ -219,7 +219,7 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
             />
           </div>
           <div class="merge-param-row">
-            <label class="merge-label">Driver Y</label>
+            <label class="merge-label">Динамик Y</label>
             <NumberInput
               value={offsetY()}
               onChange={setOffsetY}
@@ -247,7 +247,7 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
                   <span>{p().f3_hz.toFixed(0)} Hz</span>
                 </div>
                 <div class="baffle-info">
-                  <span class="baffle-info-label">Edges: </span>
+                  <span class="baffle-info-label">Края: </span>
                   <span>
                     L {p().edge_frequencies[0].toFixed(0)}{" "}
                     R {p().edge_frequencies[1].toFixed(0)}{" "}
@@ -275,7 +275,7 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
         {/* Footer */}
         <div class="merge-footer">
           <button class="dlg-btn" onClick={props.onClose}>
-            Cancel
+            Отмена
           </button>
           <button
             class="dlg-btn dlg-btn-primary"

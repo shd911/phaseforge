@@ -82,8 +82,8 @@ export default function BandTabs() {
       <button
         class={`band-tab band-tab-sum ${isSum() ? "active" : ""}`}
         onClick={setActiveBandSum}
-        title="Sum of all bands"
-      >{projectName() ?? "SUM"}</button>
+        title="Сумма всех бэндов"
+      >{projectName() ?? "Сумма"}</button>
       <For each={appState.bands}>
         {(band, idx) => (
           <button
@@ -129,16 +129,16 @@ export default function BandTabs() {
                 onClick={async (e) => {
                   e.stopPropagation();
                   e.preventDefault();
-                  const confirmed = await ask(`Delete band "${band.name}"?`, { title: "Delete Band", kind: "warning" });
+                  const confirmed = await ask(`Удалить бэнд «${band.name}»?`, { title: "Удаление бэнда", kind: "warning" });
                   if (confirmed) removeBand(band.id);
                 }}
-                title={`Delete ${band.name}`}
+                title={`Удалить ${band.name}`}
               >×</span>
             </Show>
           </button>
         )}
       </For>
-      <button class="band-tab band-tab-add" onClick={addBand} title="Add band">+</button>
+      <button class="band-tab band-tab-add" onClick={addBand} title="Добавить бэнд">+</button>
     </div>
   );
 }
