@@ -1086,9 +1086,11 @@ export default function FrequencyPlot() {
         size: 55,
       },
       {
-        label: "Phase (\u00B0)", scale: "phase", side: 1, stroke: "#9b9ba6",
+        // b141.4: distinct cool-violet hue so the right (phase) scale reads as
+        // separate from the left (magnitude) axis \u2014 reinforces "phase = dashed".
+        label: "\u0424\u0430\u0437\u0430 (\u00B0)", scale: "phase", side: 1, stroke: "#a99ad0",
         grid: { show: false },
-        ticks: { stroke: "rgba(255,255,255,0.20)" },
+        ticks: { stroke: "rgba(169,154,208,0.30)" },
       },
     ];
 
