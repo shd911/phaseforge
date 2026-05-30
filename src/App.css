@@ -2418,13 +2418,15 @@ body {
   font-size: var(--fs-sm);
   text-transform: uppercase;
   letter-spacing: 0.3px;
-  padding: var(--space-xxs) var(--space-xs);
+  /* b141.4.1: tight horizontal padding so the 7-column row fits the 280px
+     right panel (was --space-xs ×2 ×7 = 56px of padding → last column clipped). */
+  padding: var(--space-xxs) var(--space-xxs);
 
   border-bottom: 1px solid var(--border);
 }
 
 .peq-table td {
-  padding: var(--space-xxs) var(--space-xs);
+  padding: var(--space-xxs) var(--space-xxs);
 
   border-bottom: 1px solid var(--border);
   font-family: var(--mono);
@@ -2457,7 +2459,7 @@ body {
 }
 
 .peq-input {
-  width: 48px;
+  width: 44px;
   background: var(--bg-primary);
   border: 1px solid var(--border);
   border-radius: 2px;
