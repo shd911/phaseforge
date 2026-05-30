@@ -168,14 +168,15 @@ function FiltersTab() {
         {/* General */}
         <div class="filter-block">
           <div class="fb-header">
-            <span class="fb-title">General</span>
+            <span class="fb-title">Общие</span>
             <button
               class={`fb-toggle ${enabled() ? "on" : ""}`}
               onClick={() => { const id = bandId(); if (id) toggleBandTarget(id); }}
+              title="Включить/выключить цель для этого бэнда"
             >{enabled() ? "ON" : "OFF"}</button>
           </div>
           <div class="fb-row">
-            <label class="fb-label">Preset</label>
+            <label class="fb-label">Пресет</label>
             <select
               class="fb-select"
               onChange={(e) => {
@@ -183,15 +184,15 @@ function FiltersTab() {
                 if (id) setBandPreset(id, e.currentTarget.value as PresetName);
               }}
             >
-              <option value="flat">Flat</option>
+              <option value="flat">Плоский</option>
               <option value="harman">Harman</option>
               <option value="bk">B&K</option>
               <option value="x-curve">X-Curve</option>
-              <option value="custom">Custom</option>
+              <option value="custom">Свой</option>
             </select>
           </div>
           <div class="fb-row">
-            <label class="fb-label">Level</label>
+            <label class="fb-label">Уровень</label>
             <NumberInput
               value={target()?.reference_level_db ?? 0}
               onChange={(v) => { const id = bandId(); if (id) setBandReferenceLevel(id, v); }}
@@ -199,7 +200,7 @@ function FiltersTab() {
             />
           </div>
           <div class="fb-row">
-            <label class="fb-label">Tilt</label>
+            <label class="fb-label">Наклон</label>
             <NumberInput
               value={target()?.tilt_db_per_octave ?? 0}
               onChange={(v) => { const id = bandId(); if (id) setBandTilt(id, v); }}
@@ -207,17 +208,18 @@ function FiltersTab() {
             />
           </div>
           <div class="fb-row">
-            <label class="fb-label">Invert</label>
+            <label class="fb-label">Инверсия</label>
             <button
               class={`fb-toggle invert-toggle ${inverted() ? "on" : ""}`}
               onClick={() => { const id = bandId(); if (id) toggleBandInverted(id); }}
+              title="Инверсия полярности (NOR — нормальная, INV — инвертированная)"
             >{inverted() ? "INV" : "NOR"}</button>
           </div>
         </div>
 
         {/* High-Pass (🔗 индикатор, если связан с LP предыдущей) */}
         <FilterBlock
-          title="High-Pass"
+          title="ФВЧ"
           isHighPass={true}
           config={cloneFilterConfig(target()?.high_pass)}
           linked={hpLinked()}
@@ -237,7 +239,7 @@ function FiltersTab() {
 
         {/* Low-Pass (🔗 кнопка, если не последняя полоса) */}
         <FilterBlock
-          title="Low-Pass"
+          title="ФНЧ"
           config={cloneFilterConfig(target()?.low_pass)}
           linked={linked()}
           canLink={!isLastBand()}
@@ -413,7 +415,7 @@ function FilterBlock(props: FilterBlockProps) {
         <Show when={props.isHighPass && isGaussian()}>
           <div class="subsonic-protect-row">
             <label
-              title="Минимально-фазовый Butterworth 48 дБ/окт на 3 октавы ниже HP. Защищает driver от излишнего excursion в инфразвуке."
+              title="Минимально-фазовый Butterworth 48 дБ/окт на 3 октавы ниже ФВЧ. Защищает динамик от излишнего хода диффузора в инфразвуке."
               style={{ display: "flex", "align-items": "center", gap: "6px", cursor: c()!.freq_hz > 40 ? "pointer" : "not-allowed" }}
             >
               <input
@@ -425,13 +427,13 @@ function FilterBlock(props: FilterBlockProps) {
                   props.onChange(withOverride({ subsonic_protect: newValue }));
                 }}
               />
-              <span>Защитный subsonic фильтр</span>
+              <span>Защитный инфразвуковой фильтр</span>
             </label>
             <Show when={c()!.freq_hz <= 40}>
               <span class="hint" title="HP слишком низкий, защита не требуется">⊘</span>
             </Show>
             <Show when={c()!.subsonic_protect === false && c()!.freq_hz > 40}>
-              <div class="warn">⚠ Защита отключена, риск excursion на инфразвуке</div>
+              <div class="warn">⚠ Защита отключена, риск перегруза диффузора на инфразвуке</div>
             </Show>
           </div>
         </Show>
@@ -514,14 +516,14 @@ function MeasurementsTab() {
           <thead>
             <tr>
               <th></th>
-              <th>Name</th>
-              <th>Pts</th>
+              <th>Имя</th>
+              <th>Точек</th>
               <Show when={s()?.mergeSource}>
-                <th>Splice</th>
+                <th>Сшивка</th>
               </Show>
-              <th>Smooth</th>
-              <th>Dist</th>
-              <th>Delay</th>
+              <th>Сглаж.</th>
+              <th>Расст.</th>
+              <th>Задерж.</th>
               <th></th>
             </tr>
           </thead>
@@ -560,12 +562,12 @@ function MeasurementsTab() {
                     if (b) setBandSmoothing(b.id, e.currentTarget.value as SmoothingMode);
                   }}
                 >
-                  <option value="off">Off</option>
+                  <option value="off">Выкл</option>
                   <option value="1/3">1/3</option>
                   <option value="1/6">1/6</option>
                   <option value="1/12">1/12</option>
                   <option value="1/24">1/24</option>
-                  <option value="var">Var</option>
+                  <option value="var">Перем.</option>
                 </select>
               </td>
               <td class="meas-dist">
@@ -814,7 +816,7 @@ function PeqTab() {
     >
       <Show when={isStale()}>
         <div class="peq-stale-banner">
-          <span>⚠ PEQ устарел: target изменён после последней оптимизации</span>
+          <span>⚠ PEQ устарел: цель изменена после последней оптимизации</span>
           <span style={{ display: "flex", gap: "var(--space-xs)" }}>
             <button
               class="tb-btn tb-btn-sm"
@@ -832,12 +834,12 @@ function PeqTab() {
       <Show when={band()?.measurement}>
         <div class="peq-exclusion-section">
           <div class="peq-sidebar-header">
-            <span class="fb-title" style={{ "font-size": "var(--fs-base)" }}>Exclude</span>
-            <button class="peq-add-btn" onClick={() => { const b = band(); if (b) addExclusionZone(b.id, { startHz: 100, endHz: 200 }); }} title="Add exclusion zone">+</button>
+            <span class="fb-title" style={{ "font-size": "var(--fs-base)" }}>Исключить</span>
+            <button class="peq-add-btn" onClick={() => { const b = band(); if (b) addExclusionZone(b.id, { startHz: 100, endHz: 200 }); }} title="Добавить зону исключения">+</button>
           </div>
           <Show when={(band()?.exclusionZones?.length ?? 0) > 0}>
             <table class="peq-table peq-excl-table">
-              <thead><tr><th>From</th><th>To</th><th></th></tr></thead>
+              <thead><tr><th>От</th><th>До</th><th></th></tr></thead>
               <tbody>
                 {(band()?.exclusionZones ?? []).map((z, i) => (
                   <tr>
@@ -855,7 +857,7 @@ function PeqTab() {
       {/* Manual PEQ — blue */}
       <div class="peq-manual-section">
         <div class="peq-sidebar-header">
-          <span class="fb-title" style={{ "font-size": "var(--fs-base)" }}>Manual</span>
+          <span class="fb-title" style={{ "font-size": "var(--fs-base)" }}>Вручную</span>
           <button class="peq-add-btn" onClick={() => {
             const b = band();
             if (b) {
@@ -863,7 +865,7 @@ function PeqTab() {
               addPeqBand(b.id, { freq_hz: 1000, gain_db: 0, q: 2.0, enabled: true, filter_type: "Peaking" });
               setPendingPeqIdx(0); setSelectedPeqIdx(0);
             }
-          }} title="Add manual PEQ band">+</button>
+          }} title="Добавить PEQ-фильтр вручную">+</button>
         </div>
         <Show when={pendingPeqIdx() != null && peqBands().length > 0}>
           {(() => {
@@ -890,31 +892,31 @@ function PeqTab() {
       <Show when={band()?.measurement}>
         <div class="peq-auto-section">
           <div class="peq-sidebar-header">
-            <span class="fb-title" style={{ "font-size": "var(--fs-base)" }}>Auto Optimizer</span>
+            <span class="fb-title" style={{ "font-size": "var(--fs-base)" }}>Авто-оптимизатор</span>
           </div>
           <div class="peq-grid">
-            <div class="fb-row"><label class="fb-label">Tolerance</label><NumberInput value={tolerance()} onChange={setTolerance} min={0.5} max={3.0} step={0.1} unit="dB" /></div>
-            <div class="fb-row"><label class="fb-label">Max bands</label><NumberInput value={maxBands()} onChange={(v: number) => setMaxBands(Math.round(v))} min={1} max={60} step={1} precision={0} /></div>
-            <div class="fb-row"><label class="fb-label">Regularization</label><NumberInput value={gainRegularization()} onChange={setGainRegularization} min={0} max={1} step={0.0001} precision={4} /></div>
+            <div class="fb-row"><label class="fb-label">Допуск</label><NumberInput value={tolerance()} onChange={setTolerance} min={0.5} max={3.0} step={0.1} unit="dB" /></div>
+            <div class="fb-row"><label class="fb-label">Макс. фильтров</label><NumberInput value={maxBands()} onChange={(v: number) => setMaxBands(Math.round(v))} min={1} max={60} step={1} precision={0} /></div>
+            <div class="fb-row"><label class="fb-label">Регуляризация</label><NumberInput value={gainRegularization()} onChange={setGainRegularization} min={0} max={1} step={0.0001} precision={4} /></div>
             <div class="fb-row">
-              <label class="fb-label">Range</label>
-              <select class="peq-range-select" value={peqRangeMode()} onChange={(e) => setPeqRangeMode(e.currentTarget.value as "auto" | "direct")}><option value="auto">Auto</option><option value="direct">Direct</option></select>
+              <label class="fb-label">Диапазон</label>
+              <select class="peq-range-select" value={peqRangeMode()} onChange={(e) => setPeqRangeMode(e.currentTarget.value as "auto" | "direct")}><option value="auto">Авто</option><option value="direct">Заданный</option></select>
             </div>
             {peqRangeMode() === "auto" ? (
-              <div class="fb-row"><label class="fb-label" title="Don't place PEQ where target is this many dB below reference level">Floor dB</label><NumberInput value={peqFloor()} onChange={setPeqFloor} min={0} max={120} step={1} precision={0} /></div>
+              <div class="fb-row"><label class="fb-label" title="Не ставить PEQ там, где цель на столько dB ниже опорного уровня">Порог dB</label><NumberInput value={peqFloor()} onChange={setPeqFloor} min={0} max={120} step={1} precision={0} /></div>
             ) : (
               <div class="fb-row"><label class="fb-label">Hz</label><NumberInput value={peqDirectLow()} onChange={setPeqDirectLow} min={20} max={20000} step={10} precision={0} /><span style={{ margin: "0 var(--space-xxs)", color: "#8b8b96" }}>–</span><NumberInput value={peqDirectHigh()} onChange={setPeqDirectHigh} min={20} max={20000} step={10} precision={0} /></div>
             )}
           </div>
           <div class="peq-buttons-row">
             <span class="align-range-info">{formatFreq(peqRange()[0])}{"\u2013"}{formatFreq(peqRange()[1])} Hz</span>
-            <button class="tb-btn primary" onClick={handleOptimizePeq} disabled={computing()}>{computing() ? "..." : "Optimize"}</button>
-            <Show when={peqBands().length > 0}><button class="tb-btn" onClick={handleClearPeq}>Clear</button></Show>
+            <button class="tb-btn primary" onClick={handleOptimizePeq} disabled={computing()}>{computing() ? "..." : "Оптимизировать"}</button>
+            <Show when={peqBands().length > 0}><button class="tb-btn" onClick={handleClearPeq}>Очистить</button></Show>
           </div>
           <Show when={peqError()}><div class="align-error">{peqError()}</div></Show>
           <Show when={peqBands().length > 0}>
             <div class="align-status">
-              {peqBands().length} band{peqBands().length > 1 ? "s" : ""}
+              {peqBands().length} фильтр{peqBands().length === 1 ? "" : "ов"}
               {maxErr() != null ? ` \u00B7 max: ${maxErr()!.toFixed(1)}dB` : ""}
               {iters() != null ? ` \u00B7 ${iters()}it` : ""}
             </div>
@@ -922,7 +924,7 @@ function PeqTab() {
           <Show when={peqBands().length > 0}>
             <div class="peq-sidebar-table-scroll">
               <table class="peq-table">
-                <thead><tr><th></th><th>Type</th><th>Freq</th><th>Gain</th><th>Q</th><th></th><th></th></tr></thead>
+                <thead><tr><th></th><th>Тип</th><th>Гц</th><th>dB</th><th>Q</th><th></th><th></th></tr></thead>
                 <tbody>
                   {peqBands().map((b, i) => {
                     const isPending = pendingPeqIdx() === i;
