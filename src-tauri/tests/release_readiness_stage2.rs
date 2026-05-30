@@ -250,12 +250,15 @@ fn release_readiness_stage2_routing_invariants() {
         subsonic_cutoff_hz: subsonic,
     };
 
+    // b141.2: mirrors production `is_iir_realizable` — a linear-phase crossover
+    // is NOT IIR-realisable (mixed HP/LP phase routes to cepstral).
     let realisable = |f: Option<&FilterConfig>| -> bool {
         f.map(|c| {
-            matches!(
-                c.filter_type,
-                FilterType::LinkwitzRiley | FilterType::Butterworth | FilterType::Custom
-            )
+            !c.linear_phase
+                && matches!(
+                    c.filter_type,
+                    FilterType::LinkwitzRiley | FilterType::Butterworth | FilterType::Custom
+                )
         })
         .unwrap_or(true)
     };

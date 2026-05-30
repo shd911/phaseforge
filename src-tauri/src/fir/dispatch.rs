@@ -57,10 +57,17 @@ pub fn route_for(
 }
 
 /// Single-filter realisability check for the IIR cascade.
+///
+/// b141.2 (audit C1): a linear-phase crossover is NOT IIR-realisable. The IIR
+/// cascade builds every filter as a min-phase digital biquad — it cannot honour
+/// a per-filter `linear_phase = true`. A mixed band (e.g. HP min + LP linear)
+/// previously routed here and was silently collapsed to min+min, so the realised
+/// FIR disagreed with the displayed model. Such configs now fall through to the
+/// cepstral path, which consumes the per-filter model phase.
 fn is_iir_realizable(f: Option<&FilterConfig>) -> bool {
     match f {
         None => true,
-        Some(c) => matches!(
+        Some(c) => !c.linear_phase && matches!(
             c.filter_type,
             FilterType::LinkwitzRiley | FilterType::Butterworth | FilterType::Custom
         ),
@@ -113,6 +120,25 @@ mod tests {
     fn cepstral_route_when_subsonic_active() {
         let c = cfg(false, Some(80.0 / 8.0));
         assert_eq!(route_for(Some(&flt(FilterType::LinkwitzRiley)), None, &c), Route::Cepstral);
+    }
+
+    #[test]
+    fn cepstral_route_when_any_crossover_linear_phase() {
+        // b141.2 (audit C1): a per-filter linear_phase crossover is not
+        // IIR-realisable — mixed HP/LP phase must route to cepstral so the
+        // model phase is honoured, not collapsed to min+min.
+        let c = cfg(false, None);
+        let mut lin_lp = flt(FilterType::LinkwitzRiley);
+        lin_lp.linear_phase = true;
+        let min_hp = flt(FilterType::LinkwitzRiley); // linear_phase = false
+        assert_eq!(route_for(Some(&min_hp), Some(&lin_lp), &c), Route::Cepstral);
+        // symmetric: linear HP + min LP
+        let mut lin_hp = flt(FilterType::LinkwitzRiley);
+        lin_hp.linear_phase = true;
+        let min_lp = flt(FilterType::Butterworth);
+        assert_eq!(route_for(Some(&lin_hp), Some(&min_lp), &c), Route::Cepstral);
+        // pure min stays IIR
+        assert_eq!(route_for(Some(&min_hp), Some(&min_lp), &c), Route::Iir);
     }
 
     #[test]

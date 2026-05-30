@@ -52,6 +52,7 @@ function buildSharedFirConfig(
   cfg: DispatchFirConfig,
   linearMain: boolean,
   subsonicCutoffHz: number | null,
+  mixedPhase: boolean,
 ) {
   return {
     taps: cfg.taps,
@@ -59,7 +60,10 @@ function buildSharedFirConfig(
     max_boost_db: cfg.maxBoostDb,
     noise_floor_db: cfg.noiseFloorDb,
     window: cfg.window,
-    phase_mode: "Composite",
+    // b141.2: MixedPhase tells the cepstral path to honour the per-filter
+    // model phase verbatim (HP min + LP linear) instead of recomposing from a
+    // single linear_phase_main flag. Composite for every other config.
+    phase_mode: mixedPhase ? "MixedPhase" : "Composite",
     linear_phase_main: linearMain,
     subsonic_cutoff_hz: subsonicCutoffHz,
     iterations: cfg.iterations,
@@ -92,7 +96,13 @@ export async function dispatchFirInvoke(
   cfg: DispatchFirConfig,
 ): Promise<FirInvokeResult> {
   const useIirPath = (await pickFirRoute(hp, lp, linearMain, subsonicCutoffHz)) === "iir";
-  const sharedFirConfig = buildSharedFirConfig(cfg, linearMain, subsonicCutoffHz);
+  // b141.2: a band whose HP and LP disagree on linear_phase (e.g. HP min +
+  // LP linear) is not IIR-realisable and cannot be expressed by a single
+  // linear_phase_main flag. Flag it so the cepstral path consumes the
+  // per-filter model phase (firCombinedPhase) directly.
+  const isLin = (f: FilterConfig | null) => !!f && f.linear_phase === true;
+  const mixedPhase = !!hp && !!lp && isLin(hp) !== isLin(lp);
+  const sharedFirConfig = buildSharedFirConfig(cfg, linearMain, subsonicCutoffHz, mixedPhase);
 
   if (useIirPath) {
     return invoke<FirInvokeResult>("generate_model_fir_iir", {

@@ -96,12 +96,23 @@ pub fn generate_model_fir(
     // 3. Total magnitude = target + PEQ (in dB)
     let lin_mag: Vec<f64> = lin_target.iter().zip(lin_peq.iter()).map(|(&t, &p)| t + p).collect();
 
+    // b141.2: mixed per-filter phase path. The frontend sends phase_mode =
+    // MixedPhase (with an empty gaussian list) for a band whose HP and LP
+    // disagree on linear_phase (e.g. HP min + LP linear) — physically not
+    // expressible through a single linear_phase_main flag. In that case we
+    // honour the exact `model_phase` the UI computed per-filter, rather than
+    // recomposing a single-mode phase. Realised like a linear-phase FIR
+    // (peak-centred, full window, N/2 delay removed) but with non-zero phase.
+    let use_model_phase = config.phase_mode == PhaseMode::MixedPhase
+        && config.gaussian_min_phase_filters.is_empty();
+
     // 4. Determine effective phase mode
     let max_phase_abs = model_phase.iter().map(|p| p.abs()).fold(0.0_f64, f64::max);
     let effective_linear = match config.phase_mode {
         PhaseMode::LinearPhase => true,
-        // MixedPhase: linear only if no per-filter Gaussian info provided
-        PhaseMode::MixedPhase => config.gaussian_min_phase_filters.is_empty(),
+        // MixedPhase carries an explicit phase (per-filter Gaussian, or the
+        // frontend model phase) — never the zero-phase linear realisation.
+        PhaseMode::MixedPhase => false,
         PhaseMode::MinimumPhase | PhaseMode::HybridPhase => false,
         // b139.4a: Composite follows linear_phase_main for the impulse
         // structure (full window + center shift). The subsonic min-phase
@@ -125,7 +136,17 @@ pub fn generate_model_fir(
     //      (some filters lin-phase, some min-phase — frontend computes per-filter Hilbert)
     //    MixedPhase + zero model_phase: fallback to LinearPhase
     //    PEQ phase: ALWAYS Hilbert (min-phase biquads)
-    let target_phase_rad = if config.phase_mode == PhaseMode::Composite {
+    let target_phase_rad = if use_model_phase {
+        // Honour the frontend-supplied per-filter phase verbatim. model_phase
+        // (degrees) already includes PEQ (firCombinedPhase) and lives on the
+        // caller's `freq` grid — interpolate (wrap-aware) onto the linear FFT
+        // grid and convert to radians. No Hilbert recompute: the whole point is
+        // to keep HP-min and LP-linear distinct.
+        let (_, _, mp) = interpolate_linear_grid(
+            freq, target_mag, Some(model_phase), n_bins, config.sample_rate,
+        );
+        mp.expect("phase requested").iter().map(|d| d.to_radians()).collect()
+    } else if config.phase_mode == PhaseMode::Composite {
         // b140.1: compose_target_phase now returns the full
         // main + peq + subsonic phase composed from three independent
         // Hilbert sources — matches what iterative_refine recomputes each
@@ -174,7 +195,8 @@ pub fn generate_model_fir(
 
     // b140.1: Composite mode already incorporates the PEQ Hilbert via
     // compose_target_phase. Other phase modes still need it added here.
-    let peq_phase_rad = if config.phase_mode == PhaseMode::Composite {
+    let peq_phase_rad = if use_model_phase || config.phase_mode == PhaseMode::Composite {
+        // use_model_phase: PEQ phase already folded into model_phase above.
         vec![0.0; n_bins]
     } else if has_peq {
         minimum_phase_from_magnitude(&lin_peq, n_fft)
@@ -197,8 +219,11 @@ pub fn generate_model_fir(
     let mut impulse: Vec<f64> = spectrum.iter().map(|c| c.re * norm).collect();
 
     // 4. Phase-dependent reordering + windowing
-    if effective_linear {
-        // Symmetric impulse: shift peak to center, full window
+    if effective_linear || use_model_phase {
+        // Symmetric / mixed impulse: shift peak to center, full window.
+        // use_model_phase: the model phase makes the impulse neither fully
+        // causal nor symmetric; centring the peak + full window keeps it whole,
+        // and the N/2 delay is removed from the realised phase below.
         circular_shift_to_center(&mut impulse);
         let window = generate_window(n_fft, &config.window);
         for (i, w) in window.iter().enumerate() {
@@ -249,7 +274,7 @@ pub fn generate_model_fir(
     let mut realized_mag_lin: Vec<f64> = Vec::with_capacity(n_bins);
     let mut realized_phase_lin: Vec<f64> = Vec::with_capacity(n_bins);
 
-    let delay_samples = if effective_linear { (n_fft / 2) as f64 } else { 0.0 };
+    let delay_samples = if effective_linear || use_model_phase { (n_fft / 2) as f64 } else { 0.0 };
 
     for i in 0..n_bins {
         let c = realized_spectrum[i];

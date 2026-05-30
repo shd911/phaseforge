@@ -122,8 +122,15 @@ pub(crate) fn iterative_refine(
     // refinement loop reorders/windows the impulse the same way as the
     // initial assembly. Otherwise Composite + linear_main loses the
     // center-shift and gets half-windowed, destroying the symmetric base.
+    // b141.2: mixed per-filter phase (HP min + LP linear) is realised like a
+    // linear-phase FIR (peak-centred, full window) but with the model phase.
+    // Must mirror generate_model_fir's `use_model_phase` path so the refinement
+    // loop reorders/windows identically.
+    let use_model_phase = matches!(config.phase_mode, PhaseMode::MixedPhase)
+        && config.gaussian_min_phase_filters.is_empty();
     let is_linear_phase = matches!(config.phase_mode, PhaseMode::LinearPhase)
-        || (matches!(config.phase_mode, PhaseMode::Composite) && config.linear_phase_main);
+        || (matches!(config.phase_mode, PhaseMode::Composite) && config.linear_phase_main)
+        || use_model_phase;
     // b139.3.4: in MinimumPhase mode the (magnitude, phase) pair must stay
     // consistent across iterations — Hilbert(refined_db) recomputed each
     // pass. LinearPhase keeps zero phase; MixedPhase/HybridPhase carry a
@@ -229,6 +236,14 @@ pub(crate) fn iterative_refine(
         }
 
         // 5. Apply window (must match initial windowing in generate_model_fir)
+        if use_model_phase {
+            // Peak already centred via is_linear_phase shift above; full window.
+            let window = generate_window(n_fft, &config.window);
+            for (i, w) in window.iter().enumerate() {
+                impulse[i] *= w;
+            }
+            continue;
+        }
         match config.phase_mode {
             PhaseMode::MixedPhase if !config.gaussian_min_phase_filters.is_empty() => {
                 // Peak-centered full window (same as generate_model_fir MixedPhase)

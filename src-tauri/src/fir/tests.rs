@@ -552,7 +552,88 @@ use super::*;
         println!("\n=== All {} FIR filters generated and exported OK ===", total);
     }
 
-    // NOTE: Phase-match test for MixedPhase was removed because peak-centered
+    /// b141.2: mixed per-filter phase (HP min + LP linear) must produce a FIR
+    /// whose realised magnitude AND phase match the model the UI displays.
+    /// Before b141.2 this band routed to the IIR cascade and collapsed both
+    /// filters to min-phase; the cepstral `use_model_phase` path now honours the
+    /// per-filter model phase verbatim.
+    #[test]
+    fn mixed_phase_fir_honours_hp_min_lp_linear() {
+        use crate::target::{evaluate, FilterConfig, FilterType, TargetCurve};
+
+        let n = 512;
+        let freq: Vec<f64> = (0..n)
+            .map(|i| {
+                let t = i as f64 / (n - 1) as f64;
+                (20.0_f64.ln() + t * (20000.0_f64.ln() - 20.0_f64.ln())).exp()
+            })
+            .collect();
+
+        let hp = FilterConfig {
+            filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: 200.0,
+            shape: None, linear_phase: false, q: None, subsonic_protect: None,
+        };
+        let lp = FilterConfig {
+            filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: 2000.0,
+            shape: None, linear_phase: true, q: None, subsonic_protect: None,
+        };
+        let tc = TargetCurve {
+            reference_level_db: 0.0, tilt_db_per_octave: 0.0, tilt_ref_freq: 1000.0,
+            high_pass: Some(hp), low_pass: Some(lp), low_shelf: None, high_shelf: None,
+        };
+        // Model: magnitude = full bandpass; phase = HP min-phase only (the
+        // linear-phase LP contributes zero excess phase — exactly what the UI
+        // shows on the export tab).
+        let model = evaluate(&tc, &freq);
+
+        let config = FirConfig {
+            taps: 32768, sample_rate: 48000.0, max_boost_db: 24.0, noise_floor_db: -150.0,
+            window: WindowType::Blackman, phase_mode: PhaseMode::MixedPhase,
+            iterations: 0, freq_weighting: false, narrowband_limit: false,
+            nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0,
+            gaussian_min_phase_filters: vec![],
+            linear_phase_main: false, subsonic_cutoff_hz: None,
+        };
+
+        let result = generate_model_fir(&freq, &model.magnitude, &[], &model.phase, &config)
+            .expect("mixed-phase FIR");
+
+        // The model phase must be non-trivial (HP LR4 min-phase) or the test
+        // would pass vacuously against an all-zero phase.
+        assert!(
+            model.phase.iter().any(|p| p.abs() > 10.0),
+            "HP min-phase should give a non-trivial model phase",
+        );
+        if let Some(pi) = freq.iter().position(|&f| f >= 400.0) {
+            eprintln!(
+                "sample @ {:.0} Hz: model φ={:.1}° realised φ={:.1}° | model mag={:.2} realised={:.2} dB",
+                freq[pi], model.phase[pi], result.realized_phase[pi],
+                model.magnitude[pi], result.realized_mag[pi],
+            );
+        }
+
+        // Passband 300–1500 Hz: realised must track the model.
+        let mut max_dmag = 0.0_f64;
+        let mut max_dphase = 0.0_f64;
+        for (i, &f) in freq.iter().enumerate() {
+            if !(300.0..=1500.0).contains(&f) { continue; }
+            let dmag = (result.realized_mag[i] - model.magnitude[i]).abs();
+            // Wrap the phase difference to (-180, 180] — realised phase is
+            // unwrapped (can be multi-turn) while the model is wrapped; they are
+            // equal modulo 360° when the FIR honours the model.
+            let raw = result.realized_phase[i] - model.phase[i];
+            let dph = (raw - 360.0 * (raw / 360.0).round()).abs();
+            if dmag > max_dmag { max_dmag = dmag; }
+            if dph > max_dphase { max_dphase = dph; }
+        }
+        eprintln!("mixed-phase passband: max Δmag={:.2} dB, max Δphase={:.1}°", max_dmag, max_dphase);
+        assert!(max_dmag < 1.5, "realized magnitude diverges from model: {:.2} dB", max_dmag);
+        assert!(max_dphase < 15.0, "realized phase diverges from model: {:.1}°", max_dphase);
+    }
+
+    // NOTE: original phase-match test for the Gaussian MixedPhase path was
+    // removed because peak-centering perturbs phase; the b141.2 model-phase
+    // path above is the supported mixed-phase case.
     #[test]
     fn test_fir_matches_model_magnitude() {
         // Test that FIR realized_mag matches the target Model magnitude
