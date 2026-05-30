@@ -71,6 +71,7 @@ import {
   handleOptimizePeq, handleClearPeq, peqStale,
 } from "../stores/peq-optimize";
 import { showStaleConfirmDialog } from "./StalePeqExportDialog";
+import { showToast } from "../lib/toast";
 import { hasActiveSubsonicProtect } from "../lib/types";
 import { qWarnAt } from "../lib/peq-quality";
 import { openHighQPopup } from "./HighQWarningPopup";
@@ -1117,9 +1118,12 @@ function ExportTab() {
       if (!path) { setExporting(false); return; }
 
       await invoke("export_fir_wav", { impulse, sampleRate: sr, path });
+      const fname = String(path).split("/").pop();
+      showToast(`Экспортирован FIR: ${fname}`);
     } catch (e) {
       console.error("Export failed:", e);
       setExportError(String(e));
+      showToast(`Ошибка экспорта: ${String(e)}`, "warn");
     } finally {
       setExporting(false);
     }

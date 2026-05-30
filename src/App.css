@@ -11,7 +11,8 @@
 
   --text-primary: #d4d4d8;
   --text-secondary: #8b8b96;
-  --text-muted: #5a5a66;
+  --text-muted: #6f6f7c; /* b141.4: was #5a5a66 (~2.3:1, below WCAG); lifted to ~3:1 */
+  --text-on-accent: #fff; /* b141.4: text/icons on accent or danger fills */
 
   --accent: #4a90d9;
   --accent-hover: #5da3e8;
@@ -23,6 +24,11 @@
   --danger: #d94a4a;
   --success: #4ad97a;
   --warning: #d9a44a;
+  /* b141.4: single canonical amber for warning/stale states (was forked into
+     var(--warn-amber) / var(--warn-amber-text) / var(--warn-amber) across the sheet). */
+  --warn-amber: var(--warn-amber);
+  --warn-amber-text: var(--warn-amber-text);
+  --color-meas: #4A9EFF; /* b141.4: measurement-curve blue, distinct from --accent */
 
   --mono: "SF Mono", "Menlo", "Monaco", "Consolas", monospace;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", sans-serif;
@@ -208,7 +214,7 @@ body {
 .tb-hybrid input[type="checkbox"] {
   margin: 0;
   cursor: pointer;
-  accent-color: var(--accent, #4A9EFF);
+  accent-color: var(--accent);
 }
 .tb-hybrid:hover { color: var(--text-primary); }
 
@@ -1073,7 +1079,7 @@ body {
 .fb-checkbox input[type="checkbox"] {
   margin: 0;
   cursor: pointer;
-  accent-color: var(--accent, #4A9EFF);
+  accent-color: var(--accent);
 }
 .fb-check-box {
   width: 12px;
@@ -1084,8 +1090,8 @@ body {
   position: relative;
 }
 .fb-check-box.checked {
-  background: var(--accent, #4A9EFF);
-  border-color: var(--accent, #4A9EFF);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 .fb-check-box.checked::after {
   content: "";
@@ -2010,7 +2016,7 @@ body {
 
 /* PEQ stale state (b136): visual cue when target diverged from snapshot */
 .peq-tab-stale {
-  border: 2px solid #d97706;
+  border: 2px solid var(--warn-amber);
   border-radius: 4px;
   padding: 4px;
 }
@@ -2023,14 +2029,14 @@ body {
   padding: 6px 10px;
   margin-bottom: 8px;
   background: rgba(217, 119, 6, 0.15);
-  color: #fbbf24;
+  color: var(--warn-amber-text);
   border-radius: 3px;
   font-size: var(--fs-sm);
 }
 
 .band-tab-stale-dot {
   margin-left: 4px;
-  color: #d97706;
+  color: var(--warn-amber);
   font-size: 10px;
   line-height: 1;
 }
@@ -2039,7 +2045,7 @@ body {
 .peq-warn-icon {
   background: transparent;
   border: none;
-  color: #d97706;
+  color: var(--warn-amber);
   font-size: 14px;
   cursor: pointer;
   padding: 0 4px;
@@ -2061,7 +2067,7 @@ body {
   flex-wrap: wrap;
 }
 .subsonic-protect-row .warn {
-  color: #d97706;
+  color: var(--warn-amber);
   font-size: 12px;
 }
 .subsonic-protect-row .hint {
@@ -2514,7 +2520,7 @@ body {
   background: rgba(234, 179, 8, 0.03);
 }
 .peq-exclusion-section .peq-sidebar-header .fb-title {
-  color: #eab308;
+  color: var(--warn-amber);
 }
 
 .peq-add-btn {

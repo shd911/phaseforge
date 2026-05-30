@@ -3341,23 +3341,23 @@ export default function FrequencyPlot() {
 
         if (result.sumTargetMag) {
           uSeries.push({
-            label: "Σ tgt (New)", stroke: SUM_TARGET_COLOR, width: 2.5,
+            label: "Σ цель", stroke: SUM_TARGET_COLOR, width: 2.5,
             dash: [8, 4], scale: "mag",
           });
           uData.push(result.sumTargetMag);
           legend.push({
-            label: "Σ target (New)", color: SUM_TARGET_COLOR, dash: true,
+            label: "Σ цель", color: SUM_TARGET_COLOR, dash: true,
             visible: true, seriesIdx: sIdx, category: "target",
           });
           sIdx++;
           if (showPhase && result.sumTargetPhase) {
             uSeries.push({
-              label: "Σ tgt ° (New)", stroke: SUM_TARGET_PHASE_COLOR,
+              label: "Σ цель °", stroke: SUM_TARGET_PHASE_COLOR,
               width: 1.5, dash: [4, 4], scale: "phase",
             });
             uData.push(wrapPhase(result.sumTargetPhase));
             legend.push({
-              label: "Σ target ° (New)", color: SUM_TARGET_PHASE_COLOR, dash: true,
+              label: "Σ цель °", color: SUM_TARGET_PHASE_COLOR, dash: true,
               visible: true, seriesIdx: sIdx, category: "target",
             });
             sIdx++;

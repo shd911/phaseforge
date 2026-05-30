@@ -2,6 +2,7 @@ import "./App.css";
 import { createSignal, createEffect, onCleanup, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { ask } from "@tauri-apps/plugin-dialog";
 import {
   appState,
   activeBand,
@@ -112,9 +113,21 @@ function App() {
 
   // Plot split removed — all modes now in FrequencyPlot tabs
 
-  const infoText = () => {
-    if (isSum()) return "";
-    return "";
+  // Strategy switch re-optimizes ALL bands and overwrites manual PEQ edits.
+  // Confirm first when any band already has PEQ so a stray click can't wipe
+  // hand-tuning across the whole project.
+  const switchStrategy = async (toHybrid: boolean) => {
+    if (exportHybridPhase() === toHybrid) return;
+    const hasPeq = appState.bands.some((b) => (b.peqBands?.length ?? 0) > 0);
+    if (hasPeq) {
+      const ok = await ask(
+        "Переключение режима переоптимизирует все бэнды и перезапишет ручные правки PEQ. Продолжить?",
+        { title: toHybrid ? "Перейти в режим Hybrid" : "Перейти в режим Standard", kind: "warning" },
+      );
+      if (!ok) return;
+    }
+    setExportHybridPhase(toHybrid);
+    handleOptimizeAll();
   };
 
   // All plot modes now handled by FrequencyPlot tabs (freq/ir/step/gd/export)
@@ -145,30 +158,32 @@ function App() {
             : "Untitled")}
         </span>
         <Show when={isDirty()}>
-          <span class="top-project-dirty">(modified)</span>
+          <span class="top-project-dirty">(изменён)</span>
         </Show>
         <div class="top-sep" />
         <div class="strategy-toggle">
           <button
             class={`strategy-btn ${!exportHybridPhase() ? "active" : ""}`}
-            onClick={() => { if (exportHybridPhase()) { setExportHybridPhase(false); handleOptimizeAll(); } }}
+            onClick={() => switchStrategy(false)}
+            title="Стандартная коррекция (мин./лин. фаза). Переключение переоптимизирует все бэнды."
           >Standard</button>
           <button
             class={`strategy-btn ${exportHybridPhase() ? "active" : ""}`}
-            onClick={() => { if (!exportHybridPhase()) { setExportHybridPhase(true); handleOptimizeAll(); } }}
+            onClick={() => switchStrategy(true)}
+            title="Гибридная фаза экспорта. Переключение переоптимизирует все бэнды."
           >Hybrid</button>
         </div>
         <button
           class="tb-btn"
           onClick={openFirSettings}
-          title="Optimization settings"
-        >Settings</button>
+          title="Настройки оптимизации и FIR"
+        >Настройки</button>
         <button
           class="tb-btn primary"
           onClick={handleOptimizeAll}
           disabled={computing()}
-          title="Optimize PEQ for all bands"
-        >{computing() ? "..." : "Optimize All"}</button>
+          title="Оптимизировать PEQ для всех бэндов"
+        >{computing() ? "..." : "Оптимизировать все"}</button>
         <div class="top-sep" />
       </div>
 
@@ -198,8 +213,8 @@ function App() {
 
       {/* Status bar */}
       <footer class="status-bar">
-        {appState.bands.length} band{appState.bands.length > 1 ? "s" : ""}
-        {isSum() ? " — SUM view" : ""}
+        {appState.bands.length} бэнд{appState.bands.length === 1 ? "" : "а"}
+        {isSum() ? " — режим Сумма" : ""}
       </footer>
 
       {/* Modal dialogs */}

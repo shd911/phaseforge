@@ -17,6 +17,7 @@ import {
 } from "./bands";
 import type { BandState } from "./bands";
 import { pushHistory, registerHistoryHooks, type HistoryEntry } from "./history";
+import { showToast } from "../lib/toast";
 
 // --- Signals ---
 export const [tolerance, setTolerance] = createSignal(1.0);
@@ -219,8 +220,12 @@ export async function handleOptimizePeq() {
     setMaxErr(result.max_error_db);
     setIters(result.iterations);
     setSelectedPeqIdx(null);
+    showToast(
+      `PEQ оптимизирован · фильтров: ${result.bands.length} · макс. ошибка ${result.max_error_db.toFixed(2)} dB`,
+    );
   } catch (e) {
     setPeqError(String(e));
+    showToast(`Ошибка оптимизации PEQ: ${String(e)}`, "warn");
   } finally {
     setComputing(false);
   }
@@ -260,8 +265,12 @@ export async function handleOptimizeAll() {
       setIters(results.reduce((sum, r) => sum + r.iters, 0));
       setSelectedPeqIdx(null);
     });
+    showToast(
+      `Оптимизировано бэндов: ${results.length} · макс. ошибка ${Math.max(...results.map(r => r.maxErr)).toFixed(2)} dB`,
+    );
   } catch (e) {
     setPeqError(String(e));
+    showToast(`Ошибка оптимизации: ${String(e)}`, "warn");
   } finally {
     setComputing(false);
   }
