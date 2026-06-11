@@ -197,16 +197,17 @@ describe("evaluateSum (minimal, b140.3.0) — Σ Target only", () => {
   });
 
   it("alignment delay rotates Σ phase linearly with frequency", async () => {
-    // 1 ms delay on a single band → phase = 360 · f · 0.001 deg
+    // b141.10: positive delay = LATER (HQPlayer parity) →
+    // phase = −360 · f · 0.001 deg for a 1 ms delay.
     const a = flatBand("a", { alignmentDelay: 0.001 });
     const result = await evaluateSum([a]);
     expect(result.sumTargetPhase).not.toBeNull();
     const f = result.freq;
     const ph = result.sumTargetPhase!;
     // Pick an early bin where the phase wrap stays linear (well below
-    // ±180°). At 100 Hz, expected = 360·100·0.001 = 36°.
+    // ±180°). At 100 Hz, expected = −360·100·0.001 = −36°.
     const idx = f.findIndex((v) => v >= 100);
-    expect(ph[idx]).toBeCloseTo(36, 0);
+    expect(ph[idx]).toBeCloseTo(-36, 0);
   });
 
   it("targetEnabled=false drops band from the sum", async () => {

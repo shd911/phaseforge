@@ -36,6 +36,24 @@ export interface FilterConfig {
   subsonic_protect?: boolean | null;
 }
 
+/** b141.10: single source of truth for the alignment-delay phase ramp.
+ *  Positive delay = the band plays LATER (HQPlayer per-channel delay
+ *  convention): H(f) *= e^{-j2pi f tau} -> phase -360*f*tau degrees.
+ *  Was +360*f*tau (advance) before b141.10 — saved projects are migrated
+ *  via migrateDelayConvention on load. */
+export function alignmentPhaseDeg(freqHz: number, delaySec: number): number {
+  return -360 * freqHz * delaySec;
+}
+
+/** b141.10: convert pre-b141.10 alignment delays (positive = advance) to
+ *  the positive-is-late convention, preserving relative timing and keeping
+ *  all values >= 0: new_i = max(old) - old_i. */
+export function migrateDelayConvention(delays: number[]): number[] {
+  if (delays.length === 0) return [];
+  const max = Math.max(...delays);
+  return delays.map(d => Math.round((max - d) * 1e9) / 1e9);
+}
+
 /** True when the HP carries an active subsonic_protect that must
  *  contribute min-phase even if the Gaussian itself is linear-phase.
  *  b140.15.2: inlined here from the deleted src/lib/band-evaluation.ts

@@ -14,6 +14,8 @@ import { setBandDelayInfo, markBandDelayRemoved, restoreBandDelay } from "../sto
 import MergeDialog from "./MergeDialog";
 import { exportBandWav, mixedWavConventionWarning } from "../lib/fir-export";
 import { showToast } from "../lib/toast";
+import { alignmentPhaseDeg } from "../lib/types";
+import { autoRefLevel } from "../lib/band-evaluator/extension";
 import { peqStale } from "../stores/peq-optimize";
 import { showStaleConfirmDialog } from "./StalePeqExportDialog";
 import { highQIndices } from "../lib/peq-quality";
@@ -2042,7 +2044,7 @@ export default function FrequencyPlot() {
             const gdDelay = irDelayByName[sb.name] ?? 0;
             for (let j = 0; j < n; j++) {
               const amp = Math.pow(10, (sb.measurement!.magnitude[j] ?? -200) / 20) * sign;
-              const phRad = ((sb.measurement!.phase![j] ?? 0) + 360 * freq[j] * gdDelay) * Math.PI / 180;
+              const phRad = ((sb.measurement!.phase![j] ?? 0) + alignmentPhaseDeg(freq[j], gdDelay)) * Math.PI / 180;
               sumRe[j] += amp * Math.cos(phRad);
               sumIm[j] += amp * Math.sin(phRad);
             }
@@ -2155,7 +2157,7 @@ export default function FrequencyPlot() {
 
           let rotatedPhase = sbPh;
           if (delay !== 0) {
-            rotatedPhase = sbPh.map((p, j) => p + 360 * sbFreq[j] * delay);
+            rotatedPhase = sbPh.map((p, j) => p + alignmentPhaseDeg(sbFreq[j], delay));
           }
 
           return invoke<{ time: number[]; impulse: number[]; step: number[]; raw_peak: number; step_raw_peak: number }>(
@@ -2193,12 +2195,12 @@ export default function FrequencyPlot() {
           if (!sb.targetEnabled) return null;
           try {
             const tc = JSON.parse(JSON.stringify(sb.target));
-            // Per-band auto-ref from this band's measurement
-            let bRef = 0, bN = 0;
-            for (let i = 0; i < sb.measurement!.freq.length; i++) {
-              if (sb.measurement!.freq[i] >= 200 && sb.measurement!.freq[i] <= 2000) { bRef += sb.measurement!.magnitude[i]; bN++; }
-            }
-            tc.reference_level_db += bN > 0 ? bRef / bN : 0;
+            // b141.10: passband-aware auto-ref (was a hardcoded 200-2000 Hz
+            // window — outside the woofer's passband entirely).
+            tc.reference_level_db += autoRefLevel(
+              sb.measurement!.freq, sb.measurement!.magnitude,
+              sb.target.high_pass, sb.target.low_pass,
+            );
             const tResp = await invoke<{ magnitude: number[]; phase: number[] }>("evaluate_target", { target: tc, freq });
             if (gen !== renderGen) return null;
             let tMag = tResp.magnitude;
@@ -2226,7 +2228,7 @@ export default function FrequencyPlot() {
             const delay = irDelayByName[sb.name] ?? 0;
             let adjPhase = tPh;
             if (delay !== 0) {
-              adjPhase = tPh.map((p, j) => p + 360 * freq[j] * delay);
+              adjPhase = tPh.map((p, j) => p + alignmentPhaseDeg(freq[j], delay));
             }
             const r = await invoke<{ time: number[]; impulse: number[]; step: number[]; raw_peak: number; step_raw_peak: number }>("compute_impulse", {
               freq, magnitude: normMag, phase: adjPhase, sampleRate: sr,
@@ -2282,7 +2284,7 @@ export default function FrequencyPlot() {
             const delay = irDelayByName[sb.name] ?? 0;
             let adjPhase = cPh;
             if (delay !== 0) {
-              adjPhase = cPh.map((p, j) => p + 360 * sbFreq[j] * delay);
+              adjPhase = cPh.map((p, j) => p + alignmentPhaseDeg(sbFreq[j], delay));
             }
             const r = await invoke<{ time: number[]; impulse: number[]; step: number[]; raw_peak: number; step_raw_peak: number }>("compute_impulse", {
               freq: sbFreq, magnitude: normMag, phase: adjPhase, sampleRate: sbSr,

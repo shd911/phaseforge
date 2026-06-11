@@ -14,6 +14,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { BandState } from "../stores/bands";
 import { interpOnGrid } from "./band-evaluator/grid";
+import { alignmentPhaseDeg } from "./types";
 import { unwrapDegrees } from "./plot-helpers";
 
 /** Result of auto-align: map from bandId → delay in seconds */
@@ -205,7 +206,7 @@ function optimizePairDelay(
       for (let b = 0; b < bandData.length; b++) {
         const d = b === hiIdx ? delayHi : delays[b];
         const amp = Math.pow(10, bandData[b].mag[j] / 20);
-        const phRad = (bandData[b].ph[j] + 360 * freq[j] * d) * Math.PI / 180;
+        const phRad = (bandData[b].ph[j] + alignmentPhaseDeg(freq[j], d)) * Math.PI / 180;
         re += amp * Math.cos(phRad);
         im += amp * Math.sin(phRad);
       }

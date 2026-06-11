@@ -27,7 +27,7 @@ import {
   firMaxBoost, setFirMaxBoost,
   firNoiseFloor, setFirNoiseFloor,
 } from "../stores/bands";
-import { MEASUREMENT_COLORS, cloneFilterConfig } from "../lib/types";
+import { MEASUREMENT_COLORS, cloneFilterConfig, migrateDelayConvention } from "../lib/types";
 import type { FilterConfig } from "../lib/types";
 import { tolerance, setTolerance, maxBands, setMaxBands, gainRegularization, setGainRegularization, peqFloor, setPeqFloor, peqRangeMode, setPeqRangeMode, peqDirectLow, setPeqDirectLow, peqDirectHigh, setPeqDirectHigh } from "../stores/peq-optimize";
 import type { AppState, BandState, PerMeasurementSettings, FloorBounceConfig, MergeSource } from "../stores/bands";
@@ -174,6 +174,10 @@ function isSafePath(p: string): boolean {
 
 export interface ProjectFile {
   version: number;
+  /** b141.10: present (true) in projects saved with the positive-is-late
+   *  alignment-delay convention. Absent => legacy advance convention,
+   *  migrated on load via migrateDelayConvention. */
+  delay_positive_is_late?: boolean;
   app_name: string;
   project_name?: string | null;
   bands: ProjectBand[];
@@ -308,6 +312,7 @@ export function buildProjectData(): ProjectFile {
   const isV2 = projectDir() !== null;
   return {
     version: isV2 ? 2 : 1,
+    delay_positive_is_late: true,
     app_name: "PhaseForge",
     project_name: isV2 ? projectName() : null,
     bands: appState.bands.map(mapBandToProject),
@@ -404,6 +409,12 @@ function mapBandFromProject(b: ProjectBand, idx: number): BandState {
 /** Restore state from a loaded project. For v2, re-import measurements from files. */
 export async function restoreState(project: ProjectFile, projDir: string | null) {
   const bands = project.bands.map((b, i) => mapBandFromProject(b, i));
+  // b141.10: legacy projects stored alignment delays under the inverted
+  // (positive = advance) convention — convert preserving relative timing.
+  if (!project.delay_positive_is_late) {
+    const migrated = migrateDelayConvention(bands.map(b => b.alignmentDelay ?? 0));
+    bands.forEach((b, i) => { b.alignmentDelay = migrated[i]; });
+  }
   const missingMeasurements: string[] = [];
 
   // v2: re-import measurements from files in project folder

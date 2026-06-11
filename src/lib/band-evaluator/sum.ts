@@ -14,6 +14,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { BandState } from "../../stores/bands";
 import type { PeqBand, TargetResponse } from "../types";
+import { alignmentPhaseDeg } from "../types";
 import { buildCommonGrid, buildLogGrid, interpOnGrid, interpPhaseOnGrid } from "./grid";
 import { appendNoiseFloorTail, computeExtension } from "./extension";
 import { evaluateBandFull, reconstructTargetPhase } from "./evaluate";
@@ -208,7 +209,7 @@ function coherentSum(
       // size relative to that, which dominates the result at deep
       // crossover nulls where re,im → 0. Reducing modulo 2π preserves
       // the periodic value but keeps the trig arg in [-π, π].
-      const phaseDeg = (b.phase[j] ?? 0) + 360 * freq[j] * b.delay;
+      const phaseDeg = (b.phase[j] ?? 0) + alignmentPhaseDeg(freq[j], b.delay);
       const phaseDegMod = phaseDeg - 360 * Math.round(phaseDeg / 360);
       const phRad = phaseDegMod * Math.PI / 180;
       re[j] += amp * Math.cos(phRad);
@@ -360,6 +361,12 @@ async function evaluateSumImpl(
   > = [];
   let anyMissingPhase = false;
   let anyCorrected = false;
+  // b141.10: scalar level shift applied to each band's corrected curve on
+  // the SPL path (normalize-to-target + global wide-excess shift). The IR
+  // section MUST reuse it so the Σ step weights bands exactly like the SPL
+  // Σ — measurements are merged/recorded at arbitrary levels; the norm is
+  // "corrected sits at target" (realised live via per-band attenuation).
+  const corrLevelOffsetDb = new Array<number>(bands.length).fill(0);
 
   for (let i = 0; i < bands.length; i++) {
     const r = perBandResults[i];
@@ -410,17 +417,20 @@ async function evaluateSumImpl(
         const offset = dSum / dN;
         if (Math.abs(offset) > 0.01) {
           correctedMag = correctedMag.map(v => v + offset);
+          corrLevelOffsetDb[i] += offset;
         }
       }
 
       // b140.3.1.4: global shift if a wide excess is detected in the
       // passband ± 1 octave control zone. Whole curve moves uniformly;
       // narrow resonances stay intact.
+      const preShift = correctedMag[0];
       correctedMag = applyGlobalShiftIfWideExcess(
         freq, correctedMag, pbTarget.mag,
         bands[i].target.high_pass?.freq_hz ?? null,
         bands[i].target.low_pass?.freq_hz ?? null,
       );
+      corrLevelOffsetDb[i] += correctedMag[0] - preShift;
     }
 
     const phaseArr = resampled.phase ?? new Array<number>(freq.length).fill(0);
@@ -485,7 +495,7 @@ async function evaluateSumImpl(
       corr: { re: Float64Array; im: Float64Array } | null;
     }
 
-    const partials: IrPartial[] = await Promise.all(bands.map(async (band): Promise<IrPartial> => {
+    const partials: IrPartial[] = await Promise.all(bands.map(async (band, bandIdx): Promise<IrPartial> => {
       const sign: 1 | -1 = band.inverted ? -1 : 1;
       const delay = band.alignmentDelay ?? 0;
       const out: IrPartial = { tgt: null, meas: null, corr: null };
@@ -504,7 +514,7 @@ async function evaluateSumImpl(
         const re = new Float64Array(N), im = new Float64Array(N);
         for (let j = 0; j < N; j++) {
           const amp = Math.pow(10, (resp.magnitude[j] ?? -200) / 20) * sign;
-          const phRad = ((tPhase[j] ?? 0) + 360 * irFreq[j] * delay) * Math.PI / 180;
+          const phRad = ((tPhase[j] ?? 0) + alignmentPhaseDeg(irFreq[j], delay)) * Math.PI / 180;
           re[j] = amp * Math.cos(phRad);
           im[j] = amp * Math.sin(phRad);
         }
@@ -539,7 +549,7 @@ async function evaluateSumImpl(
         const re = new Float64Array(N), im = new Float64Array(N);
         for (let j = 0; j < N; j++) {
           const amp = Math.pow(10, (extMeasMag[j] ?? -200) / 20) * sign;
-          const phRad = ((measPhaseArr[j] ?? 0) + 360 * irFreq[j] * delay) * Math.PI / 180;
+          const phRad = ((measPhaseArr[j] ?? 0) + alignmentPhaseDeg(irFreq[j], delay)) * Math.PI / 180;
           re[j] = amp * Math.cos(phRad);
           im[j] = amp * Math.sin(phRad);
         }
@@ -570,7 +580,9 @@ async function evaluateSumImpl(
             console.warn("[evaluateSum] IR compute_cross_section failed (leaving zeros):", e);
           }
         }
-        const corrMag = extMeasMag.map((m, j) => m + irPeqMag[j] + irXsMag[j]);
+        // b141.10: same scalar level shift as the SPL Σ corrected curve.
+        const lvl = corrLevelOffsetDb[bandIdx];
+        const corrMag = extMeasMag.map((m, j) => m + irPeqMag[j] + irXsMag[j] + lvl);
         const baseP = measPhaseArr.map((p, j) => p + irPeqPhase[j] + irXsPhase[j]);
         const corrPhase = await reconstructTargetPhase(
           irFreq, baseP, band.target.high_pass, band.target.low_pass,
@@ -578,7 +590,7 @@ async function evaluateSumImpl(
         const re = new Float64Array(N), im = new Float64Array(N);
         for (let j = 0; j < N; j++) {
           const amp = Math.pow(10, (corrMag[j] ?? -200) / 20) * sign;
-          const phRad = ((corrPhase[j] ?? 0) + 360 * irFreq[j] * delay) * Math.PI / 180;
+          const phRad = ((corrPhase[j] ?? 0) + alignmentPhaseDeg(irFreq[j], delay)) * Math.PI / 180;
           re[j] = amp * Math.cos(phRad);
           im[j] = amp * Math.sin(phRad);
         }
