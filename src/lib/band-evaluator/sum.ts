@@ -17,6 +17,7 @@ import type { PeqBand, TargetResponse } from "../types";
 import { buildCommonGrid, buildLogGrid, interpOnGrid } from "./grid";
 import { appendNoiseFloorTail, computeExtension } from "./extension";
 import { evaluateBandFull, reconstructTargetPhase } from "./evaluate";
+import { memoEval, sumRequestKey } from "./cache";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -251,7 +252,18 @@ function coherentSum(
 //         cargo test --test sum_3band_lr4_flat
 //         npx vitest run src/lib/__tests__/sum-3band-lr4-spikes.test.ts
 
+/** b141.7: cached entry point — same pattern as evaluateBandFull. The sum
+ *  key additionally covers inverted + alignmentDelay per band (read only by
+ *  the sum pipeline). Per-band evaluateBandFull calls inside benefit from
+ *  their own cache layer independently. */
 export async function evaluateSum(
+  bands: BandState[],
+  options?: SumEvalOptions,
+): Promise<SumEvalResult> {
+  return memoEval(sumRequestKey(bands, options), () => evaluateSumImpl(bands, options));
+}
+
+async function evaluateSumImpl(
   bands: BandState[],
   options?: SumEvalOptions,
 ): Promise<SumEvalResult> {

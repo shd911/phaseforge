@@ -25,6 +25,7 @@ import { hasActiveSubsonicProtect } from "../types";
 import { buildLogGrid, buildCommonGrid, resampleOnLogGrid } from "./grid";
 import { dispatchFirInvoke } from "./route";
 import { appendNoiseFloorTail, autoRefLevel, computeExtension } from "./extension";
+import { bandRequestKey, memoEval } from "./cache";
 
 export interface FirRequestConfig {
   taps: number;
@@ -182,7 +183,14 @@ async function applyMeasurementSmoothing(m: Measurement, mode: string | null | u
 // b140.14.2: `appendNoiseFloorTail` and `autoRefLevel` moved to
 // ./band-evaluator/extension.ts and re-imported above. Behaviour unchanged.
 
+/** b141.7: cached entry point. The DSP pipeline lives in
+ *  `evaluateBandFullImpl`; identical requests (band content + options) are
+ *  served from the content-keyed LRU in ./cache.ts as a structuredClone. */
 export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalResult> {
+  return memoEval(bandRequestKey(req), () => evaluateBandFullImpl(req));
+}
+
+async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResult> {
   const { band } = req;
 
   // 1. Measurement (with smoothing).
