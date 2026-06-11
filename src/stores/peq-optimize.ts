@@ -4,6 +4,7 @@
 import { createSignal, batch } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import type { PeqBand, PeqConfig, PeqResult, FilterConfig, ExclusionZone, PeqOptimizedTarget, Measurement } from "../lib/types";
+import { cloneFilterConfig } from "../lib/types";
 import {
   activeBand,
   appState,
@@ -173,9 +174,11 @@ function mergeBands(frozen: PeqBand[], optimized: PeqBand[]): PeqBand[] {
 // Snapshot of target/exclusion taken at successful optimization. Used by
 // peqStale to detect divergence later.
 export function captureOptimizedTarget(b: BandState): PeqOptimizedTarget {
+  // b141.6 (audit): clone via the single source of truth, not an ad-hoc
+  // spread — this snapshot is serialized into .pfproj (peq_optimized_target).
   return {
-    high_pass: b.target.high_pass ? { ...b.target.high_pass } : null,
-    low_pass: b.target.low_pass ? { ...b.target.low_pass } : null,
+    high_pass: cloneFilterConfig(b.target.high_pass ?? null),
+    low_pass: cloneFilterConfig(b.target.low_pass ?? null),
     exclusion_zones: JSON.parse(JSON.stringify(b.exclusionZones)),
   };
 }

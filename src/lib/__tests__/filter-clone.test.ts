@@ -1,13 +1,16 @@
 /**
- * Phase 0 test (b140.10): FilterConfig clone consistency across 3 sites.
+ * Phase 0 test (b140.10): FilterConfig clone consistency across copy sites.
  *
- * Today the codebase has 3 independent deep-copy implementations:
- *   - `unwrapFilterConfig` in src/stores/bands.ts:549
- *   - `unwrapFilter`        in src/components/ControlPanel.tsx:125
- *   - `cloneFilter`         in src/lib/project-io.ts:375
+ * b141.6 (audit): the three original ad-hoc copies (unwrapFilterConfig /
+ * unwrapFilter / cloneFilter) were unified into `cloneFilterConfig`
+ * (src/lib/types.ts) in b140.11 and no longer exist. Current copy sites
+ * that MUST stay in sync when adding a FilterConfig field:
+ *   - `cloneFilterConfig`       src/lib/types.ts (single source of truth)
+ *   - `captureOptimizedTarget`  src/stores/peq-optimize.ts (uses cloneFilterConfig)
+ *   - test mirrors              FilterBlock.test.tsx, bands.test.ts (use cloneFilterConfig)
+ *   - the site re-implementations below (update + review on every field add)
  *
- * Phase 1 will collapse them into a single `cloneFilterConfig` in types.ts.
- * This suite locks down the contract BEFORE that change:
+ * This suite locks down the contract:
  *   1. All 3 implementations produce structurally identical output for
  *      the canonical fixture set.
  *   2. A 4th, reference implementation (defined here) matches them too —

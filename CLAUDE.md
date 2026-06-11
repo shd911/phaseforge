@@ -38,7 +38,7 @@
 
 ## Adding fields to shared structures
 - Before adding a field to a struct (e.g. FilterConfig, BandState): grep for ALL functions that copy this struct field-by-field. Known duplicate sites must be enumerated in the prompt and updated in the same commit.
-- Examples of copy sites in this repo: `unwrapFilterConfig` (bands.ts), `unwrapFilter` + `withOverride` (ControlPanel.tsx), `cloneFilter` (project-io.ts), test mirrors (FilterBlock.test.tsx).
+- Copy sites in this repo (актуально с b141.6): `cloneFilterConfig` (lib/types.ts — single source of truth; все прод-сайты идут через него), `captureOptimizedTarget` (stores/peq-optimize.ts), test mirrors (FilterBlock.test.tsx, bands.test.ts), site re-implementations в lib/__tests__/filter-clone.test.ts.
 - Forgetting one site = silent loss of the new field across part of the pipeline. Caught only via UI testing on real workflow, expensive.
 
 ## Testing / Verification

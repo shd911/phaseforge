@@ -15,6 +15,7 @@ import {
   setBandLowPass,
 } from "./bands";
 import type { FilterConfig } from "../lib/types";
+import { cloneFilterConfig } from "../lib/types";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -140,13 +141,10 @@ describe("HP/LP linear_phase isolation", () => {
       // Simulate what FilterBlock.withOverride does:
       // reads current config via SolidJS proxy, spreads it, overrides linear_phase
       const cur = appState.bands[0].target.high_pass!;
+      // b141.6 (audit): mirror via cloneFilterConfig — same as production
+      // withOverride, so new FilterConfig fields can't drop out silently.
       const patched: FilterConfig = {
-        filter_type: cur.filter_type,
-        order: cur.order,
-        freq_hz: cur.freq_hz,
-        shape: cur.shape,
-        linear_phase: cur.linear_phase,  // reads from proxy
-        q: cur.q,
+        ...cloneFilterConfig(cur),
         // now override:
         ...{ linear_phase: false },
       };

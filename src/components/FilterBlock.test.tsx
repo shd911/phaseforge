@@ -24,18 +24,12 @@ function TestFilterBlock(props: {
   const c = () => props.config;
 
   /** Build a full FilterConfig from the current config, overriding specific fields.
-   *  Mirrors the real withOverride exactly. */
+   *  Mirrors the real withOverride exactly — via cloneFilterConfig, so new
+   *  FilterConfig fields (e.g. subsonic_protect, b138) can't silently drop
+   *  out of the mirror (b141.6 audit). */
   const withOverride = (overrides: Partial<FilterConfig>): FilterConfig => {
     const cur = c()!;
-    return {
-      filter_type: cur.filter_type,
-      order: cur.order,
-      freq_hz: cur.freq_hz,
-      shape: cur.shape,
-      linear_phase: cur.linear_phase,
-      q: cur.q,
-      ...overrides,
-    };
+    return { ...cloneFilterConfig(cur), ...overrides };
   };
 
   return (
