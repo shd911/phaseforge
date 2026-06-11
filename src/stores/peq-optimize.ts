@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 import { createSignal, batch } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
-import type { PeqBand, PeqConfig, PeqResult, FilterConfig, ExclusionZone, PeqOptimizedTarget } from "../lib/types";
+import type { PeqBand, PeqConfig, PeqResult, FilterConfig, ExclusionZone, PeqOptimizedTarget, Measurement } from "../lib/types";
 import {
   activeBand,
   appState,
@@ -57,7 +57,13 @@ export function peqRange(): [number, number] {
 // If some PEQ bands are disabled, they are "frozen": their correction is baked
 // into the measurement and the optimizer re-fits only the remaining enabled slots.
 async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBands: PeqBand[] }> {
-  const meas = b.measurement!;
+  // b141.5 (audit): pre-read EVERY store-proxy field into plain objects
+  // BEFORE the first await. Proxy reads after an await observe concurrent
+  // user edits mid-run (mixed pre/post state, lost updates) — project rule
+  // "pre-read в plain objects ДО async loop".
+  const meas: Measurement = JSON.parse(JSON.stringify(b.measurement!));
+  const peqBandsSnap: PeqBand[] = JSON.parse(JSON.stringify(b.peqBands ?? []));
+  const exclusionZonesSnap: ExclusionZone[] = JSON.parse(JSON.stringify(b.exclusionZones ?? []));
   const fLow = b.target?.high_pass?.freq_hz ?? 20;
   const fHigh = b.target?.low_pass?.freq_hz ?? 20000;
   // adaptive passband for refOffset (matches FrequencyPlot autoRef)
@@ -79,7 +85,7 @@ async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBa
   });
 
   // Separate frozen (disabled) bands from active ones
-  const frozenBands = (b.peqBands ?? []).filter((p) => !p.enabled);
+  const frozenBands = peqBandsSnap.filter((p) => !p.enabled);
   let measMag = meas.magnitude;
 
   // If there are frozen bands, bake their correction into measurement
@@ -152,7 +158,7 @@ async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBa
     config,
     hpFreq: fLow,
     lpFreq: fHigh,
-    exclusionZones: b.exclusionZones.length > 0 ? b.exclusionZones : null,
+    exclusionZones: exclusionZonesSnap.length > 0 ? exclusionZonesSnap : null,
   });
   return { result, frozenBands };
 }
