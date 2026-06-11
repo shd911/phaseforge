@@ -237,6 +237,25 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
     }
   }
 
+  // 3b. b141.6 (audit): when the caller supplied its own grid AND a
+  //     measurement exists on a different grid, resample the measurement
+  //     onto `freq` — downstream corrected/measurement curves are combined
+  //     index-wise with peq/cross-section evaluated on `freq`, and the
+  //     result envelope declares `result.freq = req.freq`.
+  if (req.freq && req.freq.length > 0 && measurement) {
+    const mf = measurement.freq;
+    const sameGrid = mf.length === freq.length
+      && mf[0] === freq[0] && mf[mf.length - 1] === freq[freq.length - 1];
+    if (!sameGrid) {
+      measurement = {
+        ...measurement,
+        freq: [...freq],
+        magnitude: resampleOnLogGrid(mf, measurement.magnitude, freq),
+        phase: measurement.phase ? resampleOnLogGrid(mf, measurement.phase, freq) : null,
+      };
+    }
+  }
+
   // 4. PEQ contribution (mag + phase). PEQ phase is always min-phase
   //    physically (biquads); we ask Rust for the complex response so callers
   //    that previously used only peqMag pick up the correct phase too.
