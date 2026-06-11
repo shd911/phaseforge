@@ -3,6 +3,50 @@ use num_complex::Complex64;
 use super::fft::FftEngine;
 use super::interpolation::interpolate_linear_grid;
 
+/// Build the conjugate-symmetric spectrum at `fft_size`, IFFT, return the
+/// real impulse (1/N-normalized).
+fn ifft_real_impulse(
+    freq: &[f64],
+    magnitude: &[f64],
+    phase: &[f64],
+    sample_rate: f64,
+    fft_size: usize,
+) -> Vec<f64> {
+    let n_bins = fft_size / 2 + 1; // positive freq bins (DC to Nyquist)
+
+    // Interpolate measurement onto linear grid: 0 Hz to Nyquist
+    let (_grid_freq, grid_mag, grid_phase_opt) =
+        interpolate_linear_grid(freq, magnitude, Some(phase), n_bins, sample_rate);
+    let grid_phase = grid_phase_opt.expect("phase must be present when Some(phase) was passed");
+
+    // Build complex spectrum for positive frequencies. DC and Nyquist must be
+    // real for a real time-domain signal — project them onto the real axis
+    // explicitly (taking `.re` after the IFFT performs exactly this hermitian
+    // projection implicitly; making it explicit keeps the spectrum honest).
+    let mut spectrum: Vec<Complex64> = Vec::with_capacity(fft_size);
+    for i in 0..n_bins {
+        let amp = 10.0_f64.powf(grid_mag[i] / 20.0);
+        let ph_rad = grid_phase[i].to_radians();
+        if i == 0 || i == n_bins - 1 {
+            spectrum.push(Complex64::new(amp * ph_rad.cos(), 0.0));
+        } else {
+            spectrum.push(Complex64::new(amp * ph_rad.cos(), amp * ph_rad.sin()));
+        }
+    }
+
+    // Mirror for negative frequencies (conjugate symmetry): bins n_bins..fft_size
+    for i in 1..(fft_size - n_bins + 1) {
+        let idx = n_bins - 1 - i;
+        spectrum.push(spectrum[idx].conj());
+    }
+
+    // IFFT (rustfft does not normalize)
+    let mut engine = FftEngine::new();
+    engine.fft_inverse(&mut spectrum);
+    let norm = 1.0 / fft_size as f64;
+    spectrum.iter().map(|c| c.re * norm).collect()
+}
+
 /// Result of impulse response computation
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ImpulseResult {
@@ -33,48 +77,42 @@ pub fn compute_impulse_response(
     phase: &[f64],
     sample_rate: f64,
 ) -> ImpulseResult {
-    // Choose FFT size: next power of 2, at least 4096
-    let fft_size = {
+    // Choose initial FFT size: next power of 2, at least 4096
+    let initial_fft_size = {
         let min_size = 4096usize;
         let desired = (freq.len() * 4).max(min_size);
         desired.next_power_of_two()
     };
-    let n_bins = fft_size / 2 + 1; // positive freq bins (DC to Nyquist)
 
-    // Interpolate measurement onto linear grid: 0 Hz to Nyquist
-    let (_grid_freq, grid_mag, grid_phase_opt) =
-        interpolate_linear_grid(freq, magnitude, Some(phase), n_bins, sample_rate);
-    let grid_phase = grid_phase_opt.expect("phase must be present when Some(phase) was passed");
-
-    // Build complex spectrum for positive frequencies
-    let mut spectrum: Vec<Complex64> = Vec::with_capacity(fft_size);
-    for i in 0..n_bins {
-        let amp = 10.0_f64.powf(grid_mag[i] / 20.0);
-        let ph_rad = grid_phase[i].to_radians();
-        spectrum.push(Complex64::new(amp * ph_rad.cos(), amp * ph_rad.sin()));
+    // b141.6 (audit): the IFFT is circular — a causal tail that has not
+    // decayed within the window wraps into the end of the buffer, which the
+    // pre-peak collection below would render as fake "pre-ringing" before
+    // t=0 (e.g. a Q=8 resonator at 30 Hz showed ~46% of peak at negative
+    // time). Grow the window until the zone the layout never displays
+    // ([half .. 3/4·fft_size]) is at residual level, so neither the post-peak
+    // half nor the pre-peak zone contains wrapped energy. Capped: one 2^18
+    // IFFT (5.5 s @ 48 kHz) is still ~ms-scale work.
+    const MAX_FFT: usize = 1 << 18;
+    let mut fft_size = initial_fft_size.min(MAX_FFT);
+    let impulse_raw: Vec<f64>;
+    let peak: f64;
+    loop {
+        let raw = ifft_real_impulse(freq, magnitude, phase, sample_rate, fft_size);
+        let p = raw.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
+        let mid_max = raw[fft_size / 2..fft_size * 3 / 4]
+            .iter()
+            .map(|v| v.abs())
+            .fold(0.0_f64, f64::max);
+        if mid_max <= p * 0.002 || fft_size >= MAX_FFT {
+            impulse_raw = raw;
+            peak = p;
+            break;
+        }
+        fft_size = (fft_size * 4).min(MAX_FFT);
     }
-
-    // Mirror for negative frequencies (conjugate symmetry): bins n_bins..fft_size
-    for i in 1..(fft_size - n_bins + 1) {
-        let idx = n_bins - 1 - i;
-        spectrum.push(spectrum[idx].conj());
-    }
-
-    // IFFT
-    let mut engine = FftEngine::new();
-    engine.fft_inverse(&mut spectrum);
-
-    // Normalize IFFT output (rustfft does not normalize)
-    let norm = 1.0 / fft_size as f64;
-
-    // Extract real part as impulse response
-    let impulse_raw: Vec<f64> = spectrum.iter().map(|c| c.re * norm).collect();
 
     // Time step
     let dt = 1.0 / sample_rate;
-
-    // Find peak (absolute maximum)
-    let peak = impulse_raw.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
 
     if peak <= 0.0 {
         return ImpulseResult {
@@ -248,6 +286,55 @@ mod tests {
                 i, result.time[i], result.time[i - 1]
             );
         }
+    }
+
+    /// b141.6 (audit MEDIUM): a slowly-decaying causal system (high-Q LF
+    /// resonator) whose tail exceeds the FFT window used to wrap around the
+    /// IFFT buffer and get rendered as "pre-ringing" before t=0 — a false
+    /// visual signal for users judging linear vs min phase by pre-ring.
+    /// The FFT window must grow until the tail actually decays.
+    #[test]
+    fn test_causal_resonator_has_no_fake_preringing() {
+        // 2nd-order LP resonator at f0=30 Hz, Q=8 → decay tau ≈ 2Q/w0 ≈ 85 ms,
+        // comparable to the default 4096-sample window at 48 kHz (85.3 ms).
+        let f0 = 30.0_f64;
+        let q = 8.0_f64;
+        let n = 500;
+        let freq: Vec<f64> = (0..n)
+            .map(|i| 10.0 * (20000.0_f64 / 10.0).powf(i as f64 / (n - 1) as f64))
+            .collect();
+        let mut mag = Vec::with_capacity(n);
+        let mut phase = Vec::with_capacity(n);
+        for &f in &freq {
+            // H(jw) = w0^2 / (w0^2 - w^2 + j*w0*w/Q), normalized s-domain
+            let r = f / f0;
+            let re = 1.0 - r * r;
+            let im = r / q;
+            let denom = re * re + im * im;
+            let h_re = re / denom;
+            let h_im = -im / denom;
+            let amp = (h_re * h_re + h_im * h_im).sqrt();
+            mag.push(20.0 * amp.log10());
+            phase.push(h_im.atan2(h_re).to_degrees());
+        }
+
+        let result = compute_impulse_response(&freq, &mag, &phase, 48000.0);
+
+        // The system is strictly causal: anything before t = -10 ms must be
+        // residual-level only. With the wrap bug the tail re-entered at up to
+        // ~40% of peak.
+        let max_pre: f64 = result
+            .time
+            .iter()
+            .zip(result.impulse.iter())
+            .filter(|(t, _)| **t < -0.010)
+            .map(|(_, v)| v.abs())
+            .fold(0.0, f64::max);
+        assert!(
+            max_pre <= 1.0,
+            "causal resonator shows fake pre-ringing: {:.2}% of peak before -10 ms",
+            max_pre
+        );
     }
 
     #[test]
