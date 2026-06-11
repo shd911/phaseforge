@@ -1,4 +1,5 @@
 {
+  "__platform__": "macos",
   "cep_01_gaussian_hp_subsonic_off": "11c1d7004955bfac8291a38bec9e88a27d67976f00849190e22ee38d7188a252",
   "cep_02_gaussian_hp_subsonic_on": "5482af6e92667965ea12f61160abb5b37dee189cb65bc66a0aa457f1c18e5a43",
   "cep_03_bessel_lp_500": "d9b4b859c9113c64396a794eb7da9fa5b3aec802450014edb73bf1d14ad45fe5",
