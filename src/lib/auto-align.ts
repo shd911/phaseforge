@@ -13,6 +13,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type { BandState } from "../stores/bands";
+import { interpOnGrid } from "./band-evaluator/grid";
 import { unwrapDegrees } from "./plot-helpers";
 
 /** Result of auto-align: map from bandId → delay in seconds */
@@ -20,20 +21,10 @@ export interface AlignResult {
   delays: Record<string, number>;
 }
 
-/** Linear interpolation on log-frequency scale. Returns NaN outside source range. */
-function interpOnGrid(srcFreq: number[], srcData: number[], dstFreq: number[]): number[] {
+/** Linear interpolation, NaN outside source range (b141.6: shared helper). */
+function interpNanOutside(srcFreq: number[], srcData: number[], dstFreq: number[]): number[] {
   if (srcFreq.length < 2) return dstFreq.map(() => NaN);
-  return dstFreq.map(f => {
-    if (f < srcFreq[0] || f > srcFreq[srcFreq.length - 1]) return NaN;
-    let lo = 0, hi = srcFreq.length - 1;
-    while (hi - lo > 1) {
-      const mid = (lo + hi) >> 1;
-      if (srcFreq[mid] <= f) lo = mid; else hi = mid;
-    }
-    const dt = srcFreq[hi] - srcFreq[lo];
-    const frac = dt > 0 ? (f - srcFreq[lo]) / dt : 0;
-    return srcData[lo] + frac * (srcData[hi] - srcData[lo]);
-  });
+  return interpOnGrid(srcFreq, srcData, dstFreq, { outside: "nan" }) as number[];
 }
 
 /**
@@ -128,8 +119,8 @@ export async function computeAutoAlign(bands: BandState[], sampleRate = 48000): 
   // Interpolate all bands onto common freq grid
   for (const bd of bandData) {
     if (bd.freq.length !== nPts || bd.freq[0] !== freq[0]) {
-      const interpMag = interpOnGrid(bd.freq, bd.mag, freq);
-      const interpPh = interpOnGrid(bd.freq, bd.ph, freq);
+      const interpMag = interpNanOutside(bd.freq, bd.mag, freq);
+      const interpPh = interpNanOutside(bd.freq, bd.ph, freq);
       // Replace with interpolated data; NaN → -200 dB / 0°
       bd.mag = interpMag.map(v => isNaN(v) ? -200 : v);
       bd.ph = interpPh.map(v => isNaN(v) ? 0 : v);

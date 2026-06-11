@@ -28,6 +28,7 @@ import {
 } from "../lib/plot-helpers";
 import { hasActiveSubsonicProtect } from "../lib/types";
 import { evaluateBandFull, evaluateSum, reconstructTargetPhase } from "../lib/band-evaluator";
+import { interpOnGrid } from "../lib/band-evaluator/grid";
 import { computeAutoAlign } from "../lib/auto-align";
 
 // Track which inputs have been explicitly clicked — wheel only fires when in set
@@ -1939,14 +1940,8 @@ export default function FrequencyPlot() {
       {
         const b = activeBand();
         const snaps = b ? plotSnapshots(b.id, "export") : [];
-        const interpSnap = (srcFreq: number[], srcData: number[]) => freq.map(f => {
-          if (f < srcFreq[0] || f > srcFreq[srcFreq.length - 1]) return NaN;
-          let lo = 0, hi = srcFreq.length - 1;
-          while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (srcFreq[mid] <= f) lo = mid; else hi = mid; }
-          const dt = srcFreq[hi] - srcFreq[lo];
-          const frac = dt > 0 ? (f - srcFreq[lo]) / dt : 0;
-          return srcData[lo] + frac * (srcData[hi] - srcData[lo]);
-        });
+        const interpSnap = (srcFreq: number[], srcData: number[]) =>
+          interpOnGrid(srcFreq, srcData, freq, { outside: "nan" }) as number[];
         for (const snap of snaps) {
           if (!snap.freq || (!snap.exportMag && !snap.exportPhase)) continue;
           if (snap.exportMag) {
@@ -2918,23 +2913,8 @@ export default function FrequencyPlot() {
         const extFreq = evalRes.extendedFreq;
         const srcFreq = evalRes.freq;
         const fLo = srcFreq[0], fHi = srcFreq[srcFreq.length - 1];
-        const interp = (src: number[] | null): number[] | null => {
-          if (!src) return null;
-          const out = new Array<number>(extFreq.length);
-          for (let k = 0; k < extFreq.length; k++) {
-            const f = extFreq[k];
-            if (f < fLo || f > fHi) { out[k] = NaN; continue; }
-            let lo = 0, hi = srcFreq.length - 1;
-            while (hi - lo > 1) {
-              const mid = (lo + hi) >> 1;
-              if (srcFreq[mid] <= f) lo = mid; else hi = mid;
-            }
-            const dt = srcFreq[hi] - srcFreq[lo];
-            const frac = dt > 0 ? (f - srcFreq[lo]) / dt : 0;
-            out[k] = src[lo] + frac * (src[hi] - src[lo]);
-          }
-          return out;
-        };
+        const interp = (src: number[] | null): number[] | null =>
+          src ? interpOnGrid(srcFreq, src, extFreq, { outside: "nan" }) as number[] : null;
         evalRes.measurementMag = interp(evalRes.measurementMag);
         evalRes.measurementPhase = interp(evalRes.measurementPhase);
         evalRes.targetMag = interp(evalRes.targetMag);
@@ -3202,19 +3182,7 @@ export default function FrequencyPlot() {
           if (snap.freq.length === result.freq!.length && snap.freq[0] === result.freq![0]) {
             return srcArr;
           }
-          return result.freq!.map(f => {
-            let lo = 0, hi = snap.freq.length - 1;
-            if (f <= snap.freq[0]) return srcArr[0];
-            if (f >= snap.freq[hi]) return srcArr[hi];
-            while (hi - lo > 1) {
-              const mid = (lo + hi) >> 1;
-              if (snap.freq[mid] <= f) lo = mid; else hi = mid;
-            }
-            const vLo = srcArr[lo], vHi = srcArr[hi];
-            if (vLo == null || vHi == null) return null;
-            const t = (f - snap.freq[lo]) / (snap.freq[hi] - snap.freq[lo]);
-            return (vLo as number) + t * ((vHi as number) - (vLo as number));
-          });
+          return interpOnGrid(snap.freq, srcArr, result.freq!, { outside: "clamp" });
         };
 
         const snapMag = snap.mag.length > 0 ? interpolateArr(snap.mag as (number | null)[]) as number[] : null;

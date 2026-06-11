@@ -14,7 +14,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { BandState } from "../../stores/bands";
 import type { PeqBand, TargetResponse } from "../types";
-import { buildCommonGrid, buildLogGrid } from "./grid";
+import { buildCommonGrid, buildLogGrid, interpOnGrid } from "./grid";
 import { appendNoiseFloorTail, computeExtension } from "./extension";
 import { evaluateBandFull, reconstructTargetPhase } from "./evaluate";
 
@@ -84,29 +84,11 @@ function resampleOntoCommon(
   dstFreq: number[],
 ): { mag: number[]; phase: number[] | null } | null {
   if (srcFreq.length < 2) return null;
-  const n = dstFreq.length;
-  const fLo = srcFreq[0], fHi = srcFreq[srcFreq.length - 1];
-  const mag = new Array<number>(n);
-  const phase = srcPhase ? new Array<number>(n) : null;
-  for (let k = 0; k < n; k++) {
-    const f = dstFreq[k];
-    if (f < fLo || f > fHi) {
-      mag[k] = -200;
-      if (phase) phase[k] = 0;
-      continue;
-    }
-    let lo = 0, hi = srcFreq.length - 1;
-    while (hi - lo > 1) {
-      const mid = (lo + hi) >> 1;
-      if (srcFreq[mid] <= f) lo = mid; else hi = mid;
-    }
-    const dt = srcFreq[hi] - srcFreq[lo];
-    const frac = dt > 0 ? (f - srcFreq[lo]) / dt : 0;
-    mag[k] = srcMag[lo] + frac * (srcMag[hi] - srcMag[lo]);
-    if (phase && srcPhase) {
-      phase[k] = srcPhase[lo] + frac * (srcPhase[hi] - srcPhase[lo]);
-    }
-  }
+  // b141.6: shared binary-search interp; fences match the old inline loop.
+  const mag = interpOnGrid(srcFreq, srcMag, dstFreq, { outside: -200 }) as number[];
+  const phase = srcPhase
+    ? interpOnGrid(srcFreq, srcPhase, dstFreq, { outside: 0 }) as number[]
+    : null;
   return { mag, phase };
 }
 
