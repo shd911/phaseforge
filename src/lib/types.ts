@@ -216,15 +216,25 @@ export interface PeqResult {
 // --- Auto Align: FIR ---
 
 export type PhaseMode = "MinimumPhase" | "LinearPhase" | "MixedPhase" | "HybridPhase";
-export type WindowType =
+export const WINDOW_TYPES = [
   // Basic / classical
-  | "Rectangular" | "Bartlett" | "Hann" | "Hamming" | "Blackman"
+  "Rectangular", "Bartlett", "Hann", "Hamming", "Blackman",
   // Blackman-Harris family
-  | "ExactBlackman" | "BlackmanHarris" | "Nuttall3" | "Nuttall4" | "FlatTop"
+  "ExactBlackman", "BlackmanHarris", "Nuttall3", "Nuttall4", "FlatTop",
   // Parametric
-  | "Kaiser" | "DolphChebyshev" | "Gaussian" | "Tukey"
+  "Kaiser", "DolphChebyshev", "Gaussian", "Tukey",
   // Special
-  | "Lanczos" | "Poisson" | "HannPoisson" | "Bohman" | "Cauchy" | "Riesz";
+  "Lanczos", "Poisson", "HannPoisson", "Bohman", "Cauchy", "Riesz",
+] as const;
+
+export type WindowType = (typeof WINDOW_TYPES)[number];
+
+/** b141.6 (audit): validate a window name from a .pfproj — an unknown value
+ *  used to load "successfully", then every FIR generation failed with an
+ *  opaque serde error on the Rust WindowType enum. */
+export function isWindowType(v: unknown): v is WindowType {
+  return typeof v === "string" && (WINDOW_TYPES as readonly string[]).includes(v);
+}
 
 export interface FirConfig {
   taps: number;

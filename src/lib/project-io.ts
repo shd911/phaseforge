@@ -31,7 +31,8 @@ import { MEASUREMENT_COLORS, cloneFilterConfig } from "../lib/types";
 import type { FilterConfig } from "../lib/types";
 import { tolerance, setTolerance, maxBands, setMaxBands, gainRegularization, setGainRegularization, peqFloor, setPeqFloor, peqRangeMode, setPeqRangeMode, peqDirectLow, setPeqDirectLow, peqDirectHigh, setPeqDirectHigh } from "../stores/peq-optimize";
 import type { AppState, BandState, PerMeasurementSettings, FloorBounceConfig, MergeSource } from "../stores/bands";
-import type { Measurement, MergeResult, WindowType } from "../lib/types";
+import type { Measurement, MergeResult } from "../lib/types";
+import { isWindowType } from "../lib/types";
 import { clearHistory } from "../stores/history";
 import { showToast } from "./toast";
 import { openMeasurementAnalysis } from "../components/MeasurementAnalysisDialog";
@@ -534,9 +535,11 @@ export async function restoreState(project: ProjectFile, projDir: string | null)
     const validTabs = ["measurements", "target", "peq", "export"];
     const savedTab = project.active_tab === "align" ? "target" : project.active_tab;
     setActiveTab((validTabs.includes(savedTab) ? savedTab : "measurements") as any);
-    setExportSampleRate(project.export_sample_rate);
-    setExportTaps(project.export_taps);
-    setExportWindow(project.export_window as WindowType);
+    // b141.6 (audit): defaults for hand-edited / ancient projects — undefined
+    // here used to propagate into FirConfig (serde reject) and WAV filenames.
+    setExportSampleRate(project.export_sample_rate ?? 48000);
+    setExportTaps(project.export_taps ?? 65536);
+    setExportWindow(isWindowType(project.export_window) ? project.export_window : "Blackman");
     setExportHybridPhase(project.export_hybrid_phase ?? false);
     setTolerance(project.peq_tolerance ?? 1.0);
     setMaxBands(project.peq_max_bands ?? 20);
