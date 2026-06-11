@@ -2085,19 +2085,38 @@ export default function FrequencyPlot() {
           : null;
         if (gen !== renderGen) return;
 
-        // Target GD (band mode only)
         let targetGdMs: number[] | null = null;
-        if (gdEval && gdEval.targetPhase) {
-          const tgd = computeGroupDelay(freq, gdEval.targetPhase);
-          targetGdMs = tgd.gdMs;
-        }
-
-        // Corrected GD: read evalRes.correctedPhase directly. Single source
-        // of truth — Gaussian/subsonic reconstruction is unified with target.
         let corrGdMs: number[] | null = null;
-        if (gdEval && gdEval.correctedPhase) {
-          const cgd = computeGroupDelay(freq, gdEval.correctedPhase);
-          corrGdMs = cgd.gdMs;
+        if (sumMode) {
+          // b141.12: Σ target / corrected GD from evaluateSum's coherent
+          // phases (call is served from the b141.7 cache — same params as
+          // the SPL render). Phases come wrapped (atan2) — unwrap before
+          // differentiating, then resample onto the measurement GD grid so
+          // all series share one x-axis.
+          const sumRes = await evaluateSum(allBands as BandState[], { sampleRate: exportSampleRate() })
+            .catch((e) => { console.error("[GD] sum eval failed:", e); return null; });
+          if (gen !== renderGen) return;
+          if (sumRes) {
+            const toGd = (ph: number[] | null): number[] | null => {
+              if (!ph) return null;
+              const gd = computeGroupDelay(sumRes.freq, unwrapDegrees(ph));
+              return interpOnGrid(gd.freqOut, gd.gdMs, measGd.freqOut, { outside: "nan" }) as number[];
+            };
+            targetGdMs = toGd(sumRes.sumTargetPhase);
+            corrGdMs = toGd(sumRes.sumCorrectedPhase);
+          }
+        } else {
+          // Target GD (band mode)
+          if (gdEval && gdEval.targetPhase) {
+            const tgd = computeGroupDelay(freq, gdEval.targetPhase);
+            targetGdMs = tgd.gdMs;
+          }
+          // Corrected GD: read evalRes.correctedPhase directly. Single source
+          // of truth — Gaussian/subsonic reconstruction is unified with target.
+          if (gdEval && gdEval.correctedPhase) {
+            const cgd = computeGroupDelay(freq, gdEval.correctedPhase);
+            corrGdMs = cgd.gdMs;
+          }
         }
 
         // GD colors from band
@@ -2726,7 +2745,7 @@ export default function FrequencyPlot() {
             const nSteps = 30;
             const maskWidthX = peakX - clampedMaskStart;
             if (isDb) {
-              ctx.fillStyle = "rgba(34, 197, 94, 0.10)";
+              ctx.fillStyle = "rgba(34, 197, 94, 0.20)";
               ctx.beginPath();
               for (let s = 0; s <= nSteps; s++) {
                 const t = s / nSteps;
@@ -2737,7 +2756,7 @@ export default function FrequencyPlot() {
               const yBot = u.valToPos(-80, "y", true);
               ctx.lineTo(clampedMaskStart, yBot); ctx.lineTo(peakX, yBot);
               ctx.closePath(); ctx.fill();
-              ctx.fillStyle = "rgba(234, 179, 8, 0.08)";
+              ctx.fillStyle = "rgba(234, 179, 8, 0.16)";
               ctx.beginPath();
               for (let s = 0; s <= nSteps; s++) {
                 const t = s / nSteps;
@@ -2748,12 +2767,12 @@ export default function FrequencyPlot() {
               ctx.lineTo(clampedMaskStart, yBot); ctx.lineTo(peakX, yBot);
               ctx.closePath(); ctx.fill();
             } else {
-              ctx.fillStyle = "rgba(234, 179, 8, 0.08)";
+              ctx.fillStyle = "rgba(234, 179, 8, 0.16)";
               ctx.beginPath();
               for (let s = 0; s <= nSteps; s++) { const t = s / nSteps; ctx.lineTo(peakX - t * maskWidthX, u.valToPos(5.0 * Math.exp(-3 * t), "y", true)); }
               for (let s = nSteps; s >= 0; s--) { const t = s / nSteps; ctx.lineTo(peakX - t * maskWidthX, u.valToPos(-5.0 * Math.exp(-3 * t), "y", true)); }
               ctx.closePath(); ctx.fill();
-              ctx.fillStyle = "rgba(34, 197, 94, 0.10)";
+              ctx.fillStyle = "rgba(34, 197, 94, 0.20)";
               ctx.beginPath();
               for (let s = 0; s <= nSteps; s++) { const t = s / nSteps; ctx.lineTo(peakX - t * maskWidthX, u.valToPos(1.0 * Math.exp(-4 * t), "y", true)); }
               for (let s = nSteps; s >= 0; s--) { const t = s / nSteps; ctx.lineTo(peakX - t * maskWidthX, u.valToPos(-1.0 * Math.exp(-4 * t), "y", true)); }
@@ -2761,8 +2780,21 @@ export default function FrequencyPlot() {
             }
           }
           if (maskStartX > plotLeft + 2) {
-            ctx.fillStyle = "rgba(239, 68, 68, 0.08)";
+            ctx.fillStyle = "rgba(239, 68, 68, 0.10)";
             ctx.fillRect(plotLeft, plotTop, maskStartX - plotLeft, plotHeight);
+          }
+          // b141.12: the zone is ~1-2 ms wide under the frequency-aware
+          // model — mark its start with a dashed boundary so it reads at
+          // the default ±30 ms view, not only when zoomed in.
+          if (maskStartX >= plotLeft && peakX > maskStartX) {
+            ctx.strokeStyle = "rgba(34, 197, 94, 0.85)";
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4, 3]);
+            ctx.beginPath();
+            ctx.moveTo(maskStartX, plotTop);
+            ctx.lineTo(maskStartX, plotTop + plotHeight);
+            ctx.stroke();
+            ctx.setLineDash([]);
           }
           ctx.restore();
         }] : [],
