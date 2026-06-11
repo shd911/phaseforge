@@ -101,7 +101,7 @@ fn fresh_id() -> String {
 }
 
 #[tauri::command]
-pub fn create_snapshot(
+pub async fn create_snapshot(
     project_dir: String,
     description: String,
     app_version: String,
@@ -176,14 +176,14 @@ pub fn create_snapshot(
 }
 
 #[tauri::command]
-pub fn list_snapshots(project_dir: String) -> Result<Vec<SnapshotEntry>, String> {
+pub async fn list_snapshots(project_dir: String) -> Result<Vec<SnapshotEntry>, String> {
     let dir = validate_dir(&project_dir)?;
     let idx = read_index(&dir)?;
     Ok(idx.entries)
 }
 
 #[tauri::command]
-pub fn load_snapshot(project_dir: String, id: String) -> Result<ProjectFile, String> {
+pub async fn load_snapshot(project_dir: String, id: String) -> Result<ProjectFile, String> {
     let dir = validate_dir(&project_dir)?;
     validate_id(&id)?;
     let path = snapshots_dir(&dir).join(format!("{id}.pfproj"));
@@ -198,7 +198,7 @@ pub fn load_snapshot(project_dir: String, id: String) -> Result<ProjectFile, Str
 }
 
 #[tauri::command]
-pub fn delete_snapshot(project_dir: String, id: String) -> Result<(), String> {
+pub async fn delete_snapshot(project_dir: String, id: String) -> Result<(), String> {
     let dir = validate_dir(&project_dir)?;
     validate_id(&id)?;
     let snap_path = snapshots_dir(&dir).join(format!("{id}.pfproj"));
@@ -221,7 +221,7 @@ pub fn delete_snapshot(project_dir: String, id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn rebuild_snapshot_index(project_dir: String) -> Result<u32, String> {
+pub async fn rebuild_snapshot_index(project_dir: String) -> Result<u32, String> {
     let dir = validate_dir(&project_dir)?;
     let snap_dir = snapshots_dir(&dir);
     if !snap_dir.is_dir() {

@@ -13,7 +13,7 @@ use tracing::info;
 /// ...
 /// ```
 #[tauri::command]
-pub fn export_target_txt(freq: Vec<f64>, magnitude: Vec<f64>, path: String) -> Result<(), String> {
+pub async fn export_target_txt(freq: Vec<f64>, magnitude: Vec<f64>, path: String) -> Result<(), String> {
     if freq.len() != magnitude.len() {
         return Err("freq and magnitude length mismatch".into());
     }

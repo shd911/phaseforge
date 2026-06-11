@@ -79,14 +79,14 @@ fn validate_export_path(path: &str) -> Result<PathBuf, String> {
 }
 
 #[tauri::command]
-fn import_measurement(path: String) -> Result<Measurement, String> {
+async fn import_measurement(path: String) -> Result<Measurement, String> {
     info!("import_measurement: {}", path);
     let p = PathBuf::from(&path);
     io::import_measurement(&p).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn get_smoothed(
+async fn get_smoothed(
     freq: Vec<f64>,
     magnitude: Vec<f64>,
     config: SmoothingConfig,
@@ -97,13 +97,13 @@ fn get_smoothed(
 
 
 #[tauri::command]
-fn evaluate_target(target: TargetCurve, freq: Vec<f64>) -> Result<TargetResponse, String> {
+async fn evaluate_target(target: TargetCurve, freq: Vec<f64>) -> Result<TargetResponse, String> {
     info!("evaluate_target: {} points", freq.len());
     Ok(target::evaluate(&target, &freq))
 }
 
 #[tauri::command]
-fn evaluate_target_standalone(
+async fn evaluate_target_standalone(
     target: TargetCurve,
     n_points: Option<usize>,
     f_min: Option<f64>,
@@ -119,7 +119,7 @@ fn evaluate_target_standalone(
 }
 
 #[tauri::command]
-fn compute_delay_info(
+async fn compute_delay_info(
     freq: Vec<f64>,
     magnitude: Vec<f64>,
     phase: Vec<f64>,
@@ -132,7 +132,7 @@ fn compute_delay_info(
 }
 
 #[tauri::command]
-fn remove_measurement_delay(
+async fn remove_measurement_delay(
     freq: Vec<f64>,
     magnitude: Vec<f64>,
     phase: Vec<f64>,
@@ -152,7 +152,7 @@ fn remove_measurement_delay(
 
 /// Apply a user-specified delay (manual override).
 #[tauri::command]
-fn apply_manual_delay(
+async fn apply_manual_delay(
     freq: Vec<f64>,
     phase: Vec<f64>,
     delay_seconds: f64,
@@ -193,7 +193,7 @@ fn estimate_delay(freq: &[f64], magnitude: &[f64], phase: &[f64], sample_rate: O
 }
 
 #[tauri::command]
-fn compute_impulse(
+async fn compute_impulse(
     freq: Vec<f64>,
     magnitude: Vec<f64>,
     phase: Vec<f64>,
@@ -207,7 +207,7 @@ fn compute_impulse(
 /// Compute minimum phase from magnitude spectrum via Hilbert transform.
 /// Input: freq (log grid), magnitude (dB). Output: phase (degrees) on same grid.
 #[tauri::command]
-fn compute_minimum_phase(
+async fn compute_minimum_phase(
     freq: Vec<f64>,
     magnitude: Vec<f64>,
 ) -> Result<Vec<f64>, String> {
@@ -259,7 +259,7 @@ fn compute_minimum_phase(
 }
 
 #[tauri::command]
-fn merge_measurements(
+async fn merge_measurements(
     nf_path: String,
     ff_path: String,
     config: MergeConfig,
@@ -271,7 +271,7 @@ fn merge_measurements(
 }
 
 #[tauri::command]
-fn preview_baffle_step(config: BaffleConfig) -> Result<BaffleStepPreview, String> {
+async fn preview_baffle_step(config: BaffleConfig) -> Result<BaffleStepPreview, String> {
     let freq = dsp::generate_log_freq_grid(256, 10.0, 24000.0);
     let result =
         dsp::baffle::compute_baffle_step(&freq, &config).map_err(|e| e.to_string())?;
@@ -292,7 +292,7 @@ fn preview_baffle_step(config: BaffleConfig) -> Result<BaffleStepPreview, String
 // remain for the peq module's own tests.
 
 #[tauri::command]
-fn auto_peq_lma(
+async fn auto_peq_lma(
     freq: Vec<f64>,
     measurement_mag: Vec<f64>,
     target_mag: Option<Vec<f64>>,
@@ -319,7 +319,7 @@ fn auto_peq_lma(
 }
 
 #[tauri::command]
-fn compute_peq_response(
+async fn compute_peq_response(
     freq: Vec<f64>,
     bands: Vec<PeqBand>,
     sample_rate: Option<f64>,
@@ -330,7 +330,7 @@ fn compute_peq_response(
 }
 
 #[tauri::command]
-fn compute_peq_complex(
+async fn compute_peq_complex(
     freq: Vec<f64>,
     bands: Vec<PeqBand>,
     sample_rate: Option<f64>,
@@ -352,7 +352,7 @@ fn compute_peq_complex(
 ///    makeup gain to bring corrected up to target.
 /// 4. Return total (filter + makeup) magnitude and phase corrections.
 #[tauri::command]
-fn compute_cross_section(
+async fn compute_cross_section(
     freq: Vec<f64>,
     high_pass: Option<target::FilterConfig>,
     low_pass: Option<target::FilterConfig>,
@@ -405,7 +405,7 @@ fn compute_cross_section(
 // golden-snapshot baseline; fir::recommend_taps remains for tests.
 
 #[tauri::command]
-fn generate_model_fir(
+async fn generate_model_fir(
     freq: Vec<f64>,
     target_mag: Vec<f64>,
     peq_mag: Vec<f64>,
@@ -427,7 +427,7 @@ fn generate_model_fir(
 /// here only when the configuration is IIR-realisable; otherwise it
 /// keeps calling the original `generate_model_fir` above.
 #[tauri::command]
-fn generate_model_fir_iir(
+async fn generate_model_fir_iir(
     freq: Vec<f64>,
     hp: Option<target::FilterConfig>,
     lp: Option<target::FilterConfig>,
@@ -488,7 +488,7 @@ fn pick_fir_route(
 }
 
 #[tauri::command]
-fn export_fir_wav(impulse: Vec<f64>, sample_rate: f64, path: String) -> Result<(), String> {
+async fn export_fir_wav(impulse: Vec<f64>, sample_rate: f64, path: String) -> Result<(), String> {
     info!("export_fir_wav: {} samples, sr={}, path={}", impulse.len(), sample_rate, path);
 
     // Validate path to prevent path traversal attacks

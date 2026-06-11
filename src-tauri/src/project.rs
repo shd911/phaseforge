@@ -166,7 +166,7 @@ fn default_tab() -> String { "measurements".to_string() }
 const MAX_VERSION: u32 = 2;
 
 #[tauri::command]
-pub fn save_project(path: String, project: ProjectFile) -> Result<(), String> {
+pub async fn save_project(path: String, project: ProjectFile) -> Result<(), String> {
     info!("save_project: {}", path);
     // Security check: prevent path traversal
     let p = std::path::Path::new(&path);
@@ -184,7 +184,7 @@ pub fn save_project(path: String, project: ProjectFile) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn load_project(path: String) -> Result<ProjectFile, String> {
+pub async fn load_project(path: String) -> Result<ProjectFile, String> {
     info!("load_project: {}", path);
     let json = std::fs::read_to_string(&path)
         .map_err(|e| format!("Read error: {e}"))?;
@@ -206,7 +206,7 @@ pub fn load_project(path: String) -> Result<ProjectFile, String> {
 
 /// Create a project folder: `parent_dir/project_name/`
 #[tauri::command]
-pub fn create_project_folder(parent_dir: String, project_name: String) -> Result<String, String> {
+pub async fn create_project_folder(parent_dir: String, project_name: String) -> Result<String, String> {
     // Sanitize project_name: extract only the filename, reject path traversal attempts
     let safe_name = std::path::Path::new(&project_name)
         .file_name()
@@ -257,7 +257,7 @@ fn paths_resolve_to_same_file(source: &std::path::Path, dest: &std::path::Path) 
 
 /// Copy a file into the project folder.
 #[tauri::command]
-pub fn copy_file_to_project(source_path: String, dest_path: String) -> Result<(), String> {
+pub async fn copy_file_to_project(source_path: String, dest_path: String) -> Result<(), String> {
     // Reject paths containing ".." to prevent path traversal
     let dest = std::path::Path::new(&dest_path);
     for component in dest.components() {
@@ -302,7 +302,7 @@ pub fn ensure_dir(path: String) -> Result<(), String> {
 /// Copy all top-level files from source_dir into dest_dir (non-recursive).
 /// Skips subdirectories. Creates dest_dir if it doesn't exist.
 #[tauri::command]
-pub fn copy_dir_contents(source_dir: String, dest_dir: String) -> Result<u32, String> {
+pub async fn copy_dir_contents(source_dir: String, dest_dir: String) -> Result<u32, String> {
     let src = std::path::Path::new(&source_dir);
     let dst = std::path::Path::new(&dest_dir);
     if !src.is_dir() {
@@ -365,7 +365,7 @@ mod tests {
         assert!(original_size > 0);
 
         let same = path.to_string_lossy().to_string();
-        let result = copy_file_to_project(same.clone(), same.clone());
+        let result = tauri::async_runtime::block_on(copy_file_to_project(same.clone(), same.clone()));
         assert!(result.is_ok(), "self-copy must not fail: {:?}", result.err());
 
         let after_size = std::fs::metadata(&path).unwrap().len();
@@ -385,10 +385,10 @@ mod tests {
             writeln!(f, "data").unwrap();
         }
 
-        let result = copy_file_to_project(
+        let result = tauri::async_runtime::block_on(copy_file_to_project(
             src.to_string_lossy().to_string(),
             dst.to_string_lossy().to_string(),
-        );
+        ));
         assert!(result.is_ok(), "normal copy failed: {:?}", result.err());
         assert!(dst.exists());
         assert_eq!(
@@ -416,7 +416,7 @@ mod tests {
         let s2 = std::fs::metadata(&f2).unwrap().len();
 
         let same = dir.to_string_lossy().to_string();
-        let result = copy_dir_contents(same.clone(), same.clone());
+        let result = tauri::async_runtime::block_on(copy_dir_contents(same.clone(), same.clone()));
         assert!(result.is_ok(), "dir self-copy must not fail: {:?}", result.err());
 
         assert_eq!(std::fs::metadata(&f1).unwrap().len(), s1, "a.txt zeroed");
