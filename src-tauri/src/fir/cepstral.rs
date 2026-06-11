@@ -225,6 +225,10 @@ pub fn generate_model_fir(
     // WAV-bound impulse gets the adaptive N/2 shift below — after the
     // realized-response analysis, which must see the unshifted impulse.
     let causal_min_phase = !effective_linear && !use_model_phase && !mixed_gaussian;
+    // b141.15: the mixed-gaussian branch rotates its peak to N/2 by an
+    // impulse-dependent amount — that shift must be subtracted from the
+    // realized phase below, same as the fixed N/2 of the linear branch.
+    let mut mixed_gaussian_shift = 0usize;
     if effective_linear || use_model_phase {
         // Symmetric / mixed impulse: shift peak to center, full window.
         // use_model_phase: the model phase makes the impulse neither fully
@@ -243,6 +247,7 @@ pub fn generate_model_fir(
             .map(|(i, _)| i).unwrap_or(0);
         let shift = (n_fft / 2).wrapping_sub(peak_idx) % n_fft;
         impulse.rotate_right(shift);
+        mixed_gaussian_shift = shift;
         let window = generate_window(n_fft, &config.window);
         for (i, w) in window.iter().enumerate() {
             impulse[i] *= w;
@@ -280,7 +285,13 @@ pub fn generate_model_fir(
     let mut realized_mag_lin: Vec<f64> = Vec::with_capacity(n_bins);
     let mut realized_phase_lin: Vec<f64> = Vec::with_capacity(n_bins);
 
-    let delay_samples = if effective_linear || use_model_phase { (n_fft / 2) as f64 } else { 0.0 };
+    let delay_samples = if effective_linear || use_model_phase {
+        (n_fft / 2) as f64
+    } else {
+        // 0 for the causal min-phase branch (its WAV shift happens after
+        // this analysis); the actual rotate amount for mixed-gaussian.
+        mixed_gaussian_shift as f64
+    };
 
     for i in 0..n_bins {
         let c = realized_spectrum[i];

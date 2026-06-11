@@ -1480,3 +1480,52 @@ use super::*;
             pb_max, infra_at_7hz, attenuation);
     }
 
+
+/// b141.15 — item-5 fix: the MixedPhase + per-filter-Gaussian branch centers
+/// the impulse at N/2 but must compensate that shift in the realized phase,
+/// or the reported phase carries a bogus N/2-sample linear delay. Reference:
+/// the same single Gaussian LP through PhaseMode::MinimumPhase (blanket
+/// Hilbert over the identical magnitude) — passband phases must agree.
+/// NOTE: branch is unreachable from the UI since b141.2 (frontend sends
+/// MixedPhase only with an empty gaussian list) — locked down here anyway.
+#[test]
+fn mixed_gaussian_realized_phase_matches_min_phase_reference() {
+    let n = 512;
+    let freq: Vec<f64> = (0..n)
+        .map(|i| 5.0 * (40000f64 / 5.0).powf(i as f64 / (n - 1) as f64))
+        .collect();
+    let (fc, shape) = (500.0_f64, 1.0_f64);
+    let ln2 = 2.0_f64.ln();
+    let target_mag: Vec<f64> = freq.iter().map(|&f| {
+        let lp_lin = (-ln2 * (f / fc).powf(2.0 * shape)).exp();
+        if lp_lin > 1e-20 { 20.0 * lp_lin.log10() } else { -400.0 }
+    }).collect();
+    let zero_phase = vec![0.0; n];
+
+    let reference = generate_model_fir(
+        &freq, &target_mag, &[], &zero_phase,
+        &b139_3_fir_config(PhaseMode::MinimumPhase),
+    ).expect("min-phase reference");
+
+    let mixed_cfg = FirConfig {
+        gaussian_min_phase_filters: vec![GaussianFilterInfo {
+            freq_hz: fc, shape, is_lowpass: true,
+        }],
+        ..b139_3_fir_config(PhaseMode::MixedPhase)
+    };
+    let mixed = generate_model_fir(&freq, &target_mag, &[], &zero_phase, &mixed_cfg)
+        .expect("mixed gaussian run");
+
+    // Passband 50–250 Hz: well below fc, |phase| modest, both paths must agree.
+    let mut max_diff = 0.0_f64;
+    for (i, &f) in freq.iter().enumerate() {
+        if f < 50.0 || f > 250.0 { continue; }
+        let d = (mixed.realized_phase[i] - reference.realized_phase[i]).abs();
+        if d > max_diff { max_diff = d; }
+    }
+    assert!(
+        max_diff < 5.0,
+        "MixedPhase+gaussian realized phase diverges from min-phase reference \
+         by {max_diff:.1}° in passband — N/2 center shift not compensated?",
+    );
+}
