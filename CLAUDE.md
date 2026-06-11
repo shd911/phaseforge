@@ -1,6 +1,6 @@
 # PhaseForge — Project Rules
 
-> **Last reviewed:** 2026-05-10 (after b140.8 IIR min-phase + REPhase parity release).
+> **Last reviewed:** 2026-06-11 (after b141.13 release: audit fixes, BandEvalResult cache, IR/Step conventions, UI batch).
 > Файл актуализируется в конце каждой длинной сессии. Перед началом новой
 > — пробежать сверху вниз и удалить устаревшее.
 
@@ -23,6 +23,15 @@
   - **FFT cepstral path** (`fir/mod.rs::generate_model_fir`) — every
     other configuration: Linear-Phase main, Composite + subsonic,
     Gaussian, Bessel, Custom measured targets.
+- **Alignment delay convention** (b141.10): положительное значение =
+  полоса ИГРАЕТ ПОЗЖЕ (паритет с HQPlayer). Единая точка —
+  `alignmentPhaseDeg` (types.ts, −360·f·τ); legacy-проекты мигрируются
+  при загрузке (`migrateDelayConvention`). Менять знак где-либо
+  точечно — запрещено.
+- **Golden baselines платформо-зависимы** (b141.13): хэши FIR бит-точные,
+  libm (tan/cos) различается macOS↔Linux. golden_fir скипается на чужой
+  ОС, pipeline_contract сравнивает только routes. Re-baseline: удалить
+  json и прогнать тест дважды.
 - **WAV peak convention** (b141.8): linear-phase и IIR-путь — пик у N/2
   (IIR — адаптивный сдвиг `min(N/2, n-1-last_significant)`, хвост не
   режется); cepstral min-phase (Gaussian/Bessel/subsonic/custom) —
