@@ -11,7 +11,7 @@
 
   --text-primary: #d4d4d8;
   --text-secondary: #8b8b96;
-  --text-muted: #6f6f7c; /* b141.4: was #5a5a66 (~2.3:1, below WCAG); lifted to ~3:1 */
+  --text-muted: #8b8b9d; /* b141.11: ~4.5:1 на тёмном фоне (WCAG AA) */ /* b141.4: was #5a5a66 (~2.3:1, below WCAG); lifted to ~3:1 */
   --text-on-accent: #fff; /* b141.4: text/icons on accent or danger fills */
 
   --accent: #4a90d9;
@@ -36,7 +36,7 @@
   --target-color: #FFD700;
 
   /* Typography scale */
-  --fs-xxs: 8px;     /* ultra-compact buttons (AUTO) */
+  --fs-xxs: 9px; /* b141.11: 8px нечитаем (кнопка AUTO) */     /* ultra-compact buttons (AUTO) */
   --fs-xs: 9px;      /* hints, units (ms, dB), footnotes */
   --fs-sm: 10px;     /* matrix cells, compact controls, labels */
   --fs-base: 11px;   /* main text, inputs, form labels */
@@ -556,9 +556,22 @@ body {
   text-align: center;
   color: inherit;
 }
+/* b141.11: dashed curves are indicated by a dashed LINE sample, not an
+   11px box with a 1.5px dashed border (unreadable). Border-color is set
+   inline per entry; on/off state is the standard .legend-off dimming. */
 .legend-swatch-dash {
-  border-style: dashed;
+  width: 18px;
+  height: 0;
+  border: none;
+  border-top: 2.5px dashed;
+  border-radius: 0;
   background: transparent !important;
+  align-self: center;
+}
+
+.legend-item:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .legend-text {

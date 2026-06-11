@@ -15,6 +15,7 @@ import MergeDialog from "./MergeDialog";
 import { exportBandWav, mixedWavConventionWarning } from "../lib/fir-export";
 import { showToast } from "../lib/toast";
 import { alignmentPhaseDeg } from "../lib/types";
+import { preRingZoneMs } from "../lib/pre-ring";
 import { autoRefLevel } from "../lib/band-evaluator/extension";
 import { peqStale } from "../stores/peq-optimize";
 import { showStaleConfirmDialog } from "./StalePeqExportDialog";
@@ -2300,12 +2301,6 @@ export default function FrequencyPlot() {
         // Σ corrected IR — populated by evaluateSum below (single source of truth).
         let corrSum: { timeMs: number[]; impulse: number[]; step: number[] } | null = null;
 
-        // HP freq for masking zone (use lowest band's HP or 20)
-        const hpFreq = bands.reduce((min, sb) => {
-          const hp = sb.target?.high_pass?.freq_hz;
-          return hp && hp < min ? hp : min;
-        }, 20);
-
         // Σ IR/Step from evaluateSum's unified frequency-domain coherent sum.
         try {
           const sumResult = await evaluateSum(allBands as BandState[], { includeIr: true, sampleRate: exportSampleRate() });
@@ -2351,7 +2346,7 @@ export default function FrequencyPlot() {
           }
         }
 
-        renderIrStepChart(measBands, measSum, targetBands, targetSum, corrBands, corrSum, hpFreq, irCfg);
+        renderIrStepChart(measBands, measSum, targetBands, targetSum, corrBands, corrSum, preRingZoneMs(allBands as BandState[]), irCfg);
 
       } else {
         // ============================================================
@@ -2391,9 +2386,6 @@ export default function FrequencyPlot() {
           step: irEval.ir.corrected.step,
         }] : [];
 
-        // HP freq for masking zone
-        const hpFreq = band?.target?.high_pass?.freq_hz ?? 20;
-
         // Save IR data for snapshot capture
         // Priority: corrected → target → measurement
         {
@@ -2409,7 +2401,7 @@ export default function FrequencyPlot() {
           }
         }
 
-        renderIrStepChart(measBands, null, targetBands, null, corrBands, null, hpFreq, irCfg);
+        renderIrStepChart(measBands, null, targetBands, null, corrBands, null, band ? preRingZoneMs([band] as BandState[]) : null, irCfg);
       }
     } catch (e) {
       console.error("Time tab render failed:", e);
@@ -2423,7 +2415,7 @@ export default function FrequencyPlot() {
     targetSum: { timeMs: number[]; impulse: number[]; step: number[] } | null,
     corrBands: IrBandData[],
     corrSum: { timeMs: number[]; impulse: number[]; step: number[] } | null,
-    hpFreq: number,
+    preRingMs: number | null,
     irCfg: { db: boolean; masking: boolean },
   ) {
     try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
@@ -2462,7 +2454,10 @@ export default function FrequencyPlot() {
       irCurXMin = irUserXScale.min;
       irCurXMax = irUserXScale.max;
     }
-    const maskingMs = hpFreq > 0 ? (1.5 / hpFreq) * 1000 : 20;
+    // b141.11: zone = 2 periods of the lowest LINEAR-PHASE crossover (the
+    // actual pre-ringing source). null = min-phase system, zone disabled.
+    const maskingMs = preRingMs ?? 0;
+    const maskingActive = irCfg.masking && preRingMs != null;
 
     // Resample srcData onto timeMs grid (linear interpolation)
     const resampleOnto = (srcTime: number[], srcData: number[]): number[] => {
@@ -2717,7 +2712,7 @@ export default function FrequencyPlot() {
       legend: { show: false },
       cursor: { drag: { x: false, y: false, setScale: false } },
       hooks: {
-        draw: irCfg.masking ? [(u: uPlot) => {
+        draw: maskingActive ? [(u: uPlot) => {
           const ctx = u.ctx;
           const plotLeft = u.bbox.left;
           const plotTop = u.bbox.top;
@@ -3797,13 +3792,22 @@ export default function FrequencyPlot() {
     chart = undefined;
   });
 
+  // b141.11: Export-вкладка скрыта в режиме «Сумма» — если SUM включили,
+  // находясь на ней, возвращаемся на SPL.
+  createEffect(() => {
+    if (isSum() && plotTab() === "export") setPlotTab("freq");
+  });
+
   return (
     <div class="plot-wrapper">
       <div class="plot-tabs-strip">
         <button class={`plot-tab ${plotTab() === "freq" ? "active" : ""}`} onClick={() => setPlotTab("freq")} title="АЧХ + фаза (магнитуда и фаза по частоте)">SPL</button>
         <button class={`plot-tab ${plotTab() === "ir" || plotTab() === "step" ? "active" : ""}`} onClick={() => setPlotTab("ir")} title="Импульсная и переходная характеристика">IR/Step</button>
         <button class={`plot-tab ${plotTab() === "gd" ? "active" : ""}`} onClick={() => setPlotTab("gd")} title="Групповая задержка (мс)">GD</button>
-        <button class={`plot-tab ${plotTab() === "export" ? "active" : ""}`} onClick={() => setPlotTab("export")} title="Предпросмотр модели и FIR + экспорт WAV">Export</button>
+        {/* b141.11: экспорт по-полосный — в режиме «Сумма» вкладка скрыта */}
+        <Show when={!isSum()}>
+          <button class={`plot-tab ${plotTab() === "export" ? "active" : ""}`} onClick={() => setPlotTab("export")} title="Предпросмотр модели и FIR + экспорт WAV">Export</button>
+        </Show>
       </div>
       <div class="cursor-readout">
         <div class="readout-curves-area">
@@ -3812,7 +3816,7 @@ export default function FrequencyPlot() {
             <span class="readout-value">{cursorFreq()}</span>
           </span>
           {/* Per-curve values at cursor — colored by curve */}
-          <For each={cursorValues()}>
+          <For each={cursorValues().slice(0, 12)}>
             {(cv) => (
               <span class="readout-item readout-curve-val">
                 <span class="readout-curve-dot" style={{ background: cv.color }} />
@@ -3820,6 +3824,11 @@ export default function FrequencyPlot() {
               </span>
             )}
           </For>
+          <Show when={cursorValues().length > 12}>
+            <span class="readout-item readout-curve-val" title="Показаны первые 12 кривых">
+              <span class="readout-value">+{cursorValues().length - 12}</span>
+            </span>
+          </Show>
           <Show when={cursorValues().length === 0}>
             <span class="readout-item">
               <span class="readout-label">SPL:</span>
@@ -3893,7 +3902,7 @@ export default function FrequencyPlot() {
                 <Show when={plotTab() === "freq"}>
                   <span class="readout-sep" />
                   <button class="tb-btn tb-btn-xs primary" onClick={handleImportMeasurement} title="Import measurement file">Import</button>
-                  <button class="tb-btn tb-btn-xs" onClick={() => setShowMergeDialog(true)} title="Merge NF+FF">Merge</button>
+                  <button class="tb-btn tb-btn-xs" onClick={() => setShowMergeDialog(true)} title="Мердж NF+FF">Мердж</button>
                 </Show>
 
                 {/* Smooth — all tabs except Export */}
@@ -3997,13 +4006,23 @@ export default function FrequencyPlot() {
                     }}
                   </For>
                   <tr>
-                    <td class="sum-row-header" onClick={() => { setIrShowMasking(!irShowMasking()); irToggleRedraw(); }}>ZONES</td>
-                    <td class="sum-cell" colspan="2">
-                      <button class={`legend-item ${irShowMasking() ? "" : "legend-off"}`} onClick={() => { setIrShowMasking(!irShowMasking()); irToggleRedraw(); }}>
-                        <span class="legend-swatch" style={{ "background-color": irShowMasking() ? "rgba(34,197,94,0.5)" : "transparent", "border-color": "rgba(34,197,94,0.5)" }} />
-                        <span class="legend-text" style={{ "font-size": "var(--fs-xs)" }}>Pre-ringing</span>
-                      </button>
-                    </td>
+                    {(() => {
+                      const zone = () => preRingZoneMs(appState.bands as BandState[]);
+                      const zoneTitle = () => zone() != null
+                        ? `Зона предзвона: ${zone()!.toFixed(2)} мс — 2 периода нижнего linear-phase кроссовера`
+                        : "Нет linear-phase кроссоверов — предзвон не ожидается";
+                      return (
+                        <>
+                          <td class="sum-row-header" title={zoneTitle()} onClick={() => { if (zone() == null) return; setIrShowMasking(!irShowMasking()); irToggleRedraw(); }}>ZONES</td>
+                          <td class="sum-cell" colspan="2">
+                            <button class={`legend-item ${irShowMasking() && zone() != null ? "" : "legend-off"}`} disabled={zone() == null} title={zoneTitle()} onClick={() => { setIrShowMasking(!irShowMasking()); irToggleRedraw(); }}>
+                              <span class="legend-swatch" style={{ "background-color": irShowMasking() && zone() != null ? "rgba(34,197,94,0.5)" : "transparent", "border-color": "rgba(34,197,94,0.5)" }} />
+                              <span class="legend-text" style={{ "font-size": "var(--fs-xs)" }}>Pre-ringing</span>
+                            </button>
+                          </td>
+                        </>
+                      );
+                    })()}
                   </tr>
                 </tbody>
               </table>
@@ -4029,7 +4048,8 @@ export default function FrequencyPlot() {
                   <td class="sum-row-header" onClick={() => { row.set(!row.sig()); gdToggleRedraw(); }}>{row.label}</td>
                   <td class="sum-cell">
                     <button class={`legend-item ${row.sig() ? "" : "legend-off"}`} onClick={() => { row.set(!row.sig()); gdToggleRedraw(); }}>
-                      <span class="legend-swatch" style={{ "background-color": row.sig() ? row.color() : "transparent", "border-color": row.color() }} />
+                      {/* b141.11: TARGET is drawn dashed on the chart — legend mirrors it */}
+                      <span class={`legend-swatch ${row.label === "TARGET" ? "legend-swatch-dash" : ""}`} style={{ "background-color": row.sig() ? row.color() : "transparent", "border-color": row.color() }} />
                     </button>
                   </td>
                 </tr>
@@ -4112,9 +4132,9 @@ export default function FrequencyPlot() {
               class="tb-btn primary"
               disabled={exportingWav() || !activeBand()}
               onClick={handleExportWav}
-              title="Export FIR as WAV"
+              title={!activeBand() ? "Выберите бэнд для экспорта" : "Экспортировать FIR в WAV"}
             >
-              {exportingWav() ? "Exporting..." : "Export WAV"}
+              {exportingWav() ? "Экспорт…" : "Экспорт WAV"}
             </button>
           </div>
         </div>
@@ -4312,7 +4332,7 @@ export default function FrequencyPlot() {
                                               const idx = () => legendEntries.findIndex(le => le.seriesIdx === e().seriesIdx);
                                               return (
                                                 <button class={`legend-item ${e().visible ? "" : "legend-off"}`} onClick={() => { const i = idx(); if (i >= 0) toggleLegendEntry(i); }} style={{ padding: "1px var(--space-xxs)" }}>
-                                                  <span class="legend-swatch legend-swatch-dash" style={{ "border-color": e().color, "background-color": e().visible ? e().color : "transparent" }} />
+                                                  <span class="legend-swatch legend-swatch-dash" style={{ "border-color": e().color }} />
                                                 </button>
                                               );
                                             }}
