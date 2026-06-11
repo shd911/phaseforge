@@ -236,9 +236,15 @@ fn collect_entries() -> BTreeMap<String, Entry> {
 // Tests
 // ---------------------------------------------------------------------------
 
+const PLATFORM_KEY: &str = "__platform__";
+
 #[test]
 fn pipeline_contract_matches_baseline() {
-    let current = collect_entries();
+    let mut current = collect_entries();
+    current.insert(
+        PLATFORM_KEY.to_string(),
+        Entry { route: std::env::consts::OS.to_string(), hash: String::new() },
+    );
     match load_baseline() {
         None => {
             save_baseline(&current);
@@ -249,12 +255,30 @@ fn pipeline_contract_matches_baseline() {
                 fixtures_path().display(),
             );
         }
-        Some(baseline) => {
+        Some(mut baseline) => {
+            // b141.13: FIR hashes are bit-exact and platform-specific (libm
+            // differs macOS vs Linux), but ROUTES are not — on a foreign
+            // platform compare routing parity only, skip the hash check.
+            let baseline_os = baseline.remove(PLATFORM_KEY).map(|e| e.route);
+            let current_os = current.remove(PLATFORM_KEY).map(|e| e.route);
+            let same_platform = baseline_os == current_os;
+            if !same_platform {
+                eprintln!(
+                    "pipeline_contract: baseline from {:?}, running on {:?} — \
+                     comparing ROUTES only (hashes are platform-specific).",
+                    baseline_os.as_deref().unwrap_or("unknown(legacy)"),
+                    current_os.as_deref().unwrap_or("unknown"),
+                );
+            }
             let mut diffs = Vec::new();
             for (k, v) in &current {
                 match baseline.get(k) {
                     None => diffs.push(format!("  + NEW   {}: route={} hash={}", k, v.route, v.hash)),
-                    Some(b) if b != v => diffs.push(format!(
+                    Some(b) if b.route != v.route => diffs.push(format!(
+                        "  ! ROUTE DRIFT {}\n      expected: {}\n      got:      {}",
+                        k, b.route, v.route,
+                    )),
+                    Some(b) if same_platform && b.hash != v.hash => diffs.push(format!(
                         "  ! DRIFT {}\n      expected: route={} hash={}\n      got:      route={} hash={}",
                         k, b.route, b.hash, v.route, v.hash,
                     )),

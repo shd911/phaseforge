@@ -1,4 +1,8 @@
 {
+  "__platform__": {
+    "route": "macos",
+    "hash": ""
+  },
   "contract_01_lr4_hp_only": {
     "route": "Iir",
     "hash": "9a879f70c4ea7cb5d529b2b83afd021de00328349010ca60b095b8c3f1a116d4"
