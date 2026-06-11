@@ -282,9 +282,9 @@ use super::*;
         let result = generate_model_fir(&freq, &mag, &[], &phase, &config).unwrap();
         assert_eq!(result.taps, 8192);
         assert_eq!(result.sample_rate, 48000.0);
-        assert_eq!(result.time_ms.len(), 8192);
-        assert!(result.time_ms[0] < 0.001); // starts near 0
-        assert!(result.time_ms[8191] > 170.0); // ~170ms for 8192 taps at 48k
+        // b141.6: time_ms removed from the payload — frontend derives the
+        // ramp from taps + sample_rate. Length contract moves to impulse.
+        assert_eq!(result.impulse.len(), 8192);
     }
 
     #[test]

@@ -105,7 +105,9 @@ pub struct FirResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FirModelResult {
     pub impulse: Vec<f64>,
-    pub time_ms: Vec<f64>,
+    // b141.6 (audit): time_ms removed from the IPC payload — it was a pure
+    // linear ramp (i * 1000 / sample_rate), ~0.5-1.3 MB of JSON per call at
+    // 65k taps. The frontend derives it from taps + sample_rate.
     pub realized_mag: Vec<f64>,
     pub realized_phase: Vec<f64>,
     pub taps: usize,

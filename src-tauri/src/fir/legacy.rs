@@ -377,16 +377,11 @@ pub fn generate_hybrid_fir(
     let realized_mag = interp_1d(&lin_freq, &realized_mag_lin, meas_freq);
     let realized_phase = interp_1d(&lin_freq, &realized_phase_lin, meas_freq);
 
-    // Build time axis in ms
-    let dt_ms = 1000.0 / config.sample_rate;
-    let time_ms: Vec<f64> = (0..n_fft).map(|i| i as f64 * dt_ms).collect();
-
     let causality = compute_causality(&impulse);
     info!("generate_hybrid_fir: causality={:.4} ({}%)", causality, (causality * 100.0) as u32);
 
     Ok(FirModelResult {
         impulse,
-        time_ms,
         realized_mag,
         realized_phase,
         taps: n_fft,

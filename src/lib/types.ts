@@ -215,7 +215,9 @@ export interface PeqResult {
 
 // --- Auto Align: FIR ---
 
-export type PhaseMode = "MinimumPhase" | "LinearPhase" | "MixedPhase" | "HybridPhase";
+// b141.6 (audit): "Composite" added — route.ts sends it as the main FIR
+// phase_mode; the union was missing it, leaving the routing field untyped.
+export type PhaseMode = "MinimumPhase" | "LinearPhase" | "MixedPhase" | "HybridPhase" | "Composite";
 export const WINDOW_TYPES = [
   // Basic / classical
   "Rectangular", "Bartlett", "Hann", "Hamming", "Blackman",
@@ -261,7 +263,7 @@ export interface FirResult {
 
 export interface FirModelResult {
   impulse: number[];
-  time_ms: number[];
+  // b141.6: time_ms removed from the Rust payload — derive client-side.
   realized_mag: number[];
   realized_phase: number[];
   taps: number;

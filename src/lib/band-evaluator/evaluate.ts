@@ -393,7 +393,8 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
     const realizedPhaseOnFreq = resampleOnLogGrid(firFreq, result.realized_phase, freq);
     fir = {
       impulse: result.impulse,
-      timeMs: result.time_ms,
+      // b141.6: ramp derived locally — was a ~MB linear array in the payload.
+      timeMs: Array.from({ length: result.impulse.length }, (_, i) => i * 1000 / result.sample_rate),
       realizedMag: realizedMagOnFreq,
       realizedPhase: realizedPhaseOnFreq,
       taps: result.taps,

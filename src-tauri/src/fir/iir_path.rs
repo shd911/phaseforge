@@ -436,9 +436,6 @@ pub fn generate_min_phase_fir_iir(input: &IirPathInput) -> Result<FirModelResult
     for v in wav_impulse.iter_mut() { *v *= norm_linear; }
     let realized_mag: Vec<f64> = realized_mag.iter().map(|&v| v - norm_db).collect();
 
-    let dt_ms = 1000.0 / sr;
-    let time_ms: Vec<f64> = (0..n_fft).map(|i| i as f64 * dt_ms).collect();
-
     // Causality computed on the *centered* WAV impulse — that's what the
     // user sees in the UI status alongside the WAV file content.
     let causality = compute_causality(&wav_impulse);
@@ -456,7 +453,6 @@ pub fn generate_min_phase_fir_iir(input: &IirPathInput) -> Result<FirModelResult
 
     Ok(FirModelResult {
         impulse,
-        time_ms,
         realized_mag,
         realized_phase,
         taps: n_fft,

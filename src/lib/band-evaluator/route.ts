@@ -19,7 +19,8 @@ import { pickFirRoute } from "../fir-routing";
  *  the band-evaluator unpacker doesn't need to change. */
 export interface FirInvokeResult {
   impulse: number[];
-  time_ms: number[];
+  // b141.6: time_ms dropped from the IPC payload (pure linear ramp, ~MB of
+  // JSON at 65k taps) — derived client-side from impulse.length + sample_rate.
   realized_mag: number[];
   realized_phase: number[];
   taps: number;

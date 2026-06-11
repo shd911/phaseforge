@@ -330,16 +330,11 @@ pub fn generate_model_fir(
 
     info!("generate_model_fir: norm_db={:.2} → passband normalized to 0 dB", norm_db);
 
-    // 9. Time axis
-    let dt_ms = 1000.0 / config.sample_rate;
-    let time_ms: Vec<f64> = (0..n_fft).map(|i| i as f64 * dt_ms).collect();
-
     let causality = compute_causality(&impulse);
     info!("generate_model_fir: causality={:.4} ({}%)", causality, (causality * 100.0) as u32);
 
     Ok(FirModelResult {
         impulse,
-        time_ms,
         realized_mag,
         realized_phase,
         taps: n_fft,
