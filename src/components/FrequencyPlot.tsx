@@ -29,7 +29,7 @@ import {
 } from "../lib/plot-helpers";
 import { hasActiveSubsonicProtect } from "../lib/types";
 import { evaluateBandFull, evaluateSum, reconstructTargetPhase } from "../lib/band-evaluator";
-import { interpOnGrid } from "../lib/band-evaluator/grid";
+import { interpOnGrid, interpPhaseOnGrid } from "../lib/band-evaluator/grid";
 import { computeAutoAlign } from "../lib/auto-align";
 
 // Track which inputs have been explicitly clicked — wheel only fires when in set
@@ -1949,6 +1949,9 @@ export default function FrequencyPlot() {
         const snaps = b ? plotSnapshots(b.id, "export") : [];
         const interpSnap = (srcFreq: number[], srcData: number[]) =>
           interpOnGrid(srcFreq, srcData, freq, { outside: "nan" }) as number[];
+        // b141.9: wrapped phase — shortest-arc interp (no bogus mid-wrap bins).
+        const interpSnapPh = (srcFreq: number[], srcData: number[]) =>
+          interpPhaseOnGrid(srcFreq, srcData, freq, { outside: "nan" }) as number[];
         for (const snap of snaps) {
           if (!snap.freq || (!snap.exportMag && !snap.exportPhase)) continue;
           if (snap.exportMag) {
@@ -1957,7 +1960,7 @@ export default function FrequencyPlot() {
           }
           if (snap.exportPhase) {
             opts.series.push({ label: snap.label + " °", stroke: snap.color + "80", width: 1, dash: [4, 3], scale: "phase" });
-            expData.push(interpSnap(snap.freq, snap.exportPhase));
+            expData.push(interpSnapPh(snap.freq, snap.exportPhase));
           }
         }
       }
@@ -2922,18 +2925,22 @@ export default function FrequencyPlot() {
         const fLo = srcFreq[0], fHi = srcFreq[srcFreq.length - 1];
         const interp = (src: number[] | null): number[] | null =>
           src ? interpOnGrid(srcFreq, src, extFreq, { outside: "nan" }) as number[] : null;
+        // b141.9: phase arrays are wrapped (±180) — shortest-arc interp so
+        // the LR-crossover wrap at fc doesn't draw a bogus mid-value bin.
+        const interpPh = (src: number[] | null): number[] | null =>
+          src ? interpPhaseOnGrid(srcFreq, src, extFreq, { outside: "nan" }) as number[] : null;
         evalRes.measurementMag = interp(evalRes.measurementMag);
-        evalRes.measurementPhase = interp(evalRes.measurementPhase);
+        evalRes.measurementPhase = interpPh(evalRes.measurementPhase);
         evalRes.targetMag = interp(evalRes.targetMag);
-        evalRes.targetPhase = interp(evalRes.targetPhase);
+        evalRes.targetPhase = interpPh(evalRes.targetPhase);
         evalRes.peqMag = interp(evalRes.peqMag) ?? new Array(extFreq.length).fill(0);
-        evalRes.peqPhase = interp(evalRes.peqPhase) ?? new Array(extFreq.length).fill(0);
+        evalRes.peqPhase = interpPh(evalRes.peqPhase) ?? new Array(extFreq.length).fill(0);
         evalRes.correctedMag = interp(evalRes.correctedMag);
-        evalRes.correctedPhase = interp(evalRes.correctedPhase);
+        evalRes.correctedPhase = interpPh(evalRes.correctedPhase);
         evalRes.combinedTargetMag = interp(evalRes.combinedTargetMag);
-        evalRes.combinedTargetPhase = interp(evalRes.combinedTargetPhase);
+        evalRes.combinedTargetPhase = interpPh(evalRes.combinedTargetPhase);
         evalRes.crossSectionMag = interp(evalRes.crossSectionMag);
-        evalRes.crossSectionPhase = interp(evalRes.crossSectionPhase);
+        evalRes.crossSectionPhase = interpPh(evalRes.crossSectionPhase);
         evalRes.freq = extFreq;
       }
 
@@ -3191,9 +3198,16 @@ export default function FrequencyPlot() {
           }
           return interpOnGrid(snap.freq, srcArr, result.freq!, { outside: "clamp" });
         };
+        // b141.9: wrapped phase — shortest-arc interp (null gaps still propagate).
+        const interpolatePhaseArr = (srcArr: (number | null)[]): (number | null)[] => {
+          if (snap.freq.length === result.freq!.length && snap.freq[0] === result.freq![0]) {
+            return srcArr;
+          }
+          return interpPhaseOnGrid(snap.freq, srcArr, result.freq!, { outside: "clamp" });
+        };
 
         const snapMag = snap.mag.length > 0 ? interpolateArr(snap.mag as (number | null)[]) as number[] : null;
-        const snapPhase = snap.phase.length > 0 ? interpolateArr(snap.phase) : null;
+        const snapPhase = snap.phase.length > 0 ? interpolatePhaseArr(snap.phase) : null;
 
         // Magnitude series (only if captured)
         if (snapMag && snapMag.length > 0) {

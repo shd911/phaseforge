@@ -49,6 +49,19 @@ export interface InterpOptions {
   /** Policy outside the source range: "clamp" to edge values (default),
    *  "nan", or a numeric fence value (e.g. -200 dB). */
   outside?: "clamp" | "nan" | number;
+  /** b141.9: treat values as WRAPPED phase in degrees and interpolate along
+   *  the shortest arc (mod 360). Plain lerp across a ±180 wrap (e.g. an LR
+   *  crossover passes through exactly ±180 at fc) lands near 0° and poisons
+   *  the bin — partial cancellation in any later coherent sum. Do NOT use
+   *  for unwrapped/continuous phase (FIR realized phase): a legitimate
+   *  >180° change between samples would be folded incorrectly. */
+  phase?: boolean;
+}
+
+/** Shortest signed angular distance, result in (-180, 180]. */
+export function shortestPhaseDelta(deltaDeg: number): number {
+  const d = ((deltaDeg + 180) % 360 + 360) % 360 - 180;
+  return d === -180 ? 180 : d;
 }
 
 /** Interpolate `srcVals` (defined at ascending `srcFreq`) onto `dstFreq`.
@@ -78,8 +91,19 @@ export function interpOnGrid(
     const t = dt > 0 ? (x - xs[lo]) / dt : 0;
     const a = srcVals[lo], b = srcVals[hi];
     if (a == null || b == null) return null;
-    return a + t * (b - a);
+    return a + t * (opts?.phase ? shortestPhaseDelta(b - a) : b - a);
   });
+}
+
+/** interpOnGrid specialised for WRAPPED phase (degrees): shortest-arc
+ *  interpolation. See InterpOptions.phase for when NOT to use this. */
+export function interpPhaseOnGrid(
+  srcFreq: number[],
+  srcPhase: readonly (number | null)[],
+  dstFreq: number[],
+  opts?: Omit<InterpOptions, "phase">,
+): (number | null)[] {
+  return interpOnGrid(srcFreq, srcPhase, dstFreq, { ...opts, phase: true });
 }
 
 /** Linear interpolation of `srcVals` (defined at `srcFreq`) onto

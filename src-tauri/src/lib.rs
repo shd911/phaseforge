@@ -481,7 +481,7 @@ pub fn run() {
         )
         .init();
 
-    info!("PhaseForge b141.8 starting...");
+    info!("PhaseForge b141.9 starting...");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())

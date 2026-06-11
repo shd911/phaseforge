@@ -16,6 +16,7 @@
  *                              for phase reconstruction.
  */
 import { invoke } from "@tauri-apps/api/core";
+import { shortestPhaseDelta } from "./grid";
 import type { FilterConfig } from "../types";
 
 /** b140.5: extend a (freq, mag, phase) trio up to ~Nyquist with explicit
@@ -105,7 +106,8 @@ export async function computeExtension(
     const frac = dt > 0 ? (f - srcFreq[lo]) / dt : 0;
     nativeMag[k] = srcMag[lo] + frac * (srcMag[hi] - srcMag[lo]);
     if (nativePhase && srcPhase) {
-      nativePhase[k] = srcPhase[lo] + frac * (srcPhase[hi] - srcPhase[lo]);
+      // b141.9: wrapped phase — shortest-arc lerp (see grid.ts).
+      nativePhase[k] = srcPhase[lo] + frac * shortestPhaseDelta(srcPhase[hi] - srcPhase[lo]);
     }
   }
 

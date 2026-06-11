@@ -14,7 +14,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { BandState } from "../../stores/bands";
 import type { PeqBand, TargetResponse } from "../types";
-import { buildCommonGrid, buildLogGrid, interpOnGrid } from "./grid";
+import { buildCommonGrid, buildLogGrid, interpOnGrid, interpPhaseOnGrid } from "./grid";
 import { appendNoiseFloorTail, computeExtension } from "./extension";
 import { evaluateBandFull, reconstructTargetPhase } from "./evaluate";
 import { memoEval, sumRequestKey } from "./cache";
@@ -87,8 +87,11 @@ function resampleOntoCommon(
   if (srcFreq.length < 2) return null;
   // b141.6: shared binary-search interp; fences match the old inline loop.
   const mag = interpOnGrid(srcFreq, srcMag, dstFreq, { outside: -200 }) as number[];
+  // b141.9: phase is wrapped (±180 from Rust atan2) — shortest-arc interp,
+  // otherwise the LR-crossover wrap at fc poisons the nearest bin and the
+  // coherent sum shows a narrow dip there (user 3WAY, 200 Hz).
   const phase = srcPhase
-    ? interpOnGrid(srcFreq, srcPhase, dstFreq, { outside: 0 }) as number[]
+    ? interpPhaseOnGrid(srcFreq, srcPhase, dstFreq, { outside: 0 }) as number[]
     : null;
   return { mag, phase };
 }

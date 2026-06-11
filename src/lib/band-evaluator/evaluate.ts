@@ -22,7 +22,7 @@ import {
   smoothingConfig,
 } from "../plot-helpers";
 import { hasActiveSubsonicProtect } from "../types";
-import { buildLogGrid, buildCommonGrid, resampleOnLogGrid } from "./grid";
+import { buildLogGrid, buildCommonGrid, resampleOnLogGrid, interpPhaseOnGrid } from "./grid";
 import { dispatchFirInvoke } from "./route";
 import { appendNoiseFloorTail, autoRefLevel, computeExtension } from "./extension";
 import { bandRequestKey, memoEval } from "./cache";
@@ -259,7 +259,10 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
         ...measurement,
         freq: [...freq],
         magnitude: resampleOnLogGrid(mf, measurement.magnitude, freq),
-        phase: measurement.phase ? resampleOnLogGrid(mf, measurement.phase, freq) : null,
+        // b141.9: measurement phase is wrapped (±180) — shortest-arc interp.
+        phase: measurement.phase
+          ? interpPhaseOnGrid(mf, measurement.phase, freq, { logSpace: true, outside: "clamp" }) as number[]
+          : null,
       };
     }
   }
