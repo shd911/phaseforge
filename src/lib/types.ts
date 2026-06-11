@@ -203,6 +203,8 @@ export interface PeqConfig {
   freq_range: [number, number];
   hybrid?: boolean;
   gain_regularization?: number;
+  /** b141.5: sample rate the realized biquads run at (= export sample rate). */
+  sample_rate?: number;
 }
 
 export interface PeqResult {

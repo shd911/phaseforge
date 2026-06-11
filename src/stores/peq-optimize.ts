@@ -8,6 +8,7 @@ import {
   activeBand,
   appState,
   exportHybridPhase,
+  exportSampleRate,
   setBandPeqBands,
   clearBandPeqBands,
   setBandPeqOptimizedTarget,
@@ -141,6 +142,8 @@ async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBa
     freq_range: [peqLow, peqHigh],
     hybrid: isHybrid,
     gain_regularization: gainRegularization(),
+    // b141.5 (audit): optimize at the rate the biquads will actually run at.
+    sample_rate: exportSampleRate(),
   };
   const result = await invoke<PeqResult>("auto_peq_lma", {
     freq: meas.freq,

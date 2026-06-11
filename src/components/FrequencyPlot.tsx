@@ -1587,7 +1587,7 @@ export default function FrequencyPlot() {
 
     try {
       const [pm] = await invoke<[number[], number[]]>("compute_peq_complex", {
-        freq: Array.from(freq), bands: enabledBands,
+        freq: Array.from(freq), bands: enabledBands, sampleRate: exportSampleRate(),
       });
       if (!chart || gen !== peqFastGen) return;
 
@@ -2073,7 +2073,7 @@ export default function FrequencyPlot() {
         // b139.4b: target / corrected GD share BandEvaluator's
         // target+peq computation on the measurement grid.
         const gdEval = (!sumMode && band && band.targetEnabled)
-          ? await evaluateBandFull({ band, freq }).catch((e) => { console.error("[GD] band eval failed:", e); return null; })
+          ? await evaluateBandFull({ band, freq, sampleRate: exportSampleRate() }).catch((e) => { console.error("[GD] band eval failed:", e); return null; })
           : null;
         if (gen !== renderGen) return;
 
@@ -2247,7 +2247,7 @@ export default function FrequencyPlot() {
             const sbSr = sb.measurement!.sample_rate ?? 48000;
             const peqBands = sb.peqBands?.filter((p: PeqBand) => p.enabled) ?? [];
             if (peqBands.length > 0) {
-              const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", { freq: sbFreq, bands: peqBands });
+              const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", { freq: sbFreq, bands: peqBands, sampleRate: exportSampleRate() });
               if (gen !== renderGen) return null;
               cMag = cMag.map((v, i) => v + (pm[i] ?? 0));
               cPh = cPh.map((v, i) => v + (pp[i] ?? 0));
@@ -2301,7 +2301,7 @@ export default function FrequencyPlot() {
 
         // Σ IR/Step from evaluateSum's unified frequency-domain coherent sum.
         try {
-          const sumResult = await evaluateSum(allBands as BandState[], { includeIr: true });
+          const sumResult = await evaluateSum(allBands as BandState[], { includeIr: true, sampleRate: exportSampleRate() });
           if (gen === renderGen && sumResult.ir) {
             if (sumResult.ir.measurement) {
               measSum = {
@@ -2353,7 +2353,7 @@ export default function FrequencyPlot() {
         // b139.4c: BandEvaluator returns measurement / target / corrected
         // impulses in one shot. No inline compute_impulse, compute_cross_section
         // or addGaussianMinPhase here — single source of truth.
-        const irEval = await evaluateBandFull({ band: band!, freq, includeIr: true })
+        const irEval = await evaluateBandFull({ band: band!, freq, includeIr: true, sampleRate: exportSampleRate() })
           .catch((e) => { console.error("[IR] band eval failed:", e); return null; });
         if (gen !== renderGen) return;
         if (!irEval || !irEval.ir?.measurement) {
@@ -2907,7 +2907,7 @@ export default function FrequencyPlot() {
       // the legacy { measurement, freq, targetMag, targetPhase } shape so the
       // ~700-line renderBandMode body keeps reading result.measurement.foo
       // unchanged. Equivalence proven by b139.1 unit tests (max diff 1e-9).
-      const evalRes = await evaluateBandFull({ band });
+      const evalRes = await evaluateBandFull({ band, sampleRate: exportSampleRate() });
       if (gen !== renderGen) return; // stale render, discard
 
       // b140.3.2: when extension is available, switch the chart's display grid
@@ -3337,7 +3337,7 @@ export default function FrequencyPlot() {
     zoomCenter = 0;
     const bands: BandState[] = JSON.parse(JSON.stringify(appState.bands));
     try {
-      const result = await evaluateSum(bands, {});
+      const result = await evaluateSum(bands, { sampleRate: exportSampleRate() });
       if (gen !== renderGen) return;
 
       const freq = result.freq;
@@ -4426,7 +4426,7 @@ export default function FrequencyPlot() {
                                 );
                                 if (bands.length < 2) return;
                                 const plainBands = JSON.parse(JSON.stringify(bands));
-                                const result = await computeAutoAlign(plainBands);
+                                const result = await computeAutoAlign(plainBands, exportSampleRate());
                                 batch(() => {
                                   for (const [id, delay] of Object.entries(result.delays)) {
                                     setAlignmentDelay(id, delay);

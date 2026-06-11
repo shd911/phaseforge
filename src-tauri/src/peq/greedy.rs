@@ -60,7 +60,7 @@ pub(crate) fn greedy_fit_adaptive(freq: &[f64], smoothed_error: &[f64], config: 
         };
 
         // Apply this band's response to the working error
-        let response = peq_band_response(freq, &band, SAMPLE_RATE);
+        let response = peq_band_response(freq, &band, config.sample_rate);
         for i in 0..n {
             current_error[i] += response[i];
         }

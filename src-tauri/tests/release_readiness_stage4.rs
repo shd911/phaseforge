@@ -155,6 +155,7 @@ fn release_readiness_stage4_sum_ir_peq_alignment() {
             min_band_distance_oct: Some(0.333),
             hybrid: false,
             gain_regularization: 0.0,
+            sample_rate: 48000.0,
         };
 
         // Target for auto_peq: flat at average meas in passband.

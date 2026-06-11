@@ -40,9 +40,10 @@ function interpOnGrid(srcFreq: number[], srcData: number[], dstFreq: number[]): 
  * Compute optimal alignment delays for all bands.
  *
  * @param bands - array of BandState (must have measurement + phase + target with crossovers)
+ * @param sampleRate - realization sample rate for PEQ biquads (b141.5; = export sample rate)
  * @returns delays in seconds per band id
  */
-export async function computeAutoAlign(bands: BandState[]): Promise<AlignResult> {
+export async function computeAutoAlign(bands: BandState[], sampleRate = 48000): Promise<AlignResult> {
   // Filter bands with measurement + phase data
   const validBands = bands.filter(
     b => b.measurement?.phase && b.measurement.phase.length > 0
@@ -90,6 +91,7 @@ export async function computeAutoAlign(bands: BandState[]): Promise<AlignResult>
       const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", {
         freq: [...b.measurement!.freq],
         bands: JSON.parse(JSON.stringify(peqBands)),
+        sampleRate,
       });
       if (!pm || pm.length !== mag.length) {
         console.warn('[AA] peq response length mismatch, skipping PEQ');

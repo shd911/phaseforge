@@ -54,6 +54,11 @@ export interface BandEvalRequest {
    *  apply a project-wide globalRef so multi-way bands' targets line up
    *  on the same SPL baseline (parity with renderSumMode). */
   refLevelOverride?: number;
+  /** b141.5 (audit): sample rate the realized biquads run at (= export
+   *  sample rate). Threaded into every compute_peq_complex call so the
+   *  displayed/optimized PEQ matches the realized IIR/FIR response near
+   *  Nyquist. Falls back to fir.sampleRate, then 48 kHz. */
+  sampleRate?: number;
 }
 
 export interface BandEvalResult {
@@ -236,11 +241,14 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
   //    physically (biquads); we ask Rust for the complex response so callers
   //    that previously used only peqMag pick up the correct phase too.
   const enabledPeq = (band.peqBands ?? []).filter((p: PeqBand) => p.enabled);
+  // b141.5: biquads are NOT sample-rate independent (bilinear warp near
+  // Nyquist) — every PEQ evaluation must run at the realization rate.
+  const peqSampleRate = req.sampleRate ?? req.fir?.sampleRate ?? 48000;
   let peqMag: number[] = new Array(freq.length).fill(0);
   let peqPhase: number[] = new Array(freq.length).fill(0);
   if (enabledPeq.length > 0) {
     const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", {
-      freq, bands: enabledPeq,
+      freq, bands: enabledPeq, sampleRate: peqSampleRate,
     });
     peqMag = pm;
     peqPhase = pp;
@@ -349,12 +357,13 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
     const firTargetMag = firExt.mag;
     const firTargetPhase = firExt.phase;
 
-    // PEQ on the FIR grid (biquads are sample-rate independent — same bands).
+    // PEQ on the FIR grid, at the FIR's sample rate (b141.5: biquads warp
+    // near Nyquist — the baked-in PEQ curve must match the realized rate).
     let firPeqMag: number[] = new Array(firFreq.length).fill(0);
     let firPeqPhase: number[] = new Array(firFreq.length).fill(0);
     if (enabledPeq.length > 0) {
       const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", {
-        freq: firFreq, bands: enabledPeq,
+        freq: firFreq, bands: enabledPeq, sampleRate: cfg.sampleRate,
       });
       firPeqMag = pm;
       firPeqPhase = pp;
@@ -463,7 +472,7 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
           let irPeqPhase: number[] = new Array(irFreq.length).fill(0);
           if (enabledPeq.length > 0) {
             const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", {
-              freq: irFreq, bands: enabledPeq,
+              freq: irFreq, bands: enabledPeq, sampleRate: peqSampleRate,
             });
             irPeqMag = pm; irPeqPhase = pp;
           }

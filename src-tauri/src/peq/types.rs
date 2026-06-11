@@ -72,6 +72,16 @@ pub struct PeqConfig {
     /// Higher values produce more uniform, conservative corrections.
     #[serde(default)]
     pub gain_regularization: f64,
+    /// Sample rate the realized biquads will run at (b141.5). The bilinear
+    /// transform warps the response near Nyquist, so optimizing at a fixed
+    /// 48 kHz while the FIR/IIR path realizes at e.g. 96 kHz diverges by
+    /// several dB above ~10 kHz. Default keeps old projects working.
+    #[serde(default = "default_sample_rate")]
+    pub sample_rate: f64,
+}
+
+pub(crate) fn default_sample_rate() -> f64 {
+    48000.0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,7 +95,6 @@ pub struct PeqResult {
 // Constants
 // ---------------------------------------------------------------------------
 
-pub(crate) const SAMPLE_RATE: f64 = 48000.0;
 /// Minimum distance between two PEQ bands in octaves
 pub(crate) const MIN_BAND_DISTANCE_OCT: f64 = 0.333; // 1/3 octave
 /// Q limits

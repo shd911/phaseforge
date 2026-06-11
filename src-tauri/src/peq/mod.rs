@@ -205,7 +205,7 @@ pub fn auto_peq_lma(
         }
 
         // Find largest weighted residual
-        let correction = apply_peq(freq, &bands, SAMPLE_RATE);
+        let correction = apply_peq(freq, &bands, config.sample_rate);
         let mut worst_idx = 0;
         let mut worst_val = 0.0_f64;
         let mut available = vec![true; n];
@@ -252,7 +252,7 @@ pub fn auto_peq_lma(
             1.0_f64 // wide filter above LP
         } else {
             estimate_q_from_peak_width(freq, &{
-                let c = apply_peq(freq, &bands, SAMPLE_RATE);
+                let c = apply_peq(freq, &bands, config.sample_rate);
                 meas_mag.iter().zip(target.iter()).zip(c.iter()).map(|((m, t), cr)| m + cr - t).collect::<Vec<_>>()
             }, worst_idx).min(q_envelope::q_cap_at(new_fc))
         };
@@ -299,7 +299,7 @@ pub fn auto_peq_lma(
     try_promote_to_shelves(&mut bands, freq, meas_mag, target, config);
 
     // Compute final max error
-    let correction = apply_peq(freq, &bands, SAMPLE_RATE);
+    let correction = apply_peq(freq, &bands, config.sample_rate);
     let max_err = compute_max_error_in_range(freq, meas_mag, target, &correction, config.freq_range);
 
     info!(
@@ -421,6 +421,7 @@ pub fn auto_peq_above_lp(
         min_band_distance_oct: config.min_band_distance_oct,
         hybrid: false,
         gain_regularization: config.gain_regularization,
+        sample_rate: config.sample_rate,
     };
 
     auto_peq_lma(meas_mag, Some(&target), freq, &above_config, hp_freq, lp_freq, &[])
@@ -541,6 +542,7 @@ mod tests {
             min_band_distance_oct: None,
             hybrid: false,
             gain_regularization: 0.0,
+            sample_rate: 48000.0,
         };
         let result = auto_peq(&mag, &mag, &freq, &config).unwrap();
         assert!(
@@ -572,6 +574,7 @@ mod tests {
             min_band_distance_oct: None,
             hybrid: false,
             gain_regularization: 0.0,
+            sample_rate: 48000.0,
         };
         let result = auto_peq(&meas, &target, &freq, &config).unwrap();
 
@@ -639,6 +642,7 @@ mod tests {
             min_band_distance_oct: None,
             hybrid: false,
             gain_regularization: 0.0,
+            sample_rate: 48000.0,
         };
         assert!(auto_peq(&meas, &target, &freq, &config).is_err());
     }
@@ -658,6 +662,7 @@ mod tests {
             min_band_distance_oct: None,
             hybrid: false,
             gain_regularization: 0.0,
+            sample_rate: 48000.0,
         };
         assert!(auto_peq(&mag, &mag, &freq, &config).is_err());
     }
@@ -684,6 +689,7 @@ mod tests {
             min_band_distance_oct: None,
             hybrid: false,
             gain_regularization: 0.0,
+            sample_rate: 48000.0,
         };
         let result = auto_peq(&meas, &target, &freq, &config).unwrap();
 
@@ -735,6 +741,7 @@ mod tests {
             min_band_distance_oct: None,
             hybrid: false,
             gain_regularization: 0.0,
+            sample_rate: 48000.0,
         };
         let result = auto_peq(&meas, &target, &freq, &config).unwrap();
 
@@ -839,6 +846,7 @@ mod tests {
             min_band_distance_oct: None,
             hybrid: false,
             gain_regularization: 0.0,
+            sample_rate: 48000.0,
         };
         let result = auto_peq_above_lp(&meas, &freq, &config, 3000.0, 80.0).unwrap();
 
@@ -873,6 +881,7 @@ mod tests {
             min_band_distance_oct: None,
             hybrid: false,
             gain_regularization: 0.0,
+            sample_rate: 48000.0,
         };
         let result = auto_peq_above_lp(&meas, &freq, &config, 3000.0, 80.0).unwrap();
 
@@ -986,6 +995,7 @@ mod tests {
             min_band_distance_oct: None,
             hybrid: false,
             gain_regularization: 0.0,
+            sample_rate: 48000.0,
         };
         let result = auto_peq_lma(&meas, Some(&target), &freq, &config, 80.0, 15000.0, &[]).unwrap();
 
@@ -1009,6 +1019,55 @@ mod tests {
         );
     }
 
+    /// b141.5 (audit CRITICAL): the optimizer must evaluate biquads at the
+    /// sample rate the correction will actually run at. Bilinear warp makes
+    /// a 16 kHz peaking filter respond very differently at 48 kHz vs 96 kHz,
+    /// so identical inputs with different config.sample_rate MUST converge
+    /// to different band parameters.
+    #[test]
+    fn test_lma_honors_config_sample_rate() {
+        let freq = make_log_freq(300, 100.0, 22000.0);
+        let target = vec![80.0; 300];
+        let mut meas = vec![80.0; 300];
+
+        // +6 dB peak at 16 kHz — deep in the warp zone at sr=48k.
+        for (i, &f) in freq.iter().enumerate() {
+            let log_ratio = (f / 16000.0).log2();
+            meas[i] = 80.0 + 6.0 * (-log_ratio * log_ratio * 10.0).exp();
+        }
+
+        let mk_config = |sr: f64| PeqConfig {
+            max_bands: 6,
+            tolerance_db: 0.5,
+            peak_bias: 1.5,
+            max_boost_db: 6.0,
+            max_cut_db: 18.0,
+            freq_range: (1000.0, 21000.0),
+            smoothing_fraction: None,
+            min_band_distance_oct: None,
+            hybrid: false,
+            gain_regularization: 0.0,
+            sample_rate: sr,
+        };
+
+        let r48 = auto_peq_lma(&meas, Some(&target), &freq, &mk_config(48000.0), 100.0, 21000.0, &[]).unwrap();
+        let r96 = auto_peq_lma(&meas, Some(&target), &freq, &mk_config(96000.0), 100.0, 21000.0, &[]).unwrap();
+
+        assert!(!r48.bands.is_empty(), "48k run should produce bands");
+        assert!(!r96.bands.is_empty(), "96k run should produce bands");
+
+        let differs = r48.bands.len() != r96.bands.len()
+            || r48.bands.iter().zip(r96.bands.iter()).any(|(a, b)| {
+                (a.freq_hz - b.freq_hz).abs() > 1e-3
+                    || (a.gain_db - b.gain_db).abs() > 1e-3
+                    || (a.q - b.q).abs() > 1e-3
+            });
+        assert!(
+            differs,
+            "optimizer ignored config.sample_rate: 48k and 96k runs produced identical bands"
+        );
+    }
+
     #[test]
     fn test_lma_flat_no_bands() {
         let freq = make_log_freq(500, 20.0, 20000.0);
@@ -1025,6 +1084,7 @@ mod tests {
             min_band_distance_oct: None,
             hybrid: false,
             gain_regularization: 0.0,
+            sample_rate: 48000.0,
         };
         let result = auto_peq_lma(&meas, Some(&meas), &freq, &config, 80.0, 15000.0, &[]).unwrap();
 
@@ -1060,6 +1120,7 @@ mod tests {
             min_band_distance_oct: None,
             hybrid: false,
             gain_regularization: 0.0,
+            sample_rate: 48000.0,
         };
 
         let target: Vec<f64> = freq.iter().map(|_| 80.0).collect();

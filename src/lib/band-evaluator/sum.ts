@@ -65,6 +65,9 @@ export interface SumEvalOptions {
    *  coherent-summing per-band responses on a wide IR grid (5 Hz – Nyquist·0.95)
    *  in the frequency domain, then taking compute_impulse of the result. */
   includeIr?: boolean;
+  /** b141.5 (audit): realization sample rate for PEQ biquads (= export
+   *  sample rate). Threaded into every compute_peq_complex call. */
+  sampleRate?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -310,7 +313,7 @@ export async function evaluateSum(
     // sum.ts (would otherwise pick its own 5..40k standalone grid — same
     // values typically, but we lock it down).
     perBandResults = await Promise.all(
-      bands.map(b => evaluateBandFull({ band: b, freq })),
+      bands.map(b => evaluateBandFull({ band: b, freq, sampleRate: options?.sampleRate })),
     );
     for (let i = 0; i < bands.length; i++) {
       const band = bands[i];
@@ -350,7 +353,7 @@ export async function evaluateSum(
   // No-measurement case: already populated above.
   if (!allBandsNoMeasurement) {
     perBandResults = await Promise.all(
-      bands.map(b => evaluateBandFull({ band: b })),
+      bands.map(b => evaluateBandFull({ band: b, sampleRate: options?.sampleRate })),
     );
   }
 
@@ -553,7 +556,7 @@ export async function evaluateSum(
         let irPeqPhase: number[] = new Array(N).fill(0);
         if (enabledPeq.length > 0) {
           const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", {
-            freq: irFreq, bands: enabledPeq,
+            freq: irFreq, bands: enabledPeq, sampleRate: options?.sampleRate ?? 48000,
           });
           irPeqMag = pm; irPeqPhase = pp;
         }

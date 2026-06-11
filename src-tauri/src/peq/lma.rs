@@ -248,7 +248,7 @@ impl<'a> LmaSolver<'a> {
     /// Compute weighted residual vector: r_i = sqrt(W(f_i)) * sqrt(bias) * (meas[i] + correction[i] - target[i])
     fn compute_residuals(&self, params: &[f64]) -> Vec<f64> {
         let bands = Self::params_to_bands(params);
-        let correction = apply_peq(self.freq, &bands, SAMPLE_RATE);
+        let correction = apply_peq(self.freq, &bands, self.config.sample_rate);
 
         let n_bands = params.len() / 3;
         let n_freq = self.range_indices.len();
@@ -454,7 +454,7 @@ pub(crate) fn try_promote_to_shelves(
 
     // Helper: weighted SSE in freq_range
     let compute_sse = |bs: &[PeqBand]| -> f64 {
-        let corr = apply_peq(freq, bs, SAMPLE_RATE);
+        let corr = apply_peq(freq, bs, config.sample_rate);
         freq.iter().enumerate()
             .filter(|(_, &f)| f >= config.freq_range.0 && f <= config.freq_range.1)
             .map(|(i, _)| {
