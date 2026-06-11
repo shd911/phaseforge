@@ -1816,6 +1816,8 @@ export default function FrequencyPlot() {
       // b141.14: min-phase WAVs are zero-padded to center the peak at N/2 —
       // those exact-zero leading samples are latency, not pre-ringing, so
       // the metric starts at the first sample above -80 dB of peak.
+      // -80 dB here is a perceptual display threshold; deliberately looser
+      // than the -100 dB content-preservation threshold of the WAV shift.
       let peakIdx = 0, peakVal = 0;
       for (let i = 0; i < firResult.impulse.length; i++) {
         if (Math.abs(firResult.impulse[i]) > peakVal) {

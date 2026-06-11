@@ -415,6 +415,8 @@ pub fn generate_min_phase_fir_iir(input: &IirPathInput) -> Result<FirModelResult
     // response. Center at N/2 when the tail has decayed (≤ -100 dB of peak),
     // otherwise shrink the pad so no significant sample is dropped — content
     // correctness wins over peak centering for REW import.
+    // b141.14: the cepstral path mirrors this exact block (cepstral.rs,
+    // unified WAV peak convention) — keep the two in sync on any change.
     let peak_abs = raw_impulse.iter().fold(0.0_f64, |a, &v| a.max(v.abs()));
     let tail_threshold = peak_abs * 1e-5;
     let last_significant = raw_impulse

@@ -11,9 +11,10 @@
 //! pending b140.13.3); the legacy measurement-based pipelines live in
 //! `fir/legacy.rs`.
 //!
-//! Behaviour is byte-identical to the pre-b140.13.2 definition — locked
-//! down by `golden_fir_snapshots` and `pipeline_contract` baselines
-//! staying unchanged across this move.
+//! The b140.13.2 extraction was byte-identical to the inline original.
+//! Since b141.14 the causal min-phase output additionally gets the
+//! adaptive N/2 WAV centering shift (unified peak convention, mirrors
+//! `iir_path.rs`) — cepstral golden baselines were re-captured then.
 
 use num_complex::Complex64;
 use std::f64::consts::PI;
@@ -228,6 +229,11 @@ pub fn generate_model_fir(
     // b141.15: the mixed-gaussian branch rotates its peak to N/2 by an
     // impulse-dependent amount — that shift must be subtracted from the
     // realized phase below, same as the fixed N/2 of the linear branch.
+    // rotate_right is circular (tail wraps to the front, then the full
+    // window tapers it), so treating the rotation as a pure linear delay
+    // is exact only up to the wrapped-tail energy — bounded by the window
+    // edge attenuation, verified ≤ 5° in passband by
+    // `mixed_gaussian_realized_phase_matches_min_phase_reference`.
     let mut mixed_gaussian_shift = 0usize;
     if effective_linear || use_model_phase {
         // Symmetric / mixed impulse: shift peak to center, full window.
@@ -355,6 +361,11 @@ pub fn generate_model_fir(
     //    still carries content above -100 dB of peak the shift shrinks and
     //    content correctness wins over centering. The realized mag/phase
     //    above were computed from the unshifted impulse and stay valid.
+    //    No tail taper here (unlike iir_path): the half-window already
+    //    decays to 0 at n-1, and shift ≤ n-1-last_significant guarantees
+    //    the new endpoint sample is at or below the -100 dB threshold —
+    //    nothing audible to fade. A short-of-center peak is surfaced to
+    //    the user at export (offCenterWavWarning, fir-export.ts).
     if causal_min_phase {
         let half = n_fft / 2;
         let peak_abs = impulse.iter().fold(0.0_f64, |a, &v| a.max(v.abs()));
