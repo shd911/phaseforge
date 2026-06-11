@@ -17,6 +17,7 @@ pub async fn export_target_txt(freq: Vec<f64>, magnitude: Vec<f64>, path: String
     if freq.len() != magnitude.len() {
         return Err("freq and magnitude length mismatch".into());
     }
+    crate::project::validate_write_target(&path)?;
     let p = PathBuf::from(&path);
     let mut out = String::with_capacity(freq.len() * 24);
     out.push_str("* Freq(Hz)\tSPL(dB)\n");

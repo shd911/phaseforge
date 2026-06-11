@@ -165,16 +165,47 @@ fn default_tab() -> String { "measurements".to_string() }
 
 const MAX_VERSION: u32 = 2;
 
+/// b141.6 (audit): shared guard for every command that WRITES to a path
+/// received from the webview. The commands accept arbitrary absolute paths
+/// (the user picks project folders via the OS dialog, including external
+/// volumes), so we cannot whitelist a root — instead reject the classic
+/// code-execution write primitives a compromised webview would aim for:
+/// path traversal, null bytes, hidden files/dirs (~/.zshrc, ~/.ssh, ...)
+/// and macOS launch-persistence directories.
+pub(crate) fn validate_write_target(path: &str) -> Result<(), String> {
+    if path.contains('\0') {
+        return Err("invalid path: contains null bytes".into());
+    }
+    let p = std::path::Path::new(path);
+    for component in p.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                return Err("path traversal detected: '..' not allowed".into());
+            }
+            std::path::Component::Normal(name) => {
+                if name.to_string_lossy().starts_with('.') {
+                    return Err(format!(
+                        "invalid path: writing into hidden files/directories is not allowed ({})",
+                        name.to_string_lossy()
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+    let lower = path.to_lowercase();
+    for blocked in ["launchagents", "launchdaemons", "startupitems"] {
+        if lower.contains(blocked) {
+            return Err(format!("invalid path: writing into {blocked} is not allowed"));
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn save_project(path: String, project: ProjectFile) -> Result<(), String> {
     info!("save_project: {}", path);
-    // Security check: prevent path traversal
-    let p = std::path::Path::new(&path);
-    for component in p.components() {
-        if matches!(component, std::path::Component::ParentDir) {
-            return Err("path traversal detected: '..' not allowed in save path".into());
-        }
-    }
+    validate_write_target(&path)?;
     let json = serde_json::to_string_pretty(&project)
         .map_err(|e| format!("Serialization error: {e}"))?;
     std::fs::write(&path, json)
@@ -258,13 +289,8 @@ fn paths_resolve_to_same_file(source: &std::path::Path, dest: &std::path::Path) 
 /// Copy a file into the project folder.
 #[tauri::command]
 pub async fn copy_file_to_project(source_path: String, dest_path: String) -> Result<(), String> {
-    // Reject paths containing ".." to prevent path traversal
+    validate_write_target(&dest_path)?;
     let dest = std::path::Path::new(&dest_path);
-    for component in dest.components() {
-        if matches!(component, std::path::Component::ParentDir) {
-            return Err("Invalid destination path: contains '..'".into());
-        }
-    }
 
     // b139.5.2: guard against self-copy. If a user drops a file directly into
     // <project>/inbox/ and then "imports" it via the picker pointing at the
@@ -295,6 +321,7 @@ pub fn check_path_exists(path: String) -> Result<bool, String> {
 /// Ensure a directory exists (create if missing). For backward-compat with old projects.
 #[tauri::command]
 pub fn ensure_dir(path: String) -> Result<(), String> {
+    validate_write_target(&path)?;
     std::fs::create_dir_all(&path).map_err(|e| format!("{e}"))?;
     Ok(())
 }
@@ -303,6 +330,7 @@ pub fn ensure_dir(path: String) -> Result<(), String> {
 /// Skips subdirectories. Creates dest_dir if it doesn't exist.
 #[tauri::command]
 pub async fn copy_dir_contents(source_dir: String, dest_dir: String) -> Result<u32, String> {
+    validate_write_target(&dest_dir)?;
     let src = std::path::Path::new(&source_dir);
     let dst = std::path::Path::new(&dest_dir);
     if !src.is_dir() {
@@ -340,6 +368,30 @@ mod tests {
     use super::*;
     use std::io::Write;
     use std::sync::atomic::{AtomicU32, Ordering};
+
+    /// b141.6 (audit): the write guard must block the classic persistence /
+    /// code-execution write primitives while keeping normal project paths
+    /// (including external volumes) working.
+    #[test]
+    fn write_guard_blocks_dangerous_targets() {
+        for bad in [
+            "/Users/x/.zshrc",
+            "/Users/x/.ssh/authorized_keys",
+            "/Users/x/Library/LaunchAgents/evil.plist",
+            "/Library/LaunchDaemons/evil.plist",
+            "/Users/x/Projects/../../.zshrc",
+            "/Users/x/Proj/inbox/m.txt\0.wav",
+        ] {
+            assert!(validate_write_target(bad).is_err(), "must reject: {bad}");
+        }
+        for good in [
+            "/Users/x/Music/MyProj/MyProj.pfproj",
+            "/Volumes/Ext/Speakers/proj/export/fir-48000-65536.wav",
+            "/Users/x/Documents/Проект... финал/inbox/meas.txt",
+        ] {
+            assert!(validate_write_target(good).is_ok(), "must accept: {good}");
+        }
+    }
 
     static TEST_DIR_COUNTER: AtomicU32 = AtomicU32::new(0);
 

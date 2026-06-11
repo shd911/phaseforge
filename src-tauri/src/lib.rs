@@ -45,29 +45,12 @@ fn close_window_now(
     }
 }
 
-/// Validate that a path does not contain path traversal sequences and is within allowed directories.
+/// Validate an export destination. b141.6 (audit): delegates to the shared
+/// write guard (traversal / null bytes / hidden dirs / launch persistence);
+/// the old `contains("..")` heuristic also rejected legitimate "..." names.
 fn validate_export_path(path: &str) -> Result<PathBuf, String> {
-    let p = PathBuf::from(path);
-    
-    // Check for obvious path traversal patterns
-    if path.contains("..") {
-        return Err("Invalid path: path traversal not allowed".into());
-    }
-    
-    // Additional check: ensure the path doesn't contain null bytes or other dangerous characters
-    if path.contains('\0') {
-        return Err("Invalid path: contains null bytes".into());
-    }
-    
-    // Check for Windows-specific dangerous patterns
-    if cfg!(windows) {
-        let lower = path.to_lowercase();
-        if lower.contains("c:\\") || lower.contains("d:\\") || lower.contains("e:\\") {
-            return Err("Invalid path: cannot write to system drives".into());
-        }
-    }
-    
-    Ok(p)
+    project::validate_write_target(path)?;
+    Ok(PathBuf::from(path))
 }
 
 #[tauri::command]
