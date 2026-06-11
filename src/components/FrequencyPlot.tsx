@@ -2106,15 +2106,18 @@ export default function FrequencyPlot() {
             corrGdMs = toGd(sumRes.sumCorrectedPhase);
           }
         } else {
-          // Target GD (band mode)
+          // Target GD (band mode). b141.13: phases are WRAPPED (±180 from
+          // Rust atan2) — differentiating across a wrap produced narrow
+          // ±(360/df) spikes (thousands of ms). Unwrap first, like the
+          // measurement and SUM paths do.
           if (gdEval && gdEval.targetPhase) {
-            const tgd = computeGroupDelay(freq, gdEval.targetPhase);
+            const tgd = computeGroupDelay(freq, unwrapDegrees(gdEval.targetPhase));
             targetGdMs = tgd.gdMs;
           }
           // Corrected GD: read evalRes.correctedPhase directly. Single source
           // of truth — Gaussian/subsonic reconstruction is unified with target.
           if (gdEval && gdEval.correctedPhase) {
-            const cgd = computeGroupDelay(freq, gdEval.correctedPhase);
+            const cgd = computeGroupDelay(freq, unwrapDegrees(gdEval.correctedPhase));
             corrGdMs = cgd.gdMs;
           }
         }
