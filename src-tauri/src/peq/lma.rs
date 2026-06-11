@@ -257,8 +257,8 @@ impl<'a> LmaSolver<'a> {
     fn residuals_from_correction(&self, params: &[f64], correction: &[f64]) -> Vec<f64> {
         let n_bands = params.len() / 3;
         let n_freq = self.range_indices.len();
-        let extra = if self.config.gain_regularization > 0.0 { n_bands } else { 0 };
-        let mut residuals = Vec::with_capacity(n_freq + extra);
+        let extra_reg = if self.config.gain_regularization > 0.0 { n_bands } else { 0 };
+        let mut residuals = Vec::with_capacity(n_freq + extra_reg + n_bands);
 
         for &i in &self.range_indices {
             let err = self.meas_mag[i] + correction[i] - self.target_mag[i];
@@ -280,36 +280,36 @@ impl<'a> LmaSolver<'a> {
             }
         }
 
-        residuals
-    }
-
-    /// Compute total cost = Sigma r_i^2 + Q penalties
-    fn compute_cost(&self, params: &[f64]) -> f64 {
-        let residuals = self.compute_residuals(params);
-        let mut cost: f64 = residuals.iter().map(|r| r * r).sum();
-
-        // Q penalty: penalize Q > Q_MAX_ABOVE_LP for above-LP bands
-        let n_bands = params.len() / 3;
+        // b141.8 (audit): Q penalties as virtual residuals — one row per band
+        // (fixed count so Jacobian columns stay aligned; 0 below threshold).
+        // Squaring reproduces the former compute_cost terms exactly:
+        //   above LP:  (q-1.5)²·|gain|·0.5·m   for q > 1.5
+        //   in band:   (q-warn(f))²·0.1·m      for q > warn(f)
+        // Living in the residual vector makes them visible to the Jacobian /
+        // gradient, so the solver steps AWAY from penalty growth instead of
+        // having those steps rejected post-hoc (lambda inflation → false
+        // "lambda exceeded max" stops).
         let m = self.range_indices.len().max(1) as f64;
         for i in 0..n_bands {
             let freq = params[i * 3];
-            let q = params[i * 3 + 2];
             let gain = params[i * 3 + 1];
-            // Q penalty above LP: gentle quadratic penalty for Q > 1.5
-            if freq > self.lp_freq && q > 1.5 {
-                cost += (q - 1.5).powi(2) * gain.abs() * 0.5 * m;
-            }
-            // In-band penalty aligned with the envelope (b137): pressure to
-            // stay below q_warn_at(freq) instead of a freq-blind threshold.
-            if freq <= self.lp_freq {
+            let q = params[i * 3 + 2];
+            let r = if freq > self.lp_freq {
+                (q - 1.5).max(0.0) * (gain.abs() * 0.5 * m).sqrt()
+            } else {
                 let warn = crate::peq::q_warn_at(freq);
-                if q > warn {
-                    cost += (q - warn).powi(2) * 0.1 * m;
-                }
-            }
+                (q - warn).max(0.0) * (0.1 * m).sqrt()
+            };
+            residuals.push(r);
         }
 
-        cost
+        residuals
+    }
+
+    /// Compute total cost = Sigma r_i^2 (Q penalties live in the residuals).
+    fn compute_cost(&self, params: &[f64]) -> f64 {
+        let residuals = self.compute_residuals(params);
+        residuals.iter().map(|r| r * r).sum()
     }
 
     /// Compute Jacobian via numerical finite differences (parallelized with rayon).
@@ -320,7 +320,7 @@ impl<'a> LmaSolver<'a> {
     /// the cached base correction — O(n_freq) per column instead of
     /// O(n_bands × n_freq). At 15-20 bands this removes ~20× redundant work
     /// from the dominant LMA stage.
-    fn compute_jacobian(&self, params: &[f64]) -> (Vec<f64>, Vec<f64>, usize, usize) {
+    fn compute_jacobian(&self, params: &[f64], freeze_freq: bool) -> (Vec<f64>, Vec<f64>, usize, usize) {
         let n_params = params.len();
         let n_bands = n_params / 3;
         let sr = self.config.sample_rate;
@@ -342,10 +342,14 @@ impl<'a> LmaSolver<'a> {
         let r0 = self.residuals_from_correction(params, &base_correction);
         let m = r0.len();
 
-        // Compute step sizes
+        // Compute step sizes. b141.8: freeze_freq zeroes the freq columns —
+        // a zero Jacobian column yields delta=0 for that param (gradient 0,
+        // damped diagonal stays positive), so frequencies stay put while
+        // gain/Q re-fit. Used by the post-merge polish to preserve the band
+        // separation the merge just established.
         let steps: Vec<f64> = (0..n_params).map(|p| {
             match p % 3 {
-                0 => (params[p] * 1e-3).max(0.1),
+                0 => if freeze_freq { 0.0 } else { (params[p] * 1e-3).max(0.1) },
                 1 => 0.01,
                 2 => 0.01,
                 _ => unreachable!(),
@@ -425,6 +429,17 @@ impl<'a> LmaSolver<'a> {
     /// Run LMA optimization on the given bands.
     /// Returns (optimized bands, iteration count).
     pub(crate) fn optimize(&self, initial_bands: &[PeqBand]) -> (Vec<PeqBand>, u32) {
+        self.optimize_inner(initial_bands, false)
+    }
+
+    /// b141.8: re-fit gains and Qs only — frequencies frozen. Post-merge
+    /// polish uses this when a free re-fit would push bands back inside the
+    /// minimum separation distance.
+    pub(crate) fn optimize_gain_q(&self, initial_bands: &[PeqBand]) -> (Vec<PeqBand>, u32) {
+        self.optimize_inner(initial_bands, true)
+    }
+
+    fn optimize_inner(&self, initial_bands: &[PeqBand], freeze_freq: bool) -> (Vec<PeqBand>, u32) {
         if initial_bands.is_empty() {
             return (Vec::new(), 0);
         }
@@ -443,7 +458,7 @@ impl<'a> LmaSolver<'a> {
                 break;
             }
 
-            let (jacobian, residuals, m, n_params) = self.compute_jacobian(&params);
+            let (jacobian, residuals, m, n_params) = self.compute_jacobian(&params, freeze_freq);
 
             // H = Jt*J  (flat row-major n_params x n_params)
             let mut h = vec![0.0_f64; n_params * n_params];
@@ -485,13 +500,8 @@ impl<'a> LmaSolver<'a> {
                 }
             };
 
-            // Check convergence: ||delta|| / ||theta||
             let delta_norm: f64 = delta.iter().map(|d| d * d).sum::<f64>().sqrt();
             let params_norm: f64 = params.iter().map(|p| p * p).sum::<f64>().sqrt().max(1e-10);
-            if delta_norm / params_norm < LMA_CONVERGENCE {
-                info!("LMA: converged at iter {} (rel step {:.2e})", iter, delta_norm / params_norm);
-                break;
-            }
 
             // Trial step
             let mut params_new: Vec<f64> = params.iter().zip(&delta).map(|(p, d)| p + d).collect();
@@ -505,6 +515,16 @@ impl<'a> LmaSolver<'a> {
                 cost = cost_new;
                 lambda *= 0.5;
                 lambda = lambda.max(1e-10);
+
+                // b141.8 (audit): convergence is only meaningful on an
+                // ACCEPTED step. A tiny delta after rejections just means
+                // lambda is huge (damping shrinks the step), not that we are
+                // at an optimum — declaring convergence there froze runs at
+                // arbitrary points ("false convergence at large lambda").
+                if delta_norm / params_norm < LMA_CONVERGENCE {
+                    info!("LMA: converged at iter {} (rel step {:.2e})", iter, delta_norm / params_norm);
+                    break;
+                }
             } else {
                 // Reject step — increase damping
                 lambda *= 2.0;
@@ -573,6 +593,64 @@ pub(crate) fn try_promote_to_shelves(
 mod tests {
     use super::*;
 
+    /// b141.8 (audit): the Q penalties must live in the residual vector —
+    /// visible to the Jacobian/gradient — not as an out-of-band term added
+    /// only in compute_cost. Otherwise the solver's steps never account for
+    /// the penalty, high-Q-increasing steps get rejected post-hoc, lambda
+    /// inflates and the run dies on "lambda exceeded max" instead of
+    /// converging. The invariant: cost == Σ residual².
+    #[test]
+    fn test_cost_is_sum_of_squared_residuals() {
+        let n = 200;
+        let freq: Vec<f64> = (0..n)
+            .map(|i| 20.0 * (20000.0_f64 / 20.0).powf(i as f64 / (n - 1) as f64))
+            .collect();
+        let meas = vec![80.0_f64; n];
+        let target = vec![80.0_f64; n];
+        let weights = vec![1.0_f64; n];
+        let config = PeqConfig {
+            max_bands: 20,
+            tolerance_db: 1.0,
+            peak_bias: 1.5,
+            max_boost_db: 6.0,
+            max_cut_db: 18.0,
+            freq_range: (30.0, 18000.0),
+            smoothing_fraction: None,
+            min_band_distance_oct: None,
+            hybrid: false,
+            gain_regularization: 0.2,
+            sample_rate: 48000.0,
+        };
+        // lp_freq = 3000: band at 5 kHz (Q=6 > 1.5) triggers the above-LP
+        // penalty, band at 300 Hz with Q=9 > q_warn_at(300) triggers the
+        // in-band envelope penalty.
+        let solver = LmaSolver::new(&freq, &meas, &target, &weights, 3000.0, &config);
+        let params = vec![5000.0, 4.0, 6.0, 300.0, 3.0, 9.0];
+
+        let r = solver.compute_residuals(&params);
+        let sum_sq: f64 = r.iter().map(|x| x * x).sum();
+        let cost = solver.compute_cost(&params);
+
+        assert!(
+            (cost - sum_sq).abs() < 1e-9 * cost.max(1.0),
+            "cost ({cost}) must equal Σ residual² ({sum_sq}) — Q penalties belong in the residuals"
+        );
+        // Sanity: the penalties are actually active in this fixture.
+        let plain_fit: f64 = {
+            let corr = apply_peq(&freq, &LmaSolver::params_to_bands(&params), 48000.0);
+            let mut s = 0.0;
+            for (i, &f) in freq.iter().enumerate() {
+                if f >= 30.0 && f <= 18000.0 {
+                    let e = meas[i] + corr[i] - target[i];
+                    let b = if e > 0.0 { 1.5_f64 } else { 1.0 };
+                    s += b * e * e;
+                }
+            }
+            s
+        };
+        assert!(cost > plain_fit, "fixture must exercise the Q penalties");
+    }
+
     /// b141.6: the incremental Jacobian (patch one band's response into the
     /// cached base correction) must match the full per-column re-evaluation.
     /// Non-trivial fixture: 12 bands, 400 points, regularization both on/off.
@@ -616,7 +694,7 @@ mod tests {
             let solver = LmaSolver::new(&freq, &meas, &target, &weights, 18000.0, &config);
             let params = LmaSolver::bands_to_params(&bands);
 
-            let (j_fast, r_fast, m_fast, np_fast) = solver.compute_jacobian(&params);
+            let (j_fast, r_fast, m_fast, np_fast) = solver.compute_jacobian(&params, false);
             let (j_ref, r_ref, m_ref, np_ref) = solver.compute_jacobian_reference(&params);
 
             assert_eq!((m_fast, np_fast), (m_ref, np_ref));

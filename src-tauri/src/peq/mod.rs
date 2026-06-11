@@ -276,27 +276,12 @@ pub fn auto_peq_lma(
         total_iterations += iters;
     }
 
-    // 7. Post-processing
-    // Merge nearby bands that LMA may have pushed together
-    merge_nearby_bands(&mut bands, merge_dist * 0.8);
-
-    // Remove weak bands
-    bands.retain(|b| b.gain_db.abs() >= LMA_MIN_GAIN_DB);
-
-    // Sort by frequency
-    bands.sort_by(|a, b| a.freq_hz.partial_cmp(&b.freq_hz).unwrap_or(std::cmp::Ordering::Equal));
-
-    // Final Q enforcement (frequency-dependent cap inside passband; b137).
-    for b in &mut bands {
-        if b.freq_hz > lp_freq {
-            b.q = b.q.clamp(Q_MIN, Q_MAX_ABOVE_LP);
-        } else {
-            b.q = b.q.clamp(Q_MIN, q_envelope::q_cap_at(b.freq_hz));
-        }
-    }
-
-    // 8. Shelf promotion: try converting edge bands to LowShelf / HighShelf
-    try_promote_to_shelves(&mut bands, freq, meas_mag, target, config);
+    // 7.+8. Post-processing (merge / retain / Q clamp / shelf promotion) —
+    // extracted to polish_bands (b141.8) so the no-overshoot property is
+    // testable in isolation.
+    total_iterations += polish_bands(
+        &mut bands, &solver, freq, meas_mag, target, config, lp_freq, merge_dist,
+    );
 
     // Compute final max error
     let correction = apply_peq(freq, &bands, config.sample_rate);
@@ -318,6 +303,77 @@ pub fn auto_peq_lma(
         max_error_db: max_err,
         iterations: total_iterations,
     })
+}
+
+/// Post-LMA polish: merge bands the optimizer pushed together, drop weak
+/// ones, enforce the Q envelope, re-optimize the mutated set (b141.8 —
+/// merging sums gains, so without a re-fit the result overshoots by up to
+/// 3-4 dB), then try shelf promotion on the edge bands. Returns the extra
+/// LMA iterations spent on the re-fit.
+pub(crate) fn polish_bands(
+    bands: &mut Vec<PeqBand>,
+    solver: &LmaSolver,
+    freq: &[f64],
+    meas_mag: &[f64],
+    target: &[f64],
+    config: &PeqConfig,
+    lp_freq: f64,
+    merge_dist: f64,
+) -> u32 {
+    // Merge nearby bands that LMA may have pushed together
+    let n_before = bands.len();
+    merge_nearby_bands(bands, merge_dist * 0.8);
+    let merged_any = bands.len() != n_before;
+
+    // Remove weak bands
+    let n_pre_retain = bands.len();
+    bands.retain(|b| b.gain_db.abs() >= LMA_MIN_GAIN_DB);
+    let dropped_any = bands.len() != n_pre_retain;
+
+    // b141.8 (audit): merging sums gains (+3 +3 → +6 at the weighted center)
+    // and dropping a band leaves its residual uncorrected — both mutate the
+    // response without re-fitting. One more LMA pass re-fits the surviving
+    // set; near the optimum it converges in a handful of iterations.
+    let mut extra_iters = 0u32;
+    if (merged_any || dropped_any) && !bands.is_empty() {
+        let (refit, iters) = solver.optimize(bands);
+        *bands = refit;
+        extra_iters += iters;
+        // The re-fit may shrink a band below audibility — drop, no re-fit
+        // needed (≤ LMA_MIN_GAIN_DB effect by construction).
+        bands.retain(|b| b.gain_db.abs() >= LMA_MIN_GAIN_DB);
+
+        // The free re-fit may pull bands back inside the separation distance
+        // (it optimizes fit, not layout). Re-merge; if anything collapsed
+        // again, re-fit with frequencies FROZEN so the separation holds.
+        let n_pre = bands.len();
+        merge_nearby_bands(bands, merge_dist * 0.8);
+        if bands.len() != n_pre && !bands.is_empty() {
+            let (refit, iters) = solver.optimize_gain_q(bands);
+            *bands = refit;
+            extra_iters += iters;
+            bands.retain(|b| b.gain_db.abs() >= LMA_MIN_GAIN_DB);
+        }
+    }
+
+    // Sort by frequency
+    bands.sort_by(|a, b| a.freq_hz.partial_cmp(&b.freq_hz).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Final Q enforcement (frequency-dependent cap inside passband; b137).
+    for b in bands.iter_mut() {
+        if b.freq_hz > lp_freq {
+            b.q = b.q.clamp(Q_MIN, Q_MAX_ABOVE_LP);
+        } else {
+            b.q = b.q.clamp(Q_MIN, q_envelope::q_cap_at(b.freq_hz));
+        }
+    }
+
+    // Shelf promotion: try converting edge bands to LowShelf / HighShelf
+    // (self-guarding: keeps the shelf only if the weighted error does not
+    // degrade, so no re-fit is required after it).
+    try_promote_to_shelves(bands, freq, meas_mag, target, config);
+
+    extra_iters
 }
 
 // ---------------------------------------------------------------------------
@@ -443,6 +499,54 @@ mod tests {
         (0..n)
             .map(|i| (log_min + (log_max - log_min) * i as f64 / (n - 1) as f64).exp())
             .collect()
+    }
+
+    /// b141.8 (audit): merging two nearby bands sums their gains (+3 +3 → +6
+    /// at the weighted center) — without a re-optimization pass the polished
+    /// set overshoots by ~3 dB on a measurement the pre-polish set corrected
+    /// exactly. polish_bands must keep the in-range error near zero.
+    #[test]
+    fn test_polish_merge_does_not_overshoot() {
+        let freq = make_log_freq(500, 20.0, 20000.0);
+        let target = vec![80.0_f64; 500];
+
+        // Measurement = flat minus the exact response of two close boosts:
+        // those two bands ARE the perfect correction (max_error ≈ 0). They
+        // sit 0.2 oct apart — inside the polish merge radius 0.333·0.8.
+        let b1 = PeqBand { freq_hz: 900.0, gain_db: 3.0, q: 4.0, enabled: true, filter_type: PeqFilterType::Peaking };
+        let b2 = PeqBand { freq_hz: 1035.0, gain_db: 3.0, q: 4.0, enabled: true, filter_type: PeqFilterType::Peaking };
+        let inverse = apply_peq(&freq, &[b1.clone(), b2.clone()], 48000.0);
+        let meas: Vec<f64> = inverse.iter().map(|c| 80.0 - c).collect();
+
+        let config = PeqConfig {
+            max_bands: 10,
+            tolerance_db: 1.0,
+            peak_bias: 1.5,
+            max_boost_db: 6.0,
+            max_cut_db: 18.0,
+            freq_range: (80.0, 15000.0),
+            smoothing_fraction: None,
+            min_band_distance_oct: None,
+            hybrid: false,
+            gain_regularization: 0.0,
+            sample_rate: 48000.0,
+        };
+        let weights = vec![1.0_f64; 500];
+        let solver = LmaSolver::new(&freq, &meas, &target, &weights, 15000.0, &config);
+
+        let mut bands = vec![b1, b2];
+        let corr0 = apply_peq(&freq, &bands, config.sample_rate);
+        let err_before = compute_max_error_in_range(&freq, &meas, &target, &corr0, config.freq_range);
+        assert!(err_before < 0.01, "fixture: pre-polish correction must be exact, got {err_before:.3} dB");
+
+        polish_bands(&mut bands, &solver, &freq, &meas, &target, &config, 15000.0, MIN_BAND_DISTANCE_OCT);
+
+        let corr = apply_peq(&freq, &bands, config.sample_rate);
+        let err_after = compute_max_error_in_range(&freq, &meas, &target, &corr, config.freq_range);
+        assert!(
+            err_after <= 0.5,
+            "polish must not overshoot after merging: max_error {err_after:.2} dB"
+        );
     }
 
     #[test]
