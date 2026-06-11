@@ -141,6 +141,19 @@ describe("evaluateBandFull cache (b141.7)", () => {
     expect(invokeCount()).toBeGreaterThan(after1);
   });
 
+  it("in-place phase replacement on the SAME measurement object → recompute", async () => {
+    // bands.ts delay-remove/restore does setState(..., "measurement", "phase",
+    // newArr): the measurement object keeps its identity, only the phase array
+    // is swapped. The key must see this.
+    const m = makeMeasurement() as any;
+    const band = makeBand({ measurement: m });
+    await evaluateBandFull({ band });
+    const after1 = invokeCount();
+    m.phase = m.phase.map((p: number) => p + 90);
+    await evaluateBandFull({ band });
+    expect(invokeCount()).toBeGreaterThan(after1);
+  });
+
   it("smoothing change → recompute", async () => {
     const m = makeMeasurement() as any;
     const band = makeBand({ measurement: m });

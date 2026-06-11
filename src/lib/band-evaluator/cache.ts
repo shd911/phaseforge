@@ -21,14 +21,23 @@ const store = new Map<string, unknown>();
 let measSeq = 0;
 const measIds = new WeakMap<object, number>();
 
-function measurementId(m: object | null | undefined): number | null {
-  if (!m) return null;
-  let id = measIds.get(m);
+function objectId(o: object | null | undefined): number | null {
+  if (!o) return null;
+  let id = measIds.get(o);
   if (id === undefined) {
     id = ++measSeq;
-    measIds.set(m, id);
+    measIds.set(o, id);
   }
   return id;
+}
+
+/** Measurement key = identity of the object AND of its data arrays.
+ *  bands.ts delay-remove/restore swaps `measurement.phase` in place via
+ *  setState path update — the measurement object keeps its identity, so the
+ *  sub-array identities must be part of the key. */
+function measurementKey(m: { freq?: number[]; magnitude?: number[]; phase?: number[] | null } | null | undefined): string | null {
+  if (!m) return null;
+  return [objectId(m), objectId(m.freq), objectId(m.magnitude), objectId(m.phase)].join(".");
 }
 
 /** FNV-1a (32-bit) over the raw float bits of a numeric array. Endpoints +
@@ -56,7 +65,7 @@ function bandContentKey(band: BandState): string {
     t: band.target,
     p: enabledPeq,
     s: band.settings?.smoothing ?? null,
-    m: measurementId(band.measurement),
+    m: measurementKey(band.measurement),
   });
 }
 
