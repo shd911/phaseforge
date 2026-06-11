@@ -104,7 +104,7 @@ export const DEFAULT_EXPORT_COLORS = {
 };
 
 // --- HSL color utilities ---
-export function hexToHsl(hex: string): [number, number, number] {
+function hexToHsl(hex: string): [number, number, number] {
   const r = parseInt(hex.slice(1, 3), 16) / 255;
   const g = parseInt(hex.slice(3, 5), 16) / 255;
   const b = parseInt(hex.slice(5, 7), 16) / 255;
@@ -121,7 +121,7 @@ export function hexToHsl(hex: string): [number, number, number] {
   return [h * 360, s * 100, l * 100];
 }
 
-export function hslToHex(h: number, s: number, l: number): string {
+function hslToHex(h: number, s: number, l: number): string {
   h /= 360; s /= 100; l /= 100;
   const hue2rgb = (p: number, q: number, t: number) => {
     if (t < 0) t += 1; if (t > 1) t -= 1;

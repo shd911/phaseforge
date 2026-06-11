@@ -236,7 +236,6 @@ export function resetAppState(newState: AppState) {
     if (b.target.low_pass) b.target.low_pass = { ...b.target.low_pass };
   }
   setState(reconcile(newState));
-  clearAllExportSnapshots();
   clearAllFreqSnapshots();
 }
 
@@ -287,7 +286,6 @@ export function removeBand(id: string) {
     }
   });
   // Очищаем снэпшоты удалённой полосы
-  setExportSnapshots(id, []);
   setFreqSnapshots(id, []);
   assignDefaultTargets(state.bands as BandState[]);
   markDirty();
@@ -447,12 +445,6 @@ export function restoreBandDelay(bandId: string) {
   markDirty();
 }
 
-export function updateBandPhase(bandId: string, newPhase: number[]) {
-  const idx = bandIndex(bandId);
-  if (idx < 0 || !state.bands[idx].measurement) return;
-  setState("bands", idx, "measurement", "phase", newPhase);
-  markDirty();
-}
 
 // ---------------------------------------------------------------------------
 // Per-band: target / filters
@@ -466,14 +458,6 @@ export function toggleBandTarget(bandId: string) {
   markDirty();
 }
 
-// Автовключение таргета при включении любого фильтра
-export function ensureTargetEnabled(bandId: string) {
-  const idx = bandIndex(bandId);
-  if (idx < 0) return;
-  if (!state.bands[idx].targetEnabled) {
-    setState("bands", idx, "targetEnabled", true);
-  }
-}
 
 // Инвертирование полярности полосы (фаза +180°)
 export function toggleBandInverted(bandId: string) {
@@ -641,27 +625,7 @@ export function setBandLowPass(bandId: string, config: import("../lib/types").Fi
   markDirty();
 }
 
-export function setBandLowShelf(bandId: string, config: import("../lib/types").ShelfConfig | null) {
-  const idx = bandIndex(bandId);
-  if (idx < 0) return;
-  pushHistory("Edit shelf");
-  setState("bands", idx, "target", "low_shelf", config);
-  if (config && !state.bands[idx].targetEnabled) {
-    setState("bands", idx, "targetEnabled", true);
-  }
-  markDirty();
-}
 
-export function setBandHighShelf(bandId: string, config: import("../lib/types").ShelfConfig | null) {
-  const idx = bandIndex(bandId);
-  if (idx < 0) return;
-  pushHistory("Edit shelf");
-  setState("bands", idx, "target", "high_shelf", config);
-  if (config && !state.bands[idx].targetEnabled) {
-    setState("bands", idx, "targetEnabled", true);
-  }
-  markDirty();
-}
 
 // ---------------------------------------------------------------------------
 // Per-band: merge source (для интерактивного re-merge)
@@ -685,12 +649,6 @@ export function updateBandSpliceFreq(bandId: string, freq: number) {
 // Per-band: floor bounce
 // ---------------------------------------------------------------------------
 
-export function setBandFloorBounce(bandId: string, config: FloorBounceConfig | null) {
-  const idx = bandIndex(bandId);
-  if (idx < 0 || !state.bands[idx].settings) return;
-  setState("bands", idx, "settings", "floorBounce", config);
-  markDirty();
-}
 
 export function toggleBandFloorBounce(bandId: string) {
   const idx = bandIndex(bandId);
@@ -949,31 +907,8 @@ export const [firNoiseFloor, setFirNoiseFloor] = createSignal(-150.0);
 // Stored at module level so they survive component unmount/remount.
 // ---------------------------------------------------------------------------
 
-export interface ExportSnapshot {
-  label: string;
-  freq: number[];
-  mag: number[];
-  phase: (number | null)[];
-  color: string;
-}
-
-// --- Export Plot snapshots (per-band) ---
-const [_exportSnapMap, _setExportSnapMap] = createSignal<Map<string, ExportSnapshot[]>>(new Map());
-
-export function exportSnapshots(bandId: string): ExportSnapshot[] {
-  return _exportSnapMap().get(bandId) ?? [];
-}
-
-export function setExportSnapshots(bandId: string, snaps: ExportSnapshot[]) {
-  const m = new Map(_exportSnapMap());
-  if (snaps.length === 0) m.delete(bandId);
-  else m.set(bandId, snaps);
-  _setExportSnapMap(m);
-}
-
-export function clearAllExportSnapshots() {
-  _setExportSnapMap(new Map());
-}
+// b141.5 (audit): the ExportSnapshot subsystem was write-only — superseded
+// by PlotSnapshot with tab:"export". Removed.
 
 // --- FrequencyPlot snapshots (per-band, corrected curve) ---
 export interface FreqSnapshot {
@@ -1039,9 +974,6 @@ export function clearPlotSnapshots(bandId: string, tab: string) {
   _setPlotSnapMap(m);
 }
 
-export function clearAllPlotSnapshots() {
-  _setPlotSnapMap(new Map());
-}
 
 // Export plot Y-scale: persists across ExportPlot unmount/remount.
 // null = not yet set (use auto-range), {min,max} = user has zoomed/scrolled.

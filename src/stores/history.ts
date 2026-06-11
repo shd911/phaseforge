@@ -104,7 +104,7 @@ export function pushHistory(label: string): void {
 }
 
 /** Capture pre-state into a buffer. Subsequent calls are no-ops until
- *  commitInteraction or discardInteraction. Use for drag operations. */
+ *  commitInteraction. Use for drag operations. */
 export function beginInteraction(label: string): void {
   if (_activeBuffer || !_captureFn) return;
   _activeBuffer = _captureFn(label);
@@ -120,10 +120,6 @@ export function commitInteraction(): void {
   _coalesceTs = 0;
   redoStack.length = 0;
   bump();
-}
-
-export function discardInteraction(): void {
-  _activeBuffer = null;
 }
 
 export function undo(): void {

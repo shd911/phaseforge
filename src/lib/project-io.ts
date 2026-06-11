@@ -438,7 +438,6 @@ export async function restoreState(project: ProjectFile, projDir: string | null)
 
             const nfPath = await resolveFile(ms.nfPath);
             const ffPath = await resolveFile(ms.ffPath);
-            console.log(`[Restore] Re-merge band "${band.name}": NF=${nfPath}, FF=${ffPath}`);
             const result = await invoke<MergeResult>("merge_measurements", {
               nfPath, ffPath, config: ms.config,
             });
@@ -452,7 +451,6 @@ export async function restoreState(project: ProjectFile, projDir: string | null)
             // Fallback: try importing the single measurement file
             try {
               const filePath = `${projDir}/${band.measurementFile}`;
-              console.log(`[Restore] Fallback import: ${filePath}`);
               band.measurement = await invoke<Measurement>("import_measurement", { path: filePath });
             } catch (e2) {
               console.warn(`[Restore] Fallback import also failed:`, e2);
@@ -612,7 +610,6 @@ async function migrateToV2(pfprojPath: string): Promise<void> {
   }
   setProjectDir(dir);
   setProjectName(info.name);
-  console.log(`[Migrate] v1 → v2: created folder structure in ${dir}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -841,15 +838,13 @@ export async function saveProjectAs(): Promise<void> {
 
   // 4. Copy files from old project folder (if exists)
   const oldDir = projectDir();
-  console.log("[SaveAs] oldDir:", oldDir, "newDir:", newDir);
   if (oldDir && oldDir !== newDir) {
     for (const sub of ["inbox", "target", "export"]) {
       try {
-        const copied = await invoke<number>("copy_dir_contents", {
+        await invoke<number>("copy_dir_contents", {
           sourceDir: `${oldDir}/${sub}`,
           destDir: `${newDir}/${sub}`,
         });
-        if (copied > 0) console.log(`[SaveAs] Copied ${copied} files: ${sub}/`);
       } catch (e) {
         console.warn(`[SaveAs] Failed to copy ${sub}/:`, e);
       }

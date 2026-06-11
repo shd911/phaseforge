@@ -54,14 +54,6 @@ fn validate_export_path(path: &str) -> Result<PathBuf, String> {
         return Err("Invalid path: path traversal not allowed".into());
     }
     
-    // Check for absolute paths that might escape project directory
-    if p.is_absolute() {
-        // For absolute paths, we still need to validate they're safe
-        // In a Tauri app, we typically want to restrict to project folder
-        // For now, we'll allow absolute paths but check they don't contain traversal
-        // A more strict implementation would canonicalize and check against project dir
-    }
-    
     // Additional check: ensure the path doesn't contain null bytes or other dangerous characters
     if path.contains('\0') {
         return Err("Invalid path: contains null bytes".into());

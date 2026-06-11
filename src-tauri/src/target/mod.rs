@@ -742,33 +742,9 @@ fn custom_hp_complex(f: f64, fc: f64, q: f64, order: u8) -> (f64, f64) {
 // Shelving filters (magnitude + phase)
 // ---------------------------------------------------------------------------
 
-/// Legacy scalar variant retained for tests that exercise the
-/// pre-b140.15.9 phase-summation path directly. Production code goes
-/// through `apply_shelf_complex`.
-#[cfg(test)]
-fn apply_shelf(
-    mag: &mut [f64],
-    phase: &mut [f64],
-    freq: &[f64],
-    cfg: &ShelfConfig,
-    is_low: bool,
-) {
-    let fc = cfg.freq_hz;
-    let gain = cfg.gain_db;
-    let q = cfg.q.max(0.1);
-    if fc <= 0.0 || gain.abs() < 1e-12 {
-        return;
-    }
-    for i in 0..freq.len() {
-        let f = freq[i];
-        if f <= 0.0 {
-            continue;
-        }
-        let (m_db, p_deg) = shelf_response(f, fc, gain, q, is_low);
-        mag[i] += m_db;
-        phase[i] += p_deg;
-    }
-}
+// b141.5 (audit): legacy scalar apply_shelf removed — its doc claimed
+// "retained for tests" but no test called it (cargo warned dead even under
+// cfg(test)). Production path is apply_shelf_complex → shelf_response.
 
 /// Analog 2nd-order shelf: exact s-domain transfer function.
 ///
