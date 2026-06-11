@@ -1,8 +1,8 @@
 {
   "__platform__": "macos",
-  "cep_01_gaussian_hp_subsonic_off": "11c1d7004955bfac8291a38bec9e88a27d67976f00849190e22ee38d7188a252",
-  "cep_02_gaussian_hp_subsonic_on": "5482af6e92667965ea12f61160abb5b37dee189cb65bc66a0aa457f1c18e5a43",
-  "cep_03_bessel_lp_500": "d9b4b859c9113c64396a794eb7da9fa5b3aec802450014edb73bf1d14ad45fe5",
+  "cep_01_gaussian_hp_subsonic_off": "2c511523be9b5d622a6ba3ca3f3a915df9ca9a46acb0fc5f700a457010d0db85",
+  "cep_02_gaussian_hp_subsonic_on": "d3403cfdcd6ffc1dea1150cb37080bcf9b811b60fc39e73f6827775f8bc680e3",
+  "cep_03_bessel_lp_500": "037d2d3cb2eb3910b8aad9b7f1f2e1478401c09cd978a6538791832ce4209d74",
   "cep_04_lr4_bandpass_linear_main": "52291795962c3951523aea2ef3cfc0062b4e63325be4500792d3065522d41eac",
   "iir_01_lr4_hp_80": "9a879f70c4ea7cb5d529b2b83afd021de00328349010ca60b095b8c3f1a116d4",
   "iir_02_lr4_bandpass_with_peq": "f9f236fddd8c9646a4023226e7a521e0dc328dee3e3c26c4594c4af736bd2c1e",

@@ -219,6 +219,12 @@ pub fn generate_model_fir(
     let mut impulse: Vec<f64> = spectrum.iter().map(|c| c.re * norm).collect();
 
     // 4. Phase-dependent reordering + windowing
+    let mixed_gaussian = config.phase_mode == PhaseMode::MixedPhase
+        && !config.gaussian_min_phase_filters.is_empty();
+    // Causal min-phase realisation (half-window, peak at sample 0). The
+    // WAV-bound impulse gets the adaptive N/2 shift below — after the
+    // realized-response analysis, which must see the unshifted impulse.
+    let causal_min_phase = !effective_linear && !use_model_phase && !mixed_gaussian;
     if effective_linear || use_model_phase {
         // Symmetric / mixed impulse: shift peak to center, full window.
         // use_model_phase: the model phase makes the impulse neither fully
@@ -229,7 +235,7 @@ pub fn generate_model_fir(
         for (i, w) in window.iter().enumerate() {
             impulse[i] *= w;
         }
-    } else if config.phase_mode == PhaseMode::MixedPhase && !config.gaussian_min_phase_filters.is_empty() {
+    } else if mixed_gaussian {
         // MixedPhase: impulse is neither fully causal nor symmetric.
         // Find the peak, shift it to center, apply full window.
         let peak_idx = impulse.iter().enumerate()
@@ -329,6 +335,35 @@ pub fn generate_model_fir(
     let realized_mag: Vec<f64> = realized_mag.iter().map(|&v| v - norm_db).collect();
 
     info!("generate_model_fir: norm_db={:.2} → passband normalized to 0 dB", norm_db);
+
+    // 9. b141.14 — unified WAV peak convention: shift the causal min-phase
+    //    impulse so its peak lands near N/2, matching the linear-phase and
+    //    IIR-path outputs (bands from different routes stay time-aligned in
+    //    a convolver). Mirrors iir_path.rs: the shift is adaptive — shifting
+    //    by k discards the last k samples, so when the (half-windowed) tail
+    //    still carries content above -100 dB of peak the shift shrinks and
+    //    content correctness wins over centering. The realized mag/phase
+    //    above were computed from the unshifted impulse and stay valid.
+    if causal_min_phase {
+        let half = n_fft / 2;
+        let peak_abs = impulse.iter().fold(0.0_f64, |a, &v| a.max(v.abs()));
+        let tail_threshold = peak_abs * 1e-5;
+        let last_significant = impulse
+            .iter()
+            .rposition(|&v| v.abs() > tail_threshold)
+            .unwrap_or(0);
+        let shift = half.min(n_fft - 1 - last_significant);
+        if shift > 0 {
+            let copy_len = n_fft - shift;
+            let mut out = vec![0.0_f64; n_fft];
+            out[shift..shift + copy_len].copy_from_slice(&impulse[..copy_len]);
+            impulse = out;
+        }
+        info!(
+            "generate_model_fir: WAV centered (shift={}, N/2={}, last_sig={})",
+            shift, half, last_significant,
+        );
+    }
 
     let causality = compute_causality(&impulse);
     info!("generate_model_fir: causality={:.4} ({}%)", causality, (causality * 100.0) as u32);

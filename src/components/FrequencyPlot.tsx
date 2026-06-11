@@ -12,7 +12,7 @@ import { openCrossoverDialog, type CrossoverDialogData } from "./CrossoverDialog
 import { handleImportMeasurement, handleMergeComplete, setShowMergeDialog, showMergeDialog } from "../lib/measurement-actions";
 import { setBandDelayInfo, markBandDelayRemoved, restoreBandDelay } from "../stores/bands";
 import MergeDialog from "./MergeDialog";
-import { exportBandWav, mixedWavConventionWarning } from "../lib/fir-export";
+import { exportBandWav } from "../lib/fir-export";
 import { showToast } from "../lib/toast";
 import { alignmentPhaseDeg } from "../lib/types";
 import { preRingZoneMs } from "../lib/pre-ring";
@@ -400,13 +400,9 @@ export default function FrequencyPlot() {
     setExportingWav(true);
     setExportWavError(null);
     try {
-      const ok = await exportBandWav(b);
-      // b141.8 (audit): IIR-path WAVs are peak-centered, cepstral min-phase
-      // WAVs are peak-at-0 — warn when the project mixes both conventions.
-      if (ok) {
-        const warn = await mixedWavConventionWarning(appState.bands as BandState[]).catch(() => null);
-        if (warn) showToast(warn, "warn", 12000);
-      }
+      // b141.14: all routes now ship the impulse peak at ~N/2 (cepstral
+      // min-phase gets the adaptive shift) — no mixed-convention warning.
+      await exportBandWav(b);
     } catch (e) {
       console.error("Export WAV failed:", e);
       setExportWavError(String(e));
@@ -1816,7 +1812,10 @@ export default function FrequencyPlot() {
       const normModelMag = targetMag.map((v: number, i: number) => (v + (peqMagArr[i] ?? 0)) - firResult.norm_db);
 
       // Compute export metrics from FIR result
-      // Pre-ringing: time from start to peak of impulse (ms)
+      // Pre-ringing: time from first significant sample to peak (ms).
+      // b141.14: min-phase WAVs are zero-padded to center the peak at N/2 —
+      // those exact-zero leading samples are latency, not pre-ringing, so
+      // the metric starts at the first sample above -80 dB of peak.
       let peakIdx = 0, peakVal = 0;
       for (let i = 0; i < firResult.impulse.length; i++) {
         if (Math.abs(firResult.impulse[i]) > peakVal) {
@@ -1824,7 +1823,11 @@ export default function FrequencyPlot() {
           peakIdx = i;
         }
       }
-      const preRingMs = peakIdx > 0 ? firResult.time_ms[peakIdx] - firResult.time_ms[0] : 0;
+      let firstSigIdx = peakIdx;
+      for (let i = 0; i < peakIdx; i++) {
+        if (Math.abs(firResult.impulse[i]) > peakVal * 1e-4) { firstSigIdx = i; break; }
+      }
+      const preRingMs = peakIdx > firstSigIdx ? firResult.time_ms[peakIdx] - firResult.time_ms[firstSigIdx] : 0;
 
       // Max magnitude error in passband (realized vs model)
       const modelMag = targetMag.map((v: number, i: number) => v + (peqMagArr[i] ?? 0));

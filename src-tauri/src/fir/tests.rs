@@ -993,7 +993,7 @@ use super::*;
         // Captured from b138.4 reference run; any change in the FIR pipeline
         // that touches this config flips the hash → investigate before
         // accepting.
-        let expected = "3a56a4dab45f0fb1";
+        let expected = "4574e5da87ade187"; // b141.14: unified WAV peak (N/2 shift)
         assert_eq!(hash, expected,
             "FIR impulse hash drift — capture new value from this test failure if intentional");
     }
@@ -1045,7 +1045,7 @@ use super::*;
         let result = generate_model_fir(&freq, &target_mag, &[], &vec![0.0; n], &b139_3_fir_config(PhaseMode::MinimumPhase))
             .expect("generate_model_fir should succeed");
         let hash = b139_impulse_hash(&result.impulse);
-        let expected = "f239598b9ca52795";
+        let expected = "dd841e3f05cb81a9"; // b141.14: unified WAV peak (N/2 shift)
         assert_eq!(hash, expected,
             "Gaussian linear + subsonic FIR hash drift — capture new value if intentional");
     }
@@ -1061,7 +1061,7 @@ use super::*;
         let result = generate_model_fir(&freq, &target_mag, &[], &vec![0.0; n], &b139_3_fir_config(PhaseMode::MinimumPhase))
             .expect("generate_model_fir should succeed");
         let hash = b139_impulse_hash(&result.impulse);
-        let expected = "f239598b9ca52795";
+        let expected = "dd841e3f05cb81a9"; // b141.14: unified WAV peak (N/2 shift)
         assert_eq!(hash, expected,
             "Gaussian min-phase + subsonic FIR hash drift — capture new value if intentional");
     }
@@ -1104,7 +1104,7 @@ use super::*;
         let result = generate_model_fir(&freq, &target_mag, &peq_mag, &vec![0.0; n], &b139_3_fir_config(PhaseMode::MinimumPhase))
             .expect("generate_model_fir should succeed");
         let hash = b139_impulse_hash(&result.impulse);
-        let expected = "a1c030bf0bceeee0";
+        let expected = "f5d8b961a20d053a"; // b141.14: unified WAV peak (N/2 shift)
         assert_eq!(hash, expected,
             "LR4 + PEQ FIR hash drift — capture new value if intentional");
     }
@@ -1188,8 +1188,12 @@ use super::*;
             "Identity MinimumPhase FIR peak should be ~1.0, got {pv}");
         assert!(off < 0.1 * pv * pv,
             "Identity MinimumPhase FIR should have ≪10% energy off peak, got {off}");
-        assert!(pi < cfg.taps / 4,
-            "MinimumPhase peak should be near start (causal), got idx {pi} of {} taps", cfg.taps);
+        // b141.14: unified WAV peak convention — the causal min-phase impulse
+        // ships with an adaptive shift to N/2 (parity with linear-phase and
+        // IIR-path WAVs). For an identity FIR the tail decays instantly, so
+        // the shift is exactly N/2.
+        assert!(pi >= cfg.taps / 2 && pi <= cfg.taps / 2 + 32,
+            "MinimumPhase peak should be near N/2 (unified WAV convention), got idx {pi} of {} taps", cfg.taps);
     }
 
     /// b139.3.2/3: real-world divergence reproducer. Kirill's logs showed

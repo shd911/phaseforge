@@ -8,9 +8,6 @@ import {
 } from "../stores/bands";
 import { projectDir, sanitize } from "./project-io";
 import { evaluateBandFull } from "./band-evaluator";
-import { hasActiveSubsonicProtect } from "./types";
-import type { FilterConfig } from "./types";
-import { pickFirRoute } from "./fir-routing";
 
 export function driverName(b: BandState): string {
   let name = b.measurement?.name ?? b.name;
@@ -44,36 +41,10 @@ async function generateBandImpulse(b: BandState): Promise<number[]> {
   return result.fir.impulse;
 }
 
-/** b141.8 (audit): WAV peak-position convention of a band's exported FIR.
- *  "centered" — peak at ~N/2 (linear-phase mains are symmetric; the IIR
- *  path zero-pads deliberately for REW import). "zero" — peak at sample 0
- *  (cepstral min-phase: Gaussian/Bessel/subsonic-protect/custom). */
-export async function bandWavConvention(b: BandState): Promise<"centered" | "zero"> {
-  const isUserLin = (f: FilterConfig | null | undefined) => !f || f.linear_phase === true;
-  const hp = b.target.high_pass;
-  const lp = b.target.low_pass;
-  const linearMain = isUserLin(hp) && isUserLin(lp);
-  if (linearMain) return "centered";
-  const subsonicCutoff = hasActiveSubsonicProtect(hp) ? hp!.freq_hz / 8 : null;
-  const route = await pickFirRoute(hp, lp, linearMain, subsonicCutoff);
-  return route === "iir" ? "centered" : "zero";
-}
-
-/** When the project mixes both conventions across enabled bands, the WAVs
- *  carry an N/2-sample relative latency: loaded as-is into a convolver the
- *  crossover desynchronizes. Returns a user-facing warning, or null. */
-export async function mixedWavConventionWarning(bands: BandState[]): Promise<string | null> {
-  const active = bands.filter((b) => b.targetEnabled);
-  if (active.length < 2) return null;
-  const conv = await Promise.all(active.map(bandWavConvention));
-  if (new Set(conv).size <= 1) return null;
-  const centered = active.filter((_, i) => conv[i] === "centered").map(driverName).join(", ");
-  const zero = active.filter((_, i) => conv[i] === "zero").map(driverName).join(", ");
-  return `Внимание: FIR-файлы полос имеют разную задержку пика. ` +
-    `Пик в центре (N/2): ${centered}. Пик в начале: ${zero}. ` +
-    `При загрузке в конвольвер выровняйте задержки между полосами, ` +
-    `иначе кроссовер рассинхронизируется на N/2 отсчётов.`;
-}
+// b141.14: the WAV peak convention is unified — every route (linear-phase,
+// IIR-analytical, cepstral min-phase) ships the impulse peak at ~N/2, so
+// bands stay time-aligned in a convolver. The b141.8 mixed-convention
+// warning (`bandWavConvention` / `mixedWavConventionWarning`) is gone.
 
 /** Export active band to WAV. Returns true on success, false on cancel, throws on error.
  *  Stale PEQ is gated by a confirm dialog at higher-level call sites — keep this

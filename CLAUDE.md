@@ -32,12 +32,14 @@
   libm (tan/cos) различается macOS↔Linux. golden_fir скипается на чужой
   ОС, pipeline_contract сравнивает только routes. Re-baseline: удалить
   json и прогнать тест дважды.
-- **WAV peak convention** (b141.8): linear-phase и IIR-путь — пик у N/2
-  (IIR — адаптивный сдвиг `min(N/2, n-1-last_significant)`, хвост не
-  режется); cepstral min-phase (Gaussian/Bessel/subsonic/custom) —
-  peak-at-0. Смешение конвенций в проекте → toast-warning при экспорте
-  (`mixedWavConventionWarning`, fir-export.ts). Полная унификация
-  требует генерации на 2N — отложено.
+- **WAV peak convention** (b141.14): ЕДИНАЯ — все пути кладут пик у N/2.
+  Cepstral min-phase получил тот же адаптивный сдвиг
+  `min(N/2, n-1-last_significant)`, что и IIR-путь (cepstral.rs, после
+  realized-анализа — кривые плота не сдвигаются). Toast-warning о
+  смешении конвенций удалён. Идея «генерация на 2N» оказалась не нужна:
+  финальный файл всё равно N тапов, комната для хвоста при пике N/2 —
+  ровно N/2, адаптивный сдвиг честнее (контент важнее центрирования).
+  Acceptance: `tests/wav_peak_convention.rs` (пик у N/2 на всех маршрутах).
 - **Bilinear digital cascade** (IIR path) has frequency-dependent
   deviation up to ~20° vs analog reference accumulated over 8 biquads.
   REPhase reference comparison gives tighter empirical bound (≤ 2.5° on
