@@ -23,6 +23,12 @@
   - **FFT cepstral path** (`fir/mod.rs::generate_model_fir`) — every
     other configuration: Linear-Phase main, Composite + subsonic,
     Gaussian, Bessel, Custom measured targets.
+- **WAV peak convention** (b141.8): linear-phase и IIR-путь — пик у N/2
+  (IIR — адаптивный сдвиг `min(N/2, n-1-last_significant)`, хвост не
+  режется); cepstral min-phase (Gaussian/Bessel/subsonic/custom) —
+  peak-at-0. Смешение конвенций в проекте → toast-warning при экспорте
+  (`mixedWavConventionWarning`, fir-export.ts). Полная унификация
+  требует генерации на 2N — отложено.
 - **Bilinear digital cascade** (IIR path) has frequency-dependent
   deviation up to ~20° vs analog reference accumulated over 8 biquads.
   REPhase reference comparison gives tighter empirical bound (≤ 2.5° on

@@ -12,7 +12,8 @@ import { openCrossoverDialog, type CrossoverDialogData } from "./CrossoverDialog
 import { handleImportMeasurement, handleMergeComplete, setShowMergeDialog, showMergeDialog } from "../lib/measurement-actions";
 import { setBandDelayInfo, markBandDelayRemoved, restoreBandDelay } from "../stores/bands";
 import MergeDialog from "./MergeDialog";
-import { exportBandWav } from "../lib/fir-export";
+import { exportBandWav, mixedWavConventionWarning } from "../lib/fir-export";
+import { showToast } from "../lib/toast";
 import { peqStale } from "../stores/peq-optimize";
 import { showStaleConfirmDialog } from "./StalePeqExportDialog";
 import { highQIndices } from "../lib/peq-quality";
@@ -396,7 +397,13 @@ export default function FrequencyPlot() {
     setExportingWav(true);
     setExportWavError(null);
     try {
-      await exportBandWav(b);
+      const ok = await exportBandWav(b);
+      // b141.8 (audit): IIR-path WAVs are peak-centered, cepstral min-phase
+      // WAVs are peak-at-0 — warn when the project mixes both conventions.
+      if (ok) {
+        const warn = await mixedWavConventionWarning(appState.bands as BandState[]).catch(() => null);
+        if (warn) showToast(warn, "warn", 12000);
+      }
     } catch (e) {
       console.error("Export WAV failed:", e);
       setExportWavError(String(e));
