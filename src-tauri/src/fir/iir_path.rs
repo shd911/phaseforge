@@ -408,7 +408,20 @@ pub fn generate_min_phase_fir_iir(input: &IirPathInput) -> Result<FirModelResult
     //    cascade (no phase correction needed → no parity / wrap artefacts
     //    near Nyquist, no over-subtraction of LP natural delay).
     let half = n / 2;
-    let shift = half;
+    // b141.8 (audit): the shift is adaptive, not a fixed N/2. Shifting by k
+    // discards the last k samples of the causal cascade impulse; for small
+    // taps with LF/high-Q corrections that tail carried up to -37 dB of the
+    // energy and skewed the shipped WAV by ~2-3 dB at LF vs the plotted
+    // response. Center at N/2 when the tail has decayed (≤ -100 dB of peak),
+    // otherwise shrink the pad so no significant sample is dropped — content
+    // correctness wins over peak centering for REW import.
+    let peak_abs = raw_impulse.iter().fold(0.0_f64, |a, &v| a.max(v.abs()));
+    let tail_threshold = peak_abs * 1e-5;
+    let last_significant = raw_impulse
+        .iter()
+        .rposition(|&v| v.abs() > tail_threshold)
+        .unwrap_or(0);
+    let shift = half.min(n - 1 - last_significant);
     let mut wav_impulse: Vec<f64> = if shift > 0 && shift < n {
         let mut out = vec![0.0_f64; n];
         let copy_len = n - shift;
@@ -418,8 +431,8 @@ pub fn generate_min_phase_fir_iir(input: &IirPathInput) -> Result<FirModelResult
         raw_impulse.clone()
     };
     info!(
-        "[IIR PATH] WAV centered: raw_peak={} → wav_peak={} (shift=N/2={})",
-        raw_peak_idx, raw_peak_idx + shift, shift,
+        "[IIR PATH] WAV centered: raw_peak={} → wav_peak={} (shift={}, N/2={}, last_sig={})",
+        raw_peak_idx, raw_peak_idx + shift, shift, half, last_significant,
     );
 
     // 5. Tail taper: fade the last ~5 % of WAV samples to avoid a hard
@@ -830,5 +843,70 @@ mod tests {
         assert!(max_err < phase_tolerance_deg,
             "HP=2000 LR4 sr=48k UI plot phase: max err {:.2}° > {}° in 100 Hz–20 kHz band",
             max_err, phase_tolerance_deg);
+    }
+}
+
+#[cfg(test)]
+mod wav_tail_tests {
+    use super::*;
+    use crate::fir::types::*;
+
+    /// b141.8 (audit): the WAV used a fixed N/2 zero-pad shift, truncating
+    /// the last N/2 samples of the cascade impulse. For small taps with a
+    /// low-frequency high-Q correction the discarded tail carries up to
+    /// -37 dB of the energy => the shipped WAV deviated from the plotted
+    /// (raw-cascade) response by ~2-3 dB at LF while the app showed none of
+    /// it. The shift must adapt: center when the tail fits, shrink when not.
+    #[test]
+    fn wav_spectrum_matches_raw_cascade_small_taps_lf_high_q() {
+        let taps = 4096usize;
+        let sr = 44100.0;
+        let hp = FilterConfig {
+            filter_type: FilterType::LinkwitzRiley,
+            order: 4, freq_hz: 20.0, shape: None,
+            linear_phase: false, q: None, subsonic_protect: None,
+        };
+        let peq = PeqBand { freq_hz: 30.0, gain_db: 6.0, q: 10.0, enabled: true, filter_type: PeqFilterType::Peaking };
+        let cfg = FirConfig {
+            taps, sample_rate: sr,
+            max_boost_db: 24.0, noise_floor_db: -150.0,
+            window: WindowType::Blackman,
+            phase_mode: PhaseMode::MinimumPhase,
+            iterations: 0,
+            freq_weighting: false, narrowband_limit: false,
+            nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0,
+            gaussian_min_phase_filters: vec![],
+            linear_phase_main: false,
+            subsonic_cutoff_hz: None,
+        };
+        let f_max = (40_000.0_f64).min(sr / 2.0 * 0.95);
+        let log_freq: Vec<f64> = (0..512).map(|i| 5.0 * (f_max / 5.0_f64).powf(i as f64 / 511.0)).collect();
+        let out = generate_min_phase_fir_iir(&IirPathInput {
+            freq: &log_freq, hp: Some(&hp), lp: None, peq: std::slice::from_ref(&peq), config: &cfg,
+        }).unwrap();
+
+        // Reference: the raw cascade impulse (what the UI plot is built from).
+        let mut biquads = build_filter_cascade(&hp, false, sr).unwrap();
+        biquads.push(build_peq_biquad(&peq, sr));
+        let raw = cascade_impulse(&biquads, taps);
+
+        let mut engine = FftEngine::new();
+        let mut spec_wav: Vec<Complex64> = out.impulse.iter().map(|&v| Complex64::new(v, 0.0)).collect();
+        engine.fft_forward(&mut spec_wav);
+        let mut spec_raw: Vec<Complex64> = raw.iter().map(|&v| Complex64::new(v, 0.0)).collect();
+        engine.fft_forward(&mut spec_raw);
+
+        // Bins 2..=10 cover ~21..108 Hz at taps=4096/sr=44.1k — the region
+        // the truncated tail distorted by up to 2.7 dB.
+        for bin in 2..=10usize {
+            let wav_db = 20.0 * spec_wav[bin].norm().log10() + out.norm_db;
+            let raw_db = 20.0 * spec_raw[bin].norm().log10();
+            let err = (wav_db - raw_db).abs();
+            assert!(
+                err < 0.5,
+                "bin {} ({:.0} Hz): WAV {:.2} dB vs raw cascade {:.2} dB (err {:.2} dB) — tail truncated?",
+                bin, bin as f64 * sr / taps as f64, wav_db, raw_db, err
+            );
+        }
     }
 }
