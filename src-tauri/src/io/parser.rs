@@ -89,9 +89,28 @@ pub fn parse_rew_txt(content: &str) -> Result<Measurement, AppError> {
             None
         };
 
+        // b141.5 (audit): reject nan/inf — f64::parse accepts them and they
+        // poison the DSP pipeline (10^(inf/20) → inf → NaN impulse).
+        if !f.is_finite() || !m.is_finite() || p.is_some_and(|v| !v.is_finite()) {
+            return Err(AppError::Parse {
+                message: format!("Non-finite value in data line: '{trimmed}'"),
+            });
+        }
+
         if first_data {
             has_phase = p.is_some();
             first_data = false;
+        } else if p.is_some() != has_phase {
+            // b141.5 (audit): a truncated 3-column file (or a stray extra
+            // column) used to yield phase.len() != freq.len(), accepted
+            // silently → index panic later in interp. Reject up front.
+            return Err(AppError::Parse {
+                message: format!(
+                    "Inconsistent column count: line '{trimmed}' {} a phase column while previous lines {}",
+                    if p.is_some() { "has" } else { "is missing" },
+                    if has_phase { "have one" } else { "do not" },
+                ),
+            });
         }
 
         freq.push(f);
@@ -104,6 +123,13 @@ pub fn parse_rew_txt(content: &str) -> Result<Measurement, AppError> {
     if freq.is_empty() {
         return Err(AppError::Parse {
             message: "No data points found in file".to_string(),
+        });
+    }
+    // b141.5 (audit): a single point breaks group-delay rendering and any
+    // interpolation downstream — require at least two.
+    if freq.len() < 2 {
+        return Err(AppError::Parse {
+            message: "File contains only one data point; at least two are required".to_string(),
         });
     }
 
@@ -248,6 +274,50 @@ mod tests {
         let m = result.unwrap();
         assert_eq!(m.freq.len(), 2);
         assert!((m.freq[1] - 100.0).abs() < 1e-6);
+    }
+
+    // b141.5 (audit HIGH): a truncated/corrupt 3-column file whose tail rows
+    // lose the phase column previously produced phase.len() < freq.len() —
+    // accepted silently, then index-out-of-bounds panic deep in interp_at /
+    // interp_single when the frontend fed freq+phase into DSP commands.
+    #[test]
+    fn test_inconsistent_phase_column_rejected() {
+        let data = "\
+20.0 65.3 -45.2
+40.0 70.1 -30.0
+100.0 75.5
+";
+        let result = parse_rew_txt(data);
+        assert!(result.is_err(), "rows with missing phase column must be rejected");
+    }
+
+    #[test]
+    fn test_phase_column_appearing_later_rejected() {
+        let data = "\
+20.0 65.3
+40.0 70.1 -30.0
+";
+        let result = parse_rew_txt(data);
+        assert!(result.is_err(), "rows gaining a phase column must be rejected");
+    }
+
+    // b141.5 (audit MEDIUM): f64::parse accepts nan/inf literals which then
+    // poison the whole DSP pipeline (10^(inf/20) → inf → NaN impulse).
+    #[test]
+    fn test_non_finite_values_rejected() {
+        for bad in ["20.0 nan\n40.0 70.0\n", "20.0 65.0\n40.0 inf\n",
+                    "nan 65.0\n40.0 70.0\n", "20.0 65.0 -inf\n40.0 70.0 0.0\n"] {
+            let result = parse_rew_txt(bad);
+            assert!(result.is_err(), "non-finite value must be rejected: {bad:?}");
+        }
+    }
+
+    // b141.5 (audit LOW): a single data point breaks GD rendering
+    // ((ph[1]-ph[0])/(f[1]-f[0]) → undefined → NaN curve) and any interp.
+    #[test]
+    fn test_single_point_rejected() {
+        let result = parse_rew_txt("1000.0 65.0\n");
+        assert!(result.is_err(), "files with a single data point must be rejected");
     }
 
     #[test]

@@ -293,7 +293,11 @@ pub fn compute_ir_delay(
     let peak_idx = impulse[..half]
         .iter()
         .enumerate()
-        .max_by(|(_, a), (_, b)| a.abs().partial_cmp(&b.abs()).unwrap())
+        .max_by(|(_, a), (_, b)| {
+            // b141.5 (audit): NaN-poisoned input must not panic the command —
+            // treat incomparable values as equal (same as cepstral.rs:236).
+            a.abs().partial_cmp(&b.abs()).unwrap_or(std::cmp::Ordering::Equal)
+        })
         .map(|(i, _)| i)
         .unwrap_or(0);
 
