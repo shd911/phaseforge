@@ -249,7 +249,12 @@ impl<'a> LmaSolver<'a> {
     fn compute_residuals(&self, params: &[f64]) -> Vec<f64> {
         let bands = Self::params_to_bands(params);
         let correction = apply_peq(self.freq, &bands, self.config.sample_rate);
+        self.residuals_from_correction(params, &correction)
+    }
 
+    /// b141.6 (audit): residual assembly split from correction computation so
+    /// the Jacobian can swap in incrementally-updated corrections.
+    fn residuals_from_correction(&self, params: &[f64], correction: &[f64]) -> Vec<f64> {
         let n_bands = params.len() / 3;
         let n_freq = self.range_indices.len();
         let extra = if self.config.gain_regularization > 0.0 { n_bands } else { 0 };
@@ -309,9 +314,32 @@ impl<'a> LmaSolver<'a> {
 
     /// Compute Jacobian via numerical finite differences (parallelized with rayon).
     /// Returns flat row-major Jacobian (m x n_params) and residuals.
+    ///
+    /// b141.6 (audit HIGH): perturbing one parameter touches exactly one band,
+    /// so each column recomputes only that band's response and patches it into
+    /// the cached base correction — O(n_freq) per column instead of
+    /// O(n_bands × n_freq). At 15-20 bands this removes ~20× redundant work
+    /// from the dominant LMA stage.
     fn compute_jacobian(&self, params: &[f64]) -> (Vec<f64>, Vec<f64>, usize, usize) {
         let n_params = params.len();
-        let r0 = self.compute_residuals(params);
+        let n_bands = n_params / 3;
+        let sr = self.config.sample_rate;
+
+        // Base per-band responses; their sum (in band order) is bit-identical
+        // to what apply_peq computes.
+        let bands = Self::params_to_bands(params);
+        let base_responses: Vec<Vec<f64>> = bands
+            .iter()
+            .map(|b| peq_band_response(self.freq, b, sr))
+            .collect();
+        let mut base_correction = vec![0.0_f64; self.freq.len()];
+        for resp in &base_responses {
+            for (c, r) in base_correction.iter_mut().zip(resp.iter()) {
+                *c += r;
+            }
+        }
+
+        let r0 = self.residuals_from_correction(params, &base_correction);
         let m = r0.len();
 
         // Compute step sizes
@@ -324,17 +352,34 @@ impl<'a> LmaSolver<'a> {
             }
         }).collect();
 
-        // Parallel: compute perturbed residuals for each parameter
+        // Parallel: per column, swap the perturbed band's response into the
+        // cached correction instead of re-evaluating all bands.
         let columns: Vec<(usize, Vec<f64>)> = (0..n_params).into_par_iter()
             .filter_map(|p| {
                 let h = steps[p];
                 if h.abs() < 1e-12 { return None; }
                 let mut params_h = params.to_vec();
                 params_h[p] += h;
-                let r_h = self.compute_residuals(&params_h);
+
+                let b = p / 3;
+                let band_h = PeqBand {
+                    freq_hz: params_h[b * 3],
+                    gain_db: params_h[b * 3 + 1],
+                    q: params_h[b * 3 + 2],
+                    enabled: true,
+                    filter_type: PeqFilterType::Peaking,
+                };
+                let resp_h = peq_band_response(self.freq, &band_h, sr);
+                let correction_h: Vec<f64> = (0..self.freq.len())
+                    .map(|i| base_correction[i] - base_responses[b][i] + resp_h[i])
+                    .collect();
+
+                let r_h = self.residuals_from_correction(&params_h, &correction_h);
                 Some((p, r_h))
             })
             .collect();
+
+        debug_assert_eq!(n_bands * 3, n_params);
 
         // Assemble flat row-major Jacobian: jacobian[i * n_params + p]
         let mut jacobian = vec![0.0_f64; m * n_params];
@@ -345,6 +390,35 @@ impl<'a> LmaSolver<'a> {
             }
         }
 
+        (jacobian, r0, m, n_params)
+    }
+
+    /// Reference implementation (pre-b141.6): full re-evaluation per column.
+    /// Kept for the equivalence test only.
+    #[cfg(test)]
+    fn compute_jacobian_reference(&self, params: &[f64]) -> (Vec<f64>, Vec<f64>, usize, usize) {
+        let n_params = params.len();
+        let r0 = self.compute_residuals(params);
+        let m = r0.len();
+        let steps: Vec<f64> = (0..n_params).map(|p| {
+            match p % 3 {
+                0 => (params[p] * 1e-3).max(0.1),
+                1 => 0.01,
+                2 => 0.01,
+                _ => unreachable!(),
+            }
+        }).collect();
+        let mut jacobian = vec![0.0_f64; m * n_params];
+        for p in 0..n_params {
+            let h = steps[p];
+            if h.abs() < 1e-12 { continue; }
+            let mut params_h = params.to_vec();
+            params_h[p] += h;
+            let r_h = self.compute_residuals(&params_h);
+            for i in 0..m {
+                jacobian[i * n_params + p] = (r_h[i] - r0[i]) / h;
+            }
+        }
         (jacobian, r0, m, n_params)
     }
 
@@ -491,6 +565,70 @@ pub(crate) fn try_promote_to_shelves(
             bands[last].filter_type = PeqFilterType::HighShelf;
             bands[last].q = trial[last].q;
             info!("try_promote_to_shelves: band[{}] at {:.0} Hz -> HighShelf", last, bands[last].freq_hz);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// b141.6: the incremental Jacobian (patch one band's response into the
+    /// cached base correction) must match the full per-column re-evaluation.
+    /// Non-trivial fixture: 12 bands, 400 points, regularization both on/off.
+    #[test]
+    fn test_jacobian_incremental_matches_reference() {
+        let n = 400;
+        let freq: Vec<f64> = (0..n)
+            .map(|i| 20.0 * (20000.0_f64 / 20.0).powf(i as f64 / (n - 1) as f64))
+            .collect();
+        let meas: Vec<f64> = freq
+            .iter()
+            .map(|f| 80.0 + 3.0 * (f / 700.0).ln().sin() + 2.0 * (f / 90.0).ln().cos())
+            .collect();
+        let target = vec![80.0_f64; n];
+        let weights: Vec<f64> = freq.iter().map(|f| 1.0 / (1.0 + f / 5000.0)).collect();
+
+        let bands: Vec<PeqBand> = (0..12)
+            .map(|i| PeqBand {
+                freq_hz: 40.0 * 1.6_f64.powi(i),
+                gain_db: if i % 2 == 0 { -4.0 } else { 3.0 },
+                q: 1.0 + 0.3 * i as f64,
+                enabled: true,
+                filter_type: PeqFilterType::Peaking,
+            })
+            .collect();
+
+        for reg in [0.0, 0.2] {
+            let config = PeqConfig {
+                max_bands: 20,
+                tolerance_db: 1.0,
+                peak_bias: 1.5,
+                max_boost_db: 6.0,
+                max_cut_db: 18.0,
+                freq_range: (30.0, 18000.0),
+                smoothing_fraction: None,
+                min_band_distance_oct: None,
+                hybrid: false,
+                gain_regularization: reg,
+                sample_rate: 96000.0,
+            };
+            let solver = LmaSolver::new(&freq, &meas, &target, &weights, 18000.0, &config);
+            let params = LmaSolver::bands_to_params(&bands);
+
+            let (j_fast, r_fast, m_fast, np_fast) = solver.compute_jacobian(&params);
+            let (j_ref, r_ref, m_ref, np_ref) = solver.compute_jacobian_reference(&params);
+
+            assert_eq!((m_fast, np_fast), (m_ref, np_ref));
+            for (i, (a, b)) in r_fast.iter().zip(r_ref.iter()).enumerate() {
+                assert!((a - b).abs() < 1e-9, "residual[{i}] differs: {a} vs {b} (reg={reg})");
+            }
+            for (i, (a, b)) in j_fast.iter().zip(j_ref.iter()).enumerate() {
+                assert!(
+                    (a - b).abs() < 1e-7,
+                    "jacobian[{i}] differs: {a} vs {b} (reg={reg})"
+                );
+            }
         }
     }
 }
