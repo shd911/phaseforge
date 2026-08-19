@@ -366,6 +366,9 @@ pub fn generate_model_fir(
     //    the new endpoint sample is at or below the -100 dB threshold —
     //    nothing audible to fade. A short-of-center peak is surfaced to
     //    the user at export (offCenterWavWarning, fir-export.ts).
+    // b141.19: the applied delay (leading zeros). Linear-phase and mixed
+    // impulses are already centred by construction, so their delay is N/2.
+    let mut wav_delay_samples = n_fft / 2;
     if causal_min_phase {
         let half = n_fft / 2;
         let peak_abs = impulse.iter().fold(0.0_f64, |a, &v| a.max(v.abs()));
@@ -374,6 +377,9 @@ pub fn generate_model_fir(
             .iter()
             .rposition(|&v| v.abs() > tail_threshold)
             .unwrap_or(0);
+        // b141.19 (audit): the shift is the band's DELAY, measured from the
+        // impulse start — see the rationale in iir_path.rs. Aligning peaks
+        // instead would misalign bands by their rise-time difference.
         let shift = half.min(n_fft - 1 - last_significant);
         if shift > 0 {
             let copy_len = n_fft - shift;
@@ -381,8 +387,9 @@ pub fn generate_model_fir(
             out[shift..shift + copy_len].copy_from_slice(&impulse[..copy_len]);
             impulse = out;
         }
+        wav_delay_samples = shift;
         info!(
-            "generate_model_fir: WAV centered (shift={}, N/2={}, last_sig={})",
+            "generate_model_fir: WAV delayed (shift={}, N/2={}, last_sig={})",
             shift, half, last_significant,
         );
     }
@@ -398,5 +405,6 @@ pub fn generate_model_fir(
         sample_rate: config.sample_rate,
         norm_db,
         causality,
+        wav_delay_samples,
     })
 }

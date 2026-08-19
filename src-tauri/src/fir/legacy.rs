@@ -380,6 +380,8 @@ pub fn generate_hybrid_fir(
     let causality = compute_causality(&impulse);
     info!("generate_hybrid_fir: causality={:.4} ({}%)", causality, (causality * 100.0) as u32);
 
+    // b141.19: test-only legacy path (cfg(test) since b141.2) — it applies no
+    // centering delay; the field exists for struct parity.
     Ok(FirModelResult {
         impulse,
         realized_mag,
@@ -388,5 +390,6 @@ pub fn generate_hybrid_fir(
         sample_rate: config.sample_rate,
         norm_db,
         causality,
+        wav_delay_samples: 0,
     })
 }

@@ -114,4 +114,12 @@ pub struct FirModelResult {
     pub causality: f64,
     pub sample_rate: f64,
     pub norm_db: f64,
+    /// b141.19 (audit): leading zeros in the shipped `impulse` — the band's
+    /// latency in samples. Every route aims for N/2 so that bands share a
+    /// latency and a crossover survives; the shift is capped so no tail
+    /// content above -100 dB is dropped, so a long LF tail on few taps ends
+    /// up with less. The caller needs that number to warn about the resulting
+    /// desync instead of being promised it never happens.
+    #[serde(default)]
+    pub wav_delay_samples: usize,
 }

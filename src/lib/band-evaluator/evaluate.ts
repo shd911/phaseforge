@@ -118,6 +118,11 @@ export interface BandEvalResult {
     sampleRate: number;
     normDb: number;
     causality: number;
+    /** b141.19: leading zeros in `impulse` — the band's latency in samples.
+     *  N/2 for every route when the filter tail fits in half the file; less
+     *  when the shift had to shrink to keep the tail. Bands that disagree
+     *  here are out of sync in a convolver. */
+    wavDelaySamples: number;
   };
   /** b139.4c: structured IR for the SPL/IR/Step views. Each sub-field is
    *  populated only when the underlying response exists; `time` is
@@ -434,6 +439,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
       sampleRate: result.sample_rate,
       normDb: result.norm_db,
       causality: result.causality,
+      wavDelaySamples: result.wav_delay_samples ?? Math.floor(result.impulse.length / 2),
     };
   }
 

@@ -32,14 +32,24 @@
   libm (tan/cos) различается macOS↔Linux. golden_fir скипается на чужой
   ОС, pipeline_contract сравнивает только routes. Re-baseline: удалить
   json и прогнать тест дважды.
-- **WAV peak convention** (b141.14): ЕДИНАЯ — все пути кладут пик у N/2.
-  Cepstral min-phase получил тот же адаптивный сдвиг
+- **WAV delay convention** (b141.14, уточнена в b141.19): выравнивается
+  **ЗАДЕРЖКА** (ведущие нули), а НЕ позиция пика. Все пути дают N/2
+  ведущих нулей — cepstral min-phase получил тот же адаптивный сдвиг
   `min(N/2, n-1-last_significant)`, что и IIR-путь (cepstral.rs, после
-  realized-анализа — кривые плота не сдвигаются). Toast-warning о
-  смешении конвенций удалён. Идея «генерация на 2N» оказалась не нужна:
-  финальный файл всё равно N тапов, комната для хвоста при пике N/2 —
-  ровно N/2, адаптивный сдвиг честнее (контент важнее центрирования).
-  Acceptance: `tests/wav_peak_convention.rs` (пик у N/2 на всех маршрутах).
+  realized-анализа — кривые плота не сдвигаются).
+  **Пик min-фазной полосы законно стоит ПОЗЖЕ N/2** на время нарастания
+  фильтра: НЧ-секция физически достигает максимума позже ВЧ. Попытка
+  целиться пиком в N/2 (пробовали в аудите 2026-08-19) рассинхронизирует
+  полосы на разницу времён нарастания — сумма LR4-двухполоски проседает
+  на −1.15 dB на 400 Hz вместо ровных 0.00 dB. Формулировка «все пути
+  кладут пик у N/2» была неточной и спровоцировала ложную находку.
+  Идея «генерация на 2N» не нужна: комната для хвоста при задержке N/2 —
+  ровно N/2, адаптивный сдвиг честнее (контент важнее задержки).
+  Фактическая задержка возвращается в `wav_delay_samples`; недобор
+  (хвост не уместился) — предупреждение при экспорте.
+  Acceptance: `tests/wav_peak_convention.rs` — `two_way_sum_stays_flat`
+  (главный инвариант), `wav_delay_matches_the_leading_zeros`,
+  `short_taps_lf_tail_falls_short_of_center_and_says_so`.
 - **Bilinear digital cascade** (IIR path) has frequency-dependent
   deviation up to ~20° vs analog reference accumulated over 8 biquads.
   REPhase reference comparison gives tighter empirical bound (≤ 2.5° on

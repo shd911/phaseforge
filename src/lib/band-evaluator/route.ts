@@ -27,6 +27,9 @@ export interface FirInvokeResult {
   sample_rate: number;
   norm_db: number;
   causality: number;
+  /** b141.19: leading zeros applied to the shipped impulse = the band's
+   *  latency. N/2 when the tail fits; less when it did not. */
+  wav_delay_samples: number;
 }
 
 /** Structurally-typed subset of FirRequestConfig — keeping a local

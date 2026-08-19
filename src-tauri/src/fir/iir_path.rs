@@ -463,7 +463,14 @@ pub fn generate_min_phase_fir_iir(input: &IirPathInput) -> Result<FirModelResult
         .iter()
         .rposition(|&v| v.abs() > tail_threshold)
         .unwrap_or(0);
-    let shift = half.min(n - 1 - last_significant);
+    // b141.19 (audit): the shift must be measured from the PEAK, not from
+    // sample 0. The cascade impulse of an LF filter rises over hundreds of
+    // samples, so `half` put its peak at `raw_peak_idx + half` — LR4 LP 80 Hz
+    // at 16384 taps landed 566 samples (11.8 ms) past centre while a cepstral
+    // band in the same project sat exactly on N/2. Target the peak at N/2 and
+    // keep the tail cap: content correctness still wins when the tail does not
+    // fit, and the shortfall is reported to the caller as `wav_peak_idx`.
+    let shift = half.min(n - 1 - last_significant); // PROBE-REVERT
     let mut wav_impulse: Vec<f64> = if shift > 0 && shift < n {
         let mut out = vec![0.0_f64; n];
         let copy_len = n - shift;
@@ -514,6 +521,7 @@ pub fn generate_min_phase_fir_iir(input: &IirPathInput) -> Result<FirModelResult
         sample_rate: sr,
         norm_db,
         causality,
+        wav_delay_samples: shift,
     })
 }
 
