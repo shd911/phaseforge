@@ -14,6 +14,16 @@ use crate::target::TargetCurve;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectFile {
     pub version: u32,
+    /// b141.10 convention marker: `Some(true)` means the alignment delays in
+    /// this file use "positive = plays later" (HQPlayer parity). Absent means a
+    /// legacy file that the frontend migrates on load.
+    ///
+    /// b141.18 (audit): the frontend wrote this flag but `ProjectFile` had no
+    /// field for it, so serde dropped it on every save. The migration then fired
+    /// on every load and the delays flip-flopped between two states, never
+    /// converging. Round-trip pinned by `delay_convention_flag_survives_round_trip`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delay_positive_is_late: Option<bool>,
     pub app_name: String,
 
     /// v2: project name (used for file naming)
@@ -475,5 +485,40 @@ mod tests {
         assert_eq!(std::fs::metadata(&f2).unwrap().len(), s2, "b.txt zeroed");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// b141.18 (audit, CRITICAL): the delay-convention marker written by the
+    /// frontend had no field in `ProjectFile`, so `save_project` serialised it
+    /// away. `restoreState` then saw an unmarked file, re-ran
+    /// `migrateDelayConvention`, and the alignment delays flipped on every
+    /// open — `[788, 60, 40, 0, 0] µs` became `[0, 728, 748, 788, 788]` and
+    /// back again, without ever converging.
+    #[test]
+    fn delay_convention_flag_survives_round_trip() {
+        let src = r#"{
+            "version": 2,
+            "delay_positive_is_late": true,
+            "app_name": "PhaseForge",
+            "bands": [],
+            "active_band_id": "b1",
+            "show_phase": true,
+            "show_mag": true,
+            "show_target": true,
+            "next_band_num": 2
+        }"#;
+        let project: ProjectFile = serde_json::from_str(src).expect("parse");
+        assert_eq!(project.delay_positive_is_late, Some(true));
+
+        let out = serde_json::to_string(&project).expect("serialise");
+        assert!(out.contains("\"delay_positive_is_late\":true"),
+            "flag must survive save — otherwise the migration re-fires on every load: {out}");
+
+        // A legacy file (no marker) must still read as "needs migration".
+        let legacy = src.replace("\"delay_positive_is_late\": true,", "");
+        let legacy: ProjectFile = serde_json::from_str(&legacy).expect("parse legacy");
+        assert_eq!(legacy.delay_positive_is_late, None);
+        // ...and must not gain the key when written back untouched.
+        let out = serde_json::to_string(&legacy).expect("serialise legacy");
+        assert!(!out.contains("delay_positive_is_late"));
     }
 }
