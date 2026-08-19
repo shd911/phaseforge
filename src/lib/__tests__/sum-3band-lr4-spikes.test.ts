@@ -150,8 +150,10 @@ vi.mock("@tauri-apps/api/core", () => ({
     if (cmd === "compute_impulse") {
       const mag = args.magnitude as number[];
       const phase = args.phase as number[];
+      // b141.23: the axis is derived from dt + pre_peak_count, not shipped.
       return {
-        time: mag.map((_: number, i: number) => i / 48000),
+        dt: 1 / 48000,
+        pre_peak_count: 0,
         impulse: [...mag],
         step: [...phase],
       };

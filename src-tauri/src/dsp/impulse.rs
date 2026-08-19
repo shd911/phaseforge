@@ -50,8 +50,14 @@ fn ifft_real_impulse(
 /// Result of impulse response computation
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ImpulseResult {
-    /// Time axis in seconds (can include negative values for pre-peak region)
-    pub time: Vec<f64>,
+    /// b141.23 (audit): the time axis is `(i - pre_peak_count) * dt` — a pure
+    /// linear ramp that used to be serialised in full: 2.7 MB at 65536 taps,
+    /// 11.3 MB at the 262144 the window-growth loop can reach, a third of the
+    /// payload, ~15 times per IR render. The frontend rebuilds it from these
+    /// two numbers (same treatment `time_ms` got in the FIR payload, b141.6).
+    pub dt: f64,
+    /// Samples before t=0 in `impulse` / `step` (the pre-peak region).
+    pub pre_peak_count: usize,
     /// Impulse response amplitude (normalized: peak = 100%)
     pub impulse: Vec<f64>,
     /// Step response (cumulative sum of impulse, normalized)
@@ -116,7 +122,8 @@ pub fn compute_impulse_response(
 
     if peak <= 0.0 {
         return ImpulseResult {
-            time: vec![0.0],
+            dt,
+            pre_peak_count: 0,
             impulse: vec![0.0],
             step: vec![0.0],
             raw_peak: 0.0,
@@ -164,7 +171,6 @@ pub fn compute_impulse_response(
     let total_len = pre_peak_count + trim_end;
     let pre_start = fft_size - pre_peak_count;
 
-    let mut time = Vec::with_capacity(total_len);
     let mut impulse_out = Vec::with_capacity(total_len);
     let mut raw_reordered = Vec::with_capacity(total_len);
 
@@ -172,8 +178,6 @@ pub fn compute_impulse_response(
     // Their "true" time = (index - fft_size) * dt (negative values)
     for i in 0..pre_peak_count {
         let buf_idx = pre_start + i;
-        let t = (buf_idx as f64 - fft_size as f64) * dt;
-        time.push(t);
         impulse_out.push(impulse_norm_full[buf_idx]);
         raw_reordered.push(impulse_raw[buf_idx]);
     }
@@ -181,8 +185,6 @@ pub fn compute_impulse_response(
     // Forward samples: buffer indices [0..trim_end]
     // Their time = index * dt
     for i in 0..trim_end {
-        let t = i as f64 * dt;
-        time.push(t);
         impulse_out.push(impulse_norm_full[i]);
         raw_reordered.push(impulse_raw[i]);
     }
@@ -205,7 +207,8 @@ pub fn compute_impulse_response(
     };
 
     ImpulseResult {
-        time,
+        dt,
+        pre_peak_count,
         impulse: impulse_out,
         step: step_norm,
         raw_peak: peak,
@@ -227,8 +230,7 @@ mod tests {
 
         let result = compute_impulse_response(&freq, &mag, &phase, 48000.0);
 
-        assert_eq!(result.impulse.len(), result.time.len());
-        assert_eq!(result.step.len(), result.time.len());
+        assert_eq!(result.step.len(), result.impulse.len());
 
         // Find peak in the output
         let peak_idx = result
@@ -244,11 +246,12 @@ mod tests {
         assert!((peak_val - 100.0).abs() < 1.0, "Peak should be ~100%, got {}", peak_val);
 
         // Time at peak should be near 0
-        let peak_time = result.time[peak_idx];
+        let time_at = |i: usize| (i as f64 - result.pre_peak_count as f64) * result.dt;
+        let peak_time = time_at(peak_idx);
         assert!(peak_time.abs() < 0.001, "Peak time should be near 0, got {}", peak_time);
 
         // Should have some negative time values (pre-peak region)
-        assert!(result.time[0] < 0.0, "First time should be negative, got {}", result.time[0]);
+        assert!(time_at(0) < 0.0, "First time should be negative, got {}", time_at(0));
     }
 
     #[test]
@@ -262,16 +265,17 @@ mod tests {
         let result = compute_impulse_response(&freq, &mag, &phase, 48000.0);
 
         // Trimmed length should be less than full FFT size (4096 at minimum)
-        assert!(result.time.len() < 4096, "Should be trimmed, got len={}", result.time.len());
-        assert_eq!(result.time.len(), result.impulse.len());
-        assert_eq!(result.time.len(), result.step.len());
-        // Time axis should start with negative value (pre-peak)
-        assert!(result.time[0] < 0.0, "First time should be negative");
+        assert!(result.impulse.len() < 4096, "Should be trimmed, got len={}", result.impulse.len());
+        assert_eq!(result.step.len(), result.impulse.len());
+        // Time axis starts before t=0 (pre-peak region)
+        assert!(result.pre_peak_count > 0, "expected a pre-peak region");
     }
 
+    /// b141.23: the axis is now derived on the frontend as
+    /// `(i - pre_peak_count) * dt`. Pin the two numbers that define it.
     #[test]
     fn test_impulse_time_monotonic() {
-        // Verify time axis is monotonically increasing
+        // Verify the derived time axis is monotonically increasing
         let n = 100;
         let freq: Vec<f64> = (0..n).map(|i| 20.0 + i as f64 * 200.0).collect();
         let mag: Vec<f64> = vec![0.0; n];
@@ -279,11 +283,14 @@ mod tests {
 
         let result = compute_impulse_response(&freq, &mag, &phase, 48000.0);
 
-        for i in 1..result.time.len() {
+        let time_at = |i: usize| (i as f64 - result.pre_peak_count as f64) * result.dt;
+        assert!(result.dt > 0.0, "dt must be positive, got {}", result.dt);
+        assert!((result.dt - 1.0 / 48_000.0).abs() < 1e-15, "dt must be 1/sr");
+        for i in 1..result.impulse.len() {
             assert!(
-                result.time[i] > result.time[i - 1],
+                time_at(i) > time_at(i - 1),
                 "Time should be monotonically increasing at index {}: {} <= {}",
-                i, result.time[i], result.time[i - 1]
+                i, time_at(i), time_at(i - 1)
             );
         }
     }
@@ -323,11 +330,12 @@ mod tests {
         // The system is strictly causal: anything before t = -10 ms must be
         // residual-level only. With the wrap bug the tail re-entered at up to
         // ~40% of peak.
+        let time_at = |i: usize| (i as f64 - result.pre_peak_count as f64) * result.dt;
         let max_pre: f64 = result
-            .time
+            .impulse
             .iter()
-            .zip(result.impulse.iter())
-            .filter(|(t, _)| **t < -0.010)
+            .enumerate()
+            .filter(|(i, _)| time_at(*i) < -0.010)
             .map(|(_, v)| v.abs())
             .fold(0.0, f64::max);
         assert!(
@@ -372,8 +380,9 @@ mod tests {
         let step_at_ir_peak = result.step[ir_peak_idx];
         let ir_at_step_peak = result.impulse[st_peak_idx].abs();
 
-        eprintln!("IR peak: idx={} t={:.3}ms val={:.1}%", ir_peak_idx, result.time[ir_peak_idx] * 1000.0, ir_peak_val);
-        eprintln!("Step peak: idx={} t={:.3}ms val={:.1}%", st_peak_idx, result.time[st_peak_idx] * 1000.0, st_peak_val);
+        let time_ms = |i: usize| (i as f64 - result.pre_peak_count as f64) * result.dt * 1000.0;
+        eprintln!("IR peak: idx={} t={:.3}ms val={:.1}%", ir_peak_idx, time_ms(ir_peak_idx), ir_peak_val);
+        eprintln!("Step peak: idx={} t={:.3}ms val={:.1}%", st_peak_idx, time_ms(st_peak_idx), st_peak_val);
         eprintln!("Step at IR peak: {:.1}% (should be ~50%)", step_at_ir_peak);
         eprintln!("IR at Step peak: {:.1}% (should be ~0 for symmetric)", ir_at_step_peak);
         eprintln!("IR peak time != Step peak time? {} != {} → {}", ir_peak_idx, st_peak_idx, ir_peak_idx != st_peak_idx);

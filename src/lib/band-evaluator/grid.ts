@@ -23,6 +23,31 @@ export function buildLogGrid(n: number, fMin: number, fMax: number): number[] {
   return out;
 }
 
+/** b141.23 (audit): rebuild the IR time axis (seconds) from the two numbers
+ *  `compute_impulse` now returns. The axis is a pure ramp, and shipping it
+ *  cost 2.7 MB per call at 65536 taps (11.3 MB at 262144) — a third of the
+ *  payload, ~15 calls per IR render. Same treatment `time_ms` got in the FIR
+ *  payload in b141.6. */
+export interface ImpulseIpc {
+  dt: number;
+  pre_peak_count: number;
+  impulse: number[];
+  step: number[];
+  raw_peak?: number;
+  step_raw_peak?: number;
+}
+
+/** Time axis (seconds) for one `compute_impulse` result. */
+export function irTime(r: ImpulseIpc): number[] {
+  return buildIrTimeAxis(r.dt, r.pre_peak_count, r.impulse.length);
+}
+
+export function buildIrTimeAxis(dt: number, prePeakCount: number, len: number): number[] {
+  const out = new Array<number>(len);
+  for (let i = 0; i < len; i++) out[i] = (i - prePeakCount) * dt;
+  return out;
+}
+
 /** b141.19 (audit): the grid a FIR is generated on, independent of whether the
  *  band has a measurement attached. Both the Export tab preview and the WAV
  *  export must pass this — `evaluateBandFull` otherwise falls back to the

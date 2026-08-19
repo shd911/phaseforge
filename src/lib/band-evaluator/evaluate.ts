@@ -22,7 +22,7 @@ import {
   smoothingConfig,
 } from "../plot-helpers";
 import { hasActiveSubsonicProtect } from "../types";
-import { buildLogGrid, buildCommonGrid, resampleOnLogGrid, interpPhaseOnGrid } from "./grid";
+import { buildLogGrid, buildCommonGrid, resampleOnLogGrid, interpPhaseOnGrid, irTime, type ImpulseIpc } from "./grid";
 import { dispatchFirInvoke } from "./route";
 import { appendNoiseFloorTail, autoRefLevel, computeExtension } from "./extension";
 import { bandRequestKey, memoEval } from "./cache";
@@ -451,7 +451,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
     const sr = measurement?.sample_rate ?? 48000;
     if (measurement) {
       try {
-        const r = await invoke<{ time: number[]; impulse: number[]; step: number[] }>(
+        const r = await invoke<ImpulseIpc>(
           "compute_impulse",
           {
             freq: measurement.freq,
@@ -460,7 +460,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
             sampleRate: measurement.sample_rate ?? null,
           },
         );
-        ir.measurement = { time: r.time, impulse: r.impulse, step: r.step };
+        ir.measurement = { time: irTime(r), impulse: r.impulse, step: r.step };
       } catch (e) {
         console.warn("[evaluateBandFull] measurement compute_impulse failed:", e);
       }
@@ -495,11 +495,11 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
         const irFreq = irExt.freq;
         const irTargetMag = irExt.mag;
         const irTargetPhase = irExt.phase;
-        const r = await invoke<{ time: number[]; impulse: number[]; step: number[] }>(
+        const r = await invoke<ImpulseIpc>(
           "compute_impulse",
           { freq: irFreq, magnitude: irTargetMag, phase: irTargetPhase, sampleRate: sr },
         );
-        ir.target = { time: r.time, impulse: r.impulse, step: r.step };
+        ir.target = { time: irTime(r), impulse: r.impulse, step: r.step };
 
         // b140.3.4: corrected IR on the same wide grid.
         if (measurement) {
@@ -537,11 +537,11 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
           const irCorrPhase = await reconstructTargetPhase(
             irFreq, basePhase, band.target.high_pass, band.target.low_pass,
           );
-          const cr = await invoke<{ time: number[]; impulse: number[]; step: number[] }>(
+          const cr = await invoke<ImpulseIpc>(
             "compute_impulse",
             { freq: irFreq, magnitude: irCorrMag, phase: irCorrPhase, sampleRate: sr },
           );
-          ir.corrected = { time: cr.time, impulse: cr.impulse, step: cr.step };
+          ir.corrected = { time: irTime(cr), impulse: cr.impulse, step: cr.step };
         }
       } catch (e) {
         console.warn("[evaluateBandFull] target/corrected IR pipeline failed:", e);

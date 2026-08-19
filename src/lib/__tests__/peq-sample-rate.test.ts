@@ -35,8 +35,10 @@ vi.mock("@tauri-apps/api/core", () => ({
     if (cmd === "get_smoothed") return args.magnitude;
     if (cmd === "compute_impulse") {
       const n = 64;
+      // b141.23: the axis is derived from dt + pre_peak_count, not shipped.
       return {
-        time: Array.from({ length: n }, (_, i) => i / 48000),
+        dt: 1 / 48000,
+        pre_peak_count: 0,
         impulse: new Array(n).fill(0),
         step: new Array(n).fill(0),
       };

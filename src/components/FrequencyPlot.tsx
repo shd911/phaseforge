@@ -32,7 +32,7 @@ import {
 } from "../lib/plot-helpers";
 import { hasActiveSubsonicProtect } from "../lib/types";
 import { evaluateBandFull, evaluateSum, reconstructTargetPhase } from "../lib/band-evaluator";
-import { buildFirGrid, interpOnGrid, interpPhaseOnGrid } from "../lib/band-evaluator/grid";
+import { buildFirGrid, interpOnGrid, interpPhaseOnGrid, irTime, type ImpulseIpc } from "../lib/band-evaluator/grid";
 import { computeAutoAlign } from "../lib/auto-align";
 
 // Track which inputs have been explicitly clicked — wheel only fires when in set
@@ -2185,7 +2185,7 @@ export default function FrequencyPlot() {
             rotatedPhase = sbPh.map((p, j) => p + alignmentPhaseDeg(sbFreq[j], delay));
           }
 
-          return invoke<{ time: number[]; impulse: number[]; step: number[]; raw_peak: number; step_raw_peak: number }>(
+          return invoke<ImpulseIpc>(
             "compute_impulse",
             { freq: sbFreq, magnitude: normMag, phase: rotatedPhase, sampleRate: sbSr }
           ).catch((e) => { console.error("[SUM IR] compute_impulse failed for band:", e); return null; });
@@ -2204,7 +2204,7 @@ export default function FrequencyPlot() {
           measBands.push({
             bandName: allBands[i].name,
             bandColor: allBands[i].color,
-            timeMs: r.time.map(t => t * 1000),
+            timeMs: irTime(r).map(t => t * 1000),
             impulse: r.impulse,
             step: r.step,
             rawPeak: r.raw_peak || 0,
@@ -2255,11 +2255,11 @@ export default function FrequencyPlot() {
             if (delay !== 0) {
               adjPhase = tPh.map((p, j) => p + alignmentPhaseDeg(freq[j], delay));
             }
-            const r = await invoke<{ time: number[]; impulse: number[]; step: number[]; raw_peak: number; step_raw_peak: number }>("compute_impulse", {
+            const r = await invoke<ImpulseIpc>("compute_impulse", {
               freq, magnitude: normMag, phase: adjPhase, sampleRate: sr,
             });
             if (gen !== renderGen) return null;
-            return { bandName: sb.name, bandColor: sb.color, timeMs: r.time.map(t => t * 1000), impulse: r.impulse, step: r.step, rawPeak: r.raw_peak || 0, stepRawPeak: r.step_raw_peak || 0 } as IrBandData;
+            return { bandName: sb.name, bandColor: sb.color, timeMs: irTime(r).map(t => t * 1000), impulse: r.impulse, step: r.step, rawPeak: r.raw_peak || 0, stepRawPeak: r.step_raw_peak || 0 } as IrBandData;
           } catch (_) { return null; }
         });
         const tgtBandResults = await Promise.all(tgtBandPromises);
@@ -2311,11 +2311,11 @@ export default function FrequencyPlot() {
             if (delay !== 0) {
               adjPhase = cPh.map((p, j) => p + alignmentPhaseDeg(sbFreq[j], delay));
             }
-            const r = await invoke<{ time: number[]; impulse: number[]; step: number[]; raw_peak: number; step_raw_peak: number }>("compute_impulse", {
+            const r = await invoke<ImpulseIpc>("compute_impulse", {
               freq: sbFreq, magnitude: normMag, phase: adjPhase, sampleRate: sbSr,
             });
             if (gen !== renderGen) return null;
-            return { bandName: sb.name, bandColor: sb.color, timeMs: r.time.map(t => t * 1000), impulse: r.impulse, step: r.step, rawPeak: r.raw_peak || 0, stepRawPeak: r.step_raw_peak || 0 } as IrBandData;
+            return { bandName: sb.name, bandColor: sb.color, timeMs: irTime(r).map(t => t * 1000), impulse: r.impulse, step: r.step, rawPeak: r.raw_peak || 0, stepRawPeak: r.step_raw_peak || 0 } as IrBandData;
           } catch (_) { return null; }
         });
         const corrBandResults = await Promise.all(corrBandPromises);

@@ -15,7 +15,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { BandState } from "../../stores/bands";
 import type { PeqBand, TargetResponse } from "../types";
 import { alignmentPhaseDeg } from "../types";
-import { buildCommonGrid, buildLogGrid, interpOnGrid, interpPhaseOnGrid } from "./grid";
+import { buildCommonGrid, buildLogGrid, interpOnGrid, interpPhaseOnGrid, irTime, type ImpulseIpc } from "./grid";
 import { appendNoiseFloorTail, computeExtension } from "./extension";
 import { evaluateBandFull, reconstructTargetPhase } from "./evaluate";
 import { memoEval, sumRequestKey } from "./cache";
@@ -625,11 +625,11 @@ async function evaluateSumImpl(
         phase[j] = Math.atan2(im[j], re[j]) * 180 / Math.PI;
       }
       try {
-        const r = await invoke<{ time: number[]; impulse: number[]; step: number[] }>(
+        const r = await invoke<ImpulseIpc>(
           "compute_impulse",
           { freq: irFreq, magnitude: mag, phase, sampleRate: irSr },
         );
-        return { time: r.time, impulse: r.impulse, step: r.step };
+        return { time: irTime(r), impulse: r.impulse, step: r.step };
       } catch (e) {
         console.warn("[evaluateSum] toIR compute_impulse failed:", e);
         return null;
