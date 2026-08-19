@@ -116,6 +116,13 @@ pub(crate) fn iterative_refine(
     // Working copy of correction spectrum (will be refined)
     let mut refined_db: Vec<f64> = target_correction_db.to_vec();
 
+    // b141.20 (audit): build the windows once. They depend only on (n_fft,
+    // window type), yet were rebuilt on every pass — up to 4 constructions per
+    // FIR generation. Free for the cosine-sum family; decisive for
+    // Dolph-Chebyshev, which is O(n^2) and dominated a whole generation.
+    let full_window = generate_window(n_fft, &config.window);
+    let half_window = generate_half_window(n_fft, &config.window);
+
     let mut engine = FftEngine::new();
 
     // b139.4a: must mirror effective_linear in generate_model_fir so the
@@ -238,8 +245,7 @@ pub(crate) fn iterative_refine(
         // 5. Apply window (must match initial windowing in generate_model_fir)
         if use_model_phase {
             // Peak already centred via is_linear_phase shift above; full window.
-            let window = generate_window(n_fft, &config.window);
-            for (i, w) in window.iter().enumerate() {
+            for (i, w) in full_window.iter().enumerate() {
                 impulse[i] *= w;
             }
             continue;
@@ -252,14 +258,12 @@ pub(crate) fn iterative_refine(
                     .map(|(i, _)| i).unwrap_or(0);
                 let shift = (n_fft / 2).wrapping_sub(peak_idx) % n_fft;
                 impulse.rotate_right(shift);
-                let window = generate_window(n_fft, &config.window);
-                for (i, w) in window.iter().enumerate() {
+                for (i, w) in full_window.iter().enumerate() {
                     impulse[i] *= w;
                 }
             }
             PhaseMode::MinimumPhase | PhaseMode::MixedPhase | PhaseMode::HybridPhase => {
-                let half_win = generate_half_window(n_fft, &config.window);
-                for (i, w) in half_win.iter().enumerate() {
+                for (i, w) in half_window.iter().enumerate() {
                     impulse[i] *= w;
                 }
             }
@@ -267,20 +271,17 @@ pub(crate) fn iterative_refine(
                 // b139.4a: linear_main → centered impulse → full window.
                 // min-phase main → asymmetric impulse → half window.
                 if config.linear_phase_main {
-                    let window = generate_window(n_fft, &config.window);
-                    for (i, w) in window.iter().enumerate() {
+                    for (i, w) in full_window.iter().enumerate() {
                         impulse[i] *= w;
                     }
                 } else {
-                    let half_win = generate_half_window(n_fft, &config.window);
-                    for (i, w) in half_win.iter().enumerate() {
+                    for (i, w) in half_window.iter().enumerate() {
                         impulse[i] *= w;
                     }
                 }
             }
             PhaseMode::LinearPhase => {
-                let window = generate_window(n_fft, &config.window);
-                for (i, w) in window.iter().enumerate() {
+                for (i, w) in full_window.iter().enumerate() {
                     impulse[i] *= w;
                 }
             }

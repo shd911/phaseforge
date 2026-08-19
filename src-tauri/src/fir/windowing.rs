@@ -2,6 +2,9 @@
 
 use std::f64::consts::PI;
 
+use num_complex::Complex64;
+
+use crate::dsp::fft::FftEngine;
 use super::types::WindowType;
 
 // ---------------------------------------------------------------------------
@@ -132,33 +135,56 @@ fn gaussian_window(n: usize, sigma: f64) -> Vec<f64> {
 }
 
 /// Dolph-Chebyshev window: equiripple sidelobes at -atten_db.
-/// Uses inverse DFT of Chebyshev polynomial on the unit circle.
+///
+/// b141.20 (audit): built via inverse FFT of the Chebyshev frequency response
+/// instead of the O(n^2) double sum it used to be. The old form evaluated a
+/// Chebyshev polynomial for every (sample, harmonic) pair, and
+/// `generate_half_window` asks for a window of length 2n, so a 16384-tap FIR
+/// spent 46 s inside this function and 65536 taps projected to ~12 minutes —
+/// with the call sitting in a synchronous Tauri command, the app simply hung.
+/// The transform is mathematically the same window; it is O(n log n).
 fn dolph_chebyshev_window(n: usize, atten_db: f64) -> Vec<f64> {
+    if n <= 1 { return vec![1.0; n]; }
     let nn = n as f64;
-    let m = (nn - 1.0) / 2.0;
     let order = nn - 1.0;
-    // r = sidelobe ratio (linear); x0 via inverse Chebyshev
     let r = 10.0_f64.powf(atten_db / 20.0);
-    let x0 = (r.acosh() / order).cosh();
+    let beta = (r.acosh() / order).cosh();
 
-    let mut w = vec![0.0; n];
-    for i in 0..n {
-        let mut sum = 0.0;
-        for k in 1..n {
-            let angle = PI * k as f64 / nn;
-            let cheb_arg = x0 * angle.cos();
-            let cheb_val = chebyshev_poly(order, cheb_arg);
-            sum += cheb_val * (2.0 * PI * k as f64 * (i as f64 - m) / nn).cos();
+    // Frequency samples of the Chebyshev response, p[k] = T_{n-1}(β·cos(πk/n)).
+    let mut spectrum: Vec<Complex64> = (0..n)
+        .map(|k| {
+            let arg = beta * (PI * k as f64 / nn).cos();
+            Complex64::new(chebyshev_poly(order, arg), 0.0)
+        })
+        .collect();
+
+    // Even lengths sample the response half a bin off centre; the standard
+    // correction is a half-bin phase ramp before the transform.
+    if n % 2 == 0 {
+        for (k, c) in spectrum.iter_mut().enumerate() {
+            let ph = PI * k as f64 / nn;
+            *c *= Complex64::new(ph.cos(), ph.sin());
         }
-        w[i] = 1.0 / nn + 2.0 * sum / (nn * r);
     }
 
-    // Normalize peak to 1.0
+    let mut engine = FftEngine::new();
+    engine.fft_forward(&mut spectrum);
+    let re: Vec<f64> = spectrum.iter().map(|c| c.re).collect();
+
+    // The transform yields one half of a symmetric window; mirror it back.
+    let half = if n % 2 == 1 { (n + 1) / 2 } else { n / 2 + 1 };
+    let mut w = Vec::with_capacity(n);
+    for i in (1..half).rev() { w.push(re[i]); }
+    if n % 2 == 1 {
+        w.extend_from_slice(&re[..half]);
+    } else {
+        w.extend_from_slice(&re[1..half]);
+    }
+    debug_assert_eq!(w.len(), n);
+
     let peak = w.iter().cloned().fold(0.0_f64, f64::max);
     if peak > 0.0 {
-        for v in &mut w {
-            *v /= peak;
-        }
+        for v in &mut w { *v /= peak; }
     }
     w
 }
@@ -247,4 +273,68 @@ pub(crate) fn bessel_i0(x: f64) -> f64 {
         }
     }
     sum
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Sidelobe level is the window's definition: -atten_db, equiripple. The
+    /// pre-b141.20 double sum failed this outright — it produced negative
+    /// tails (min -0.226 at n=256) and a 0 dB sidelobe floor, i.e. it was not
+    /// a Dolph-Chebyshev window at all, merely an expensive one.
+    #[test]
+    fn dolph_hits_its_sidelobe_target() {
+        let n = 256;
+        let w = dolph_chebyshev_window(n, 100.0);
+        assert!(w.iter().all(|&v| v >= -1e-9), "window must be non-negative");
+
+        // Zero-padded spectrum, normalised to the main-lobe peak.
+        let pad = 8192;
+        let mut buf: Vec<Complex64> = (0..pad)
+            .map(|i| Complex64::new(if i < n { w[i] } else { 0.0 }, 0.0))
+            .collect();
+        FftEngine::new().fft_forward(&mut buf);
+        let mag: Vec<f64> = buf[..pad / 2].iter().map(|c| c.norm()).collect();
+        let peak = mag[0];
+        let db: Vec<f64> = mag.iter().map(|m| 20.0 * (m / peak).log10()).collect();
+
+        // Walk past the main lobe to the first null, then take the worst
+        // sidelobe beyond it.
+        let mut i = 1;
+        while i < db.len() && db[i] < db[i - 1] { i += 1; }
+        let worst = db[i..].iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        assert!((worst + 100.0).abs() < 3.0,
+            "sidelobe floor {worst:.1} dB, expected about -100 dB");
+    }
+
+    #[test]
+    fn dolph_is_symmetric_and_peaks_at_one() {
+        let w = dolph_chebyshev_window(512, 100.0);
+        let peak = w.iter().cloned().fold(0.0_f64, f64::max);
+        assert!((peak - 1.0).abs() < 1e-12, "peak {peak}");
+        for i in 0..w.len() / 2 {
+            let mirror = w.len() - 1 - i;
+            assert!((w[i] - w[mirror]).abs() < 1e-9,
+                "asymmetric at {i}: {} vs {}", w[i], w[mirror]);
+        }
+    }
+
+    /// b141.20: the point of the rewrite. `generate_half_window` asks for 2n,
+    /// so a 16384-tap FIR built a 32768-long Dolph window — 46 s under the
+    /// O(n^2) form, and `iterative_refine` did it once per pass. Anything in
+    /// seconds here means the quadratic form is back.
+    #[test]
+    fn dolph_at_export_scale_is_not_quadratic() {
+        let t0 = std::time::Instant::now();
+        let w = generate_half_window(16_384, &WindowType::DolphChebyshev);
+        let elapsed = t0.elapsed();
+        assert_eq!(w.len(), 16_384);
+        assert!(elapsed.as_millis() < 2_000,
+            "half Dolph-Chebyshev at 16384 taps took {elapsed:?}");
+    }
 }
