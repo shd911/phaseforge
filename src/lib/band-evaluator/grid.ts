@@ -23,6 +23,17 @@ export function buildLogGrid(n: number, fMin: number, fMax: number): number[] {
   return out;
 }
 
+/** b141.19 (audit): the grid a FIR is generated on, independent of whether the
+ *  band has a measurement attached. Both the Export tab preview and the WAV
+ *  export must pass this — `evaluateBandFull` otherwise falls back to the
+ *  measurement's own grid, and `interp_1d` clamps below its first bin, so a
+ *  measurement starting at 20 Hz turned the target roll-off into a plateau:
+ *  measured -27.5 dB of DC gain in the exported impulse against -51.3 dB in
+ *  the previewed one, 52 dB apart at peak. */
+export function buildFirGrid(): number[] {
+  return buildLogGrid(512, 5, 40_000);
+}
+
 /** Common grid: union of band measurement ranges, 512 log-spaced points.
  *  Falls back to 5–40000 Hz when no band has a measurement. */
 export function buildCommonGrid(bands: BandState[]): number[] {

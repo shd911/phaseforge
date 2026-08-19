@@ -32,7 +32,7 @@ import {
 } from "../lib/plot-helpers";
 import { hasActiveSubsonicProtect } from "../lib/types";
 import { evaluateBandFull, evaluateSum, reconstructTargetPhase } from "../lib/band-evaluator";
-import { interpOnGrid, interpPhaseOnGrid } from "../lib/band-evaluator/grid";
+import { buildFirGrid, interpOnGrid, interpPhaseOnGrid } from "../lib/band-evaluator/grid";
 import { computeAutoAlign } from "../lib/auto-align";
 
 // Track which inputs have been explicitly clicked — wheel only fires when in set
@@ -1760,13 +1760,10 @@ export default function FrequencyPlot() {
       const peqBands = band.peqBands?.filter((b: PeqBand) => b.enabled) ?? [];
 
       // b139.4b: Export tab uses the canonical BandEvaluator. The standalone
-      // 5–40k log grid is built here so the result doesn't depend on whether
-      // the band has a measurement attached. evaluateBandFull builds Composite
-      // FIR (linear_phase_main + subsonic_cutoff_hz from band.target).
-      const exportFreq: number[] = new Array(512);
-      for (let i = 0; i < 512; i++) {
-        exportFreq[i] = 5 * Math.pow(40000 / 5, i / 511);
-      }
+      // 5–40k log grid keeps the result independent of whether the band has a
+      // measurement attached. b141.19: shared with the WAV export via
+      // buildFirGrid so preview and file are one computation, not two.
+      const exportFreq = buildFirGrid();
       const evalRes = await evaluateBandFull({
         band, freq: exportFreq,
         fir: {

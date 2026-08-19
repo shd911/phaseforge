@@ -8,6 +8,7 @@ import {
 } from "../stores/bands";
 import { projectDir, sanitize } from "./project-io";
 import { evaluateBandFull } from "./band-evaluator";
+import { buildFirGrid } from "./band-evaluator/grid";
 import { showToast } from "./toast";
 
 export function driverName(b: BandState): string {
@@ -23,6 +24,10 @@ async function generateBandImpulse(b: BandState): Promise<{ impulse: number[]; d
   // evaluator, so this call site no longer carries duplicate phase logic.
   const result = await evaluateBandFull({
     band: b,
+    // b141.19 (audit): the same grid the Export tab previews on. Without it
+    // the evaluator fell back to the measurement's grid and shipped a
+    // different impulse than the one on screen.
+    freq: buildFirGrid(),
     fir: {
       taps: exportTaps(),
       sampleRate: exportSampleRate(),
