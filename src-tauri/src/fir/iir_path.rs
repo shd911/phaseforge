@@ -213,10 +213,23 @@ pub fn build_filter_cascade(
             Ok(bs)
         }
         FilterType::Custom => {
-            // Single 2nd-order biquad with user-supplied Q (defaults to
-            // Butterworth Q = 1/√2). Order field is informational here.
+            // b141.17 (audit): mirror the analytical model
+            // (target/mod.rs::custom_lp_complex / custom_hp_complex) — it
+            // cascades `order/2` second-order sections at the user Q plus one
+            // first-order section for odd orders. Emitting a single biquad
+            // regardless of order (pre-b141.17) shipped a 12 dB/oct WAV for a
+            // filter the plot drew at up to 48 dB/oct (83 dB apart at 20 Hz
+            // for order 8). The order dropdown offers 1..8 for Custom.
             let q = cfg.q.unwrap_or(std::f64::consts::FRAC_1_SQRT_2);
-            Ok(vec![if is_lp { lp_biquad_q(fc, q, sr) } else { hp_biquad_q(fc, q, sr) }])
+            let order = cfg.order.max(1);
+            let mut bs = Vec::with_capacity(order as usize / 2 + 1);
+            if order % 2 == 1 {
+                bs.push(if is_lp { lp_first_order(fc, sr) } else { hp_first_order(fc, sr) });
+            }
+            for _ in 0..(order / 2) {
+                bs.push(if is_lp { lp_biquad_q(fc, q, sr) } else { hp_biquad_q(fc, q, sr) });
+            }
+            Ok(bs)
         }
         FilterType::Bessel | FilterType::Gaussian => {
             Err(format!("filter type {:?} is not IIR-realizable in b140.7", cfg.filter_type))
@@ -845,6 +858,78 @@ mod tests {
         assert!(max_err < phase_tolerance_deg,
             "HP=2000 LR4 sr=48k UI plot phase: max err {:.2}° > {}° in 100 Hz–20 kHz band",
             max_err, phase_tolerance_deg);
+    }
+
+    /// b141.17 (audit, CRITICAL): `build_filter_cascade` emitted a single
+    /// biquad for `FilterType::Custom` regardless of `order`, while the
+    /// analytical model cascades `order/2` sections (+ a first-order one for
+    /// odd orders). Orders 1..8 are offered in the UI, so every order but 2
+    /// shipped a WAV that did not match the plotted response — up to 83 dB
+    /// apart at 20 Hz for order 8. Realised vs model, all orders, both
+    /// directions.
+    #[test]
+    fn custom_crossover_all_orders_match_analytical_model() {
+        use crate::target::{evaluate, TargetCurve};
+
+        let sr = 48_000.0_f64;
+        let n_fft = 16_384_usize;
+        let log_freq = log_grid(512, 5.0, 40_000.0);
+
+        for order in 1_u8..=8 {
+            for is_lp in [false, true] {
+                let flt = FilterConfig {
+                    filter_type: FilterType::Custom,
+                    order,
+                    freq_hz: if is_lp { 2000.0 } else { 100.0 },
+                    shape: None,
+                    linear_phase: false,
+                    q: Some(std::f64::consts::FRAC_1_SQRT_2),
+                    subsonic_protect: None,
+                };
+                let mut cfg = cfg_min(n_fft, sr);
+                cfg.iterations = 0;
+
+                let out = generate_min_phase_fir_iir(&IirPathInput {
+                    freq: &log_freq,
+                    hp: if is_lp { None } else { Some(&flt) },
+                    lp: if is_lp { Some(&flt) } else { None },
+                    peq: &[],
+                    config: &cfg,
+                }).expect("IIR should succeed");
+
+                let target = TargetCurve {
+                    reference_level_db: 0.0, tilt_db_per_octave: 0.0, tilt_ref_freq: 1000.0,
+                    high_pass: if is_lp { None } else { Some(flt.clone()) },
+                    low_pass: if is_lp { Some(flt.clone()) } else { None },
+                    low_shelf: None, high_shelf: None,
+                };
+                let ref_resp = evaluate(&target, &log_freq);
+
+                // Compare in the passband and the first 20 dB of roll-off,
+                // below sr/4. Deeper stopband and the octave under Nyquist
+                // are where the bilinear cascade legitimately departs from the
+                // analog reference (the digital LP has a zero at Nyquist) —
+                // that deviation is pre-existing and inaudible, and pinning it
+                // here would only make the test a bilinear-error alarm.
+                let mut max_err = 0.0_f64;
+                let mut worst_f = 0.0_f64;
+                let mut probes = 0;
+                for (i, &f) in log_freq.iter().enumerate() {
+                    if f < 20.0 || f > sr / 4.0 { continue; }
+                    if ref_resp.magnitude[i] < -20.0 { continue; }
+                    let err = (out.realized_mag[i] - ref_resp.magnitude[i]).abs();
+                    if err > max_err { max_err = err; worst_f = f; }
+                    probes += 1;
+                }
+                assert!(probes > 0, "no probes for Custom order={} is_lp={}", order, is_lp);
+                // Calibrated on the fix: HP ≤ 0.02 dB across all orders, LP
+                // ≤ 1.96 dB (worst is order 1 near sr/4, pure bilinear droop).
+                // Pre-fix this test read 13.8 dB (order 1) … 83.7 dB (order 8).
+                assert!(max_err < 2.5,
+                    "Custom order={} is_lp={}: realised vs model max {:.2} dB at {:.0} Hz",
+                    order, is_lp, max_err, worst_f);
+            }
+        }
     }
 }
 
