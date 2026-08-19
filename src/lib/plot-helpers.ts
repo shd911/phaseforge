@@ -222,3 +222,33 @@ export function computeGroupDelay(freq: number[], phaseDeg: number[]): { freqOut
   gd[n - 1] = -(phaseDeg[n - 1] - phaseDeg[n - 2]) / (360 * (freq[n - 1] - freq[n - 2])) * 1000;
   return { freqOut: freq, gdMs: gd };
 }
+
+
+/** b141.24 (audit): identity of the data behind a cached IR/Step chart.
+ *
+ *  Legend visibility, dB/Lin, ZONES and snapshot toggles change nothing about
+ *  the impulses, so they are served by replaying the renderer over cached
+ *  curves instead of re-running the DSP (~65 IPC calls, 0.3–1.5 s per click).
+ *  This key is what makes that safe: it must change whenever the curves would
+ *  differ — the tab, the band in view, which bands feed the coherent sum, the
+ *  store revision that every band edit bumps, and the export sample rate the
+ *  impulses are computed at. A mismatch falls back to a full recompute, so the
+ *  worst case is a slow redraw, never a wrong one.
+ */
+export function irDataCacheKey(opts: {
+  mode: string;
+  sumMode: boolean;
+  bandId: string | null;
+  excludedBands: Iterable<string>;
+  bandsVersion: number;
+  sampleRate: number;
+}): string {
+  const excluded = [...opts.excludedBands].sort().join(",");
+  return [
+    opts.mode,
+    opts.sumMode ? "sum" : (opts.bandId ?? "none"),
+    excluded,
+    opts.bandsVersion,
+    opts.sampleRate,
+  ].join("|");
+}

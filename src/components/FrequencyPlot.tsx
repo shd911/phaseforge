@@ -29,6 +29,7 @@ import {
   FIR_COLOR, CORRECTED_COLOR, MEAS_DEFAULT_COLOR,
   STATUS_GOOD, STATUS_WARN, STATUS_BAD,
   DEFAULT_IR_COLORS, DEFAULT_GD_COLORS, DEFAULT_EXPORT_COLORS,
+  irDataCacheKey,
 } from "../lib/plot-helpers";
 import { hasActiveSubsonicProtect } from "../lib/types";
 import { evaluateBandFull, evaluateSum, reconstructTargetPhase } from "../lib/band-evaluator";
@@ -371,8 +372,19 @@ export default function FrequencyPlot() {
   const [showCorrStep, setShowCorrStep] = createSignal(true);
   const [irShowMasking, setIrShowMasking] = createSignal(true);
 
-  // Force IR/Step re-render (incremented by legend band toggles)
+  // Force IR/Step re-render (incremented when the underlying DATA changes)
   const [irRenderTrigger, setIrRenderTrigger] = createSignal(0);
+  // b141.24 (audit): redraw-only trigger. Legend visibility, dB/Lin, ZONES and
+  // snapshot toggles change nothing about the impulses — they used to go
+  // through irRenderTrigger and re-ran the whole DSP: ~65 IPC calls per click
+  // (4 bands × measurement/target/corrected + 3 sums), 0.3–1.5 s of frozen UI
+  // for a checkbox. renderIrStepChart reads visibility, snapshots and the dB
+  // mode itself, so replaying it over the cached curves is enough.
+  const [irRedrawTrigger, setIrRedrawTrigger] = createSignal(0);
+  /** Last set of curves handed to renderIrStepChart, with the identity of the
+   *  data they describe. A redraw is served from here only when that identity
+   *  still matches; anything else falls back to a full recompute. */
+  let lastIrChart: { key: string; args: Parameters<typeof renderIrStepChart> } | null = null;
 
   // IR/Step colors derived from band — updated on each render
   const defaultIrColors = DEFAULT_IR_COLORS;
@@ -1542,17 +1554,17 @@ export default function FrequencyPlot() {
     }
   }
 
-  // IR/Step: save scales → rebuild, preserving Y zoom
+  // IR/Step: save scales → redraw from cached curves, preserving Y zoom
   function irToggleRedraw() {
     irSaveScales();
-    setIrRenderTrigger(v => v + 1);
+    setIrRedrawTrigger(v => v + 1);
   }
 
-  // IR/Step: save X scale → rebuild with Y auto-fit (visibility changed)
+  // IR/Step: save X scale → redraw with Y auto-fit (visibility changed)
   function irToggleRedrawAutoY() {
     irSaveScales();
     irUserYScale = null;
-    setIrRenderTrigger(v => v + 1);
+    setIrRedrawTrigger(v => v + 1);
   }
 
   // Helper: sync persistent IR/Step show signals from category visibility in legendEntries
@@ -1641,6 +1653,36 @@ export default function FrequencyPlot() {
       chart.redraw(false, false);
     } catch (e) { console.error("[PEQ drag] fast update failed:", e); }
   }
+
+  // ----------------------------------------------------------------
+  // b141.24 (audit): redraw-only effect for IR/Step.
+  //
+  // Visibility, dB/Lin, ZONES and snapshot toggles do not touch the impulses.
+  // Replaying renderIrStepChart over the cached curves keeps them instant
+  // instead of re-running the DSP (~65 IPC calls, 0.3–1.5 s per click). The
+  // cache is honoured only while its data identity still matches; a stale or
+  // missing entry falls through to the normal recompute path, so this can
+  // make the chart late but never wrong.
+  // ----------------------------------------------------------------
+  createEffect(() => {
+    const n = irRedrawTrigger();
+    if (n === 0) return;
+    untrack(() => {
+      const pTab = plotTab();
+      if (pTab !== "ir" && pTab !== "step") return;
+      const sumMode = isSum();
+      const band = activeBand();
+      const key = irDataKey(pTab, sumMode, band);
+      if (!lastIrChart || lastIrChart.key !== key) {
+        setIrRenderTrigger(v => v + 1);
+        return;
+      }
+      const args = [...lastIrChart.args] as Parameters<typeof renderIrStepChart>;
+      args[7] = { db: irDbMode(), masking: irShowMasking() };
+      lastIrChart = { key, args };
+      renderIrStepChart(...args);
+    });
+  });
 
   // ----------------------------------------------------------------
   // Main reactive effect (debounced during PEQ drag)
@@ -1987,6 +2029,19 @@ export default function FrequencyPlot() {
   // ----------------------------------------------------------------
   // IR / Step / GD rendering (time-domain tabs)
   // ----------------------------------------------------------------
+  /** b141.24: identity of the data behind the cached IR/Step curves — see
+   *  `irDataCacheKey` for why it is shaped the way it is. */
+  function irDataKey(mode: string, sumMode: boolean, band: BandState | null): string {
+    return untrack(() => irDataCacheKey({
+      mode,
+      sumMode,
+      bandId: band?.id ?? null,
+      excludedBands: irExcludedBands(),
+      bandsVersion: bandsVersion(),
+      sampleRate: exportSampleRate(),
+    }));
+  }
+
   async function renderTimeTab(mode: "ir" | "step" | "gd", sumMode: boolean, band: BandState | null) {
     const gen = ++renderGen;
     // Snapshot toggle state — untrack to prevent main effect re-trigger on toggle
@@ -2370,7 +2425,11 @@ export default function FrequencyPlot() {
           }
         }
 
-        renderIrStepChart(measBands, measSum, targetBands, targetSum, corrBands, corrSum, preRingZoneMs(allBands as BandState[]), irCfg);
+        const sumArgs: Parameters<typeof renderIrStepChart> =
+          [measBands, measSum, targetBands, targetSum, corrBands, corrSum,
+           preRingZoneMs(allBands as BandState[]), irCfg];
+        lastIrChart = { key: irDataKey(mode, sumMode, band), args: sumArgs };
+        renderIrStepChart(...sumArgs);
 
       } else {
         // ============================================================
@@ -2425,7 +2484,11 @@ export default function FrequencyPlot() {
           }
         }
 
-        renderIrStepChart(measBands, null, targetBands, null, corrBands, null, band ? preRingZoneMs([band] as BandState[]) : null, irCfg);
+        const bandArgs: Parameters<typeof renderIrStepChart> =
+          [measBands, null, targetBands, null, corrBands, null,
+           band ? preRingZoneMs([band] as BandState[]) : null, irCfg];
+        lastIrChart = { key: irDataKey(mode, sumMode, band), args: bandArgs };
+        renderIrStepChart(...bandArgs);
       }
     } catch (e) {
       console.error("Time tab render failed:", e);
