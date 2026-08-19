@@ -942,10 +942,12 @@ export default function FrequencyPlot() {
         }
       }
     }
-    // IR/Step: save scales → full rebuild (setSeries breaks scales)
+    // IR/Step: rebuild the chart (setSeries breaks scales) — b141.25: from the
+    // cached curves. A category row toggles visibility of entries that are
+    // already computed; it was still going through the recompute trigger,
+    // which is why a row click lagged while a cell click was instant.
     if (pTab === "ir" || pTab === "step") {
-      irSaveScales();
-      setIrRenderTrigger(v => v + 1);
+      irToggleRedrawAutoY();
     } else if (pTab === "gd") {
       gdToggleRedraw();
     }
@@ -972,7 +974,8 @@ export default function FrequencyPlot() {
     }
     // For non-freq tabs: trigger rebuild
     const pTab = plotTab();
-    if (pTab === "ir" || pTab === "step") { irSaveScales(); setIrRenderTrigger(v => v + 1); }
+    // b141.25: visibility only — redraw from cache, same as the row/cell paths.
+    if (pTab === "ir" || pTab === "step") { irToggleRedraw(); }
     else if (pTab === "gd") gdToggleRedraw();
     setPlotShowOnly(null);
   });
