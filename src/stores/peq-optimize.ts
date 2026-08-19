@@ -180,6 +180,8 @@ export function captureOptimizedTarget(b: BandState): PeqOptimizedTarget {
     high_pass: cloneFilterConfig(b.target.high_pass ?? null),
     low_pass: cloneFilterConfig(b.target.low_pass ?? null),
     exclusion_zones: JSON.parse(JSON.stringify(b.exclusionZones)),
+    // b141.22 (audit): the rate the biquads were fitted at — see PeqOptimizedTarget.
+    sample_rate: exportSampleRate(),
   };
 }
 
@@ -190,7 +192,13 @@ function filterEquals(a: FilterConfig | null, b: FilterConfig | null): boolean {
     && a.order === b.order
     && a.freq_hz === b.freq_hz
     && a.shape === b.shape
-    && a.q === b.q;
+    && a.q === b.q
+    // b141.22 (audit): both change the target the PEQ was fitted against —
+    // linear_phase flips the route and the phase the correction sees,
+    // subsonic_protect adds an LF roll-off. Omitting them let the fit go
+    // stale in silence.
+    && a.linear_phase === b.linear_phase
+    && (a.subsonic_protect ?? null) === (b.subsonic_protect ?? null);
 }
 
 function exclusionZonesEquals(a: ExclusionZone[], b: ExclusionZone[]): boolean {
@@ -212,6 +220,10 @@ export function peqStale(b: BandState): boolean {
   if (!filterEquals(b.target.high_pass, snap.high_pass)) return true;
   if (!filterEquals(b.target.low_pass, snap.low_pass)) return true;
   if (!exclusionZonesEquals(b.exclusionZones, snap.exclusion_zones)) return true;
+  // b141.22: a fit made at another export rate no longer describes the biquads
+  // that will ship. Snapshots from before b141.22 carry no rate — treat those
+  // as "unknown", not as stale.
+  if (snap.sample_rate !== undefined && snap.sample_rate !== exportSampleRate()) return true;
   return false;
 }
 

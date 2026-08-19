@@ -127,6 +127,11 @@ pub struct PeqOptimizedTargetData {
     pub low_pass: Option<crate::target::FilterConfig>,
     #[serde(default)]
     pub exclusion_zones: Vec<serde_json::Value>,
+    /// b141.22 (audit): export sample rate the PEQ was fitted at. Absent in
+    /// projects written before b141.22 — `peqStale` reads that as "unknown"
+    /// rather than stale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sample_rate: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

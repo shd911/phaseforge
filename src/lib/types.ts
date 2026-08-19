@@ -181,6 +181,13 @@ export interface PeqOptimizedTarget {
   high_pass: FilterConfig | null;
   low_pass: FilterConfig | null;
   exclusion_zones: ExclusionZone[];
+  /** b141.22 (audit): the export sample rate the biquads were fitted at
+   *  (b141.5 made the optimizer honour it). Bilinear warping moves a band's
+   *  realised response near Nyquist by several dB, so a fit made at 48 kHz is
+   *  stale once the export switches to 96 kHz — and `export_sample_rate`
+   *  persists, so the mismatch survives a reload. Optional: snapshots written
+   *  before b141.22 have no rate and are not treated as stale on that ground. */
+  sample_rate?: number;
 }
 
 // Measurement analysis (b135). Mirrors Rust src-tauri/src/analysis/mod.rs.
