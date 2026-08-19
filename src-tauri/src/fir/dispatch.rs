@@ -42,14 +42,24 @@ pub enum Route {
 /// Contract (kept in lockstep with `src/lib/fir-routing.ts`):
 ///   - `linear_phase_main = true`            → Cepstral
 ///   - `subsonic_cutoff_hz = Some(_)`        → Cepstral
+///   - `tilt_db_per_octave != 0`             → Cepstral
 ///   - any active filter is Gaussian/Bessel  → Cepstral
 ///   - everything else                        → Iir
 pub fn route_for(
     hp: Option<&FilterConfig>,
     lp: Option<&FilterConfig>,
+    tilt_db_per_octave: f64,
     fir_config: &FirConfig,
 ) -> Route {
     if fir_config.linear_phase_main { return Route::Cepstral; }
+    // b141.17 (audit): a target tilt is a constant log-slope — not a rational
+    // transfer function, so the biquad cascade cannot carry it. Before this
+    // guard the IIR route dropped the tilt silently: the plot drew the tilted
+    // target while the exported WAV shipped flat (measured 9.8 dB apart at
+    // 14.8 kHz on the stock "bk" preset, tilt = -1 dB/oct). Target shelves ARE
+    // rational and stay on this route (iir_path.rs builds them into the
+    // cascade); only the tilt forces the cepstral path.
+    if tilt_db_per_octave != 0.0 { return Route::Cepstral; }
     if fir_config.subsonic_cutoff_hz.is_some() { return Route::Cepstral; }
     if !is_iir_realizable(hp) { return Route::Cepstral; }
     if !is_iir_realizable(lp) { return Route::Cepstral; }
@@ -104,22 +114,22 @@ mod tests {
     #[test]
     fn iir_route_for_pure_lr_bw_custom() {
         let c = cfg(false, None);
-        assert_eq!(route_for(Some(&flt(FilterType::LinkwitzRiley)), None, &c), Route::Iir);
-        assert_eq!(route_for(None, Some(&flt(FilterType::Butterworth)), &c), Route::Iir);
-        assert_eq!(route_for(Some(&flt(FilterType::Custom)), Some(&flt(FilterType::Custom)), &c), Route::Iir);
-        assert_eq!(route_for(None, None, &c), Route::Iir);
+        assert_eq!(route_for(Some(&flt(FilterType::LinkwitzRiley)), None, 0.0, &c), Route::Iir);
+        assert_eq!(route_for(None, Some(&flt(FilterType::Butterworth)), 0.0, &c), Route::Iir);
+        assert_eq!(route_for(Some(&flt(FilterType::Custom)), Some(&flt(FilterType::Custom)), 0.0, &c), Route::Iir);
+        assert_eq!(route_for(None, None, 0.0, &c), Route::Iir);
     }
 
     #[test]
     fn cepstral_route_when_linear_main() {
         let c = cfg(true, None);
-        assert_eq!(route_for(Some(&flt(FilterType::LinkwitzRiley)), None, &c), Route::Cepstral);
+        assert_eq!(route_for(Some(&flt(FilterType::LinkwitzRiley)), None, 0.0, &c), Route::Cepstral);
     }
 
     #[test]
     fn cepstral_route_when_subsonic_active() {
         let c = cfg(false, Some(80.0 / 8.0));
-        assert_eq!(route_for(Some(&flt(FilterType::LinkwitzRiley)), None, &c), Route::Cepstral);
+        assert_eq!(route_for(Some(&flt(FilterType::LinkwitzRiley)), None, 0.0, &c), Route::Cepstral);
     }
 
     #[test]
@@ -131,21 +141,31 @@ mod tests {
         let mut lin_lp = flt(FilterType::LinkwitzRiley);
         lin_lp.linear_phase = true;
         let min_hp = flt(FilterType::LinkwitzRiley); // linear_phase = false
-        assert_eq!(route_for(Some(&min_hp), Some(&lin_lp), &c), Route::Cepstral);
+        assert_eq!(route_for(Some(&min_hp), Some(&lin_lp), 0.0, &c), Route::Cepstral);
         // symmetric: linear HP + min LP
         let mut lin_hp = flt(FilterType::LinkwitzRiley);
         lin_hp.linear_phase = true;
         let min_lp = flt(FilterType::Butterworth);
-        assert_eq!(route_for(Some(&lin_hp), Some(&min_lp), &c), Route::Cepstral);
+        assert_eq!(route_for(Some(&lin_hp), Some(&min_lp), 0.0, &c), Route::Cepstral);
         // pure min stays IIR
-        assert_eq!(route_for(Some(&min_hp), Some(&min_lp), &c), Route::Iir);
+        assert_eq!(route_for(Some(&min_hp), Some(&min_lp), 0.0, &c), Route::Iir);
     }
 
     #[test]
     fn cepstral_route_when_gaussian_or_bessel_present() {
         let c = cfg(false, None);
-        assert_eq!(route_for(Some(&flt(FilterType::Gaussian)), None, &c), Route::Cepstral);
-        assert_eq!(route_for(None, Some(&flt(FilterType::Bessel)), &c), Route::Cepstral);
-        assert_eq!(route_for(Some(&flt(FilterType::LinkwitzRiley)), Some(&flt(FilterType::Gaussian)), &c), Route::Cepstral);
+        assert_eq!(route_for(Some(&flt(FilterType::Gaussian)), None, 0.0, &c), Route::Cepstral);
+        assert_eq!(route_for(None, Some(&flt(FilterType::Bessel)), 0.0, &c), Route::Cepstral);
+        assert_eq!(route_for(Some(&flt(FilterType::LinkwitzRiley)), Some(&flt(FilterType::Gaussian)), 0.0, &c), Route::Cepstral);
+    }
+
+    /// b141.17 (audit): a non-zero target tilt cannot be expressed by the
+    /// biquad cascade, so it must leave the IIR route.
+    #[test]
+    fn tilt_forces_cepstral() {
+        let c = cfg(false, None);
+        assert_eq!(route_for(Some(&flt(FilterType::LinkwitzRiley)), None, -1.0, &c), Route::Cepstral);
+        assert_eq!(route_for(None, None, 0.5, &c), Route::Cepstral);
+        assert_eq!(route_for(Some(&flt(FilterType::LinkwitzRiley)), None, 0.0, &c), Route::Iir);
     }
 }

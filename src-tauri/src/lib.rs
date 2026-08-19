@@ -406,6 +406,10 @@ async fn generate_model_fir_iir(
     freq: Vec<f64>,
     hp: Option<target::FilterConfig>,
     lp: Option<target::FilterConfig>,
+    // b141.17 (audit): shelves belong to the corrected target and must reach
+    // the cascade; dropping them shipped a WAV without the shelf the plot drew.
+    low_shelf: Option<target::ShelfConfig>,
+    high_shelf: Option<target::ShelfConfig>,
     peq: Vec<peq::PeqBand>,
     config: FirConfig,
 ) -> Result<FirModelResult, String> {
@@ -420,6 +424,8 @@ async fn generate_model_fir_iir(
         freq: &freq,
         hp: hp.as_ref(),
         lp: lp.as_ref(),
+        low_shelf: low_shelf.as_ref(),
+        high_shelf: high_shelf.as_ref(),
         peq: &peq,
         config: &config,
     }).map_err(|e| e.to_string())
@@ -440,6 +446,9 @@ fn pick_fir_route(
     lp: Option<target::FilterConfig>,
     linear_main: bool,
     subsonic_cutoff_hz: Option<f64>,
+    // b141.17 (audit): a non-zero target tilt cannot be expressed by the
+    // biquad cascade and forces the cepstral route.
+    tilt_db_per_octave: Option<f64>,
 ) -> String {
     use fir::FirConfig;
     // route_for() reads only linear_phase_main + subsonic_cutoff_hz from
@@ -456,7 +465,7 @@ fn pick_fir_route(
         linear_phase_main: linear_main,
         subsonic_cutoff_hz,
     };
-    match fir::route_for(hp.as_ref(), lp.as_ref(), &cfg) {
+    match fir::route_for(hp.as_ref(), lp.as_ref(), tilt_db_per_octave.unwrap_or(0.0), &cfg) {
         fir::Route::Iir => "Iir".into(),
         fir::Route::Cepstral => "Cepstral".into(),
     }
@@ -481,7 +490,7 @@ pub fn run() {
         )
         .init();
 
-    info!("PhaseForge b141.17 starting...");
+    info!("PhaseForge b141.18 starting...");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())

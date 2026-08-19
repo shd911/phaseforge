@@ -28,7 +28,7 @@ use tracing::info;
 use crate::dsp::fft::FftEngine;
 use crate::error::AppError;
 use crate::peq::{PeqBand, PeqFilterType};
-use crate::target::{FilterConfig, FilterType};
+use crate::target::{FilterConfig, FilterType, ShelfConfig};
 use num_complex::Complex64;
 
 use super::types::*;
@@ -255,6 +255,19 @@ fn build_butterworth_cascade(order: u8, fc: f64, is_lp: bool, sr: f64) -> Vec<Di
 /// Build the digital biquad for a single PEQ band. Peaking / shelving forms
 /// are taken from the RBJ Audio EQ Cookbook (already digital — no bilinear
 /// step needed).
+/// b141.17: a target shelf is the same second-order shelving section as a PEQ
+/// shelf band — reuse the one builder instead of a second copy of the RBJ
+/// coefficients.
+fn shelf_as_peq(shelf: &ShelfConfig, filter_type: PeqFilterType) -> PeqBand {
+    PeqBand {
+        freq_hz: shelf.freq_hz,
+        gain_db: shelf.gain_db,
+        q: shelf.q,
+        enabled: true,
+        filter_type,
+    }
+}
+
 pub fn build_peq_biquad(band: &PeqBand, sr: f64) -> DigitalBiquad {
     let f0 = band.freq_hz.max(1.0);
     let q = band.q.max(1e-6);
@@ -324,6 +337,13 @@ pub struct IirPathInput<'a> {
     pub freq: &'a [f64],          // log grid for realized_mag/phase output
     pub hp: Option<&'a FilterConfig>,
     pub lp: Option<&'a FilterConfig>,
+    /// b141.17 (audit): target shelves are part of the corrected response and
+    /// must be in the cascade — before the fix the IIR route silently dropped
+    /// them, so the plot showed a shelved target and the WAV shipped without
+    /// it. They are rational 2nd-order sections, so they realise exactly here
+    /// (the tilt is not, and routes to the cepstral path — see dispatch.rs).
+    pub low_shelf: Option<&'a ShelfConfig>,
+    pub high_shelf: Option<&'a ShelfConfig>,
     pub peq: &'a [PeqBand],
     pub config: &'a FirConfig,
 }
@@ -350,6 +370,13 @@ pub fn generate_min_phase_fir_iir(input: &IirPathInput) -> Result<FirModelResult
     if let Some(lp) = input.lp {
         biquads.extend(build_filter_cascade(lp, true, sr)
             .map_err(|m| AppError::Config { message: m })?);
+    }
+    // b141.17: target shelves realise as the same RBJ sections the PEQ uses.
+    if let Some(ls) = input.low_shelf {
+        biquads.push(build_peq_biquad(&shelf_as_peq(ls, PeqFilterType::LowShelf), sr));
+    }
+    if let Some(hs) = input.high_shelf {
+        biquads.push(build_peq_biquad(&shelf_as_peq(hs, PeqFilterType::HighShelf), sr));
     }
     for band in input.peq.iter().filter(|p| p.enabled) {
         biquads.push(build_peq_biquad(band, sr));
@@ -573,7 +600,7 @@ mod tests {
         let cfg = cfg_min(65536, 48000.0);
         let freq = log_grid(512, 5.0, 22800.0);
         let out = generate_min_phase_fir_iir(&IirPathInput {
-            freq: &freq, hp: None, lp: Some(&lp), peq: &[], config: &cfg,
+            freq: &freq, hp: None, lp: Some(&lp), low_shelf: None, high_shelf: None, peq: &[], config: &cfg,
         }).expect("LR4 LP=200 IIR should succeed");
         let p = peak_idx(&out.impulse);
         let half = cfg.taps / 2;
@@ -589,7 +616,7 @@ mod tests {
         let cfg = cfg_min(65536, 48000.0);
         let freq = log_grid(512, 5.0, 22800.0);
         let out = generate_min_phase_fir_iir(&IirPathInput {
-            freq: &freq, hp: Some(&hp), lp: None, peq: &[], config: &cfg,
+            freq: &freq, hp: Some(&hp), lp: None, low_shelf: None, high_shelf: None, peq: &[], config: &cfg,
         }).expect("LR4 HP=2000 IIR should succeed");
         let p = peak_idx(&out.impulse);
         let half = cfg.taps / 2;
@@ -606,7 +633,7 @@ mod tests {
         let cfg = cfg_min(65536, 48000.0);
         let freq = log_grid(512, 5.0, 22800.0);
         let out = generate_min_phase_fir_iir(&IirPathInput {
-            freq: &freq, hp: Some(&hp), lp: Some(&lp), peq: &[], config: &cfg,
+            freq: &freq, hp: Some(&hp), lp: Some(&lp), low_shelf: None, high_shelf: None, peq: &[], config: &cfg,
         }).expect("BP 200-2000 IIR should succeed");
         let p = peak_idx(&out.impulse);
         let half = cfg.taps / 2;
@@ -625,7 +652,7 @@ mod tests {
         let cfg = cfg_min(65536, 48000.0);
         let freq = log_grid(512, 5.0, 22800.0);
         let out = generate_min_phase_fir_iir(&IirPathInput {
-            freq: &freq, hp: None, lp: Some(&lp), peq: &[], config: &cfg,
+            freq: &freq, hp: None, lp: Some(&lp), low_shelf: None, high_shelf: None, peq: &[], config: &cfg,
         }).expect("LR4 LP=200 IIR should succeed");
         let target = TargetCurve {
             reference_level_db: 0.0, tilt_db_per_octave: 0.0, tilt_ref_freq: 1000.0,
@@ -658,7 +685,7 @@ mod tests {
         let cfg = cfg_min(65536, 48000.0);
         let freq = log_grid(512, 5.0, 22800.0);
         let out = generate_min_phase_fir_iir(&IirPathInput {
-            freq: &freq, hp: None, lp: Some(&lp), peq: &[], config: &cfg,
+            freq: &freq, hp: None, lp: Some(&lp), low_shelf: None, high_shelf: None, peq: &[], config: &cfg,
         }).expect("LR4 LP=200 IIR should succeed");
         let target = TargetCurve {
             reference_level_db: 0.0, tilt_db_per_octave: 0.0, tilt_ref_freq: 1000.0,
@@ -735,7 +762,7 @@ mod tests {
         let log_freq = log_grid(512, 5.0, f_max);
 
         let out = generate_min_phase_fir_iir(&IirPathInput {
-            freq: &log_freq, hp: Some(&hp), lp: None, peq: &[], config: &cfg,
+            freq: &log_freq, hp: Some(&hp), lp: None, low_shelf: None, high_shelf: None, peq: &[], config: &cfg,
         }).unwrap_or_else(|e| panic!("sr={} IIR generation failed: {:?}", sr, e));
 
         // ===== WAV checks =====
@@ -825,7 +852,7 @@ mod tests {
         let log_freq = log_grid(512, 5.0, f_max);
 
         let out = generate_min_phase_fir_iir(&IirPathInput {
-            freq: &log_freq, hp: Some(&hp), lp: None, peq: &[], config: &cfg,
+            freq: &log_freq, hp: Some(&hp), lp: None, low_shelf: None, high_shelf: None, peq: &[], config: &cfg,
         }).expect("IIR should succeed");
 
         let target = TargetCurve {
@@ -893,6 +920,7 @@ mod tests {
                     freq: &log_freq,
                     hp: if is_lp { None } else { Some(&flt) },
                     lp: if is_lp { Some(&flt) } else { None },
+                    low_shelf: None, high_shelf: None,
                     peq: &[],
                     config: &cfg,
                 }).expect("IIR should succeed");
@@ -930,6 +958,60 @@ mod tests {
                     order, is_lp, max_err, worst_f);
             }
         }
+    }
+
+    /// b141.17 (audit, CRITICAL): the IIR route received only hp/lp/peq, so a
+    /// target shelf never reached the cascade — the plot drew the shelved
+    /// target while the exported WAV shipped without it. Shelves are rational
+    /// second-order sections and now ride the cascade as RBJ shelving biquads.
+    #[test]
+    fn target_shelves_reach_the_iir_cascade() {
+        use crate::target::{evaluate, ShelfConfig, TargetCurve};
+
+        let sr = 48_000.0_f64;
+        let n_fft = 16_384_usize;
+        let log_freq = log_grid(512, 5.0, 40_000.0);
+        let hp = lr4_filter(60.0);
+        let low_shelf = ShelfConfig { freq_hz: 120.0, gain_db: 6.0, q: 0.707 };
+        let high_shelf = ShelfConfig { freq_hz: 6000.0, gain_db: -4.0, q: 0.707 };
+        let mut cfg = cfg_min(n_fft, sr);
+        cfg.iterations = 0;
+
+        let out = generate_min_phase_fir_iir(&IirPathInput {
+            freq: &log_freq, hp: Some(&hp), lp: None,
+            low_shelf: Some(&low_shelf), high_shelf: Some(&high_shelf),
+            peq: &[], config: &cfg,
+        }).expect("IIR should succeed");
+
+        let target = TargetCurve {
+            reference_level_db: 0.0, tilt_db_per_octave: 0.0, tilt_ref_freq: 1000.0,
+            high_pass: Some(hp.clone()), low_pass: None,
+            low_shelf: Some(low_shelf.clone()), high_shelf: Some(high_shelf.clone()),
+        };
+        let ref_resp = evaluate(&target, &log_freq);
+
+        // Both shelf plateaus and the band between them; stay under sr/4 so the
+        // comparison is not dominated by bilinear droop near Nyquist. The IIR
+        // path normalises its realised curve to 0 dB at the passband peak while
+        // `evaluate` returns absolute target gain, so compare shapes: peak-align
+        // both first. A dropped shelf changes the shape (one end moves by the
+        // shelf gain), which no single offset can hide.
+        let band: Vec<usize> = (0..log_freq.len())
+            .filter(|&i| log_freq[i] >= 80.0 && log_freq[i] <= sr / 4.0)
+            .collect();
+        let peak_realised = band.iter().fold(f64::NEG_INFINITY, |a, &i| a.max(out.realized_mag[i]));
+        let peak_model = band.iter().fold(f64::NEG_INFINITY, |a, &i| a.max(ref_resp.magnitude[i]));
+        let mut max_err = 0.0_f64;
+        let mut worst_f = 0.0_f64;
+        for &i in &band {
+            let err = ((out.realized_mag[i] - peak_realised)
+                     - (ref_resp.magnitude[i] - peak_model)).abs();
+            if err > max_err { max_err = err; worst_f = log_freq[i]; }
+        }
+        // Verified against the pre-fix behaviour: with the shelves left out of
+        // the cascade this reads 7.98 dB at 11.9 kHz.
+        assert!(max_err < 0.5,
+            "shelved target: realised vs model max {:.2} dB at {:.0} Hz", max_err, worst_f);
     }
 }
 
@@ -969,7 +1051,7 @@ mod wav_tail_tests {
         let f_max = (40_000.0_f64).min(sr / 2.0 * 0.95);
         let log_freq: Vec<f64> = (0..512).map(|i| 5.0 * (f_max / 5.0_f64).powf(i as f64 / 511.0)).collect();
         let out = generate_min_phase_fir_iir(&IirPathInput {
-            freq: &log_freq, hp: Some(&hp), lp: None, peq: std::slice::from_ref(&peq), config: &cfg,
+            freq: &log_freq, hp: Some(&hp), lp: None, low_shelf: None, high_shelf: None, peq: std::slice::from_ref(&peq), config: &cfg,
         }).unwrap();
 
         // Reference: the raw cascade impulse (what the UI plot is built from).

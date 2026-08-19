@@ -162,7 +162,7 @@ fn rephase_compare(sr: u32) {
     let lf = log_grid(512, 5.0, f_max);
 
     let pf_out = generate_min_phase_fir_iir(&IirPathInput {
-        freq: &lf, hp: Some(&hp), lp: None, peq: &[], config: &cfg,
+        freq: &lf, hp: Some(&hp), lp: None, low_shelf: None, high_shelf: None, peq: &[], config: &cfg,
     }).expect("PhaseForge IIR generation");
     let pf_samples = &pf_out.impulse;
 

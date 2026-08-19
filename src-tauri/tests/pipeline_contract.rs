@@ -57,7 +57,7 @@ fn evaluate_via_contract(
     cfg: &FirConfig,
     freq: &[f64],
 ) -> (Route, FirModelResult) {
-    let route = route_for(hp, lp, cfg);
+    let route = route_for(hp, lp, 0.0, cfg);
     let pipeline = phaseforge_lib::fir::pick_pipeline(hp, lp, cfg);
     let result = pipeline.evaluate(hp, lp, peq, cfg, freq).expect("pipeline.evaluate");
     (route, result)
@@ -335,7 +335,7 @@ fn rust_routing_predicate_matches_js_decisions() {
 
     for (label, hp, lp, lin, sub, expected) in table {
         let cfg = fir_config(lin, sub);
-        let got = route_for(hp, lp, &cfg);
+        let got = route_for(hp, lp, 0.0, &cfg);
         assert_eq!(got, expected, "{}", label);
     }
 }

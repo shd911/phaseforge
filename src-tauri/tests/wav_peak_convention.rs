@@ -170,7 +170,7 @@ fn iir_path_peak_centered() {
         freq: &freq,
         hp: Some(&hp),
         lp: None,
-        peq: &[],
+        low_shelf: None, high_shelf: None, peq: &[],
         config: &cfg,
     })
     .expect("iir run");

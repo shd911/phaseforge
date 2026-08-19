@@ -178,7 +178,7 @@ fn run_iir(
     cfg: &FirConfig,
 ) -> FirOutput {
     let freq = log_freq_grid();
-    let r = generate_min_phase_fir_iir(&IirPathInput { freq: &freq, hp, lp, peq, config: cfg })
+    let r = generate_min_phase_fir_iir(&IirPathInput { freq: &freq, hp, lp, low_shelf: None, high_shelf: None, peq, config: cfg })
         .expect("iir_path run");
     FirOutput { impulse: r.impulse, realized_mag: r.realized_mag, realized_phase: r.realized_phase }
 }

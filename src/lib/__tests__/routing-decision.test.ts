@@ -22,13 +22,16 @@ import type { FilterConfig } from "../types";
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async (cmd: string, args: any) => {
     if (cmd !== "pick_fir_route") throw new Error(`Unmocked command: ${cmd}`);
-    const { hp, lp, linearMain, subsonicCutoffHz } = args;
+    const { hp, lp, linearMain, subsonicCutoffHz, tiltDbPerOctave } = args;
     const realisable = (f: FilterConfig | null) =>
       !f || f.filter_type === "LinkwitzRiley"
          || f.filter_type === "Butterworth"
          || f.filter_type === "Custom";
     if (linearMain) return "Cepstral";
     if (subsonicCutoffHz !== null) return "Cepstral";
+    // b141.17: a target tilt is a log-slope, not a rational transfer function
+    // — the biquad cascade cannot carry it, so it forces the cepstral route.
+    if (tiltDbPerOctave) return "Cepstral";
     if (!realisable(hp)) return "Cepstral";
     if (!realisable(lp)) return "Cepstral";
     return "Iir";
@@ -61,6 +64,7 @@ type Row = {
   lp: FilterConfig | null;
   linearMain: boolean;
   subsonic: number | null;
+  tilt?: number;
   expected: "iir" | "cepstral";
 };
 
@@ -86,37 +90,48 @@ const TABLE: Row[] = [
   { desc: "Bessel HP + BW LP",                     hp: BESS, lp: BW,   linearMain: false, subsonic: null, expected: "cepstral" },
 
   { desc: "Gaussian + linearMain + subsonic",      hp: GAUSS, lp: BESS, linearMain: true, subsonic: 50.0, expected: "cepstral" },
+
+  // b141.17 (audit): the IIR cascade dropped the target tilt silently — the
+  // plot drew a tilted target, the WAV shipped flat (9.8 dB apart at 14.8 kHz
+  // on the stock "bk" preset). Any non-zero tilt now routes to cepstral.
+  { desc: "LR HP + LR LP, tilt -1 dB/oct",         hp: LR,   lp: LR,   linearMain: false, subsonic: null, tilt: -1.0, expected: "cepstral" },
+  { desc: "no HP/LP, tilt -0.4 dB/oct",            hp: null, lp: null, linearMain: false, subsonic: null, tilt: -0.4, expected: "cepstral" },
+  { desc: "BW LP, positive tilt",                  hp: null, lp: BW,   linearMain: false, subsonic: null, tilt: 0.5,  expected: "cepstral" },
+  { desc: "LR HP + LR LP, tilt exactly 0",         hp: LR,   lp: LR,   linearMain: false, subsonic: null, tilt: 0,    expected: "iir" },
 ];
 
 describe("pickFirRoute — decision table (b140.10 → b140.15.5)", () => {
   for (const row of TABLE) {
     it(`${row.desc} → ${row.expected}`, async () => {
-      const got = await pickFirRoute(row.hp, row.lp, row.linearMain, row.subsonic);
+      const got = await pickFirRoute(row.hp, row.lp, row.linearMain, row.subsonic, row.tilt ?? 0);
       expect(got).toBe(row.expected);
     });
   }
 
   describe("undefined HP/LP behave like null", () => {
     it("undefined HP, undefined LP, min-phase, no subsonic → iir", async () => {
-      expect(await pickFirRoute(undefined, undefined, false, null)).toBe("iir");
+      expect(await pickFirRoute(undefined, undefined, false, null, 0)).toBe("iir");
     });
     it("undefined HP, Gaussian LP → cepstral", async () => {
-      expect(await pickFirRoute(undefined, GAUSS, false, null)).toBe("cepstral");
+      expect(await pickFirRoute(undefined, GAUSS, false, null, 0)).toBe("cepstral");
     });
   });
 
   describe("priority of disqualifiers (any single one routes to cepstral)", () => {
     it("only linearMain set", async () => {
-      expect(await pickFirRoute(LR, LR, true, null)).toBe("cepstral");
+      expect(await pickFirRoute(LR, LR, true, null, 0)).toBe("cepstral");
     });
     it("only subsonic set", async () => {
-      expect(await pickFirRoute(LR, LR, false, 1.0)).toBe("cepstral");
+      expect(await pickFirRoute(LR, LR, false, 1.0, 0)).toBe("cepstral");
     });
     it("only HP non-realisable", async () => {
-      expect(await pickFirRoute(GAUSS, LR, false, null)).toBe("cepstral");
+      expect(await pickFirRoute(GAUSS, LR, false, null, 0)).toBe("cepstral");
     });
     it("only LP non-realisable", async () => {
-      expect(await pickFirRoute(LR, BESS, false, null)).toBe("cepstral");
+      expect(await pickFirRoute(LR, BESS, false, null, 0)).toBe("cepstral");
+    });
+    it("only tilt set", async () => {
+      expect(await pickFirRoute(LR, LR, false, null, -1.0)).toBe("cepstral");
     });
   });
 });

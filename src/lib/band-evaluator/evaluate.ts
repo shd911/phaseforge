@@ -406,6 +406,9 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
     const result = await dispatchFirInvoke(
       band.target.high_pass,
       band.target.low_pass,
+      band.target.low_shelf ?? null,
+      band.target.high_shelf ?? null,
+      band.target.tilt_db_per_octave ?? 0,
       enabledPeq,
       linearMain,
       subsonicCutoff,

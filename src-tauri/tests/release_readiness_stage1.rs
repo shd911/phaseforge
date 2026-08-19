@@ -95,7 +95,7 @@ fn route_label(
     lp: Option<&FilterConfig>,
     cfg: &FirConfig,
 ) -> &'static str {
-    match route_for(hp, lp, cfg) {
+    match route_for(hp, lp, 0.0, cfg) {
         Route::Iir => "Iir",
         Route::Cepstral => "Cepstral",
     }

@@ -269,7 +269,7 @@ fn release_readiness_stage2_routing_invariants() {
         let iir_ok = realisable(hp) && realisable(lp);
 
         // Default config — no linear main, no subsonic.
-        let r = route_for(hp, lp, &base(false, None));
+        let r = route_for(hp, lp, 0.0, &base(false, None));
         if iir_ok {
             assert_eq!(r, Route::Iir, "B{bi}: realisable but routed {r:?}");
         } else {
@@ -278,13 +278,13 @@ fn release_readiness_stage2_routing_invariants() {
 
         // linear_phase_main forces Cepstral regardless.
         assert_eq!(
-            route_for(hp, lp, &base(true, None)),
+            route_for(hp, lp, 0.0, &base(true, None)),
             Route::Cepstral,
             "B{bi}: linear_phase_main must force Cepstral"
         );
         // subsonic forces Cepstral regardless.
         assert_eq!(
-            route_for(hp, lp, &base(false, Some(20.0))),
+            route_for(hp, lp, 0.0, &base(false, Some(20.0))),
             Route::Cepstral,
             "B{bi}: subsonic_cutoff_hz must force Cepstral"
         );

@@ -6,7 +6,10 @@ import type { FilterConfig } from "./types";
  *  - "iir"      → IIR-analytical cascade (`generate_model_fir_iir`).
  *                 Bit-exact phase via DigitalBiquad cascade.
  *                 Restricted to: min-phase main + no subsonic +
- *                 every active crossover is LR / Butterworth / Custom.
+ *                 no target tilt (b141.17 — a log-slope is not rational, so
+ *                 the biquad cascade cannot carry it; shelves are rational
+ *                 and stay here) + every active crossover is LR /
+ *                 Butterworth / Custom.
  *  - "cepstral" → FFT cepstral path (`generate_model_fir`).
  *                 Used for Gaussian, Bessel, linear-phase main,
  *                 composite + subsonic, custom measured targets, etc.
@@ -24,12 +27,14 @@ export async function pickFirRoute(
   lp: FilterConfig | null | undefined,
   linearMain: boolean,
   subsonicCutoffHz: number | null,
+  tiltDbPerOctave: number,
 ): Promise<"iir" | "cepstral"> {
   const route = await invoke<string>("pick_fir_route", {
     hp: hp ?? null,
     lp: lp ?? null,
     linearMain,
     subsonicCutoffHz,
+    tiltDbPerOctave,
   });
   return route === "Iir" ? "iir" : "cepstral";
 }

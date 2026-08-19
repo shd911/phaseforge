@@ -11,7 +11,7 @@
  * isolation and the route-to-Tauri payload mapping has a single home.
  */
 import { invoke } from "@tauri-apps/api/core";
-import type { FilterConfig, PeqBand } from "../types";
+import type { FilterConfig, PeqBand, ShelfConfig } from "../types";
 import { pickFirRoute } from "../fir-routing";
 
 /** Raw response shape returned by both `generate_model_fir_iir` and
@@ -87,6 +87,12 @@ function buildSharedFirConfig(
 export async function dispatchFirInvoke(
   hp: FilterConfig | null,
   lp: FilterConfig | null,
+  // b141.17 (audit): shelves and tilt are part of the target the plot draws.
+  // Shelves ride the IIR cascade as RBJ sections; a non-zero tilt forces the
+  // cepstral route (a constant log-slope has no rational realisation).
+  lowShelf: ShelfConfig | null,
+  highShelf: ShelfConfig | null,
+  tiltDbPerOctave: number,
   enabledPeq: PeqBand[],
   linearMain: boolean,
   subsonicCutoffHz: number | null,
@@ -96,7 +102,8 @@ export async function dispatchFirInvoke(
   firCombinedPhase: number[],
   cfg: DispatchFirConfig,
 ): Promise<FirInvokeResult> {
-  const useIirPath = (await pickFirRoute(hp, lp, linearMain, subsonicCutoffHz)) === "iir";
+  const useIirPath =
+    (await pickFirRoute(hp, lp, linearMain, subsonicCutoffHz, tiltDbPerOctave)) === "iir";
   // b141.2: a band whose HP and LP disagree on linear_phase (e.g. HP min +
   // LP linear) is not IIR-realisable and cannot be expressed by a single
   // linear_phase_main flag. Flag it so the cepstral path consumes the
@@ -110,6 +117,8 @@ export async function dispatchFirInvoke(
       freq: firFreq,
       hp,
       lp,
+      lowShelf,
+      highShelf,
       peq: enabledPeq,
       config: sharedFirConfig,
     });

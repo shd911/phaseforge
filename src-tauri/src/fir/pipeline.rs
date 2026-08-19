@@ -56,8 +56,12 @@ impl FirPipeline for IirAnalyticalPipeline {
         config: &FirConfig,
         freq: &[f64],
     ) -> Result<FirModelResult, AppError> {
+        // b141.17: this contract-test pipeline builds its TargetCurve with no
+        // shelves and no tilt (see CepstralFftPipeline below), so both are None
+        // here. Production goes through the Tauri command, which passes the
+        // band's real shelves.
         generate_min_phase_fir_iir(&IirPathInput {
-            freq, hp, lp, peq, config,
+            freq, hp, lp, low_shelf: None, high_shelf: None, peq, config,
         })
     }
 }
@@ -125,7 +129,7 @@ pub fn pick_pipeline(
     lp: Option<&FilterConfig>,
     config: &FirConfig,
 ) -> Box<dyn FirPipeline> {
-    match route_for(hp, lp, config) {
+    match route_for(hp, lp, 0.0, config) {
         Route::Iir => Box::new(IirAnalyticalPipeline),
         Route::Cepstral => Box::new(CepstralFftPipeline),
     }
@@ -201,7 +205,7 @@ mod tests {
         let via_trait = IirAnalyticalPipeline.evaluate(Some(&hp), Some(&lp), &[], &cfg, &freq)
             .expect("trait");
         let direct = generate_min_phase_fir_iir(&IirPathInput {
-            freq: &freq, hp: Some(&hp), lp: Some(&lp), peq: &[], config: &cfg,
+            freq: &freq, hp: Some(&hp), lp: Some(&lp), low_shelf: None, high_shelf: None, peq: &[], config: &cfg,
         }).expect("direct");
         // Impulses must match bit-for-bit
         assert_eq!(via_trait.impulse.len(), direct.impulse.len());
