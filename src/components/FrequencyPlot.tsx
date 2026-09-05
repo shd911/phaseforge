@@ -1580,9 +1580,23 @@ export default function FrequencyPlot() {
   });
 
 
-  // Fast PEQ update during drag — recompute PEQ + corrected in-place, no chart rebuild
+  // Fast PEQ update during drag — recompute PEQ + corrected in-place, no chart rebuild.
+  // rAF-throttled: one IPC per frame, the latest band state wins (a 120 Hz
+  // mouse queued an unbounded number of compute_peq_complex requests).
   let peqFastGen = 0;
-  async function peqFastUpdate(band: BandState) {
+  let peqFastPending: BandState | null = null;
+  let peqFastRaf = 0;
+  function peqFastUpdate(band: BandState) {
+    peqFastPending = band;
+    if (peqFastRaf) return;
+    peqFastRaf = requestAnimationFrame(() => {
+      peqFastRaf = 0;
+      const b = peqFastPending;
+      peqFastPending = null;
+      if (b) void peqFastUpdateNow(b);
+    });
+  }
+  async function peqFastUpdateNow(band: BandState) {
     const gen = ++peqFastGen;
     if (!chart || !band.peqBands?.length) return;
     const peqSi = chart.series.findIndex(s => s.label === "PEQ dB");

@@ -228,3 +228,21 @@ describe("evaluateSum cache (b141.7)", () => {
     expect(r2.sumTargetPhase).not.toEqual(r1.sumTargetPhase);
   });
 });
+
+describe("memoEval in-flight de-duplication (2026-09-05 audit)", () => {
+  it("shares one computation between two concurrent identical requests", async () => {
+    const { memoEval, clearBandEvalCache } = await import("../band-evaluator/cache");
+    clearBandEvalCache();
+    let calls = 0;
+    let release!: (v: { x: number }) => void;
+    const compute = () => { calls++; return new Promise<{ x: number }>((r) => { release = r; }); };
+    const p1 = memoEval("inflight-key", compute);
+    const p2 = memoEval("inflight-key", compute);
+    release({ x: 7 });
+    const [a, b] = await Promise.all([p1, p2]);
+    expect(calls).toBe(1);
+    expect(a).toEqual({ x: 7 });
+    expect(b).toEqual({ x: 7 });
+    expect(a).not.toBe(b); // still separate clones
+  });
+});

@@ -121,7 +121,10 @@ export default function MergeDialog(props: MergeDialogProps) {
   }
 
   return (
-    <div class="merge-overlay" onClick={props.onClose}>
+    <div class="merge-overlay" onClick={props.onClose}
+      tabIndex={-1}
+      ref={(el) => requestAnimationFrame(() => el.focus())}
+      onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); props.onClose(); } }}>
       <div class="merge-dialog" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div class="merge-header">

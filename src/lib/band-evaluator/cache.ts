@@ -17,6 +17,10 @@ import type { SumEvalOptions } from "./sum";
 
 const CACHE_CAP = 32;
 const store = new Map<string, unknown>();
+/** Pending computations by key: a second identical request while the first
+ *  is still running (Export-tab render + "Export WAV" click) shares the
+ *  promise instead of launching a duplicate FIR generation. */
+const inflight = new Map<string, Promise<unknown>>();
 
 let measSeq = 0;
 const measIds = new WeakMap<object, number>();
@@ -99,14 +103,23 @@ export async function memoEval<T>(key: string, compute: () => Promise<T>): Promi
     store.set(key, hit);
     return structuredClone(hit) as T;
   }
-  const result = await compute();
-  store.set(key, result);
-  if (store.size > CACHE_CAP) {
-    store.delete(store.keys().next().value as string);
+  const pending = inflight.get(key);
+  if (pending) return structuredClone(await pending) as T;
+  const p = compute();
+  inflight.set(key, p);
+  try {
+    const result = await p;
+    store.set(key, result);
+    if (store.size > CACHE_CAP) {
+      store.delete(store.keys().next().value as string);
+    }
+    return structuredClone(result);
+  } finally {
+    inflight.delete(key);
   }
-  return structuredClone(result);
 }
 
 export function clearBandEvalCache(): void {
   store.clear();
+  inflight.clear();
 }

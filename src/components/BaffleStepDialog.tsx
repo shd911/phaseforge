@@ -172,7 +172,10 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
   }
 
   return (
-    <div class="baffle-overlay" onClick={props.onClose}>
+    <div class="baffle-overlay" onClick={props.onClose}
+      tabIndex={-1}
+      ref={(el) => requestAnimationFrame(() => el.focus())}
+      onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); props.onClose(); } }}>
       <div class="baffle-dialog" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div class="merge-header">

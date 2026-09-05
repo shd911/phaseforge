@@ -34,6 +34,12 @@ export default function StalePeqExportDialog() {
       {(p) => (
         <div
           class="pn-overlay"
+          tabIndex={-1}
+          ref={(el) => requestAnimationFrame(() => el.focus())}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") { e.preventDefault(); resolveAndClose(false); }
+            else if (e.key === "Enter") { e.preventDefault(); resolveAndClose(true); }
+          }}
           onMouseDown={(e) => { if (e.target === e.currentTarget) resolveAndClose(false); }}
         >
           <div class="pn-dialog" style={{ "min-width": "440px", "max-width": "560px" }}>
