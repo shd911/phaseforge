@@ -180,57 +180,23 @@ async fn compute_impulse(
 }
 
 /// Compute minimum phase from magnitude spectrum via Hilbert transform.
-/// Input: freq (log grid), magnitude (dB). Output: phase (degrees) on same grid.
+/// Input: freq (log grid), magnitude (dB), the export sample rate.
+/// Output: phase (degrees) on the same grid.
+///
+/// 2026-09-05 audit: the result used to depend on the GRID, not on the
+/// filter — the last grid point was treated as Nyquist (20 kHz on a
+/// measurement grid, 40 kHz standalone), the magnitude was held flat below
+/// `freq[0]` (a HP roll-off became a DC plateau) and the FFT had ~12 Hz bins.
+/// That put every Gaussian / subsonic min-phase band 30–100° away from the
+/// FIR that is actually exported. Now: true Nyquist from `sample_rate`,
+/// log-log slope extrapolation beyond the grid, 2^17-point FFT, −120 dB floor.
 #[tauri::command]
 async fn compute_minimum_phase(
     freq: Vec<f64>,
     magnitude: Vec<f64>,
+    sample_rate: Option<f64>,
 ) -> Result<Vec<f64>, String> {
-    let n = freq.len();
-    if n == 0 { return Err("empty freq".into()); }
-    let n_fft = ((n * 4).max(4096)).next_power_of_two();
-    let n_bins = n_fft / 2 + 1;
-    let nyquist = freq.last().copied().unwrap_or(24000.0);
-
-    // Clamp magnitude to reasonable dynamic range to avoid Hilbert artifacts
-    let mag_peak = magnitude.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    let mag_floor = mag_peak - 80.0; // -80 dB dynamic range
-    let clamped: Vec<f64> = magnitude.iter().map(|&v| v.max(mag_floor)).collect();
-
-    // Resample magnitude from log freq grid onto linear FFT grid
-    let mut lin_mag = vec![clamped[0]; n_bins];
-    for k in 0..n_bins {
-        let f_lin = nyquist * k as f64 / (n_bins - 1) as f64;
-        if f_lin <= freq[0] {
-            lin_mag[k] = clamped[0];
-        } else if f_lin >= *freq.last().expect("freq non-empty (checked at line 176)") {
-            lin_mag[k] = *clamped.last().expect("clamped same len as freq");
-        } else {
-            let mut lo = 0usize;
-            let mut hi = n - 1;
-            while hi - lo > 1 {
-                let mid = (lo + hi) / 2;
-                if freq[mid] <= f_lin { lo = mid; } else { hi = mid; }
-            }
-            let dt = freq[hi] - freq[lo];
-            let frac = if dt > 0.0 { (f_lin - freq[lo]) / dt } else { 0.0 };
-            lin_mag[k] = clamped[lo] + frac * (clamped[hi] - clamped[lo]);
-        }
-    }
-
-    let min_ph_rad = dsp::minimum_phase_from_magnitude(&lin_mag, n_fft);
-
-    // Resample phase from linear grid back to log freq grid, convert to degrees
-    let mut phase_deg = Vec::with_capacity(n);
-    for i in 0..n {
-        let bin_f = freq[i] / nyquist * (n_bins - 1) as f64;
-        let lo = (bin_f as usize).min(n_bins - 2);
-        let hi = lo + 1;
-        let frac = bin_f - lo as f64;
-        let ph_rad = min_ph_rad[lo] * (1.0 - frac) + min_ph_rad[hi] * frac;
-        phase_deg.push(ph_rad.to_degrees());
-    }
-    Ok(phase_deg)
+    dsp::minimum_phase_on_log_grid(&freq, &magnitude, sample_rate)
 }
 
 #[tauri::command]
@@ -490,7 +456,7 @@ pub fn run() {
         )
         .init();
 
-    info!("PhaseForge b141.26 starting...");
+    info!("PhaseForge b141.27 starting...");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())

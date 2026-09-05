@@ -8,7 +8,7 @@ mod smoothing;
 pub use interpolation::{interpolate_linear_grid, interpolate_log_grid, interp_1d};
 pub use smoothing::{fractional_octave_smooth, variable_smoothing, SmoothingConfig};
 mod phase;
-pub use phase::minimum_phase_from_magnitude;
+pub use phase::{minimum_phase_from_magnitude, minimum_phase_on_log_grid};
 
 /// Generate a logarithmically-spaced frequency grid.
 pub fn generate_log_freq_grid(n: usize, f_min: f64, f_max: f64) -> Vec<f64> {

@@ -2297,7 +2297,7 @@ export default function FrequencyPlot() {
               tPh = tPh.map((v: number, i: number) => v + xp[i]);
             }
             // b139.4c: unified phase reconstruction (Gaussian + subsonic).
-            tPh = await reconstructTargetPhase(freq, tPh, sb.target.high_pass, sb.target.low_pass);
+            tPh = await reconstructTargetPhase(freq, tPh, sb.target.high_pass, sb.target.low_pass, exportSampleRate());
             if (gen !== renderGen) return null;
             // Normalize to 0 dB peak before IFFT (same as sum normalization)
             let tPeakMag = -Infinity;
@@ -2352,7 +2352,7 @@ export default function FrequencyPlot() {
             }
             // b139.4c: unified phase reconstruction (Gaussian + subsonic).
             if (sb.targetEnabled) {
-              cPh = await reconstructTargetPhase(sbFreq, cPh, sb.target.high_pass, sb.target.low_pass);
+              cPh = await reconstructTargetPhase(sbFreq, cPh, sb.target.high_pass, sb.target.low_pass, exportSampleRate());
               if (gen !== renderGen) return null;
             }
             // Normalize to 0 dB peak before IFFT (same as sum normalization)
@@ -3424,7 +3424,11 @@ export default function FrequencyPlot() {
     activePeqDots = null;
     const gen = ++renderGen;
     zoomCenter = 0;
-    const bands: BandState[] = JSON.parse(JSON.stringify(appState.bands));
+    // 2026-09-05 audit: no JSON clone here — it minted fresh measurement
+    // objects on every render, so the identity-keyed eval cache missed on
+    // every Σ toggle (full N-band DSP per click). evaluateSum snapshots the
+    // scalar fields itself and keys measurements by identity.
+    const bands: BandState[] = appState.bands;
     try {
       const result = await evaluateSum(bands, { sampleRate: exportSampleRate() });
       if (gen !== renderGen) return;

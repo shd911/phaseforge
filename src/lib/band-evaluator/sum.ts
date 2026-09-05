@@ -17,7 +17,7 @@ import type { PeqBand, TargetResponse } from "../types";
 import { alignmentPhaseDeg } from "../types";
 import { buildCommonGrid, buildLogGrid, interpOnGrid, interpPhaseOnGrid, irTime, type ImpulseIpc } from "./grid";
 import { appendNoiseFloorTail, computeExtension } from "./extension";
-import { evaluateBandFull, reconstructTargetPhase } from "./evaluate";
+import { evaluateBandFull, reconstructTargetPhase, snapshotBandRequest } from "./evaluate";
 import { memoEval, sumRequestKey } from "./cache";
 
 // ---------------------------------------------------------------------------
@@ -264,7 +264,9 @@ export async function evaluateSum(
   bands: BandState[],
   options?: SumEvalOptions,
 ): Promise<SumEvalResult> {
-  return memoEval(sumRequestKey(bands, options), () => evaluateSumImpl(bands, options));
+  // 2026-09-05 audit: snapshot before keying (see evaluateBandFull).
+  const snapBands = bands.map((b) => snapshotBandRequest({ band: b }).band);
+  return memoEval(sumRequestKey(snapBands, options), () => evaluateSumImpl(snapBands, options));
 }
 
 async function evaluateSumImpl(
@@ -272,6 +274,7 @@ async function evaluateSumImpl(
   options?: SumEvalOptions,
 ): Promise<SumEvalResult> {
   const freq = options?.freq ?? buildCommonGrid(bands);
+  const sumSr = options?.sampleRate ?? 48000;
 
   // b140.15.4: per-band target eval runs in parallel (was serial for...of
   // with await inside — ~N × IPC latency stacked). Bands are independent so
@@ -333,7 +336,7 @@ async function evaluateSumImpl(
         target, freq,
       });
       const phase = await reconstructTargetPhase(
-        freq, response.phase, band.target.high_pass, band.target.low_pass,
+        freq, response.phase, band.target.high_pass, band.target.low_pass, sumSr,
       );
       perBandTargetData[i] = {
         mag: response.magnitude,
@@ -508,7 +511,7 @@ async function evaluateSumImpl(
           target, freq: irFreq,
         });
         const tPhase = await reconstructTargetPhase(
-          irFreq, resp.phase, band.target.high_pass, band.target.low_pass,
+          irFreq, resp.phase, band.target.high_pass, band.target.low_pass, sumSr,
         );
         tgtMagOnIr = resp.magnitude;
         const re = new Float64Array(N), im = new Float64Array(N);
@@ -530,7 +533,7 @@ async function evaluateSumImpl(
       if (tgtMagOnIr) {
         const ext = await computeExtension(
           band.measurement.freq, band.measurement.magnitude,
-          band.measurement.phase ?? null, irFreq, tgtMagOnIr,
+          band.measurement.phase ?? null, irFreq, tgtMagOnIr, sumSr,
         );
         extMeasMag = ext.mag;
         extMeasPhase = ext.phase;
@@ -585,7 +588,7 @@ async function evaluateSumImpl(
         const corrMag = extMeasMag.map((m, j) => m + irPeqMag[j] + irXsMag[j] + lvl);
         const baseP = measPhaseArr.map((p, j) => p + irPeqPhase[j] + irXsPhase[j]);
         const corrPhase = await reconstructTargetPhase(
-          irFreq, baseP, band.target.high_pass, band.target.low_pass,
+          irFreq, baseP, band.target.high_pass, band.target.low_pass, sumSr,
         );
         const re = new Float64Array(N), im = new Float64Array(N);
         for (let j = 0; j < N; j++) {

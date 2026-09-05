@@ -145,6 +145,7 @@ export async function reconstructTargetPhase(
   basePhase: number[],
   hp: FilterConfig | null | undefined,
   lp: FilterConfig | null | undefined,
+  sampleRate: number = 48000,
 ): Promise<number[]> {
   let phase = [...basePhase];
 
@@ -154,19 +155,19 @@ export async function reconstructTargetPhase(
       const subDb = subsonicMagDb(freq, hp!.freq_hz / 8);
       hpMag = hpMag.map((db, i) => db + subDb[i]);
     }
-    const hpPh = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: hpMag });
+    const hpPh = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: hpMag, sampleRate });
     phase = phase.map((v, i) => v + hpPh[i]);
   } else if (hasActiveSubsonicProtect(hp) && hp!.linear_phase === true) {
     // Linear-phase Gaussian still ships a min-phase subsonic — Hilbert from
     // subsonic-only magnitude.
     const subDb = subsonicMagDb(freq, hp!.freq_hz / 8);
-    const subPh = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: subDb });
+    const subPh = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: subDb, sampleRate });
     phase = phase.map((v, i) => v + subPh[i]);
   }
 
   if (isGaussianMinPhase(lp)) {
     const lpMag = gaussianFilterMagDb(freq, lp!, true);
-    const lpPh = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: lpMag });
+    const lpPh = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: lpMag, sampleRate });
     phase = phase.map((v, i) => v + lpPh[i]);
   }
 
@@ -192,11 +193,33 @@ async function applyMeasurementSmoothing(m: Measurement, mode: string | null | u
  *  `evaluateBandFullImpl`; identical requests (band content + options) are
  *  served from the content-keyed LRU in ./cache.ts as a structuredClone. */
 export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalResult> {
-  return memoEval(bandRequestKey(req), () => evaluateBandFullImpl(req));
+  // 2026-09-05 audit: the key was read from the live store proxy at call
+  // time while the pipeline re-read the proxy after every await — an edit
+  // during a 1 s FIR evaluation stored NEW data under the OLD key, and Undo
+  // then served that poisoned entry. Snapshot the band once, key and
+  // compute from the snapshot. `measurement` keeps its identity (the cache
+  // keys it by object id and the pipeline never mutates it).
+  const snap = snapshotBandRequest(req);
+  return memoEval(bandRequestKey(snap), () => evaluateBandFullImpl(snap));
+}
+
+/** Plain-object copy of the DSP-relevant band fields; measurement by reference. */
+export function snapshotBandRequest(req: BandEvalRequest): BandEvalRequest {
+  const b = req.band;
+  const band: BandState = {
+    ...b,
+    target: JSON.parse(JSON.stringify(b.target)),
+    peqBands: JSON.parse(JSON.stringify(b.peqBands ?? [])),
+    settings: b.settings ? JSON.parse(JSON.stringify(b.settings)) : b.settings,
+    measurement: b.measurement,
+  };
+  return { ...req, band, fir: req.fir ? { ...req.fir } : req.fir };
 }
 
 async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResult> {
   const { band } = req;
+  /** Export sample rate: Nyquist for every min-phase (Hilbert) reconstruction. */
+  const evalSr = req.sampleRate ?? req.fir?.sampleRate ?? 48000;
 
   // 1. Measurement (with smoothing).
   let measurement: Measurement | null = null;
@@ -227,7 +250,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
     if (band.targetEnabled) {
       const response = await invoke<TargetResponse>("evaluate_target", { target: targetCurve, freq });
       targetMag = response.magnitude;
-      targetPhase = await reconstructTargetPhase(freq, response.phase, band.target.high_pass, band.target.low_pass);
+      targetPhase = await reconstructTargetPhase(freq, response.phase, band.target.high_pass, band.target.low_pass, evalSr);
     }
   } else if (measurement) {
     freq = measurement.freq;
@@ -235,7 +258,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
       const curveWithRef = { ...targetCurve, reference_level_db: targetCurve.reference_level_db + refLevel };
       const response = await invoke<TargetResponse>("evaluate_target", { target: curveWithRef, freq });
       targetMag = response.magnitude;
-      targetPhase = await reconstructTargetPhase(freq, response.phase, band.target.high_pass, band.target.low_pass);
+      targetPhase = await reconstructTargetPhase(freq, response.phase, band.target.high_pass, band.target.low_pass, evalSr);
     }
   } else {
     // Standalone: one round-trip returns the grid + the response.
@@ -246,7 +269,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
     freq = standaloneFreq;
     if (band.targetEnabled) {
       targetMag = response.magnitude;
-      targetPhase = await reconstructTargetPhase(freq, response.phase, band.target.high_pass, band.target.low_pass);
+      targetPhase = await reconstructTargetPhase(freq, response.phase, band.target.high_pass, band.target.low_pass, evalSr);
     }
   }
 
@@ -335,7 +358,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
         p + (peqPhase[i] ?? 0) + (crossSectionPhase?.[i] ?? 0)
       );
       basePhase = await reconstructTargetPhase(
-        freq, basePhase, band.target.high_pass, band.target.low_pass,
+        freq, basePhase, band.target.high_pass, band.target.low_pass, evalSr,
       );
       correctedPhase = basePhase;
     }
@@ -378,7 +401,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
       { target: targetCurve, nPoints: 512, fMin: 5, fMax: fMaxFir },
     );
     const firTargetPhaseRaw = await reconstructTargetPhase(
-      firFreqRaw, firResp.phase, band.target.high_pass, band.target.low_pass,
+      firFreqRaw, firResp.phase, band.target.high_pass, band.target.low_pass, evalSr,
     );
 
     // b140.5: extend log grid + target trio up to Nyquist with a noise-floor
@@ -485,7 +508,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
           target: irTargetCurve, freq: irFreqRaw,
         });
         const irTargetPhaseRaw = await reconstructTargetPhase(
-          irFreqRaw, irTargetResp.phase, band.target.high_pass, band.target.low_pass,
+          irFreqRaw, irTargetResp.phase, band.target.high_pass, band.target.low_pass, evalSr,
         );
         // b140.5: extend up to Nyquist with noise-floor tail to neutralise the
         // Rust constant-clamp on linear FFT bins above irFMax.
@@ -505,7 +528,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
         if (measurement) {
           const extMeas = await computeExtension(
             measurement.freq, measurement.magnitude,
-            measurement.phase ?? null, irFreq, irTargetMag,
+            measurement.phase ?? null, irFreq, irTargetMag, evalSr,
           );
 
           let irPeqMag: number[] = new Array(irFreq.length).fill(0);
@@ -535,7 +558,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
           const basePhase = (extMeas.phase ?? new Array<number>(irFreq.length).fill(0))
             .map((p, i) => p + irPeqPhase[i] + irXsPhase[i]);
           const irCorrPhase = await reconstructTargetPhase(
-            irFreq, basePhase, band.target.high_pass, band.target.low_pass,
+            irFreq, basePhase, band.target.high_pass, band.target.low_pass, evalSr,
           );
           const cr = await invoke<ImpulseIpc>(
             "compute_impulse",
@@ -578,7 +601,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
 
     const measExt = await computeExtension(
       measurement.freq, measurement.magnitude,
-      measurement.phase ?? null, extendedFreq, tgtMagExt,
+      measurement.phase ?? null, extendedFreq, tgtMagExt, evalSr,
     );
     extendedMeasurementMag = measExt.mag;
     extendedMeasurementPhase = measExt.phase;
@@ -586,7 +609,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
     if (correctedMag) {
       const corrExt = await computeExtension(
         measurement.freq, correctedMag, correctedPhase ?? null,
-        extendedFreq, tgtMagExt,
+        extendedFreq, tgtMagExt, evalSr,
       );
       extendedCorrectedMag = corrExt.mag;
       extendedCorrectedPhase = corrExt.phase;

@@ -81,6 +81,7 @@ export async function computeExtension(
   srcPhase: number[] | null,
   dstFreq: number[],
   dstTargetMag: number[],
+  sampleRate: number = 48000,
 ): Promise<{ mag: number[]; phase: number[] | null }> {
   const n = dstFreq.length;
   const fLo = srcFreq[0], fHi = srcFreq[srcFreq.length - 1];
@@ -130,7 +131,7 @@ export async function computeExtension(
   let extPhase: number[] | null = null;
   if (nativePhase) {
     const recon = await invoke<number[]>("compute_minimum_phase", {
-      freq: dstFreq, magnitude: extMag,
+      freq: dstFreq, magnitude: extMag, sampleRate,
     });
     const phOffsetLo = nativePhase[idxLo] - recon[idxLo];
     const phOffsetHi = nativePhase[idxHi] - recon[idxHi];
