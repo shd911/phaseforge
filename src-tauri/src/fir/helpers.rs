@@ -56,7 +56,7 @@ pub(crate) fn frequency_weight(freq_hz: f64, crossover_range: (f64, f64)) -> f64
         let ratio = (freq_hz / f_low).log2().abs();
         if ratio < 0.5 { 3.0 } else { 0.0 }
     } else { 0.0 };
-    let near_lp: f64 = if f_high < 20000.0 {
+    let near_lp: f64 = if f_high < crate::dsp::F_MAX_WORK {
         let ratio = (freq_hz / f_high).log2().abs();
         if ratio < 0.5 { 3.0 } else { 0.0 }
     } else { 0.0 };

@@ -453,7 +453,7 @@ pub fn auto_peq_above_lp(
         },
     )?;
 
-    let f_max = freq.last().copied().unwrap_or(20000.0).min(20000.0);
+    let f_max = freq.last().copied().unwrap_or(crate::dsp::F_MAX_WORK).min(crate::dsp::F_MAX_WORK);
 
     // Target: flat at ref_level above LP, smoothed measurement below
     let smooth_cfg = SmoothingConfig {

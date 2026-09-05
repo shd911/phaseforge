@@ -22,7 +22,7 @@ import {
   subsonicMagDb,
   smoothingConfig,
 } from "../plot-helpers";
-import { hasActiveSubsonicProtect } from "../types";
+import { hasActiveSubsonicProtect, F_MIN_WORK, F_MAX_WORK } from "../types";
 import { buildLogGrid, buildCommonGrid, resampleOnLogGrid, interpPhaseOnGrid, irTime, type ImpulseIpc } from "./grid";
 import { dispatchFirInvoke } from "./route";
 import { appendNoiseFloorTail, autoRefLevel, computeExtension } from "./extension";
@@ -95,7 +95,7 @@ export interface BandEvalResult {
 
   refLevel: number;
 
-  /** b140.3.2: standard wide grid (20–20000 Hz, 512 log) used for extension.
+  /** b140.3.2: standard wide grid (F_MIN_WORK–F_MAX_WORK, 512 log) used for extension.
    *  Populated when measurement+targetEnabled; null otherwise. */
   extendedFreq: number[] | null;
   /** Original measurement frequency bounds [fLo, fHi]. UI uses this to
@@ -611,7 +611,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
   let extendedCorrectedPhase: number[] | null = null;
 
   if (measurement && band.targetEnabled) {
-    extendedFreq = buildLogGrid(512, 20, 20000);
+    extendedFreq = buildLogGrid(512, F_MIN_WORK, F_MAX_WORK);
     nativeRange = [measurement.freq[0], measurement.freq[measurement.freq.length - 1]];
 
     // Target on extendedFreq for extension shape — mirrors the level

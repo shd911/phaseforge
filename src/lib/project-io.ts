@@ -32,7 +32,7 @@ import type { FilterConfig } from "../lib/types";
 import { tolerance, setTolerance, maxBands, setMaxBands, gainRegularization, setGainRegularization, peqFloor, setPeqFloor, peqRangeMode, setPeqRangeMode, peqDirectLow, setPeqDirectLow, peqDirectHigh, setPeqDirectHigh } from "../stores/peq-optimize";
 import type { AppState, BandState, PerMeasurementSettings, FloorBounceConfig, MergeSource } from "../stores/bands";
 import type { Measurement, MergeResult } from "../lib/types";
-import { isWindowType, STANDARD_SAMPLE_RATES, STANDARD_TAPS } from "../lib/types";
+import { isWindowType, STANDARD_SAMPLE_RATES, STANDARD_TAPS, F_MIN_WORK, F_MAX_WORK } from "../lib/types";
 import { isSmoothingMode } from "../stores/bands";
 import { clearHistory } from "../stores/history";
 import { showToast } from "./toast";
@@ -558,7 +558,7 @@ export async function restoreState(project: ProjectFile, projDir: string | null)
     setPeqFloor(project.peq_floor ?? 60);
     setPeqRangeMode(project.peq_range_mode === "direct" ? "direct" : "auto");
     setPeqDirectLow(project.peq_direct_low ?? 20);
-    setPeqDirectHigh(project.peq_direct_high ?? 20000);
+    setPeqDirectHigh(project.peq_direct_high ?? F_MAX_WORK);
     // FIR optimization settings
     setFirIterations(project.fir_iterations ?? 3);
     setFirFreqWeighting(project.fir_freq_weighting ?? true);
@@ -710,9 +710,9 @@ export async function newProject(): Promise<void> {
   }
 
   // 4. Reset state — create N bands with default crossover filters
-  //    Split 20–20000 Hz into equal logarithmic intervals
-  const F_MIN = 20;
-  const F_MAX = 20000;
+  //    Split the working range into equal logarithmic intervals
+  const F_MIN = F_MIN_WORK;
+  const F_MAX = F_MAX_WORK;
   const logMin = Math.log10(F_MIN);
   const logMax = Math.log10(F_MAX);
   // crossover frequencies: bandCount-1 points dividing the range
@@ -776,7 +776,7 @@ export async function newProject(): Promise<void> {
   setPeqFloor(60);
   setPeqRangeMode("auto");
   setPeqDirectLow(20);
-  setPeqDirectHigh(20000);
+  setPeqDirectHigh(F_MAX_WORK);
 
   // 5. Set project signals — .pfproj goes INSIDE the subfolder
   setProjectDir(folderPath);

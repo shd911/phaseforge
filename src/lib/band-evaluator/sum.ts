@@ -15,7 +15,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { untrack } from "solid-js";
 import type { BandState } from "../../stores/bands";
 import type { PeqBand, TargetResponse } from "../types";
-import { alignmentPhaseDeg } from "../types";
+import { alignmentPhaseDeg, F_MAX_REF } from "../types";
 import { buildCommonGrid, buildLogGrid, interpOnGrid, interpPhaseOnGrid, irTime, type ImpulseIpc } from "./grid";
 import { appendNoiseFloorTail, computeExtension } from "./extension";
 import { evaluateBandFull, reconstructTargetPhase, snapshotBandRequest } from "./evaluate";
@@ -116,9 +116,9 @@ function applyGlobalShiftIfWideExcess(
   const WIDE_OCT = 1 / 2;
 
   const pbLow = hpFreqHz ? hpFreqHz * 1.5 : 20;
-  const pbHigh = lpFreqHz ? lpFreqHz * 0.7 : 20000;
+  const pbHigh = lpFreqHz ? lpFreqHz * 0.7 : F_MAX_REF;
   const zoneLow = Math.max(20, pbLow / 2);
-  const zoneHigh = Math.min(20000, pbHigh * 2);
+  const zoneHigh = Math.min(F_MAX_REF, pbHigh * 2);
 
   let regionStart = -1;
   let regionMaxExcess = 0;
@@ -405,7 +405,7 @@ async function evaluateSumImpl(
       const hp = bands[i].target.high_pass;
       const lp = bands[i].target.low_pass;
       const pbLow = hp ? Math.max(20, hp.freq_hz * 1.5) : 20;
-      const pbHigh = lp ? Math.min(20000, lp.freq_hz * 0.7) : 20000;
+      const pbHigh = lp ? Math.min(F_MAX_REF, lp.freq_hz * 0.7) : F_MAX_REF;
       const eL = pbLow < pbHigh ? pbLow : 200;
       const eH = pbLow < pbHigh ? pbHigh : 2000;
       let dSum = 0, dN = 0;

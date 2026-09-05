@@ -13,7 +13,7 @@ import { setBandDelayInfo, markBandDelayRemoved, restoreBandDelay } from "../sto
 import MergeDialog from "./MergeDialog";
 import { exportBandWav } from "../lib/fir-export";
 import { showToast } from "../lib/toast";
-import { alignmentPhaseDeg, STANDARD_SAMPLE_RATES, STANDARD_TAPS } from "../lib/types";
+import { alignmentPhaseDeg, STANDARD_SAMPLE_RATES, STANDARD_TAPS, F_MIN_WORK, F_MAX_WORK, F_MAX_REF } from "../lib/types";
 import { preRingZoneMs } from "../lib/pre-ring";
 import { autoRefLevel } from "../lib/band-evaluator/extension";
 import { peqStale } from "../stores/peq-optimize";
@@ -535,9 +535,9 @@ export default function FrequencyPlot() {
       curPhaseMin = -190;
       curPhaseMax = 190;
       chart.setScale("phase", { min: curPhaseMin, max: curPhaseMax });
-      chart.setScale("x", { min: 20, max: 20000 });
+      chart.setScale("x", { min: F_MIN_WORK, max: F_MAX_WORK });
     } else if (pTab === "gd") {
-      chart.setScale("x", { min: 20, max: 20000 });
+      chart.setScale("x", { min: F_MIN_WORK, max: F_MAX_WORK });
       // Y auto from data
       let gdMin = Infinity, gdMax = -Infinity;
       for (let si = 1; si < chart.data.length; si++) {
@@ -1141,7 +1141,7 @@ export default function FrequencyPlot() {
     const opts: uPlot.Options = {
       width: w, height: h, series: allSeries,
       scales: {
-        x: { distr: 3, log: 10, min: savedXMin ?? 20, max: savedXMax ?? 20000 },
+        x: { distr: 3, log: 10, min: savedXMin ?? F_MIN_WORK, max: savedXMax ?? F_MAX_WORK },
         mag: { auto: false, range: () => [curMagMin, curMagMax] as uPlot.Range.MinMax },
         phase: { auto: false, range: () => [curPhaseMin, curPhaseMax] as uPlot.Range.MinMax },
       },
@@ -1876,9 +1876,9 @@ export default function FrequencyPlot() {
       // Max magnitude error in passband (realized vs model)
       const modelMag = targetMag.map((v: number, i: number) => v + (peqMagArr[i] ?? 0));
       const hpF = band.target.high_pass?.freq_hz ?? 20;
-      const lpF = band.target.low_pass?.freq_hz ?? 20000;
+      const lpF = band.target.low_pass?.freq_hz ?? F_MAX_REF;
       const pbLo = Math.max(20, hpF * 1.2);
-      const pbHi = Math.min(20000, lpF * 0.8);
+      const pbHi = Math.min(F_MAX_REF, lpF * 0.8);
       let maxErr = 0;
       for (let i = 0; i < freq.length; i++) {
         if (freq[i] >= pbLo && freq[i] <= pbHi) {
@@ -1944,7 +1944,7 @@ export default function FrequencyPlot() {
           { label: "FIR °", stroke: expClr.firPhase, width: 1, dash: [4, 4], scale: "phase" },
         ],
         scales: {
-          x: { min: 20, max: 20000, distr: 3 },
+          x: { min: F_MIN_WORK, max: F_MAX_WORK, distr: 3 },
           mag: { auto: false, range: () => [curMagMin, curMagMax] as uPlot.Range.MinMax },
           phase: { auto: false, range: [-180, 180] },
         },
@@ -2859,7 +2859,7 @@ export default function FrequencyPlot() {
       width: w, height: h,
       series: uSeries,
       scales: {
-        x: { min: 20, max: 20000, distr: 3 },
+        x: { min: F_MIN_WORK, max: F_MAX_WORK, distr: 3 },
         y: { auto: false, range: [yMin, yMax] as uPlot.Range.MinMax },
       },
       axes: [
@@ -2959,9 +2959,9 @@ export default function FrequencyPlot() {
       if (result.measurement) {
         // Determine passband from actual HP/LP filters
         const hpFreq = band.target.high_pass?.freq_hz ?? 20;
-        const lpFreq = band.target.low_pass?.freq_hz ?? 20000;
+        const lpFreq = band.target.low_pass?.freq_hz ?? F_MAX_REF;
         const pbLow = Math.max(20, hpFreq * 1.5);
-        const pbHigh = Math.min(20000, lpFreq * 0.7);
+        const pbHigh = Math.min(F_MAX_REF, lpFreq * 0.7);
         // Fallback to 200-2000 if no filters or range is empty
         const effLow = pbLow < pbHigh ? pbLow : 200;
         const effHigh = pbLow < pbHigh ? pbHigh : 2000;
@@ -3081,9 +3081,9 @@ export default function FrequencyPlot() {
           // Normalize corrected to target in passband (b82.06)
           if (result.targetMag) {
             const hpF = band.target.high_pass?.freq_hz ?? 20;
-            const lpF = band.target.low_pass?.freq_hz ?? 20000;
+            const lpF = band.target.low_pass?.freq_hz ?? F_MAX_REF;
             const pbL = Math.max(20, hpF * 1.5);
-            const pbH = Math.min(20000, lpF * 0.7);
+            const pbH = Math.min(F_MAX_REF, lpF * 0.7);
             const eL = pbL < pbH ? pbL : 200;
             const eH = pbL < pbH ? pbH : 2000;
             let dSum = 0, dN = 0;
@@ -3516,7 +3516,7 @@ export default function FrequencyPlot() {
       const mx = ev.clientX - rect.left;
       let newFreq = chart.posToVal(mx, "x");
       if (!isFinite(newFreq) || newFreq < 20) newFreq = 20;
-      if (newFreq > 20000) newFreq = 20000;
+      if (newFreq > F_MAX_WORK) newFreq = F_MAX_WORK;
 
       // Clamp between adjacent crossovers
       const xi = draggingXo()!;
@@ -3603,7 +3603,7 @@ export default function FrequencyPlot() {
     const mx = e.clientX - rect.left;
     let freq = chart.posToVal(mx, "x");
     if (!isFinite(freq) || freq < 20) freq = 20;
-    if (freq > 20000) freq = 20000;
+    if (freq > F_MAX_WORK) freq = F_MAX_WORK;
 
     addPeqBand(bd.id, { freq_hz: Math.round(freq), gain_db: 0, q: 4.32, enabled: true, filter_type: "Peaking" });
     setSelectedPeqIdx(0); // new band is added at index 0
@@ -3705,7 +3705,7 @@ export default function FrequencyPlot() {
 
     let freq = chart.posToVal(mx, "x");
     if (!isFinite(freq)) return;
-    freq = Math.max(20, Math.min(20000, freq));
+    freq = Math.max(F_MIN_WORK, Math.min(F_MAX_WORK, freq));
 
     let gain = chart.posToVal(my, "mag");
     if (!isFinite(gain)) return;

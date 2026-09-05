@@ -64,6 +64,12 @@
   generators and in `validate_project` (load_project/load_snapshot). The
   vDSP FFT `assert!`s otherwise and a panic in an async command hangs the
   IPC promise forever.
+- **Working range 20 Hz–30 kHz** (b141.34): `F_MIN_WORK`/`F_MAX_WORK` in
+  lib/types.ts, `dsp::F_MAX_WORK` in Rust — crossover/PEQ input limits,
+  extension grid, plot X axis, default crossover split. Sample-rate-bound
+  grids cap at Nyquist·0.95 (`fMaxForRate`). The LEVEL-MATCHING passband
+  (auto-ref, Σ level match, export metrics) stays capped at `F_MAX_REF` =
+  20 kHz on purpose — do not "unify" it with F_MAX_WORK.
 - **Bilinear digital cascade** (IIR path) has frequency-dependent
   deviation up to ~20° vs analog reference accumulated over 8 biquads.
   REPhase reference comparison gives tighter empirical bound (≤ 2.5° on

@@ -86,7 +86,7 @@ async fn evaluate_target_standalone(
 ) -> Result<(Vec<f64>, TargetResponse), String> {
     let n = n_points.unwrap_or(512);
     let fmin = f_min.unwrap_or(20.0);
-    let fmax = f_max.unwrap_or(20000.0);
+    let fmax = f_max.unwrap_or(dsp::F_MAX_WORK);
     let freq = dsp::generate_log_freq_grid(n, fmin, fmax);
     let response = target::evaluate(&target, &freq);
     info!("evaluate_target_standalone: {} points", n);
@@ -443,7 +443,7 @@ pub fn run() {
         )
         .init();
 
-    info!("PhaseForge b141.33 starting...");
+    info!("PhaseForge b141.34 starting...");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())

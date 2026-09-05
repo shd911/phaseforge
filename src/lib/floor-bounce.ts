@@ -14,6 +14,7 @@
  *   - Nulls: f_null * 1, 3, 5, 7, ...
  *   - Peaks:  f_null * 2, 4, 6, 8, ...
  */
+import { F_MAX_WORK } from "./types";
 
 const SPEED_OF_SOUND = 343; // м/с
 
@@ -30,13 +31,13 @@ export interface FloorBounceResult {
  * @param speakerHeight — высота динамика над полом (м)
  * @param micHeight — высота микрофона над полом (м)
  * @param distance — горизонтальное расстояние динамик-микрофон (м)
- * @param maxFreq — максимальная частота для вычисления (по умолчанию 20000 Гц)
+ * @param maxFreq — максимальная частота для вычисления (по умолчанию F_MAX_WORK)
  */
 export function computeFloorBounce(
   speakerHeight: number,
   micHeight: number,
   distance: number,
-  maxFreq: number = 20000,
+  maxFreq: number = F_MAX_WORK,
 ): FloorBounceResult {
   // Прямой путь (горизонтальное расстояние)
   const directPath = Math.sqrt(

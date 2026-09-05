@@ -259,6 +259,20 @@ export type WindowType = (typeof WINDOW_TYPES)[number];
 /** b141.6 (audit): validate a window name from a .pfproj — an unknown value
  *  used to load "successfully", then every FIR generation failed with an
  *  opaque serde error on the Rust WindowType enum. */
+/** Working frequency range of the tool (crossovers, PEQ, extension grids,
+ *  plot X axis). Raised 20 → 30 kHz on 2026-09-05; DSP grids that depend on
+ *  the sample rate additionally cap at Nyquist·0.95 via `fMaxForRate`. */
+export const F_MIN_WORK = 20;
+export const F_MAX_WORK = 30000;
+/** Upper cap of the LEVEL-MATCHING passband (auto reference level, Σ
+ *  level match, export error metrics). Stays at 20 kHz on purpose: the
+ *  working range may reach 30 kHz, but levels are matched over the audible
+ *  band, otherwise a tweeter's HF roll-off drags the reference down. */
+export const F_MAX_REF = 20000;
+export function fMaxForRate(sampleRate: number): number {
+  return Math.min(F_MAX_WORK, sampleRate / 2 * 0.95);
+}
+
 /** Export dropdown sets — the only values the FFT backend / UI accept. */
 export const STANDARD_SAMPLE_RATES: readonly number[] = [44100, 48000, 88200, 96000, 176400, 192000];
 export const STANDARD_TAPS: readonly number[] = [4096, 8192, 16384, 32768, 65536, 131072, 262144];

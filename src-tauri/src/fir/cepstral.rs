@@ -231,7 +231,7 @@ pub fn generate_model_fir(
             &lin_peq,         // b140.1: PEQ magnitude (own Hilbert source)
             &phase_rad,       // phase on linear grid
             config,
-            (20.0, 20000.0),  // model FIR: full range, no crossover
+            (20.0, crate::dsp::F_MAX_WORK),  // model FIR: full range, no crossover
         );
     }
 

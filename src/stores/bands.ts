@@ -1,7 +1,7 @@
 import { createStore, reconcile } from "solid-js/store";
 import { createSignal, batch } from "solid-js";
 import type { Measurement, TargetCurve, MergeConfig, PeqBand, FirResult, WindowType, ExclusionZone, AnalysisResult, PeqOptimizedTarget } from "../lib/types";
-import { MEASUREMENT_COLORS, cloneFilterConfig } from "../lib/types";
+import { MEASUREMENT_COLORS, cloneFilterConfig, F_MIN_WORK, F_MAX_WORK } from "../lib/types";
 import {
   pushHistory,
   beginInteraction,
@@ -105,7 +105,7 @@ function defaultSettings(): PerMeasurementSettings {
 
 /** Compute equal-octave crossover frequencies for n bands spanning fMin–fMax.
  *  Returns n-1 crossover points. E.g. 3 bands → 2 crossovers. */
-function equalOctaveCrossovers(n: number, fMin = 20, fMax = 20000): number[] {
+function equalOctaveCrossovers(n: number, fMin = F_MIN_WORK, fMax = F_MAX_WORK): number[] {
   if (n <= 1) return [];
   const logMin = Math.log2(fMin);
   const logMax = Math.log2(fMax);
@@ -874,7 +874,7 @@ export const [plotShowOnly, setPlotShowOnly] =
 // ---------------------------------------------------------------------------
 
 export interface XScale { min: number; max: number }
-const [_xScale, _setXScale] = createSignal<XScale>({ min: 20, max: 20000 });
+const [_xScale, _setXScale] = createSignal<XScale>({ min: F_MIN_WORK, max: F_MAX_WORK });
 let _xScaleSuppressed = false; // prevent feedback loops
 
 export const sharedXScale = _xScale;

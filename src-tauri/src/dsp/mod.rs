@@ -1,3 +1,7 @@
+/// Working frequency range upper bound (Hz) — mirrors `F_MAX_WORK` in
+/// src/lib/types.ts. Raised 20 → 30 kHz on 2026-09-05.
+pub const F_MAX_WORK: f64 = 30000.0;
+
 pub mod baffle;
 pub mod fft;
 pub mod impulse;

@@ -260,7 +260,8 @@ fn shelf_as_peq(shelf: &ShelfConfig, filter_type: PeqFilterType) -> PeqBand {
 }
 
 pub fn build_peq_biquad(band: &PeqBand, sr: f64) -> DigitalBiquad {
-    let f0 = band.freq_hz.max(1.0);
+    // Clamp below Nyquist: the bilinear RBJ form degenerates at ω = π.
+    let f0 = band.freq_hz.max(1.0).min(sr * 0.45);
     let q = band.q.max(1e-6);
     let a = 10f64.powf(band.gain_db / 40.0);
     let omega = 2.0 * PI * f0 / sr;

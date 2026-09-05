@@ -182,7 +182,7 @@ describe("evaluateBandFull (b139.1)", () => {
       expect(r.extendedFreq).not.toBeNull();
       expect(r.extendedFreq!.length).toBe(512);
       expect(r.extendedFreq![0]).toBeCloseTo(20, 0);
-      expect(r.extendedFreq![511]).toBeCloseTo(20000, 0);
+      expect(r.extendedFreq![511]).toBeCloseTo(30000, 0);
       expect(r.nativeRange).not.toBeNull();
       expect(r.extendedMeasurementMag).not.toBeNull();
       expect(r.extendedMeasurementMag!.length).toBe(512);

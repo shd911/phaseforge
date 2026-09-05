@@ -18,6 +18,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { shortestPhaseDelta } from "./grid";
 import type { FilterConfig } from "../types";
+import { F_MAX_REF } from "../types";
 
 /** b140.5: extend a (freq, mag, phase) trio up to ~Nyquist with explicit
  *  noise-floor magnitude bins (phase = 0). Without this, the Rust FFT
@@ -57,9 +58,9 @@ export function autoRefLevel(
   lp: FilterConfig | null | undefined,
 ): number {
   const hpFreq = hp?.freq_hz ?? 20;
-  const lpFreq = lp?.freq_hz ?? 20000;
+  const lpFreq = lp?.freq_hz ?? F_MAX_REF;
   const pbLow = Math.max(20, hpFreq * 1.5);
-  const pbHigh = Math.min(20000, lpFreq * 0.7);
+  const pbHigh = Math.min(F_MAX_REF, lpFreq * 0.7);
   const refLow = pbLow < pbHigh ? pbLow : 200;
   const refHigh = pbLow < pbHigh ? pbHigh : 2000;
   let sum = 0, n = 0;

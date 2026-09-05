@@ -1,4 +1,5 @@
 import { createSignal, Show } from "solid-js";
+import { F_MIN_WORK, F_MAX_WORK } from "../lib/types";
 import type { FilterConfig, FilterType } from "../lib/types";
 import { appState, setBandLowPass } from "../stores/bands";
 import { availableSlopes, orderToSlope, slopeToOrder } from "../lib/slope";
@@ -47,7 +48,7 @@ export default function CrossoverDialog() {
     setCustomQ(data.q ?? 0.707);
   }
 
-  const freqValid = () => Number.isFinite(freq()) && freq() >= 20 && freq() <= 20000;
+  const freqValid = () => Number.isFinite(freq()) && freq() >= F_MIN_WORK && freq() <= F_MAX_WORK;
 
   function handleApply() {
     const data = dialogData();
@@ -108,7 +109,7 @@ export default function CrossoverDialog() {
                 class="xo-input"
                 type="number"
                 min="20"
-                max="20000"
+                max={F_MAX_WORK}
                 step="1"
                 value={freq()}
                 onInput={(e) => setFreq(parseFloat(e.currentTarget.value) || 0)}

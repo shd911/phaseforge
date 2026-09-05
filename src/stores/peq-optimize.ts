@@ -4,7 +4,7 @@
 import { createSignal, batch } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import type { PeqBand, PeqConfig, PeqResult, FilterConfig, ExclusionZone, PeqOptimizedTarget, Measurement } from "../lib/types";
-import { cloneFilterConfig } from "../lib/types";
+import { cloneFilterConfig, F_MAX_WORK, F_MAX_REF, fMaxForRate } from "../lib/types";
 import {
   activeBand,
   appState,
@@ -29,7 +29,7 @@ export const [peqFloor, setPeqFloor] = createSignal(60); // dB below reference â
 export type PeqRangeMode = "auto" | "direct";
 export const [peqRangeMode, setPeqRangeMode] = createSignal<PeqRangeMode>("auto");
 export const [peqDirectLow, setPeqDirectLow] = createSignal(20);
-export const [peqDirectHigh, setPeqDirectHigh] = createSignal(20000);
+export const [peqDirectHigh, setPeqDirectHigh] = createSignal(F_MAX_WORK);
 export const [computing, setComputing] = createSignal(false);
 export const [peqError, setPeqError] = createSignal<string | null>(null);
 export const [maxErr, setMaxErr] = createSignal<number | null>(null);
@@ -40,7 +40,7 @@ export function crossoverRange(): [number, number] {
   const b = activeBand();
   const t = b?.target;
   const fLow = t?.high_pass?.freq_hz ?? 20;
-  const fHigh = t?.low_pass?.freq_hz ?? 20000;
+  const fHigh = t?.low_pass?.freq_hz ?? F_MAX_WORK;
   return [fLow, fHigh];
 }
 
@@ -51,7 +51,7 @@ export function formatFreq(hz: number): string {
 
 export function peqRange(): [number, number] {
   const [lo, hi] = crossoverRange();
-  return [Math.max(20, lo / 8), Math.min(20000, hi * 8)];
+  return [Math.max(20, lo / 8), Math.min(fMaxForRate(exportSampleRate()), hi * 8)];
 }
 
 // --- Internal: optimize a specific band ---
@@ -66,10 +66,10 @@ async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBa
   const peqBandsSnap: PeqBand[] = JSON.parse(JSON.stringify(b.peqBands ?? []));
   const exclusionZonesSnap: ExclusionZone[] = JSON.parse(JSON.stringify(b.exclusionZones ?? []));
   const fLow = b.target?.high_pass?.freq_hz ?? 20;
-  const fHigh = b.target?.low_pass?.freq_hz ?? 20000;
+  const fHigh = b.target?.low_pass?.freq_hz ?? F_MAX_REF;
   // adaptive passband for refOffset (matches FrequencyPlot autoRef)
   const pbLow = Math.max(20, fLow * 1.5);
-  const pbHigh = Math.min(20000, fHigh * 0.7);
+  const pbHigh = Math.min(F_MAX_REF, fHigh * 0.7);
   const refLow = pbLow < pbHigh ? pbLow : 200;
   const refHigh = pbLow < pbHigh ? pbHigh : 2000;
   let refOffset = 0, count = 0;
@@ -114,11 +114,13 @@ async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBa
   if (peqRangeMode() === "direct") {
     // Direct mode: user-specified range, ignore floor and crossover
     peqLow = peqDirectLow();
-    peqHigh = peqDirectHigh();
+    peqHigh = Math.min(peqDirectHigh(), fMaxForRate(exportSampleRate()));
   } else {
     // Auto mode: derive from crossover + floor
     peqLow = isHybrid ? 20 : Math.max(20, fLow / 8);
-    peqHigh = 20000;
+    // Cap at NyquistÂ·0.95 of the export rate: a PEQ above Nyquist is not
+    // realisable by the biquad it will be exported as.
+    peqHigh = fMaxForRate(exportSampleRate());
 
     // Trim PEQ range by target floor: don't optimize where target is below threshold
     const floorDb = peqFloor();
