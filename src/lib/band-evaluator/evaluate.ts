@@ -13,6 +13,7 @@
  * locked down by golden_sum + filter-clone + routing-decision baselines.
  */
 import { invoke } from "@tauri-apps/api/core";
+import { untrack } from "solid-js";
 import type { FilterConfig, Measurement, PeqBand, TargetResponse } from "../types";
 import type { BandState } from "../../stores/bands";
 import {
@@ -196,7 +197,11 @@ export async function evaluateBandFull(req: BandEvalRequest): Promise<BandEvalRe
   // then served that poisoned entry. Snapshot the band once, key and
   // compute from the snapshot. `measurement` keeps its identity (the cache
   // keys it by object id and the pipeline never mutates it).
-  const snap = snapshotBandRequest(req);
+  // untrack: this runs synchronously inside FrequencyPlot's render effect —
+  // reading the proxy here would subscribe the effect to EVERY band field
+  // and re-run it on each store write made during the render (b141.32
+  // regression: WebContent spun at 100 %).
+  const snap = untrack(() => snapshotBandRequest(req));
   return memoEval(bandRequestKey(snap), () => evaluateBandFullImpl(snap));
 }
 

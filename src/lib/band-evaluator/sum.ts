@@ -12,6 +12,7 @@
  * compat but isn't imported back here.
  */
 import { invoke } from "@tauri-apps/api/core";
+import { untrack } from "solid-js";
 import type { BandState } from "../../stores/bands";
 import type { PeqBand, TargetResponse } from "../types";
 import { alignmentPhaseDeg } from "../types";
@@ -265,7 +266,7 @@ export async function evaluateSum(
   options?: SumEvalOptions,
 ): Promise<SumEvalResult> {
   // 2026-09-05 audit: snapshot before keying (see evaluateBandFull).
-  const snapBands = bands.map((b) => snapshotBandRequest({ band: b }).band);
+  const snapBands = untrack(() => bands.map((b) => snapshotBandRequest({ band: b }).band));
   return memoEval(sumRequestKey(snapBands, options), () => evaluateSumImpl(snapBands, options));
 }
 
