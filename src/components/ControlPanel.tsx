@@ -313,11 +313,11 @@ function FilterBlock(props: FilterBlockProps) {
             <button
               class={`fb-link-btn ${props.linked ? "on" : ""}`}
               onClick={(e) => { e.stopPropagation(); props.onLinkToggle!(); }}
-              title={props.linked ? "Unlink from next band" : "Link to next band"}
+              title={props.linked ? "Отвязать от следующей полосы" : "Связать со следующей полосой"}
             ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={props.linked ? CORRECTED_COLOR : STATUS_BAD} stroke-width="2.5" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
           </Show>
           <Show when={!props.canLink && props.linked}>
-            <span class="fb-link-indicator" title="Linked to adjacent band"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={CORRECTED_COLOR} stroke-width="2.5" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>
+            <span class="fb-link-indicator" title="Связана с соседней полосой"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={CORRECTED_COLOR} stroke-width="2.5" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>
           </Show>
         </span>
         <button
@@ -328,7 +328,7 @@ function FilterBlock(props: FilterBlockProps) {
       <Show when={c()}>
         <div class="fb-grid">
           <div class="fb-row">
-            <label class="fb-label">Type</label>
+            <label class="fb-label">Тип</label>
             <select
               class="fb-select"
               value={c()!.filter_type}
@@ -350,7 +350,7 @@ function FilterBlock(props: FilterBlockProps) {
             </select>
           </div>
           <div class="fb-row">
-            <label class="fb-label">Freq</label>
+            <label class="fb-label">Частота</label>
             <NumberInput
               value={c()!.freq_hz}
               onChange={(v) => props.onChange(withOverride({ freq_hz: v }))}
@@ -359,7 +359,7 @@ function FilterBlock(props: FilterBlockProps) {
           </div>
           <Show when={!isGaussian()}>
             <div class="fb-row">
-              <label class="fb-label">Slope</label>
+              <label class="fb-label">Крутизна</label>
               <select
                 class="fb-select"
                 onChange={(e) => {
@@ -401,7 +401,7 @@ function FilterBlock(props: FilterBlockProps) {
           </Show>
           <div class="fb-row">
             <label class="fb-label"></label>
-            <span class="fb-checkbox" title="Linear phase (magnitude only, no phase rotation)"
+            <span class="fb-checkbox" title="Линейная фаза (только АЧХ, без поворота фазы)"
               onClick={() => props.onChange(withOverride({ linear_phase: !c()!.linear_phase }))}>
               <span class={`fb-check-box ${c()!.linear_phase ? "checked" : ""}`} />
               <span class="fb-check-label">Lin-φ</span>
@@ -414,7 +414,7 @@ function FilterBlock(props: FilterBlockProps) {
         <Show when={props.isHighPass && isGaussian()}>
           <div class="subsonic-protect-row">
             <label
-              title="Минимально-фазовый Butterworth 48 дБ/окт на 3 октавы ниже ФВЧ. Защищает динамик от излишнего хода диффузора в инфразвуке."
+              title="Минимально-фазовый Butterworth 48 dB/oct на 3 октавы ниже ФВЧ. Защищает динамик от излишнего хода диффузора в инфразвуке."
               style={{ display: "flex", "align-items": "center", gap: "6px", cursor: c()!.freq_hz > 40 ? "pointer" : "not-allowed" }}
             >
               <input
@@ -613,7 +613,7 @@ function PeqTab() {
                         <td><input type="checkbox" class="peq-toggle" checked={b.enabled} onChange={(e) => { e.stopPropagation(); const bd = band(); if (bd) updatePeqBand(bd.id, i, { enabled: !b.enabled }); }} onClick={(e) => e.stopPropagation()} /></td>
                         <td><select class="peq-type-select" value={b.filter_type ?? "Peaking"} onChange={(e) => { e.stopPropagation(); const bd = band(); if (bd) updatePeqBand(bd.id, i, { filter_type: e.currentTarget.value as any }); }} onClick={(e) => e.stopPropagation()}><option value="Peaking">PK</option><option value="LowShelf">LS</option><option value="HighShelf">HS</option></select></td>
                         <td><input class="peq-input" type="number" value={Math.round(b.freq_hz)} min={20} max={20000} step={1} onWheel={(e) => peqWheel(e, "freq_hz")} onPointerDown={(e) => wheelEnabled.add(e.currentTarget)} onBlur={(e) => wheelEnabled.delete(e.currentTarget)} onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v) && v >= 20 && v <= 20000) { const bd = band(); if (bd) updatePeqBand(bd.id, i, { freq_hz: v }); } }} /></td>
-                        <td><input class={`peq-input ${b.gain_db > 0 ? "peq-boost" : "peq-cut"}`} type="number" value={b.gain_db.toFixed(1)} min={exportHybridPhase() ? -60 : -18} max={exportHybridPhase() ? 60 : 6} step={0.1} onWheel={(e) => peqWheel(e, "gain_db")} onPointerDown={(e) => wheelEnabled.add(e.currentTarget)} onBlur={(e) => wheelEnabled.delete(e.currentTarget)} onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v)) { const bd = band(); if (bd) updatePeqBand(bd.id, i, { gain_db: v }); } }} /></td>
+                        <td><input class={`peq-input ${b.gain_db > 0 ? "peq-boost" : "peq-cut"}`} type="number" value={b.gain_db.toFixed(1)} min={exportHybridPhase() ? -60 : -18} max={exportHybridPhase() ? 60 : 6} step={0.1} onWheel={(e) => peqWheel(e, "gain_db")} onPointerDown={(e) => wheelEnabled.add(e.currentTarget)} onBlur={(e) => wheelEnabled.delete(e.currentTarget)} onChange={(e) => { const v = parseFloat(e.currentTarget.value); const lim = exportHybridPhase() ? 60 : 18; const hi = exportHybridPhase() ? 60 : 6; if (!isNaN(v)) { const bd = band(); if (bd) updatePeqBand(bd.id, i, { gain_db: Math.max(-lim, Math.min(hi, v)) }); } }} /></td>
                         <td><input class="peq-input" type="number" value={b.q.toFixed(1)} min={0.1} max={20} step={0.1} onWheel={(e) => peqWheel(e, "q")} onPointerDown={(e) => wheelEnabled.add(e.currentTarget)} onBlur={(e) => wheelEnabled.delete(e.currentTarget)} onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v) && v >= 0.1 && v <= 20) { const bd = band(); if (bd) updatePeqBand(bd.id, i, { q: v }); } }} /></td>
                         <td>{b.enabled && b.q > qWarnAt(b.freq_hz) ? (
                           <button class="peq-warn-icon" title="" aria-label="Высокая добротность"

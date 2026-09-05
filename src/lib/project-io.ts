@@ -32,7 +32,8 @@ import type { FilterConfig } from "../lib/types";
 import { tolerance, setTolerance, maxBands, setMaxBands, gainRegularization, setGainRegularization, peqFloor, setPeqFloor, peqRangeMode, setPeqRangeMode, peqDirectLow, setPeqDirectLow, peqDirectHigh, setPeqDirectHigh } from "../stores/peq-optimize";
 import type { AppState, BandState, PerMeasurementSettings, FloorBounceConfig, MergeSource } from "../stores/bands";
 import type { Measurement, MergeResult } from "../lib/types";
-import { isWindowType } from "../lib/types";
+import { isWindowType, STANDARD_SAMPLE_RATES, STANDARD_TAPS } from "../lib/types";
+import { isSmoothingMode } from "../stores/bands";
 import { clearHistory } from "../stores/history";
 import { showToast } from "./toast";
 import { openMeasurementAnalysis } from "../components/MeasurementAnalysisDialog";
@@ -350,7 +351,7 @@ function mapSettingsFromProject(s: ProjectSettings): PerMeasurementSettings {
     };
   }
   return {
-    smoothing: s.smoothing as any,
+    smoothing: isSmoothingMode(s.smoothing) ? s.smoothing : "off",
     delay_seconds: s.delay_seconds,
     distance_meters: s.distance_meters,
     delay_removed: s.delay_removed,
@@ -544,15 +545,17 @@ export async function restoreState(project: ProjectFile, projDir: string | null)
     setActiveTab((validTabs.includes(savedTab) ? savedTab : "measurements") as any);
     // b141.6 (audit): defaults for hand-edited / ancient projects — undefined
     // here used to propagate into FirConfig (serde reject) and WAV filenames.
-    setExportSampleRate(project.export_sample_rate ?? 48000);
-    setExportTaps(project.export_taps ?? 65536);
+    // 2026-09-05 audit: values outside the dropdown sets left the select
+    // blank and (for taps) hit the Rust FFT with a non-power-of-two.
+    setExportSampleRate(STANDARD_SAMPLE_RATES.includes(project.export_sample_rate as number) ? project.export_sample_rate : 48000);
+    setExportTaps(STANDARD_TAPS.includes(project.export_taps as number) ? project.export_taps : 65536);
     setExportWindow(isWindowType(project.export_window) ? project.export_window : "Blackman");
     setExportHybridPhase(project.export_hybrid_phase ?? false);
     setTolerance(project.peq_tolerance ?? 1.0);
     setMaxBands(project.peq_max_bands ?? 20);
     setGainRegularization(project.peq_gain_regularization ?? 0.0);
     setPeqFloor(project.peq_floor ?? 60);
-    setPeqRangeMode((project.peq_range_mode as any) ?? "auto");
+    setPeqRangeMode(project.peq_range_mode === "direct" ? "direct" : "auto");
     setPeqDirectLow(project.peq_direct_low ?? 20);
     setPeqDirectHigh(project.peq_direct_high ?? 20000);
     // FIR optimization settings

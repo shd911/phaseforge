@@ -259,6 +259,10 @@ export type WindowType = (typeof WINDOW_TYPES)[number];
 /** b141.6 (audit): validate a window name from a .pfproj — an unknown value
  *  used to load "successfully", then every FIR generation failed with an
  *  opaque serde error on the Rust WindowType enum. */
+/** Export dropdown sets — the only values the FFT backend / UI accept. */
+export const STANDARD_SAMPLE_RATES: readonly number[] = [44100, 48000, 88200, 96000, 176400, 192000];
+export const STANDARD_TAPS: readonly number[] = [4096, 8192, 16384, 32768, 65536, 131072, 262144];
+
 export function isWindowType(v: unknown): v is WindowType {
   return typeof v === "string" && (WINDOW_TYPES as readonly string[]).includes(v);
 }

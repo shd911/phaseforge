@@ -147,31 +147,28 @@ export async function reconstructTargetPhase(
   lp: FilterConfig | null | undefined,
   sampleRate: number = 48000,
 ): Promise<number[]> {
-  let phase = [...basePhase];
-
+  // Independent Hilbert reconstructions run in parallel (were serial awaits).
+  const jobs: Promise<number[]>[] = [];
   if (isGaussianMinPhase(hp)) {
     let hpMag = gaussianFilterMagDb(freq, hp!, false);
     if (hasActiveSubsonicProtect(hp)) {
       const subDb = subsonicMagDb(freq, hp!.freq_hz / 8);
       hpMag = hpMag.map((db, i) => db + subDb[i]);
     }
-    const hpPh = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: hpMag, sampleRate });
-    phase = phase.map((v, i) => v + hpPh[i]);
+    jobs.push(invoke<number[]>("compute_minimum_phase", { freq, magnitude: hpMag, sampleRate }));
   } else if (hasActiveSubsonicProtect(hp) && hp!.linear_phase === true) {
     // Linear-phase Gaussian still ships a min-phase subsonic — Hilbert from
     // subsonic-only magnitude.
     const subDb = subsonicMagDb(freq, hp!.freq_hz / 8);
-    const subPh = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: subDb, sampleRate });
-    phase = phase.map((v, i) => v + subPh[i]);
+    jobs.push(invoke<number[]>("compute_minimum_phase", { freq, magnitude: subDb, sampleRate }));
   }
-
   if (isGaussianMinPhase(lp)) {
     const lpMag = gaussianFilterMagDb(freq, lp!, true);
-    const lpPh = await invoke<number[]>("compute_minimum_phase", { freq, magnitude: lpMag, sampleRate });
-    phase = phase.map((v, i) => v + lpPh[i]);
+    jobs.push(invoke<number[]>("compute_minimum_phase", { freq, magnitude: lpMag, sampleRate }));
   }
-
-  return phase;
+  if (jobs.length === 0) return [...basePhase];
+  const parts = await Promise.all(jobs);
+  return basePhase.map((v, i) => parts.reduce((acc, ph) => acc + ph[i], v));
 }
 
 async function applyMeasurementSmoothing(m: Measurement, mode: string | null | undefined): Promise<Measurement> {

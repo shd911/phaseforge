@@ -13,7 +13,7 @@ import { setBandDelayInfo, markBandDelayRemoved, restoreBandDelay } from "../sto
 import MergeDialog from "./MergeDialog";
 import { exportBandWav } from "../lib/fir-export";
 import { showToast } from "../lib/toast";
-import { alignmentPhaseDeg } from "../lib/types";
+import { alignmentPhaseDeg, STANDARD_SAMPLE_RATES, STANDARD_TAPS } from "../lib/types";
 import { preRingZoneMs } from "../lib/pre-ring";
 import { autoRefLevel } from "../lib/band-evaluator/extension";
 import { peqStale } from "../stores/peq-optimize";
@@ -3935,7 +3935,7 @@ export default function FrequencyPlot() {
         {/* Snapshot SNAP/CLR buttons (band mode only) */}
         <Show when={!isSum()}>
           <span class="readout-sep" />
-          <button class="tb-btn" onClick={takeSnapshot} title="Snapshot current curve for comparison">SNAP</button>
+          <button class="tb-btn" onClick={takeSnapshot} title="Снимок текущей кривой для сравнения">SNAP</button>
           {(() => {
             const b = activeBand();
             const tab = plotTab();
@@ -3945,7 +3945,7 @@ export default function FrequencyPlot() {
             return (
               <>
                 {snaps.length > 0 && (
-                  <button class="tb-btn" onClick={clearSnapshots} title="Clear all snapshots">CLR</button>
+                  <button class="tb-btn" onClick={clearSnapshots} title="Удалить все снимки">CLR</button>
                 )}
                 {snaps.length > 0 && (
                   <span style={{ "font-size": "var(--fs-xs)", "color": "#8b8b96", "margin-left": "var(--space-xs)" }}>
@@ -3993,34 +3993,34 @@ export default function FrequencyPlot() {
                 {/* Import + Merge — SPL tab only */}
                 <Show when={plotTab() === "freq"}>
                   <span class="readout-sep" />
-                  <button class="tb-btn tb-btn-xs primary" onClick={handleImportMeasurement} title="Import measurement file">Import</button>
+                  <button class="tb-btn tb-btn-xs primary" onClick={handleImportMeasurement} title="Импортировать файл измерения">Импорт</button>
                   <button class="tb-btn tb-btn-xs" onClick={() => setShowMergeDialog(true)} title="Мердж NF+FF">Мердж</button>
                 </Show>
 
                 {/* Smooth — all tabs except Export */}
                 <Show when={plotTab() !== "export"}>
                   <span class="readout-sep" />
-                  <span class="readout-label">Smooth</span>
+                  <span class="readout-label">Сглаж.</span>
                   <select
                     class="tb-select tb-select-xs"
                     value={s()?.smoothing ?? "off"}
                     onChange={(e) => setBandSmoothing(b().id, e.currentTarget.value as SmoothingMode)}
-                    title="Smoothing"
+                    title="Сглаживание"
                   >
-                    <option value="off">Off</option>
+                    <option value="off">Выкл</option>
                     <option value="1/3">1/3</option>
                     <option value="1/6">1/6</option>
                     <option value="1/12">1/12</option>
                     <option value="1/24">1/24</option>
-                    <option value="var">Var</option>
+                    <option value="var">Перем.</option>
                   </select>
                 </Show>
 
                 {/* Delay toggle — all tabs except Export, only if phase available */}
                 <Show when={plotTab() !== "export" && m()?.phase}>
                   <span class="readout-sep" />
-                  <span class="readout-label">Delay</span>
-                  <label class="tb-inline-label" title="Compensate propagation delay">
+                  <span class="readout-label">Задержка</span>
+                  <label class="tb-inline-label" title="Компенсировать задержку распространения">
                     <input
                       type="checkbox"
                       checked={s()?.delay_removed ?? false}
@@ -4163,9 +4163,9 @@ export default function FrequencyPlot() {
             class="tb-select tb-select-xs"
             value={exportSampleRate()}
             onChange={(e) => setExportSampleRate(Number(e.currentTarget.value))}
-            title="Sample rate"
+            title="Частота дискретизации"
           >
-            {[44100, 48000, 88200, 96000, 176400, 192000].map((sr) => (
+            {STANDARD_SAMPLE_RATES.map((sr) => (
               <option value={sr}>{sr >= 1000 ? (sr / 1000) + "k" : sr}</option>
             ))}
           </select>
@@ -4174,9 +4174,9 @@ export default function FrequencyPlot() {
             class="tb-select tb-select-xs"
             value={exportTaps()}
             onChange={(e) => setExportTaps(Number(e.currentTarget.value))}
-            title="FIR filter length"
+            title="Длина FIR-фильтра (отсчётов)"
           >
-            {[4096, 8192, 16384, 32768, 65536, 131072, 262144].map((t) => (
+            {STANDARD_TAPS.map((t) => (
               <option value={t}>{t >= 1024 ? (t / 1024) + "K" : t}</option>
             ))}
           </select>
@@ -4185,7 +4185,7 @@ export default function FrequencyPlot() {
             class="tb-select tb-select-xs"
             value={exportWindow()}
             onChange={(e) => setExportWindow(e.currentTarget.value as WindowType)}
-            title="Window function"
+            title="Оконная функция"
           >
             <optgroup label="Basic">
               <option value="Rectangular">Rectangular</option>
@@ -4301,18 +4301,18 @@ export default function FrequencyPlot() {
                 Causal: {m().causality}%
               </span>
               <Show when={m().preRingMs > 0}>
-                <span>Pre-ring: {m().preRingMs} ms</span>
+                <span>Пред-звон: {m().preRingMs} ms</span>
               </Show>
               <span style={{ color: m().maxMagErr <= 0.5 ? STATUS_GOOD : m().maxMagErr <= 1.5 ? STATUS_WARN : STATUS_BAD }}>
                 Mag err: {m().maxMagErr} dB
               </span>
               <span style={{ color: m().gdRippleMs <= 1 ? STATUS_GOOD : m().gdRippleMs <= 3 ? STATUS_WARN : STATUS_BAD }}>
-                GD ripple: {m().gdRippleMs} ms
+                Рябь ГЗ: {m().gdRippleMs} ms
               </span>
               <Show when={m().peqCount > 0}>
                 <span>PEQ: {m().peqCount}</span>
               </Show>
-              <span>Norm: {m().normDb.toFixed(1)} dB</span>
+              <span>Нормировка: {m().normDb.toFixed(1)} dB</span>
             </div>
           )}
         </Show>
@@ -4347,7 +4347,7 @@ export default function FrequencyPlot() {
                           <span
                             class="opt-dot"
                             style={{ background: hasPeq() ? "var(--status-good)" : "var(--status-bad)" }}
-                            title={hasPeq() ? "PEQ optimized" : "Not optimized"}
+                            title={hasPeq() ? "PEQ оптимизирован" : "PEQ не оптимизирован"}
                           />
                         </Show>
                       </th>
@@ -4387,7 +4387,7 @@ export default function FrequencyPlot() {
                                               <span class={`legend-swatch ${e().dash ? "legend-swatch-dash" : ""}`} style={{ "background-color": e().dash ? "transparent" : e().color, "border-color": e().color }} />
                                             </button>
                                             <Show when={noPeq()}>
-                                              <span title="No PEQ optimization" style={{ color: STATUS_BAD, "font-size": "var(--fs-xs)", "font-weight": "bold", "margin-left": "1px" }}>!</span>
+                                              <span title="PEQ не оптимизирован" style={{ color: STATUS_BAD, "font-size": "var(--fs-xs)", "font-weight": "bold", "margin-left": "1px" }}>!</span>
                                             </Show>
                                           </td>
                                         );
@@ -4430,7 +4430,7 @@ export default function FrequencyPlot() {
                                             }}
                                           </Show>
                                           <Show when={noPeqIr()}>
-                                            <span title="No PEQ optimization" style={{ color: STATUS_BAD, "font-size": "var(--fs-xs)", "font-weight": "bold", "margin-left": "1px" }}>!</span>
+                                            <span title="PEQ не оптимизирован" style={{ color: STATUS_BAD, "font-size": "var(--fs-xs)", "font-weight": "bold", "margin-left": "1px" }}>!</span>
                                           </Show>
                                         </td>
                                       </Show>
@@ -4516,8 +4516,8 @@ export default function FrequencyPlot() {
                             <button
                               class="auto-align-btn"
                               title={allPeqReady()
-                                ? "Auto-compute alignment delays (gradient descent)"
-                                : "Requires PEQ optimization on all crossover bands"}
+                                ? "Автоматически подобрать задержки полос (градиентный спуск)"
+                                : "Нужна PEQ-оптимизация всех полос кроссовера"}
                               disabled={!allPeqReady()}
                               onClick={async () => {
                                 if (!allPeqReady()) {
@@ -4606,25 +4606,25 @@ export default function FrequencyPlot() {
             </div>
           </Show>
           <div class="axis-controls axis-controls-y axis-controls-y-left">
-            <button class="axis-btn" onClick={() => zoomY(0.6)} title="Zoom In dB">+</button>
-            <button class="axis-btn" onClick={() => scrollY(1)} title="Scroll Up dB">▲</button>
-            <button class="axis-btn" onClick={() => scrollY(-1)} title="Scroll Down dB">▼</button>
-            <button class="axis-btn" onClick={() => zoomY(1.6)} title="Zoom Out dB">−</button>
-            <button class="axis-btn fit-btn" onClick={fitData} title="Fit data to view">FIT</button>
+            <button class="axis-btn" onClick={() => zoomY(0.6)} title="Приблизить (dB)">+</button>
+            <button class="axis-btn" onClick={() => scrollY(1)} title="Сдвинуть вверх (dB)">▲</button>
+            <button class="axis-btn" onClick={() => scrollY(-1)} title="Сдвинуть вниз (dB)">▼</button>
+            <button class="axis-btn" onClick={() => zoomY(1.6)} title="Отдалить (dB)">−</button>
+            <button class="axis-btn fit-btn" onClick={fitData} title="Вписать данные в окно">FIT</button>
           </div>
           <Show when={plotTab() === "freq" || plotTab() === "export"}>
             <div class="axis-controls axis-controls-y axis-controls-y-right">
-              <button class="axis-btn" onClick={() => zoomPhase(0.6)} title="Zoom In Phase">+</button>
-              <button class="axis-btn" onClick={() => scrollPhase(1)} title="Scroll Up Phase">▲</button>
-              <button class="axis-btn" onClick={() => scrollPhase(-1)} title="Scroll Down Phase">▼</button>
-              <button class="axis-btn" onClick={() => zoomPhase(1.6)} title="Zoom Out Phase">−</button>
+              <button class="axis-btn" onClick={() => zoomPhase(0.6)} title="Приблизить (фаза)">+</button>
+              <button class="axis-btn" onClick={() => scrollPhase(1)} title="Сдвинуть вверх (фаза)">▲</button>
+              <button class="axis-btn" onClick={() => scrollPhase(-1)} title="Сдвинуть вниз (фаза)">▼</button>
+              <button class="axis-btn" onClick={() => zoomPhase(1.6)} title="Отдалить (фаза)">−</button>
             </div>
           </Show>
           <div class="axis-controls axis-controls-x">
-            <button class="axis-btn" onClick={() => zoomX(1.6)} title="Zoom Out Freq">−</button>
-            <button class="axis-btn" onClick={() => scrollX(-1)} title="Scroll Left">◀</button>
-            <button class="axis-btn" onClick={() => scrollX(1)} title="Scroll Right">▶</button>
-            <button class="axis-btn" onClick={() => zoomX(0.6)} title="Zoom In Freq">+</button>
+            <button class="axis-btn" onClick={() => zoomX(1.6)} title="Отдалить (частота)">−</button>
+            <button class="axis-btn" onClick={() => scrollX(-1)} title="Сдвинуть влево">◀</button>
+            <button class="axis-btn" onClick={() => scrollX(1)} title="Сдвинуть вправо">▶</button>
+            <button class="axis-btn" onClick={() => zoomX(0.6)} title="Приблизить (частота)">+</button>
           </div>
         </div>
       </div>

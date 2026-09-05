@@ -18,6 +18,10 @@ export { pushHistory, beginInteraction, commitInteraction } from "./history";
 // ---------------------------------------------------------------------------
 
 export type SmoothingMode = "off" | "1/3" | "1/6" | "1/12" | "1/24" | "var";
+export const SMOOTHING_MODES: readonly SmoothingMode[] = ["off", "1/3", "1/6", "1/12", "1/24", "var"];
+export function isSmoothingMode(v: unknown): v is SmoothingMode {
+  return typeof v === "string" && (SMOOTHING_MODES as readonly string[]).includes(v);
+}
 
 export interface FloorBounceConfig {
   enabled: boolean;

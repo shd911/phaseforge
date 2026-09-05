@@ -1,6 +1,7 @@
 import { createSignal, Show } from "solid-js";
 import type { FilterConfig, FilterType } from "../lib/types";
 import { appState, setBandLowPass } from "../stores/bands";
+import { availableSlopes, orderToSlope, slopeToOrder } from "../lib/slope";
 
 export interface CrossoverDialogData {
   bandIndex: number;   // index of band with LP filter
@@ -83,13 +84,9 @@ export default function CrossoverDialog() {
     }
   }
 
-  // Available orders per filter type
-  function availableOrders(): number[] {
-    const ft = filterType();
-    if (ft === "LinkwitzRiley") return [2, 4, 8];
-    if (ft === "Custom") return [1, 2, 3, 4, 5, 6, 7, 8];
-    return [1, 2, 3, 4, 5, 6, 7, 8]; // Butterworth, Bessel
-  }
+  // 2026-09-05 audit: this dialog showed a raw "order" while the filter
+  // block shows dB/oct for the same filter (LR order 2 = 24 dB/oct) and
+  // silently snapped LR orders 1/3/5/6/7 to 4. Same slope.ts mapping now.
 
   return (
     <Show when={(() => {
@@ -127,17 +124,19 @@ export default function CrossoverDialog() {
                 value={filterType()}
                 onChange={(e) => {
                   const ft = e.currentTarget.value as FilterType;
+                  const prevType = filterType();
                   setFilterType(ft);
                   if (ft === "Gaussian") {
                     setShape(shape() || 1.0);
                   } else if (ft === "Custom") {
                     setCustomQ(customQ() || 0.707);
                   } else {
-                    const avail = ft === "LinkwitzRiley" ? [2, 4, 8] :
-                                  [1, 2, 3, 4, 5, 6, 7, 8];
-                    if (!avail.includes(order())) {
-                      setOrder(avail[1] ?? avail[0]);
-                    }
+                    // Keep the same dB/oct where the new type offers it,
+                    // else the closest available slope.
+                    const prevSlope = orderToSlope(prevType, order());
+                    const avail = availableSlopes(ft);
+                    const pick = avail.reduce((best, s) => Math.abs(s - prevSlope) < Math.abs(best - prevSlope) ? s : best, avail[0]);
+                    setOrder(slopeToOrder(ft, pick));
                   }
                 }}
               >
@@ -152,14 +151,14 @@ export default function CrossoverDialog() {
             {/* Order — for non-Gaussian types */}
             <Show when={!isGaussian()}>
               <div class="xo-row">
-                <span class="xo-label">Порядок</span>
+                <span class="xo-label">Крутизна</span>
                 <select
                   class="xo-select"
-                  value={order()}
-                  onChange={(e) => setOrder(parseInt(e.currentTarget.value))}
+                  value={orderToSlope(filterType(), order())}
+                  onChange={(e) => setOrder(slopeToOrder(filterType(), parseInt(e.currentTarget.value, 10)))}
                 >
-                  {availableOrders().map((o) => (
-                    <option value={o}>{o}</option>
+                  {availableSlopes(filterType()).map((s) => (
+                    <option value={s}>{`${s} dB/oct`}</option>
                   ))}
                 </select>
               </div>
