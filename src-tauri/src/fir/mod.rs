@@ -39,6 +39,15 @@ use crate::dsp::minimum_phase_from_magnitude;
 // Public API
 // ---------------------------------------------------------------------------
 
+/// Tap counts the FFT backend accepts: powers of two in 32..=262144.
+/// The vDSP backend `assert!`s on non-powers-of-two, and a panic inside an
+/// async Tauri command leaves the IPC promise pending forever, so every
+/// entry point (project load, both FIR generators) checks this first.
+pub const MAX_TAPS: usize = 262_144;
+pub fn taps_valid(taps: usize) -> bool {
+    taps.is_power_of_two() && (32..=MAX_TAPS).contains(&taps)
+}
+
 /// Recommend tap count based on lowest frequency and sample rate.
 ///
 /// Formula: next power of 2 ≥ 3 × sample_rate / lowest_freq, then clamp to standard set.

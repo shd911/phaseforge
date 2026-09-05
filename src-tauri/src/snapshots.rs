@@ -193,6 +193,7 @@ pub async fn load_snapshot(project_dir: String, id: String) -> Result<ProjectFil
     let json = std::fs::read_to_string(&path).map_err(|e| format!("read snapshot: {e}"))?;
     let project: ProjectFile = serde_json::from_str(&json)
         .map_err(|e| format!("parse snapshot: {e}"))?;
+    crate::project::validate_project(&project)?;
     info!("load_snapshot: {} ({} bands)", id, project.bands.len());
     Ok(project)
 }

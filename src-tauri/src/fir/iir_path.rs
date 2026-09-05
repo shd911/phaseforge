@@ -355,9 +355,9 @@ pub fn generate_min_phase_fir_iir(input: &IirPathInput) -> Result<FirModelResult
     let cfg = input.config;
     let sr = cfg.sample_rate;
     let n_fft = cfg.taps;
-    if n_fft < 32 || sr <= 0.0 {
+    if !crate::fir::taps_valid(n_fft) || sr <= 0.0 {
         return Err(AppError::Config {
-            message: format!("invalid taps={} or sr={}", n_fft, sr),
+            message: format!("invalid taps={} (power of two in 32..=262144) or sr={}", n_fft, sr),
         });
     }
 

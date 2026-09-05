@@ -148,8 +148,13 @@ pub fn compute_baffle_step(
         // Correction = baffle_step - total_gain
         // baffle_step goes 0 → +6 dB; correction goes -6 → 0 dB
         correction_mag.push(mag_sum - total_gain);
-        // Inverse phase for correction
-        correction_phase.push(-phase_sum);
+        // The correction magnitude (baffle − 6 dB) is the SAME rising shelf
+        // as the baffle step itself, only shifted by a constant. Its
+        // minimum-phase response is therefore the shelf's own phase LEAD,
+        // not the inverse. (Fixed 2026-09-05 audit — the sign was inverted
+        // and produced ~−20° at f3 instead of +20°, which then leaked into
+        // the delay estimate of the NF/FF merge.)
+        correction_phase.push(phase_sum);
     }
 
     Ok(BaffleStepResult {
@@ -294,6 +299,21 @@ mod tests {
             driver_offset_y_m: 0.15,
         };
         assert!(compute_baffle_step(&[100.0], &config).is_err());
+    }
+
+    /// The correction magnitude rises −6 → 0 dB, so its minimum-phase
+    /// response must LEAD (positive phase) around f3 and vanish at both ends.
+    /// Pinned after the 2026-09-05 audit found the sign inverted.
+    #[test]
+    fn test_correction_phase_is_a_lead_at_f3() {
+        let config = default_config();
+        let probe = compute_baffle_step(&[100.0], &config).unwrap();
+        let f3 = probe.f3_hz;
+        let freq = vec![f3 / 100.0, f3, f3 * 100.0];
+        let result = compute_baffle_step(&freq, &config).unwrap();
+        let ph = &result.correction_phase_rad;
+        assert!(ph[1] > 0.2, "phase at f3 must lead, got {:.3} rad", ph[1]);
+        assert!(ph[0].abs() < 0.05 && ph[2].abs() < 0.05, "phase must vanish far from f3");
     }
 
     #[test]

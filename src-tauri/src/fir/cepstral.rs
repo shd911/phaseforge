@@ -71,6 +71,11 @@ pub fn generate_model_fir(
     }
 
     let n_fft = config.taps;
+    if !crate::fir::taps_valid(n_fft) {
+        return Err(AppError::Config {
+            message: format!("taps={n_fft} must be a power of two in 32..=262144"),
+        });
+    }
     let n_bins = n_fft / 2 + 1;
 
     // 1. Interpolate target mag (dB) to linear FFT grid

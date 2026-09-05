@@ -223,9 +223,80 @@ pub async fn save_project(path: String, project: ProjectFile) -> Result<(), Stri
     validate_write_target(&path)?;
     let json = serde_json::to_string_pretty(&project)
         .map_err(|e| format!("Serialization error: {e}"))?;
-    std::fs::write(&path, json)
+    write_atomic(std::path::Path::new(&path), json.as_bytes())
         .map_err(|e| format!("Write error: {e}"))?;
-    info!("save_project: wrote {} bytes", std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0));
+    info!("save_project: wrote {} bytes", json.len());
+    Ok(())
+}
+
+/// Atomic file write: tmp in the same directory + fsync + rename, so a crash,
+/// kill or ENOSPC mid-write never leaves a truncated `.pfproj` in place of
+/// the previous good one (2026-09-05 audit).
+pub(crate) fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "file".into());
+    let tmp = path.with_file_name(format!("{file_name}.tmp"));
+    {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+    }
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    Ok(())
+}
+
+/// Reject a project whose numeric payload would panic downstream DSP
+/// (hand-edited or foreign `.pfproj`): FFT sizes must be powers of two,
+/// measurement arrays must be equal-length and finite. Called by
+/// `load_project` and `load_snapshot` (2026-09-05 audit).
+pub(crate) fn validate_project(project: &ProjectFile) -> Result<(), String> {
+    let taps = project.export_taps;
+    if !crate::fir::taps_valid(taps as usize) {
+        return Err(format!(
+            "export_taps={taps} is invalid: must be a power of two between 32 and 262144"
+        ));
+    }
+    let sr = project.export_sample_rate;
+    if !(8_000..=768_000).contains(&sr) {
+        return Err(format!("export_sample_rate={sr} is out of range (8000..768000)"));
+    }
+    for band in &project.bands {
+        if let Some(m) = &band.measurement {
+            let n = m.freq.len();
+            if n < 2 {
+                return Err(format!("band '{}': measurement has fewer than 2 points", band.name));
+            }
+            if m.magnitude.len() != n {
+                return Err(format!(
+                    "band '{}': measurement freq/magnitude length mismatch ({} vs {})",
+                    band.name, n, m.magnitude.len()
+                ));
+            }
+            if let Some(ph) = &m.phase {
+                if ph.len() != n {
+                    return Err(format!(
+                        "band '{}': measurement freq/phase length mismatch ({} vs {})",
+                        band.name, n, ph.len()
+                    ));
+                }
+            }
+            let finite = m.freq.iter().chain(m.magnitude.iter())
+                .chain(m.phase.iter().flatten())
+                .all(|v| v.is_finite());
+            if !finite {
+                return Err(format!("band '{}': measurement contains NaN/Inf", band.name));
+            }
+            if m.freq.windows(2).any(|w| w[1] <= w[0]) {
+                return Err(format!("band '{}': measurement freq is not strictly ascending", band.name));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -242,6 +313,7 @@ pub async fn load_project(path: String) -> Result<ProjectFile, String> {
             project.version, MAX_VERSION
         ));
     }
+    validate_project(&project)?;
     info!("load_project: {} bands loaded", project.bands.len());
     Ok(project)
 }
@@ -498,6 +570,30 @@ mod tests {
     /// `migrateDelayConvention`, and the alignment delays flipped on every
     /// open — `[788, 60, 40, 0, 0] µs` became `[0, 728, 748, 788, 788]` and
     /// back again, without ever converging.
+    /// A hand-edited `.pfproj` with a non-power-of-two tap count or a
+    /// ragged measurement must be rejected at load, not panic inside the
+    /// FFT later (2026-09-05 audit).
+    #[test]
+    fn validate_project_rejects_bad_taps_and_ragged_measurement() {
+        let base = |extra: &str| format!(r#"{{
+            "version": 2, "app_name": "PhaseForge", "bands": [{}],
+            "active_band_id": "b1", "show_phase": true, "show_mag": true,
+            "show_target": true, "next_band_num": 2, "export_taps": 1000
+        }}"#, extra);
+        let project: ProjectFile = serde_json::from_str(&base("")).expect("parse");
+        let err = validate_project(&project).unwrap_err();
+        assert!(err.contains("export_taps"), "{err}");
+
+        let band = r#"{"id":"b1","name":"W","measurement":{"name":"m","source_path":null,
+            "sample_rate":null,"freq":[20.0,30.0,40.0],"magnitude":[80.0,81.0],"phase":null,
+            "metadata":{"date":null,"mic":null,"notes":null,"smoothing":null}},
+            "settings":null,"target":{"reference_level_db":80.0,"tilt_db_per_octave":0.0,"tilt_ref_freq":1000.0,"high_pass":null,"low_pass":null,"low_shelf":null,"high_shelf":null},"target_enabled":true}"#;
+        let src = base(band).replace("\"export_taps\": 1000", "\"export_taps\": 65536");
+        let project: ProjectFile = serde_json::from_str(&src).expect("parse band");
+        let err = validate_project(&project).unwrap_err();
+        assert!(err.contains("length mismatch"), "{err}");
+    }
+
     #[test]
     fn delay_convention_flag_survives_round_trip() {
         let src = r#"{
