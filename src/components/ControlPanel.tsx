@@ -48,8 +48,8 @@ import {
   removePeqBand,
   addExclusionZone,
   removeExclusionZone,
-  updateExclusionZone,
-} from "../stores/bands";
+  updateExclusionZone, setNeedAutoFit } from "../stores/bands";
+import { driverName } from "../lib/fir-export";
 import type { PresetName, SmoothingMode, MergeSource, BandState } from "../stores/bands";
 import {
   firMaxBoost, firNoiseFloor, firIterations,
@@ -77,7 +77,6 @@ import { qWarnAt } from "../lib/peq-quality";
 import { openHighQPopup } from "./HighQWarningPopup";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { setNeedAutoFit } from "../App";
 import { projectDir, projectName, copyMeasurementToProject, copyMergeFilesToProject, sanitize, yymmdd } from "../lib/project-io";
 import { handleImportMeasurement, handleMergeComplete } from "../lib/measurement-actions";
 import MergeDialog from "./MergeDialog";
@@ -446,14 +445,6 @@ function FilterBlock(props: FilterBlockProps) {
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
-
-/** Extract driver/band label from measurement name, stripping REW "Band N · " prefix */
-function driverName(b: BandState): string {
-  let name = b.measurement?.name ?? b.name;
-  const dotIdx = name.indexOf("·");
-  if (dotIdx >= 0) name = name.substring(dotIdx + 1).trim();
-  return name;
-}
 
 // ---------------------------------------------------------------------------
 // PEQ Tab — migrated from PeqSidebar

@@ -113,7 +113,6 @@ fn release_readiness_stage2_pipeline_matrix() {
                             narrowband_limit: true,
                             nb_smoothing_oct: 0.333,
                             nb_max_excess_db: 6.0,
-                            gaussian_min_phase_filters: vec![],
                             linear_phase_main: lin_main,
                             subsonic_cutoff_hz: subsonic,
                         };
@@ -245,7 +244,6 @@ fn release_readiness_stage2_routing_invariants() {
         narrowband_limit: false,
         nb_smoothing_oct: 0.333,
         nb_max_excess_db: 6.0,
-        gaussian_min_phase_filters: vec![],
         linear_phase_main: lin_main,
         subsonic_cutoff_hz: subsonic,
     };

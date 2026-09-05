@@ -117,7 +117,6 @@ fn fir_cfg(taps: usize, sr: f64) -> FirConfig {
         iterations: 0,
         freq_weighting: false, narrowband_limit: false,
         nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0,
-        gaussian_min_phase_filters: vec![],
         linear_phase_main: false,
         subsonic_cutoff_hz: None,
     }

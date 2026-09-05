@@ -4,7 +4,7 @@ mod types;
 mod windowing;
 mod helpers;
 mod wav;
-// b141.2: `legacy` (generate_fir / generate_hybrid_fir) is no longer reachable
+// b141.2: `legacy` (generate_fir) is no longer reachable
 // from production — the frontend routes exclusively through generate_model_fir /
 // generate_model_fir_iir, and the two dead Tauri commands were removed. The
 // module is retained only as the baseline for the golden-snapshot tests in
@@ -20,7 +20,7 @@ pub use types::*;
 pub use dispatch::{Route, route_for};
 pub use wav::{export_wav_f32, export_wav_f64};
 #[cfg(test)]
-pub use legacy::{generate_fir, generate_hybrid_fir};
+pub use legacy::generate_fir;
 pub use cepstral::generate_model_fir;
 pub use pipeline::{FirPipeline, IirAnalyticalPipeline, CepstralFftPipeline, pick_pipeline};
 // b140.13.2: production code in `mod.rs` no longer imports these — the

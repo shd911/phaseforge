@@ -133,8 +133,7 @@ pub(crate) fn iterative_refine(
     // linear-phase FIR (peak-centred, full window) but with the model phase.
     // Must mirror generate_model_fir's `use_model_phase` path so the refinement
     // loop reorders/windows identically.
-    let use_model_phase = matches!(config.phase_mode, PhaseMode::MixedPhase)
-        && config.gaussian_min_phase_filters.is_empty();
+    let use_model_phase = matches!(config.phase_mode, PhaseMode::MixedPhase);
     let is_linear_phase = matches!(config.phase_mode, PhaseMode::LinearPhase)
         || (matches!(config.phase_mode, PhaseMode::Composite) && config.linear_phase_main)
         || use_model_phase;
@@ -251,17 +250,6 @@ pub(crate) fn iterative_refine(
             continue;
         }
         match config.phase_mode {
-            PhaseMode::MixedPhase if !config.gaussian_min_phase_filters.is_empty() => {
-                // Peak-centered full window (same as generate_model_fir MixedPhase)
-                let peak_idx = impulse.iter().enumerate()
-                    .max_by(|(_, a), (_, b)| a.abs().partial_cmp(&b.abs()).unwrap_or(std::cmp::Ordering::Equal))
-                    .map(|(i, _)| i).unwrap_or(0);
-                let shift = (n_fft / 2).wrapping_sub(peak_idx) % n_fft;
-                impulse.rotate_right(shift);
-                for (i, w) in full_window.iter().enumerate() {
-                    impulse[i] *= w;
-                }
-            }
             PhaseMode::MinimumPhase | PhaseMode::MixedPhase | PhaseMode::HybridPhase => {
                 for (i, w) in half_window.iter().enumerate() {
                     impulse[i] *= w;

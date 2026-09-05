@@ -218,7 +218,6 @@ fn release_readiness_stage4_sum_ir_peq_alignment() {
             narrowband_limit: true,
             nb_smoothing_oct: 0.333,
             nb_max_excess_db: 6.0,
-            gaussian_min_phase_filters: vec![],
             linear_phase_main: false,
             subsonic_cutoff_hz: None,
         };

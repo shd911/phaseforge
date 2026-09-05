@@ -107,7 +107,6 @@ fn fir_config(phase_mode: PhaseMode, linear_main: bool, subsonic: Option<f64>) -
         narrowband_limit: true,
         nb_smoothing_oct: 0.333,
         nb_max_excess_db: 6.0,
-        gaussian_min_phase_filters: vec![],
         linear_phase_main: linear_main,
         subsonic_cutoff_hz: subsonic,
     }

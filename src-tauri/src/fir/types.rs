@@ -6,14 +6,6 @@ use serde::{Deserialize, Serialize};
 // Types
 // ---------------------------------------------------------------------------
 
-/// Per-filter Gaussian info for MixedPhase mode.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GaussianFilterInfo {
-    pub freq_hz: f64,
-    pub shape: f64,
-    pub is_lowpass: bool,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PhaseMode {
     MinimumPhase,
@@ -74,8 +66,6 @@ pub struct FirConfig {
     pub nb_smoothing_oct: f64,                // smoothing width in octaves (e.g. 1/3)
     #[serde(default = "default_nb_max_excess")]
     pub nb_max_excess_db: f64,                // max dB above smoothed curve
-    #[serde(default)]
-    pub gaussian_min_phase_filters: Vec<GaussianFilterInfo>,
     /// b139.4a Composite mode: user's linear-phase choice for the main filter.
     /// Ignored when phase_mode != Composite.
     #[serde(default)]

@@ -93,18 +93,6 @@ async fn evaluate_target_standalone(
     Ok((freq, response))
 }
 
-#[tauri::command]
-async fn compute_delay_info(
-    freq: Vec<f64>,
-    magnitude: Vec<f64>,
-    phase: Vec<f64>,
-    sample_rate: Option<f64>,
-) -> Result<(f64, f64), String> {
-    let delay = estimate_delay(&freq, &magnitude, &phase, sample_rate);
-    let distance = phase::compute_distance(delay);
-    info!("compute_delay_info: delay={:.4}ms  dist={:.3}m", delay * 1000.0, distance);
-    Ok((delay, distance))
-}
 
 #[tauri::command]
 async fn remove_measurement_delay(
@@ -427,7 +415,6 @@ fn pick_fir_route(
         window: fir::WindowType::Hann, phase_mode: fir::PhaseMode::Composite,
         iterations: 0, freq_weighting: false,
         narrowband_limit: false, nb_smoothing_oct: 0.0, nb_max_excess_db: 0.0,
-        gaussian_min_phase_filters: vec![],
         linear_phase_main: linear_main,
         subsonic_cutoff_hz,
     };
@@ -456,7 +443,7 @@ pub fn run() {
         )
         .init();
 
-    info!("PhaseForge b141.28 starting...");
+    info!("PhaseForge b141.29 starting...");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -475,7 +462,6 @@ pub fn run() {
             get_smoothed,
             evaluate_target,
             evaluate_target_standalone,
-            compute_delay_info,
             remove_measurement_delay,
             apply_manual_delay,
             compute_impulse,

@@ -3,9 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { createSignal } from "solid-js";
 import {
   activeBand, setBandMeasurement, renameBand, setBandMeasurementFile,
-  setBandDelayInfo, markBandDelayRemoved, setBandMergeSource, setBandAnalysis,
-} from "../stores/bands";
-import { setNeedAutoFit } from "../App";
+  setBandDelayInfo, markBandDelayRemoved, setBandMergeSource, setBandAnalysis, setNeedAutoFit } from "../stores/bands";
 import { copyMeasurementToProject, copyMergeFilesToProject, projectDir } from "./project-io";
 import type { Measurement, AnalysisResult } from "./types";
 import type { MergeSource } from "../stores/bands";

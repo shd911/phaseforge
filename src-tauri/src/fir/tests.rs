@@ -39,7 +39,6 @@ use super::*;
             phase_mode: PhaseMode::MinimumPhase,
             iterations: 0, freq_weighting: false, narrowband_limit: false,
             nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0,
-            gaussian_min_phase_filters: vec![],
         linear_phase_main: false,
         subsonic_cutoff_hz: None,
         };
@@ -70,7 +69,6 @@ use super::*;
             phase_mode: PhaseMode::MinimumPhase,
             iterations: 0, freq_weighting: false, narrowband_limit: false,
             nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0,
-            gaussian_min_phase_filters: vec![],
         linear_phase_main: false,
         subsonic_cutoff_hz: None,
         };
@@ -224,7 +222,6 @@ use super::*;
             phase_mode: PhaseMode::MinimumPhase,
             iterations: 0, freq_weighting: false, narrowband_limit: false,
             nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0,
-            gaussian_min_phase_filters: vec![],
         linear_phase_main: false,
         subsonic_cutoff_hz: None,
         };
@@ -274,7 +271,6 @@ use super::*;
             narrowband_limit: false,
             nb_smoothing_oct: 0.333,
             nb_max_excess_db: 6.0,
-            gaussian_min_phase_filters: vec![],
         linear_phase_main: false,
         subsonic_cutoff_hz: None,
         };
@@ -328,7 +324,6 @@ use super::*;
             narrowband_limit: false,
             nb_smoothing_oct: 0.333,
             nb_max_excess_db: 6.0,
-            gaussian_min_phase_filters: vec![],
         linear_phase_main: false,
         subsonic_cutoff_hz: None,
         };
@@ -415,7 +410,6 @@ use super::*;
             narrowband_limit: false,
             nb_smoothing_oct: 0.333,
             nb_max_excess_db: 6.0,
-            gaussian_min_phase_filters: vec![],
         linear_phase_main: false,
         subsonic_cutoff_hz: None,
         };
@@ -591,7 +585,6 @@ use super::*;
             window: WindowType::Blackman, phase_mode: PhaseMode::MixedPhase,
             iterations: 0, freq_weighting: false, narrowband_limit: false,
             nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0,
-            gaussian_min_phase_filters: vec![],
             linear_phase_main: false, subsonic_cutoff_hz: None,
         };
 
@@ -678,7 +671,6 @@ use super::*;
             narrowband_limit: false,
             nb_smoothing_oct: 0.333,
             nb_max_excess_db: 6.0,
-            gaussian_min_phase_filters: vec![],
         linear_phase_main: false,
         subsonic_cutoff_hz: None,
         };
@@ -695,41 +687,18 @@ use super::*;
             .map(|&i| target_mag[i])
             .collect();
 
-        // Define the 4 phase combinations
+        // Phase modes to compare. (The per-filter Gaussian MixedPhase list was
+        // removed 2026-09-05 — the frontend never sent it; MixedPhase now
+        // means "honour model_phase verbatim", zero here.)
         struct PhaseCase {
             name: &'static str,
             phase_mode: PhaseMode,
-            min_phase_filters: Vec<GaussianFilterInfo>,
         }
 
         let cases = vec![
-            PhaseCase {
-                name: "HP=lin, LP=lin",
-                phase_mode: PhaseMode::LinearPhase,
-                min_phase_filters: vec![],
-            },
-            PhaseCase {
-                name: "HP=min, LP=lin",
-                phase_mode: PhaseMode::MixedPhase,
-                min_phase_filters: vec![
-                    GaussianFilterInfo { freq_hz: fc_hp, shape, is_lowpass: false },
-                ],
-            },
-            PhaseCase {
-                name: "HP=lin, LP=min",
-                phase_mode: PhaseMode::MixedPhase,
-                min_phase_filters: vec![
-                    GaussianFilterInfo { freq_hz: fc_lp, shape, is_lowpass: true },
-                ],
-            },
-            PhaseCase {
-                name: "HP=min, LP=min",
-                phase_mode: PhaseMode::MixedPhase,
-                min_phase_filters: vec![
-                    GaussianFilterInfo { freq_hz: fc_hp, shape, is_lowpass: false },
-                    GaussianFilterInfo { freq_hz: fc_lp, shape, is_lowpass: true },
-                ],
-            },
+            PhaseCase { name: "LinearPhase", phase_mode: PhaseMode::LinearPhase },
+            PhaseCase { name: "MixedPhase (model phase = 0)", phase_mode: PhaseMode::MixedPhase },
+            PhaseCase { name: "MinimumPhase", phase_mode: PhaseMode::MinimumPhase },
         ];
 
         // Store passband realized_mag for each case (for cross-comparison)
@@ -738,7 +707,6 @@ use super::*;
         for case in &cases {
             let config = FirConfig {
                 phase_mode: case.phase_mode.clone(),
-                gaussian_min_phase_filters: case.min_phase_filters.clone(),
                 ..base_config.clone()
             };
 
@@ -856,23 +824,14 @@ use super::*;
             if bp > 1e-20 { 20.0 * bp.log10() } else { -400.0 }
         }).collect();
 
-        let cases: Vec<(&str, PhaseMode, Vec<GaussianFilterInfo>)> = vec![
-            ("LinearPhase", PhaseMode::LinearPhase, vec![]),
-            ("MinimumPhase", PhaseMode::MinimumPhase, vec![]),
-            ("MixedPhase HP-only", PhaseMode::MixedPhase, vec![
-                GaussianFilterInfo { freq_hz: fc_hp, shape, is_lowpass: false },
-            ]),
-            ("MixedPhase LP-only", PhaseMode::MixedPhase, vec![
-                GaussianFilterInfo { freq_hz: fc_lp, shape, is_lowpass: true },
-            ]),
-            ("MixedPhase HP+LP", PhaseMode::MixedPhase, vec![
-                GaussianFilterInfo { freq_hz: fc_hp, shape, is_lowpass: false },
-                GaussianFilterInfo { freq_hz: fc_lp, shape, is_lowpass: true },
-            ]),
+        let cases: Vec<(&str, PhaseMode)> = vec![
+            ("LinearPhase", PhaseMode::LinearPhase),
+            ("MinimumPhase", PhaseMode::MinimumPhase),
+            ("MixedPhase (model phase = 0)", PhaseMode::MixedPhase),
         ];
 
         println!("\n=== FIR Magnitude Match Test (E2E) ===");
-        for (name, mode, gauss_filters) in &cases {
+        for (name, mode) in &cases {
             let config = FirConfig {
                 taps: 65536,
                 sample_rate: 48000.0,
@@ -885,7 +844,6 @@ use super::*;
                 narrowband_limit: false,
                 nb_smoothing_oct: 0.333,
                 nb_max_excess_db: 6.0,
-                gaussian_min_phase_filters: gauss_filters.clone(),
                 linear_phase_main: false,
                 subsonic_cutoff_hz: None,
             };
@@ -980,7 +938,6 @@ use super::*;
             narrowband_limit: false,
             nb_smoothing_oct: 0.333,
             nb_max_excess_db: 6.0,
-            gaussian_min_phase_filters: vec![],
         linear_phase_main: false,
         subsonic_cutoff_hz: None,
         };
@@ -1028,7 +985,6 @@ use super::*;
             window: WindowType::Blackman, phase_mode,
             iterations: 0, freq_weighting: false, narrowband_limit: false,
             nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0,
-            gaussian_min_phase_filters: vec![],
         linear_phase_main: false,
         subsonic_cutoff_hz: None,
         }
@@ -1243,7 +1199,6 @@ use super::*;
             narrowband_limit: true,
             nb_smoothing_oct: 0.333,
             nb_max_excess_db: 6.0,
-            gaussian_min_phase_filters: vec![],
         linear_phase_main: false,
         subsonic_cutoff_hz: None,
         };
@@ -1327,7 +1282,6 @@ use super::*;
             phase_mode: PhaseMode::Composite,
             iterations: 3, freq_weighting: true, narrowband_limit: false,
             nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0,
-            gaussian_min_phase_filters: vec![],
             linear_phase_main: linear_main,
             subsonic_cutoff_hz: subsonic_cutoff,
         }
@@ -1481,51 +1435,3 @@ use super::*;
     }
 
 
-/// b141.15 — item-5 fix: the MixedPhase + per-filter-Gaussian branch centers
-/// the impulse at N/2 but must compensate that shift in the realized phase,
-/// or the reported phase carries a bogus N/2-sample linear delay. Reference:
-/// the same single Gaussian LP through PhaseMode::MinimumPhase (blanket
-/// Hilbert over the identical magnitude) — passband phases must agree.
-/// NOTE: branch is unreachable from the UI since b141.2 (frontend sends
-/// MixedPhase only with an empty gaussian list) — locked down here anyway.
-#[test]
-fn mixed_gaussian_realized_phase_matches_min_phase_reference() {
-    let n = 512;
-    let freq: Vec<f64> = (0..n)
-        .map(|i| 5.0 * (40000f64 / 5.0).powf(i as f64 / (n - 1) as f64))
-        .collect();
-    let (fc, shape) = (500.0_f64, 1.0_f64);
-    let ln2 = 2.0_f64.ln();
-    let target_mag: Vec<f64> = freq.iter().map(|&f| {
-        let lp_lin = (-ln2 * (f / fc).powf(2.0 * shape)).exp();
-        if lp_lin > 1e-20 { 20.0 * lp_lin.log10() } else { -400.0 }
-    }).collect();
-    let zero_phase = vec![0.0; n];
-
-    let reference = generate_model_fir(
-        &freq, &target_mag, &[], &zero_phase,
-        &b139_3_fir_config(PhaseMode::MinimumPhase),
-    ).expect("min-phase reference");
-
-    let mixed_cfg = FirConfig {
-        gaussian_min_phase_filters: vec![GaussianFilterInfo {
-            freq_hz: fc, shape, is_lowpass: true,
-        }],
-        ..b139_3_fir_config(PhaseMode::MixedPhase)
-    };
-    let mixed = generate_model_fir(&freq, &target_mag, &[], &zero_phase, &mixed_cfg)
-        .expect("mixed gaussian run");
-
-    // Passband 50–250 Hz: well below fc, |phase| modest, both paths must agree.
-    let mut max_diff = 0.0_f64;
-    for (i, &f) in freq.iter().enumerate() {
-        if f < 50.0 || f > 250.0 { continue; }
-        let d = (mixed.realized_phase[i] - reference.realized_phase[i]).abs();
-        if d > max_diff { max_diff = d; }
-    }
-    assert!(
-        max_diff < 5.0,
-        "MixedPhase+gaussian realized phase diverges from min-phase reference \
-         by {max_diff:.1}° in passband — N/2 center shift not compensated?",
-    );
-}

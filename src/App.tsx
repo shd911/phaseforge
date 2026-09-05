@@ -45,8 +45,6 @@ import { openFirSettings } from "./components/FirSettingsDialog";
 // PeqSidebar removed — PEQ controls now in ControlPanel PEQ tab
 import { activeTab } from "./stores/bands";
 
-// Глобальный сигнал для авто-FIT при импорте замера
-export const [needAutoFit, setNeedAutoFit] = createSignal(false);
 
 function App() {
   // Centralized global shortcuts (Cmd on macOS, Ctrl elsewhere). Suspended

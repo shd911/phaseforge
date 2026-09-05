@@ -56,25 +56,6 @@ pub struct TargetResponse {
     pub phase: Vec<f64>,
 }
 
-// ---------------------------------------------------------------------------
-// Public filter application (for IPC: compute_filter_response)
-// ---------------------------------------------------------------------------
-
-/// b140.16.2: gated to `#[cfg(test)]`. Production code goes through
-/// `apply_filter_complex` (b140.15.9 fix). No production callers found
-/// via `grep -rn target::apply_filter` — only test fixtures still
-/// exercise the scalar phase-sum path for legacy comparison.
-#[cfg(test)]
-pub fn apply_filter_public(
-    mag: &mut [f64],
-    phase: &mut [f64],
-    freq: &[f64],
-    cfg: &FilterConfig,
-    is_lowpass: bool,
-) {
-    apply_filter(mag, phase, freq, cfg, is_lowpass);
-}
-
 /// b140.15.9: complex-accumulator variant of `apply_filter`.
 ///
 /// Pre-fix `apply_filter` accumulated phase scalarly (`phase[i] += p_deg`).

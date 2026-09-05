@@ -98,7 +98,6 @@ mod tests {
             window: WindowType::Hann, phase_mode: PhaseMode::Composite,
             iterations: 3, freq_weighting: true,
             narrowband_limit: true, nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0,
-            gaussian_min_phase_filters: vec![],
             linear_phase_main: linear_main,
             subsonic_cutoff_hz: subsonic,
         }

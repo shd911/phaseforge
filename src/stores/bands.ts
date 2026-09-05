@@ -838,8 +838,13 @@ export function setAlignmentDelay(bandId: string, seconds: number) {
 export type ActiveTab = "measurements" | "target" | "peq" | "export";
 export const [activeTab, setActiveTab] = createSignal<ActiveTab>("measurements");
 
-export type PlotTab = "freq" | "ir" | "step" | "gd" | "export";
+export type PlotTab = "freq" | "ir" | "gd" | "export";
 export const [plotTab, setPlotTab] = createSignal<PlotTab>("freq");
+
+/** Auto-FIT request after a measurement import (lived in App.tsx until
+ *  2026-09-05 — components importing from the root component was an
+ *  App ↔ FrequencyPlot/ControlPanel cycle). */
+export const [needAutoFit, setNeedAutoFit] = createSignal(false);
 
 // One-shot cleanup of the deleted SUM-mode toggle's localStorage key
 // (the toggle itself was removed in b140.15). Best-effort — silent

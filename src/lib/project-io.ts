@@ -131,16 +131,6 @@ export function sanitize(name: string): string {
     || "untitled";
 }
 
-/** Generate measurement filename: ProjectName-YYMMDD-BandName.ext */
-export function measurementFileName(projName: string, bandName: string, ext: string): string {
-  return `${sanitize(projName)}-${yymmdd()}-${sanitize(bandName)}.${ext}`;
-}
-
-/** Generate WAV filename: ProjectName-YYMMDD-BandName-SR-Taps.wav */
-export function wavFileName(projName: string, bandName: string, sr: number, taps: number): string {
-  return `${sanitize(projName)}-${yymmdd()}-${sanitize(bandName)}-${sr}-${taps}.wav`;
-}
-
 /** Extract project dir and name from a .pfproj path */
 function deriveProjectInfo(pfprojPath: string): { dir: string; name: string } {
   const parts = pfprojPath.split("/");
@@ -148,12 +138,6 @@ function deriveProjectInfo(pfprojPath: string): { dir: string; name: string } {
   const dir = parts.join("/");
   const name = filename.replace(/\.pfproj$/, "");
   return { dir, name };
-}
-
-/** Get file extension from a path */
-function fileExt(path: string): string {
-  const dot = path.lastIndexOf(".");
-  return dot >= 0 ? path.substring(dot + 1) : "txt";
 }
 
 /** Extract a safe filename from a path, stripping directories and rejecting traversal. */

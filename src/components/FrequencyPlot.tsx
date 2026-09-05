@@ -4,9 +4,8 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { invoke } from "@tauri-apps/api/core";
 import type { Measurement, TargetResponse, FilterType, FilterConfig, PeqBand, WindowType } from "../lib/types";
-import { appState, activeBand, isSum, activeTab, plotTab, setPlotTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, setPeqDragging, updatePeqBand, commitPeqBand, bandsVersion, exportSampleRate, setExportSampleRate, exportTaps, setExportTaps, exportWindow, setExportWindow, firIterations, firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess, firMaxBoost, firNoiseFloor, exportMetrics, setExportMetrics, plotSnapshots, addPlotSnapshot, clearPlotSnapshots, setAlignmentDelay, setBandSmoothing, beginInteraction, commitInteraction } from "../stores/bands";
+import { appState, activeBand, isSum, activeTab, plotTab, setPlotTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, setPeqDragging, updatePeqBand, commitPeqBand, bandsVersion, exportSampleRate, setExportSampleRate, exportTaps, setExportTaps, exportWindow, setExportWindow, firIterations, firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess, firMaxBoost, firNoiseFloor, exportMetrics, setExportMetrics, plotSnapshots, addPlotSnapshot, clearPlotSnapshots, setAlignmentDelay, setBandSmoothing, beginInteraction, commitInteraction, needAutoFit, setNeedAutoFit } from "../stores/bands";
 import type { SmoothingMode, BandState, FreqSnapshot } from "../stores/bands";
-import { needAutoFit, setNeedAutoFit } from "../App";
 import { computeFloorBounce } from "../lib/floor-bounce";
 import { openCrossoverDialog, type CrossoverDialogData } from "./CrossoverDialog";
 import { handleImportMeasurement, handleMergeComplete, setShowMergeDialog, showMergeDialog } from "../lib/measurement-actions";
@@ -203,7 +202,7 @@ export default function FrequencyPlot() {
     curPhaseMin = prev.phaseMin;
     curPhaseMax = prev.phaseMax;
     const pTab = plotTab();
-    if (pTab === "ir" || pTab === "step") {
+    if (pTab === "ir") {
       irCurXMin = prev.xMin;
       irCurXMax = prev.xMax;
     }
@@ -296,13 +295,13 @@ export default function FrequencyPlot() {
     if (!band) return;
     const tab = plotTab();
     if (tab === "freq") { takeFreqSnapshot(); return; }
-    const existing = plotSnapshots(band.id, tab === "step" ? "ir" : tab);
+    const existing = plotSnapshots(band.id, tab);
     // Count snap groups (unique "Snap N" prefixes), not individual entries
     const snapNums = new Set(existing.map(s => s.label.match(/Snap (\d+)/)?.[1]).filter(Boolean));
     const groupIdx = snapNums.size;
     const color = FREQ_SNAP_COLORS[groupIdx % FREQ_SNAP_COLORS.length];
     const label = `Snap ${groupIdx + 1}`;
-    if (tab === "ir" || tab === "step") {
+    if (tab === "ir") {
       // Use bandVisMap as source of truth for visibility (not chart.series.show — avoids async race)
       const isVis = (lbl: string) => bandVisMap.get(lbl) !== false;
       // Capture ALL visible categories (not just highest-priority)
@@ -353,7 +352,7 @@ export default function FrequencyPlot() {
     if (!band) return;
     const tab = plotTab();
     if (tab === "freq") { clearFreqSnapshots(); return; }
-    clearPlotSnapshots(band.id, tab === "step" ? "ir" : tab);
+    clearPlotSnapshots(band.id, tab);
     // Trigger re-render to remove snapshot curves from chart (preserve scales)
     irToggleRedraw();
   }
@@ -362,12 +361,6 @@ export default function FrequencyPlot() {
 
   // IR/Step tab options — matrix: [meas/target/corrected] × [ir/step]
   const [irDbMode, setIrDbMode] = createSignal(false);
-  const [showMeasIr, setShowMeasIr] = createSignal(true);
-  const [showMeasStep, setShowMeasStep] = createSignal(true);
-  const [showTargetIr, setShowTargetIr] = createSignal(true);
-  const [showTargetStep, setShowTargetStep] = createSignal(true);
-  const [showCorrIr, setShowCorrIr] = createSignal(true);
-  const [showCorrStep, setShowCorrStep] = createSignal(true);
   const [irShowMasking, setIrShowMasking] = createSignal(true);
 
   // Force IR/Step re-render (incremented when the underlying DATA changes)
@@ -410,8 +403,8 @@ export default function FrequencyPlot() {
     setExportingWav(true);
     setExportWavError(null);
     try {
-      // b141.14: all routes now ship the impulse peak at ~N/2 (cepstral
-      // min-phase gets the adaptive shift) — no mixed-convention warning.
+      // Every route aligns the WAV DELAY (N/2 leading zeros); the peak of a
+      // min-phase band legitimately lands later. See CLAUDE.md.
       await exportBandWav(b);
     } catch (e) {
       console.error("Export WAV failed:", e);
@@ -468,7 +461,7 @@ export default function FrequencyPlot() {
       newMax = center + half;
     }
     if (pTab === "freq" || pTab === "export") { curMagMin = newMin; curMagMax = newMax; }
-    else if (pTab === "ir" || pTab === "step") { irCurYMin = newMin; irCurYMax = newMax; }
+    else if (pTab === "ir") { irCurYMin = newMin; irCurYMax = newMax; }
     chart.setScale(yKey, { min: newMin, max: newMax });
   }
 
@@ -483,7 +476,7 @@ export default function FrequencyPlot() {
     const newMin = s.min + step;
     const newMax = s.max + step;
     if (pTab === "freq" || pTab === "export") { curMagMin = newMin; curMagMax = newMax; }
-    else if (pTab === "ir" || pTab === "step") { irCurYMin = newMin; irCurYMax = newMax; }
+    else if (pTab === "ir") { irCurYMin = newMin; irCurYMax = newMax; }
     chart.setScale(yKey, { min: newMin, max: newMax });
   }
 
@@ -673,7 +666,7 @@ export default function FrequencyPlot() {
 
     if (isFinite(fMin) && isFinite(fMax) && fMin > 0 && fMax > fMin) {
       const pTab = plotTab();
-      if (pTab === "ir" || pTab === "step") {
+      if (pTab === "ir") {
         irCurXMin = fMin;
         irCurXMax = fMax;
       }
@@ -706,7 +699,7 @@ export default function FrequencyPlot() {
       chart.setSeries(entry.seriesIdx, { show: newVis });
     }
     // On IR/Step/GD: save visibility state, trigger rebuild (setSeries breaks scales)
-    if (pTab === "ir" || pTab === "step") {
+    if (pTab === "ir") {
       if (isSum()) sumVisMap.set(entry.label, newVis);
       else bandVisMap.set(catKey(entry), newVis);
       irToggleRedrawAutoY();
@@ -760,7 +753,7 @@ export default function FrequencyPlot() {
   // Toggle all series for a given band column in SUM mode
   function toggleColumn(colName: string) {
     const pTab = plotTab();
-    const onIrStep = pTab === "ir" || pTab === "step";
+    const onIrStep = pTab === "ir";
 
     const matching: number[] = [];
     for (let i = 0; i < legendEntries.length; i++) {
@@ -794,21 +787,15 @@ export default function FrequencyPlot() {
       }
     }
     // Sync IR show signals when toggling Σ column on IR/Step
-    if (isSum() && (pTab === "ir" || pTab === "step") && colName === "\u03A3") {
-      setShowMeasIr(legendEntries.some(e => e.category === "measurement" && e.visible));
-      setShowMeasStep(legendEntries.some(e => e.category === "measurement" && e.visible));
-      setShowTargetIr(legendEntries.some(e => e.category === "target" && e.visible));
-      setShowTargetStep(legendEntries.some(e => e.category === "target" && e.visible));
-      setShowCorrIr(legendEntries.some(e => e.category === "corrected" && e.visible));
-      setShowCorrStep(legendEntries.some(e => e.category === "corrected" && e.visible));
+    if (isSum() && (pTab === "ir") && colName === "\u03A3") {
     }
     // On IR/Step: band column toggle also updates coherent sum inclusion
-    if (isSum() && (pTab === "ir" || pTab === "step") && colName !== "\u03A3") {
+    if (isSum() && (pTab === "ir") && colName !== "\u03A3") {
       const cur = irExcludedBands().has(colName);
       setIrExcludedBands(prev => { const s = new Set(prev); if (cur) s.delete(colName); else s.add(colName); return s; });
       setIrRenderTrigger(v => v + 1);
     }
-    if (isSum() && !onFreq && !(pTab === "ir" || pTab === "step")) {
+    if (isSum() && !onFreq && !(pTab === "ir")) {
       if (pTab === "gd") {
         setIrRenderTrigger(v => v + 1);
       }
@@ -865,7 +852,7 @@ export default function FrequencyPlot() {
   // On IR/Step tab: returns the IR entry (the Step entry is toggled via pairing in toggleLegendEntry)
   function findCellEntry(colName: string, cat: "measurement" | "target" | "corrected"): LegendEntry | undefined {
     const pTab = plotTab();
-    const onIrStep = pTab === "ir" || pTab === "step";
+    const onIrStep = pTab === "ir";
     for (let i = 0; i < legendEntries.length; i++) {
       const e = legendEntries[i];
       if (e.category !== cat) continue;
@@ -944,7 +931,7 @@ export default function FrequencyPlot() {
     // cached curves. A category row toggles visibility of entries that are
     // already computed; it was still going through the recompute trigger,
     // which is why a row click lagged while a cell click was instant.
-    if (pTab === "ir" || pTab === "step") {
+    if (pTab === "ir") {
       irToggleRedrawAutoY();
     } else if (pTab === "gd") {
       gdToggleRedraw();
@@ -973,7 +960,7 @@ export default function FrequencyPlot() {
     // For non-freq tabs: trigger rebuild
     const pTab = plotTab();
     // b141.25: visibility only — redraw from cache, same as the row/cell paths.
-    if (pTab === "ir" || pTab === "step") { irToggleRedraw(); }
+    if (pTab === "ir") { irToggleRedraw(); }
     else if (pTab === "gd") gdToggleRedraw();
     setPlotShowOnly(null);
   });
@@ -1513,7 +1500,7 @@ export default function FrequencyPlot() {
     const xs = sharedXScale();
     if (!chart) return;
     const pTab = untrack(() => plotTab());
-    if (pTab === "ir" || pTab === "step") return;
+    if (pTab === "ir") return;
     const cur = chart.scales["x"];
     if (cur?.min != null && cur?.max != null) {
       // Only update if significantly different to avoid loops
@@ -1671,7 +1658,7 @@ export default function FrequencyPlot() {
     if (n === 0) return;
     untrack(() => {
       const pTab = plotTab();
-      if (pTab !== "ir" && pTab !== "step") return;
+      if (pTab !== "ir") return;
       const sumMode = isSum();
       const band = activeBand();
       const key = irDataKey(pTab, sumMode, band);
@@ -1743,7 +1730,7 @@ export default function FrequencyPlot() {
       if (xs?.min != null && xs?.max != null) { persistedXMin = xs.min; persistedXMax = xs.max; }
     }
     // Clear IR saved scales only when switching AWAY from IR tab to non-IR tab
-    if (!chartIsIr && (pTab !== "ir" && pTab !== "step")) {
+    if (!chartIsIr && (pTab !== "ir")) {
       irUserXScale = null;
       irUserYScale = null;
     }
@@ -1753,8 +1740,8 @@ export default function FrequencyPlot() {
       try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
     }
 
-    if (pTab === "ir" || pTab === "step" || pTab === "gd") {
-      renderTimeTab(pTab === "step" ? "ir" : pTab, sumMode, band);
+    if (pTab === "ir" || pTab === "gd") {
+      renderTimeTab(pTab, sumMode, band);
       return;
     }
 
@@ -1854,8 +1841,8 @@ export default function FrequencyPlot() {
 
       // Compute export metrics from FIR result
       // Pre-ringing: time from first significant sample to peak (ms).
-      // b141.14: min-phase WAVs are zero-padded to center the peak at N/2 —
-      // those exact-zero leading samples are latency, not pre-ringing, so
+      // Min-phase WAVs carry N/2 leading zeros (delay convention) — those
+      // exact-zero samples are latency, not pre-ringing, so
       // the metric starts at the first sample above -80 dB of peak.
       // -80 dB here is a perceptual display threshold; deliberately looser
       // than the -100 dB content-preservation threshold of the WAV shift.
@@ -2044,7 +2031,7 @@ export default function FrequencyPlot() {
     }));
   }
 
-  async function renderTimeTab(mode: "ir" | "step" | "gd", sumMode: boolean, band: BandState | null) {
+  async function renderTimeTab(mode: "ir" | "gd", sumMode: boolean, band: BandState | null) {
     const gen = ++renderGen;
     // Snapshot toggle state — untrack to prevent main effect re-trigger on toggle
     const irCfg = untrack(() => ({
@@ -3907,7 +3894,7 @@ export default function FrequencyPlot() {
     <div class="plot-wrapper">
       <div class="plot-tabs-strip">
         <button class={`plot-tab ${plotTab() === "freq" ? "active" : ""}`} onClick={() => setPlotTab("freq")} title="АЧХ + фаза (магнитуда и фаза по частоте)">SPL</button>
-        <button class={`plot-tab ${plotTab() === "ir" || plotTab() === "step" ? "active" : ""}`} onClick={() => setPlotTab("ir")} title="Импульсная и переходная характеристика">IR/Step</button>
+        <button class={`plot-tab ${plotTab() === "ir" ? "active" : ""}`} onClick={() => setPlotTab("ir")} title="Импульсная и переходная характеристика">IR/Step</button>
         <button class={`plot-tab ${plotTab() === "gd" ? "active" : ""}`} onClick={() => setPlotTab("gd")} title="Групповая задержка (мс)">GD</button>
         {/* b141.11: экспорт по-полосный — в режиме «Сумма» вкладка скрыта */}
         <Show when={!isSum()}>
@@ -3953,7 +3940,7 @@ export default function FrequencyPlot() {
             const b = activeBand();
             const tab = plotTab();
             const freqSnaps = b ? freqSnapshots(b.id) : [];
-            const otherSnaps = b ? plotSnapshots(b.id, tab === "step" ? "ir" : tab) : [];
+            const otherSnaps = b ? plotSnapshots(b.id, tab) : [];
             const snaps = tab === "freq" ? freqSnaps : otherSnaps;
             return (
               <>
@@ -3972,7 +3959,7 @@ export default function FrequencyPlot() {
           })()}
         </Show>
         {/* IR/Step dB/Lin toggle */}
-        <Show when={plotTab() === "ir" || plotTab() === "step"}>
+        <Show when={plotTab() === "ir"}>
           <span class="readout-sep" />
           <button class={`tb-btn tb-btn-xs ${irDbMode() ? "active" : ""}`} onClick={() => { setIrDbMode(!irDbMode()); irToggleRedraw(); }}>{irDbMode() ? "dB" : "Lin"}</button>
         </Show>
@@ -4063,7 +4050,7 @@ export default function FrequencyPlot() {
 
       {/* Unified visibility matrix — above plot, all modes */}
       {/* SUM matrix is shared across all tabs — shown below via legendEntries */}
-      <Show when={(plotTab() === "ir" || plotTab() === "step") && !isSum() && legendEntries.length > 0}>
+      <Show when={plotTab() === "ir" && !isSum() && legendEntries.length > 0}>
         {/* Band IR/Step matrix — uses legendEntries from renderIrStepChart */}
         <div class="sum-vis-table">
           {(() => {
@@ -4380,7 +4367,7 @@ export default function FrequencyPlot() {
                           </td>
                           <For each={cols()}>
                             {(col) => {
-                              const isIrTab = () => plotTab() === "ir" || plotTab() === "step";
+                              const isIrTab = () => plotTab() === "ir";
                               return (
                                 <Show when={isIrTab()} fallback={(() => {
                                   // SPL: single swatch per cell
@@ -4457,7 +4444,7 @@ export default function FrequencyPlot() {
                       );
                     }}
                   </For>
-                  <Show when={plotTab() === "ir" || plotTab() === "step"}>
+                  <Show when={plotTab() === "ir"}>
                     <tr>
                       <td class="sum-row-header">VIEW</td>
                       <td colspan={cols().length} style={{ "text-align": "center" }}>
@@ -4473,7 +4460,7 @@ export default function FrequencyPlot() {
                       </td>
                     </tr>
                   </Show>
-                  <Show when={plotTab() === "freq" || plotTab() === "ir" || plotTab() === "step"}>
+                  <Show when={plotTab() === "freq" || plotTab() === "ir"}>
                     <tr>
                       <td class="sum-row-header">DELAY <span style={{ "font-size": "var(--fs-xs)", "font-weight": "normal", color: "var(--text-muted)" }}>ms</span></td>
                       <For each={bandNames()}>

@@ -32,20 +32,11 @@ use crate::target::{FilterConfig, FilterType, ShelfConfig};
 use num_complex::Complex64;
 
 use super::types::*;
+use super::helpers::compute_causality;
 
 // ---------------------------------------------------------------------------
 // Routing predicate — when can we use the IIR path?
 // ---------------------------------------------------------------------------
-
-/// b140.7: a filter is "IIR-realizable" via this module when it's a
-/// rational analog form (Linkwitz-Riley, Butterworth, or Custom 2nd-order).
-/// Bessel and Gaussian fall back to the FFT cepstral path.
-pub fn iir_realizable(cfg: &FilterConfig) -> bool {
-    matches!(cfg.filter_type,
-        FilterType::LinkwitzRiley
-        | FilterType::Butterworth
-        | FilterType::Custom)
-}
 
 // ---------------------------------------------------------------------------
 // Digital biquad (Direct Form I)
@@ -463,14 +454,14 @@ pub fn generate_min_phase_fir_iir(input: &IirPathInput) -> Result<FirModelResult
         .iter()
         .rposition(|&v| v.abs() > tail_threshold)
         .unwrap_or(0);
-    // b141.19 (audit): the shift must be measured from the PEAK, not from
-    // sample 0. The cascade impulse of an LF filter rises over hundreds of
-    // samples, so `half` put its peak at `raw_peak_idx + half` — LR4 LP 80 Hz
-    // at 16384 taps landed 566 samples (11.8 ms) past centre while a cepstral
-    // band in the same project sat exactly on N/2. Target the peak at N/2 and
-    // keep the tail cap: content correctness still wins when the tail does not
-    // fit, and the shortfall is reported to the caller as `wav_peak_idx`.
-    let shift = half.min(n - 1 - last_significant); // PROBE-REVERT
+    // b141.19: the WAV convention aligns the DELAY (leading zeros = N/2),
+    // NOT the peak. An LF cascade impulse rises over hundreds of samples, so
+    // its peak legitimately sits later than N/2; targeting the peak instead
+    // desynchronises bands by their rise-time difference (a two-way LR4 sum
+    // sagged −1.15 dB at the crossover). Tail cap: content correctness still
+    // wins when the tail does not fit, the shortfall goes to the caller.
+    // Mirrors cepstral.rs — keep the two in sync.
+    let shift = half.min(n - 1 - last_significant);
     let mut wav_impulse: Vec<f64> = if shift > 0 && shift < n {
         let mut out = vec![0.0_f64; n];
         let copy_len = n - shift;
@@ -540,22 +531,6 @@ fn apply_tail_taper(impulse: &mut [f64]) {
     }
 }
 
-/// Mirror of `super::compute_causality` — kept private so this module can
-/// be lifted out without touching the parent.
-fn compute_causality(impulse: &[f64]) -> f64 {
-    if impulse.is_empty() { return 1.0; }
-    let mut peak_idx = 0;
-    let mut peak_val = 0.0_f64;
-    for (i, &v) in impulse.iter().enumerate() {
-        let a = v.abs();
-        if a > peak_val { peak_val = a; peak_idx = i; }
-    }
-    let total: f64 = impulse.iter().map(|v| v * v).sum();
-    if total < 1e-30 { return 1.0; }
-    let post: f64 = impulse[peak_idx..].iter().map(|v| v * v).sum();
-    post / total
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -581,7 +556,6 @@ mod tests {
             iterations: 0,
             freq_weighting: false, narrowband_limit: false,
             nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0,
-            gaussian_min_phase_filters: vec![],
             linear_phase_main: false,
             subsonic_cutoff_hz: None,
         }
@@ -1026,7 +1000,6 @@ mod tests {
 #[cfg(test)]
 mod wav_tail_tests {
     use super::*;
-    use crate::fir::types::*;
 
     /// b141.8 (audit): the WAV used a fixed N/2 zero-pad shift, truncating
     /// the last N/2 samples of the cascade impulse. For small taps with a
@@ -1052,7 +1025,6 @@ mod wav_tail_tests {
             iterations: 0,
             freq_weighting: false, narrowband_limit: false,
             nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0,
-            gaussian_min_phase_filters: vec![],
             linear_phase_main: false,
             subsonic_cutoff_hz: None,
         };
