@@ -103,8 +103,6 @@ interface IrBandData {
   timeMs: number[];
   impulse: number[];
   step: number[];
-  rawPeak: number;       /* pre-normalization impulse peak for shared scaling */
-  stepRawPeak: number;   /* pre-normalization step peak for shared scaling */
 }
 
 export default function FrequencyPlot() {
@@ -238,7 +236,7 @@ export default function FrequencyPlot() {
   // GD snapshot data (corrected GD)
   const lastGdData: { freq: number[]; gdMs: number[] } = { freq: [], gdMs: [] };
   // Export snapshot data (FIR curve)
-  const lastExportData: { freq: number[]; mag: number[]; phase: number[] } = { freq: [], mag: [], phase: [] };
+  const lastExportData: { freq: number[]; mag: number[]; phase: (number | null)[] } = { freq: [], mag: [], phase: [] };
 
   function takeFreqSnapshot() {
     const band = activeBand();
@@ -343,7 +341,7 @@ export default function FrequencyPlot() {
       addPlotSnapshot(band.id, {
         label, color, tab: "export", freq: [...lastExportData.freq],
         exportMag: hasMag ? [...lastExportData.mag] : undefined,
-        exportPhase: hasPh ? [...lastExportData.phase] : undefined,
+        exportPhase: hasPh ? lastExportData.phase.map((v) => v ?? NaN) : undefined,
       });
     }
     // Trigger re-render to show snapshot on chart (preserve scales)
@@ -986,7 +984,7 @@ export default function FrequencyPlot() {
   interface RenderInput {
     freq: number[];
     uSeries: uPlot.Series[];
-    uData: number[][];
+    uData: (number | null)[][];
     hasMeasurements: boolean;
     legend?: LegendEntry[];
     floorBounceNulls?: number[]; // частоты деструктивных интерференций floor bounce
@@ -1055,6 +1053,7 @@ export default function FrequencyPlot() {
       const d = input.uData[i];
       for (let j = 0; j < d.length; j++) {
         const v = d[j];
+        if (v == null) continue;
         if (v > -200 && v < magMin) magMin = v;
         if (v > -200 && v > magMax) magMax = v;
       }
@@ -1993,7 +1992,7 @@ export default function FrequencyPlot() {
       // Save FIR data for snapshot capture
       lastExportData.freq = [...freq]; lastExportData.mag = [...firResult.realized_mag]; lastExportData.phase = [...wrappedFirPhase];
       // Export snapshots
-      const expData: number[][] = [freq, normModelMag, firResult.realized_mag, wrappedModelPhase, wrappedFirPhase];
+      const expData: (number | null)[][] = [freq, normModelMag, firResult.realized_mag, wrappedModelPhase, wrappedFirPhase];
       {
         const b = activeBand();
         const snaps = b ? plotSnapshots(b.id, "export") : [];
@@ -2209,8 +2208,9 @@ export default function FrequencyPlot() {
         return;
       }
 
-      // IR or Step: compute via IPC
-      const b = bands[0];
+      // IR or Step: compute via IPC. Reference grid from allBands — `bands`
+      // may be empty when every band is excluded from the sum via the legend.
+      const b = allBands[0];
       const freq = [...b.measurement!.freq];
       const sr = b.measurement!.sample_rate ?? 48000;
 
@@ -2265,8 +2265,6 @@ export default function FrequencyPlot() {
             timeMs: irTime(r).map(t => t * 1000),
             impulse: r.impulse,
             step: r.step,
-            rawPeak: r.raw_peak || 0,
-            stepRawPeak: r.step_raw_peak || 0,
           });
         }
 
@@ -3091,7 +3089,7 @@ export default function FrequencyPlot() {
 
       // Строим серии для одной полосы
       const uSeries: uPlot.Series[] = [{}];
-      const uData: number[][] = [result.freq];
+      const uData: (number | null)[][] = [result.freq];
       const legend: LegendEntry[] = [];
       let sIdx = 1;
 
@@ -3395,7 +3393,7 @@ export default function FrequencyPlot() {
       if (zoomCenter !== 0) {
         for (let i = 0; i < uSeries.length; i++) {
           if ((uSeries[i] as any).scale === "mag") {
-            uData[i] = uData[i].map((v: number) => isFinite(v) ? v - zoomCenter : v);
+            uData[i] = uData[i].map((v) => v != null && isFinite(v) ? v - zoomCenter : v);
           }
         }
       }
@@ -3435,7 +3433,7 @@ export default function FrequencyPlot() {
 
       const freq = result.freq;
       const uSeries: uPlot.Series[] = [{}];
-      const uData: number[][] = [freq];
+      const uData: (number | null)[][] = [freq];
       const legend: LegendEntry[] = [];
       let sIdx = 1;
 
@@ -4551,7 +4549,6 @@ export default function FrequencyPlot() {
                                   }
                                 });
                               }}
-                              class={`tb-btn tb-btn-sm`}
                               style={{
                                 cursor: allPeqReady() ? "pointer" : "not-allowed",
                                 opacity: allPeqReady() ? 1 : 0.4,

@@ -1,4 +1,5 @@
 import { createSignal, Show, For, onCleanup } from "solid-js";
+import { ask } from "@tauri-apps/plugin-dialog";
 import {
   snapshotsList,
   snapshotsError,
@@ -78,7 +79,9 @@ export default function VersionsDialog() {
   }
 
   async function handleDelete(s: SnapshotEntry) {
-    const ok = window.confirm(`Удалить версию «${s.description}»? Это действие необратимо.`);
+    const ok = await ask(`Удалить версию «${s.description}»? Это действие необратимо.`, {
+      title: "Удаление версии", kind: "warning", okLabel: "Удалить", cancelLabel: "Отмена",
+    });
     if (!ok) return;
     setBusy(true);
     setStatusMsg(null);
@@ -163,6 +166,7 @@ export default function VersionsDialog() {
                 class="pn-input"
                 style={{ "min-height": "60px", "width": "100%", "resize": "vertical" }}
                 placeholder="Что изменилось?"
+                maxlength="1000"
                 value={draft()}
                 onInput={(e) => setDraft(e.currentTarget.value)}
                 ref={(el) => requestAnimationFrame(() => el.focus())}

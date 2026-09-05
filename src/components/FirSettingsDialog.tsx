@@ -1,4 +1,13 @@
 import { createSignal, Show } from "solid-js";
+
+/** Parse a numeric input: keep the previous value on garbage, clamp to the
+ *  field's own min/max. (`parseFloat(v) || default` turned a typed 0 into
+ *  the default and accepted 500 dB — 2026-09-05 audit.) */
+function numInput(v: string, min: number, max: number, prev: number, integer = false): number {
+  const n = integer ? parseInt(v, 10) : parseFloat(v);
+  if (!Number.isFinite(n)) return prev;
+  return Math.min(max, Math.max(min, n));
+}
 import {
   firIterations, setFirIterations,
   firFreqWeighting, setFirFreqWeighting,
@@ -67,7 +76,7 @@ export default function FirSettingsDialog() {
               class="xo-input"
               type="number" min="0" max="20" step="1"
               value={iterations()}
-              onInput={(e) => setIterations(parseInt(e.currentTarget.value) || 0)}
+              onInput={(e) => setIterations(numInput(e.currentTarget.value, 0, 20, iterations(), true))}
               onKeyDown={handleKeyDown}
               ref={(el) => requestAnimationFrame(() => { el.focus(); el.select(); })}
             />
@@ -108,7 +117,7 @@ export default function FirSettingsDialog() {
                 class="xo-input"
                 type="number" min="0.05" max="2" step="0.01"
                 value={nbSmoothing()}
-                onInput={(e) => setNbSmoothing(parseFloat(e.currentTarget.value) || 0.333)}
+                onInput={(e) => setNbSmoothing(numInput(e.currentTarget.value, 0.05, 2, nbSmoothing()))}
                 onKeyDown={handleKeyDown}
               />
               <span class="xo-unit">oct</span>
@@ -121,7 +130,7 @@ export default function FirSettingsDialog() {
                 class="xo-input"
                 type="number" min="1" max="24" step="0.5"
                 value={nbExcess()}
-                onInput={(e) => setNbExcess(parseFloat(e.currentTarget.value) || 6.0)}
+                onInput={(e) => setNbExcess(numInput(e.currentTarget.value, 1, 24, nbExcess()))}
                 onKeyDown={handleKeyDown}
               />
               <span class="xo-unit">dB</span>
@@ -136,7 +145,7 @@ export default function FirSettingsDialog() {
               class="xo-input"
               type="number" min="0" max="60" step="1"
               value={maxBoost()}
-              onInput={(e) => setMaxBoost(parseFloat(e.currentTarget.value) || 24.0)}
+              onInput={(e) => setMaxBoost(numInput(e.currentTarget.value, 0, 60, maxBoost()))}
               onKeyDown={handleKeyDown}
             />
             <span class="xo-unit">dB</span>
@@ -150,7 +159,7 @@ export default function FirSettingsDialog() {
               class="xo-input"
               type="number" min="-200" max="-40" step="5"
               value={noiseFloor()}
-              onInput={(e) => setNoiseFloor(parseFloat(e.currentTarget.value) || -150.0)}
+              onInput={(e) => setNoiseFloor(numInput(e.currentTarget.value, -200, -40, noiseFloor()))}
               onKeyDown={handleKeyDown}
             />
             <span class="xo-unit">dB</span>

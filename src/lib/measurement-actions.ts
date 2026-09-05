@@ -10,6 +10,7 @@ import { copyMeasurementToProject, copyMergeFilesToProject, projectDir } from ".
 import type { Measurement, AnalysisResult } from "./types";
 import type { MergeSource } from "../stores/bands";
 import { openMeasurementAnalysis } from "../components/MeasurementAnalysisDialog";
+import { showToast } from "./toast";
 
 export const [showMergeDialog, setShowMergeDialog] = createSignal(false);
 
@@ -44,7 +45,10 @@ export async function handleImportMeasurement() {
       } catch (e) { console.error("Delay removal failed:", e); }
     }
     await runAnalysis(b.id, measurement, b.name);
-  } catch (e) { console.error("Import failed:", e); }
+  } catch (e) {
+    console.error("Import failed:", e);
+    showToast(`Не удалось импортировать измерение: ${String(e)}`, "warn", 12000);
+  }
 }
 
 async function runAnalysis(bandId: string, m: Measurement, bandName: string): Promise<void> {

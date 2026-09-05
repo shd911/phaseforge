@@ -122,7 +122,7 @@ function flatBand(): BandState {
 describe("evaluateBandFull FIR Composite IPC payload (b139.4a)", () => {
   async function captureFirArgs(band: BandState, sr = 48000) {
     const mockMod = await import("@tauri-apps/api/core");
-    const inv = (mockMod as any).invoke as ReturnType<typeof vi.fn>;
+    const inv = (mockMod as any).invoke as ReturnType<typeof vi.fn<(cmd: string, args: any) => Promise<any>>>;
     let captured: { freq: number[]; targetMag: number[]; config: any } | null = null;
     const sniff = inv.getMockImplementation()!;
     inv.mockImplementation(async (cmd: string, args: any) => {
@@ -144,7 +144,7 @@ describe("evaluateBandFull FIR Composite IPC payload (b139.4a)", () => {
     } finally {
       inv.mockImplementation(sniff);
     }
-    return captured;
+    return captured as { freq: number[]; targetMag: number[]; config: any } | null;
   }
 
   async function captureFirConfig(band: BandState) {
@@ -203,7 +203,7 @@ describe("evaluateBandFull FIR grid (b139.5.3)", () => {
   // headroom above 20 kHz are both truncated.
   async function captureFirArgs2(band: BandState, sr: number) {
     const mockMod = await import("@tauri-apps/api/core");
-    const inv = (mockMod as any).invoke as ReturnType<typeof vi.fn>;
+    const inv = (mockMod as any).invoke as ReturnType<typeof vi.fn<(cmd: string, args: any) => Promise<any>>>;
     let captured: { freq: number[] } | null = null;
     const sniff = inv.getMockImplementation()!;
     inv.mockImplementation(async (cmd: string, args: any) => {

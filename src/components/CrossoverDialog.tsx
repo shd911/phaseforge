@@ -46,9 +46,14 @@ export default function CrossoverDialog() {
     setCustomQ(data.q ?? 0.707);
   }
 
+  const freqValid = () => Number.isFinite(freq()) && freq() >= 20 && freq() <= 20000;
+
   function handleApply() {
     const data = dialogData();
     if (!data) return;
+    // 2026-09-05 audit: Enter on an empty field applied freq_hz = 0 — the
+    // model silently dropped the filter while FIR generation rejected it.
+    if (!freqValid()) return;
 
     const config: FilterConfig = {
       filter_type: filterType(),
@@ -211,7 +216,7 @@ export default function CrossoverDialog() {
 
             <div class="xo-buttons">
               <button class="dlg-btn" onClick={handleCancel}>Отмена</button>
-              <button class="dlg-btn dlg-btn-primary" onClick={handleApply}>Применить</button>
+              <button class="dlg-btn dlg-btn-primary" onClick={handleApply} disabled={!freqValid()}>Применить</button>
             </div>
           </div>
         </div>

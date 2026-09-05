@@ -808,8 +808,32 @@ export async function newProject(): Promise<void> {
   }
 }
 
+/** 2026-09-05 audit: Rust load/save errors (corrupt JSON, newer version,
+ *  write-guard rejections, ragged measurements) used to die as unhandled
+ *  promise rejections — the user clicked Open and nothing happened. */
+export function reportProjectError(what: "открыть" | "сохранить", e: unknown): void {
+  const raw = String(e);
+  let why = raw;
+  if (/newer than supported/i.test(raw)) why = "проект создан в более новой версии PhaseForge — обновите программу";
+  else if (/Parse error/i.test(raw)) why = "файл проекта повреждён или имеет неверный формат";
+  else if (/Read error/i.test(raw)) why = "файл не найден или недоступен для чтения";
+  else if (/Write error/i.test(raw)) why = "не удалось записать файл (нет прав или места на диске)";
+  else if (/hidden files|traversal|not allowed/i.test(raw)) why = "путь недопустим для записи";
+  else if (/export_taps|export_sample_rate|measurement/i.test(raw)) why = "в проекте недопустимые данные: " + raw;
+  console.error(`Project ${what} failed:`, e);
+  showToast(`Не удалось ${what} проект: ${why}`, "warn", 12000);
+}
+
 /** Save to current path, or show Save As dialog if no path yet. */
 export async function saveProject(): Promise<void> {
+  try {
+    await saveProjectInner();
+  } catch (e) {
+    reportProjectError("сохранить", e);
+  }
+}
+
+async function saveProjectInner(): Promise<void> {
   const existing = currentProjectPath();
   if (existing) {
     // Migrate v1 → v2: create project folder structure if missing
@@ -821,11 +845,19 @@ export async function saveProject(): Promise<void> {
     await doSave(existing);
     return;
   }
-  await saveProjectAs();
+  await saveProjectAsInner();
 }
 
 /** Save As: ask name → pick parent folder → create project folder tree → copy files → save. */
 export async function saveProjectAs(): Promise<void> {
+  try {
+    await saveProjectAsInner();
+  } catch (e) {
+    reportProjectError("сохранить", e);
+  }
+}
+
+async function saveProjectAsInner(): Promise<void> {
   // 1. Ask for new project name
   const newName = await showSaveAsPrompt();
   if (!newName) return; // cancelled
@@ -912,13 +944,21 @@ export async function loadProject(): Promise<void> {
   });
   if (!path) return; // cancelled
 
-  await doLoad(path as string);
+  try {
+    await doLoad(path as string);
+  } catch (e) {
+    reportProjectError("открыть", e);
+  }
 }
 
 /** Load a project from a known path (used by Recent Projects menu). */
 export async function loadProjectFromPath(path: string): Promise<void> {
   if (!(await confirmIfDirty())) return;
-  await doLoad(path);
+  try {
+    await doLoad(path);
+  } catch (e) {
+    reportProjectError("открыть", e);
+  }
 }
 
 async function doLoad(path: string): Promise<void> {

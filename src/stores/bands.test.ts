@@ -470,7 +470,7 @@ describe("SolidJS reconcile shared-node behavior", () => {
 
       // Apply null-then-set pattern
       setStore("target", "high_pass", null);
-      setStore("target", "high_pass", { ...unwrap(store).target.high_pass ?? projectData.target.high_pass, linear_phase: false });
+      setStore("target", "high_pass", { ...(unwrap(store).target.high_pass ?? projectData.target.high_pass), linear_phase: false } as FilterConfig);
 
       expect(store.target.high_pass?.linear_phase).toBe(false);
       expect(store.target.low_pass?.linear_phase).toBe(true); // MUST be isolated
