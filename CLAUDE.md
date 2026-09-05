@@ -1,6 +1,6 @@
 # PhaseForge — Project Rules
 
-> **Last reviewed:** 2026-06-11 (after b141.13 release: audit fixes, BandEvalResult cache, IR/Step conventions, UI batch).
+> **Last reviewed:** 2026-09-05 (audit b141.26–31: min-phase at true Nyquist, cache snapshot keys, taps/project validation, dead-code −545 LOC; open items in docs/audit-2026-09-05.md).
 > Файл актуализируется в конце каждой длинной сессии. Перед началом новой
 > — пробежать сверху вниз и удалить устаревшее.
 
@@ -50,6 +50,20 @@
   Acceptance: `tests/wav_peak_convention.rs` — `two_way_sum_stays_flat`
   (главный инвариант), `wav_delay_matches_the_leading_zeros`,
   `short_taps_lf_tail_falls_short_of_center_and_says_so`.
+- **Min-phase reconstruction for the plot** (`dsp::minimum_phase_on_log_grid`,
+  Tauri `compute_minimum_phase`, 2026-09-05): ALWAYS pass the export
+  `sampleRate` — Nyquist must come from the sample rate, never from the last
+  grid point; magnitude beyond the grid is extrapolated by its log-log slope,
+  never held flat. Grid-dependent phase was 30–100° off the exported FIR.
+  Pinned by `min_phase_matches_analytic_bw2_hp_on_both_grids`.
+- **Eval cache keys are built from a snapshot** (`snapshotBandRequest`,
+  b141.27) — never key from the live store proxy and then read the proxy
+  after an await. Do NOT JSON-clone bands before `evaluateSum`: the cache
+  keys measurements by object identity, a clone = guaranteed miss.
+- **Taps**: `fir::taps_valid` (power of two, 32..=262144) is checked in both
+  generators and in `validate_project` (load_project/load_snapshot). The
+  vDSP FFT `assert!`s otherwise and a panic in an async command hangs the
+  IPC promise forever.
 - **Bilinear digital cascade** (IIR path) has frequency-dependent
   deviation up to ~20° vs analog reference accumulated over 8 biquads.
   REPhase reference comparison gives tighter empirical bound (≤ 2.5° on
@@ -65,6 +79,9 @@
 
 ## Adding fields to shared structures
 - Before adding a field to a struct (e.g. FilterConfig, BandState): grep for ALL functions that copy this struct field-by-field. Known duplicate sites must be enumerated in the prompt and updated in the same commit.
+- Snapshot site: `snapshotBandRequest` (band-evaluator/evaluate.ts) copies
+  target/peqBands/settings — a new DSP-relevant field must be included in
+  `bandContentKey` (cache.ts) too, or the cache serves stale results.
 - Copy sites in this repo (актуально с b141.6): `cloneFilterConfig` (lib/types.ts — single source of truth; все прод-сайты идут через него), `captureOptimizedTarget` (stores/peq-optimize.ts), test mirrors (FilterBlock.test.tsx, bands.test.ts), site re-implementations в lib/__tests__/filter-clone.test.ts.
 - Forgetting one site = silent loss of the new field across part of the pipeline. Caught only via UI testing on real workflow, expensive.
 
