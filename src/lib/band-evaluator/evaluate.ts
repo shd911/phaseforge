@@ -469,7 +469,12 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
   if (req.includeIr) {
     ir = {};
     const sr = measurement?.sample_rate ?? 48000;
-    if (measurement) {
+    /** Raw-grid measurement IR: only when no target is available to extend
+     *  with. `interp_single` holds |H(freq[0])| flat down to DC, so a
+     *  measurement starting at 20 Hz gets a non-physical step plateau
+     *  (2026-09-05 audit: 37 % of peak vs 0 % for the extended corrected). */
+    const rawMeasurementIr = async (irOut: NonNullable<BandEvalResult["ir"]>) => {
+      if (!measurement) return;
       try {
         const r = await invoke<ImpulseIpc>(
           "compute_impulse",
@@ -480,11 +485,11 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
             sampleRate: measurement.sample_rate ?? null,
           },
         );
-        ir.measurement = { time: irTime(r), impulse: r.impulse, step: r.step };
+        irOut.measurement = { time: irTime(r), impulse: r.impulse, step: r.step };
       } catch (e) {
         console.warn("[evaluateBandFull] measurement compute_impulse failed:", e);
       }
-    }
+    };
     // b140.3.3 + b140.3.4: target and corrected IR on a wide standalone
     // grid (5 Hz – min(40 kHz, Nyquist·0.95)) instead of measurement.freq.
     // Target is a model — its impulse must reflect rolloff outside the
@@ -528,6 +533,22 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
             measurement.phase ?? null, irFreq, irTargetMag, evalSr,
           );
 
+          // Measurement IR on the SAME extended grid as corrected, so the two
+          // Step curves are comparable (both roll off below freq[0]).
+          try {
+            const mr = await invoke<ImpulseIpc>(
+              "compute_impulse",
+              {
+                freq: irFreq, magnitude: extMeas.mag,
+                phase: extMeas.phase ?? new Array<number>(irFreq.length).fill(0),
+                sampleRate: sr,
+              },
+            );
+            ir.measurement = { time: irTime(mr), impulse: mr.impulse, step: mr.step };
+          } catch (e) {
+            console.warn("[evaluateBandFull] extended measurement compute_impulse failed:", e);
+          }
+
           let irPeqMag: number[] = new Array(irFreq.length).fill(0);
           let irPeqPhase: number[] = new Array(irFreq.length).fill(0);
           if (enabledPeq.length > 0) {
@@ -567,6 +588,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
         console.warn("[evaluateBandFull] target/corrected IR pipeline failed:", e);
       }
     }
+    if (!ir.measurement) await rawMeasurementIr(ir);
   }
 
   // 8. b140.3.2: extension block. Single source of truth for "what does the

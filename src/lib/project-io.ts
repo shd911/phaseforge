@@ -434,7 +434,8 @@ export async function restoreState(project: ProjectFile, projDir: string | null)
             if (absExists) return p;
             // Try project-relative
             const base = sanitizeFileName(p);
-            for (const candidate of [`${projDir}/inbox/${base}`, `${projDir}/${base}`]) {
+            // Project-relative first (snapshots/<id>/<file>, inbox/<file>), then legacy fallbacks.
+            for (const candidate of [`${projDir}/${p}`, `${projDir}/inbox/${base}`, `${projDir}/${base}`]) {
               const exists = await invoke<boolean>("check_path_exists", { path: candidate }).catch(() => false);
               if (exists) return candidate;
             }

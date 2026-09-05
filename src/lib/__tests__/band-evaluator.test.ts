@@ -243,18 +243,28 @@ describe("evaluateBandFull (b139.1)", () => {
       expect(f[f.length - 1]).toBeGreaterThanOrEqual(20000);
     });
 
-    it("measurement IR still uses measurement grid (not the wide IR grid)", async () => {
+    // 2026-09-05 audit: measurement IR moved to the same extended wide grid
+    // as corrected — on the raw 20 Hz grid the Rust clamp held |H(20 Hz)| to
+    // DC and the Step settled at 37 % instead of 0 %.
+    it("measurement IR uses the wide extended grid when a target is on", async () => {
       vi.mocked(invoke).mockClear();
       const band = fixtureBand(FIXTURE_CONFIGS[0].hp);
       const r = await evaluateBandFull({ band, includeIr: true });
       expect(r.ir?.measurement).toBeTruthy();
       const irCalls = vi.mocked(invoke).mock.calls.filter(c => c[0] === "compute_impulse");
-      const measCall = irCalls.find(c => {
-        const f = (c[1] as any).freq as number[];
-        // Measurement freq starts at the fixture's first bin, well above 5 Hz.
-        return f && f.length > 0 && f[0] >= 10;
-      });
-      expect(measCall).toBeTruthy();
+      const rawCall = irCalls.find(c => ((c[1] as any).freq as number[])[0] >= 10);
+      expect(rawCall).toBeUndefined();
+    });
+
+    it("measurement IR falls back to the measurement grid without a target", async () => {
+      vi.mocked(invoke).mockClear();
+      const band = fixtureBand(FIXTURE_CONFIGS[0].hp);
+      band.targetEnabled = false;
+      const r = await evaluateBandFull({ band, includeIr: true });
+      expect(r.ir?.measurement).toBeTruthy();
+      const irCalls = vi.mocked(invoke).mock.calls.filter(c => c[0] === "compute_impulse");
+      expect(irCalls.length).toBe(1);
+      expect(((irCalls[0][1] as any).freq as number[])[0]).toBeGreaterThanOrEqual(10);
     });
   });
 
@@ -267,7 +277,7 @@ describe("evaluateBandFull (b139.1)", () => {
       expect(r.ir?.corrected).toBeTruthy();
     });
 
-    it("corrected IR uses the wide grid (compute_impulse called twice with f[0] ≈ 5 Hz)", async () => {
+    it("target, measurement and corrected IR all use the wide grid (three compute_impulse calls with f[0] ≈ 5 Hz)", async () => {
       vi.mocked(invoke).mockClear();
       const band = fixtureBand(FIXTURE_CONFIGS[0].hp);
       await evaluateBandFull({ band, includeIr: true });
@@ -276,8 +286,8 @@ describe("evaluateBandFull (b139.1)", () => {
         const f = (c[1] as any).freq as number[];
         return f && f.length > 0 && f[0] < 10;
       });
-      // One call for target IR, one for corrected IR.
-      expect(wideCalls.length).toBe(2);
+      // Target, extended measurement, corrected.
+      expect(wideCalls.length).toBe(3);
     });
 
     it("no measurement → no corrected IR", async () => {

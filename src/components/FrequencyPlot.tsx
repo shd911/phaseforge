@@ -2221,163 +2221,54 @@ export default function FrequencyPlot() {
         // ============================================================
         const n = freq.length;
 
-        // --- Compute per-band measurement impulses in parallel (all bands, incl. excluded) ---
-        // Normalize each band to 0 dB peak before IFFT — same as sum does
-        // This ensures per-band IR shapes match what actually goes into the SUM
-        const measPromises = allBands.map(async (sb) => {
-          const sbFreq = [...sb.measurement!.freq];
-          const sbMag = [...sb.measurement!.magnitude];
-          const sbPh = [...sb.measurement!.phase!];
-          const sbSr = sb.measurement!.sample_rate ?? 48000;
-          const delay = irDelayByName[sb.name] ?? 0;
-
-          // Normalize to 0 dB peak (same as sum normalization)
-          let peakMag = -Infinity;
-          for (let j = 0; j < sbMag.length; j++) {
-            if ((sbMag[j] ?? -200) > peakMag) peakMag = sbMag[j] ?? -200;
-          }
-          const offset = -peakMag;
-          const normMag = sbMag.map(v => (v ?? -200) + offset);
-
-          let rotatedPhase = sbPh;
-          if (delay !== 0) {
-            rotatedPhase = sbPh.map((p, j) => p + alignmentPhaseDeg(sbFreq[j], delay));
-          }
-
-          return invoke<ImpulseIpc>(
-            "compute_impulse",
-            { freq: sbFreq, magnitude: normMag, phase: rotatedPhase, sampleRate: sbSr }
-          ).catch((e) => { console.error("[SUM IR] compute_impulse failed for band:", e); return null; });
-        });
-        const measResults = await Promise.all(measPromises);
+        // Per-band curves (all bands, incl. excluded from the sum) come from
+        // evaluateBandFull(includeIr) — the same cached wide-grid pipeline the
+        // band tab uses — with the band's alignment delay applied as a
+        // time-domain shift. (2026-09-05 audit: the inline meas/target/corr
+        // computations here ran on the 20 Hz measurement grid, which clamps
+        // to DC and gave a non-physical Step plateau; they also duplicated
+        // ~200 lines of evaluator DSP inside the view.)
+        const shiftIr = (
+          c: { time: number[]; impulse: number[]; step: number[] }, delaySec: number,
+        ): { timeMs: number[]; impulse: number[]; step: number[] } => {
+          const dt = c.time.length > 1 ? c.time[1] - c.time[0] : 0;
+          const k = dt > 0 ? Math.round(delaySec / dt) : 0;
+          const roll = (a: number[]) => {
+            if (k === 0) return a;
+            const out = new Array<number>(a.length);
+            for (let i = 0; i < a.length; i++) {
+              const j = i - k; // positive delay = later
+              out[i] = j >= 0 && j < a.length ? a[j] : 0;
+            }
+            return out;
+          };
+          return { timeMs: c.time.map(t => t * 1000), impulse: roll(c.impulse), step: roll(c.step) };
+        };
+        const perBand = await Promise.all(allBands.map(async (sb) => {
+          const res = await evaluateBandFull({
+            band: sb, freq: sb.measurement!.freq, includeIr: true, sampleRate: exportSampleRate(),
+          }).catch((e) => { console.error("[SUM IR] band eval failed:", e); return null; });
+          return { sb, res };
+        }));
         if (gen !== renderGen) return;
 
         // Σ measurement IR — populated by evaluateSum below (single source of truth).
         let measSum: { timeMs: number[]; impulse: number[]; step: number[] } | null = null;
-
-        // Build per-band measurement IrBandData — each normalized to 0dB peak (peak=100%)
         const measBands: IrBandData[] = [];
-        for (let i = 0; i < allBands.length; i++) {
-          const r = measResults[i];
-          if (!r) continue;
-          measBands.push({
-            bandName: allBands[i].name,
-            bandColor: allBands[i].color,
-            timeMs: irTime(r).map(t => t * 1000),
-            impulse: r.impulse,
-            step: r.step,
-          });
-        }
-
-        // --- Per-band targets ---
         const targetBands: IrBandData[] = [];
-
-        // Per-band target: use auto-ref from THAT band's measurement
-        const tgtBandPromises = allBands.map(async (sb) => {
-          if (!sb.targetEnabled) return null;
-          try {
-            const tc = JSON.parse(JSON.stringify(sb.target));
-            // b141.10: passband-aware auto-ref (was a hardcoded 200-2000 Hz
-            // window — outside the woofer's passband entirely).
-            tc.reference_level_db += autoRefLevel(
-              sb.measurement!.freq, sb.measurement!.magnitude,
-              sb.target.high_pass, sb.target.low_pass,
-            );
-            const tResp = await invoke<{ magnitude: number[]; phase: number[] }>("evaluate_target", { target: tc, freq });
-            if (gen !== renderGen) return null;
-            let tMag = tResp.magnitude;
-            let tPh = tResp.phase;
-            if (sb.target.high_pass || sb.target.low_pass) {
-              const [xm, xp] = await invoke<[number[], number[], number]>("compute_cross_section", {
-                freq, highPass: sb.target.high_pass, lowPass: sb.target.low_pass,
-              });
-              if (gen !== renderGen) return null;
-              tMag = tMag.map((v: number, i: number) => v + xm[i]);
-              tPh = tPh.map((v: number, i: number) => v + xp[i]);
-            }
-            // b139.4c: unified phase reconstruction (Gaussian + subsonic).
-            tPh = await reconstructTargetPhase(freq, tPh, sb.target.high_pass, sb.target.low_pass, exportSampleRate());
-            if (gen !== renderGen) return null;
-            // Normalize to 0 dB peak before IFFT (same as sum normalization)
-            let tPeakMag = -Infinity;
-            for (let j = 0; j < tMag.length; j++) {
-              if ((tMag[j] ?? -200) > tPeakMag) tPeakMag = tMag[j] ?? -200;
-            }
-            const tOffset = -tPeakMag;
-            const normMag = tMag.map(v => (v ?? -200) + tOffset);
-
-            // Apply delay as phase rotation BEFORE IFFT
-            const delay = irDelayByName[sb.name] ?? 0;
-            let adjPhase = tPh;
-            if (delay !== 0) {
-              adjPhase = tPh.map((p, j) => p + alignmentPhaseDeg(freq[j], delay));
-            }
-            const r = await invoke<ImpulseIpc>("compute_impulse", {
-              freq, magnitude: normMag, phase: adjPhase, sampleRate: sr,
-            });
-            if (gen !== renderGen) return null;
-            return { bandName: sb.name, bandColor: sb.color, timeMs: irTime(r).map(t => t * 1000), impulse: r.impulse, step: r.step, rawPeak: r.raw_peak || 0, stepRawPeak: r.step_raw_peak || 0 } as IrBandData;
-          } catch (_) { return null; }
-        });
-        const tgtBandResults = await Promise.all(tgtBandPromises);
-        if (gen !== renderGen) return;
-        for (const r of tgtBandResults) { if (r) targetBands.push(r); }
+        const corrBands: IrBandData[] = [];
+        for (const { sb, res } of perBand) {
+          if (!res?.ir) continue;
+          const delay = irDelayByName[sb.name] ?? 0;
+          const wrap = (c: { time: number[]; impulse: number[]; step: number[] }): IrBandData =>
+            ({ bandName: sb.name, bandColor: sb.color, ...shiftIr(c, delay) });
+          if (res.ir.measurement) measBands.push(wrap(res.ir.measurement));
+          if (res.ir.target) targetBands.push(wrap(res.ir.target));
+          if (res.ir.corrected) corrBands.push(wrap(res.ir.corrected));
+        }
 
         // Σ target IR — populated by evaluateSum below (single source of truth).
         let targetSum: { timeMs: number[]; impulse: number[]; step: number[] } | null = null;
-
-        // --- Per-band corrected (all bands) ---
-        const corrBands: IrBandData[] = [];
-        const corrBandPromises = allBands.map(async (sb) => {
-          try {
-            const sbFreq = [...sb.measurement!.freq];
-            let cMag = [...sb.measurement!.magnitude];
-            let cPh = [...sb.measurement!.phase!];
-            const sbSr = sb.measurement!.sample_rate ?? 48000;
-            const peqBands = sb.peqBands?.filter((p: PeqBand) => p.enabled) ?? [];
-            if (peqBands.length > 0) {
-              const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", { freq: sbFreq, bands: peqBands, sampleRate: exportSampleRate() });
-              if (gen !== renderGen) return null;
-              cMag = cMag.map((v, i) => v + (pm[i] ?? 0));
-              cPh = cPh.map((v, i) => v + (pp[i] ?? 0));
-            }
-            if (sb.targetEnabled && (sb.target.high_pass || sb.target.low_pass)) {
-              const [xm, xp] = await invoke<[number[], number[], number]>("compute_cross_section", {
-                freq: sbFreq, highPass: sb.target.high_pass, lowPass: sb.target.low_pass,
-              });
-              if (gen !== renderGen) return null;
-              cMag = cMag.map((v, i) => v + (xm[i] ?? 0));
-              cPh = cPh.map((v, i) => v + (xp[i] ?? 0));
-            }
-            // b139.4c: unified phase reconstruction (Gaussian + subsonic).
-            if (sb.targetEnabled) {
-              cPh = await reconstructTargetPhase(sbFreq, cPh, sb.target.high_pass, sb.target.low_pass, exportSampleRate());
-              if (gen !== renderGen) return null;
-            }
-            // Normalize to 0 dB peak before IFFT (same as sum normalization)
-            let cPeakMag = -Infinity;
-            for (let j = 0; j < cMag.length; j++) {
-              if ((cMag[j] ?? -200) > cPeakMag) cPeakMag = cMag[j] ?? -200;
-            }
-            const cOffset = -cPeakMag;
-            const normMag = cMag.map(v => (v ?? -200) + cOffset);
-
-            // Apply delay as phase rotation BEFORE IFFT
-            const delay = irDelayByName[sb.name] ?? 0;
-            let adjPhase = cPh;
-            if (delay !== 0) {
-              adjPhase = cPh.map((p, j) => p + alignmentPhaseDeg(sbFreq[j], delay));
-            }
-            const r = await invoke<ImpulseIpc>("compute_impulse", {
-              freq: sbFreq, magnitude: normMag, phase: adjPhase, sampleRate: sbSr,
-            });
-            if (gen !== renderGen) return null;
-            return { bandName: sb.name, bandColor: sb.color, timeMs: irTime(r).map(t => t * 1000), impulse: r.impulse, step: r.step, rawPeak: r.raw_peak || 0, stepRawPeak: r.step_raw_peak || 0 } as IrBandData;
-          } catch (_) { return null; }
-        });
-        const corrBandResults = await Promise.all(corrBandPromises);
-        if (gen !== renderGen) return;
-        for (const r of corrBandResults) { if (r) corrBands.push(r); }
 
         // Σ corrected IR — populated by evaluateSum below (single source of truth).
         let corrSum: { timeMs: number[]; impulse: number[]; step: number[] } | null = null;
