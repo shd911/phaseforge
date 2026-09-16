@@ -50,7 +50,7 @@ pub enum WindowType {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FirConfig {
-    pub taps: usize,          // 4096..262144
+    pub taps: usize,          // 4096..1048576
     pub sample_rate: f64,     // e.g. 48000
     pub max_boost_db: f64,    // e.g. 18.0
     pub noise_floor_db: f64,  // e.g. -60.0

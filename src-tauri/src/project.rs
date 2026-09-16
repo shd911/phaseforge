@@ -259,7 +259,8 @@ pub(crate) fn validate_project(project: &ProjectFile) -> Result<(), String> {
     let taps = project.export_taps;
     if !crate::fir::taps_valid(taps as usize) {
         return Err(format!(
-            "export_taps={taps} is invalid: must be a power of two between 32 and 262144"
+            "export_taps={taps} is invalid: must be a power of two between 32 and {}",
+            crate::fir::MAX_TAPS
         ));
     }
     let sr = project.export_sample_rate;

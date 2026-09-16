@@ -349,7 +349,7 @@ pub fn generate_min_phase_fir_iir(input: &IirPathInput) -> Result<FirModelResult
     let n_fft = cfg.taps;
     if !crate::fir::taps_valid(n_fft) || sr <= 0.0 {
         return Err(AppError::Config {
-            message: format!("invalid taps={} (power of two in 32..=262144) or sr={}", n_fft, sr),
+            message: format!("invalid taps={} (power of two in 32..={}) or sr={}", n_fft, crate::fir::MAX_TAPS, sr),
         });
     }
 
@@ -996,6 +996,78 @@ mod tests {
         assert!(max_err < 0.5,
             "shelved target: realised vs model max {:.2} dB at {:.0} Hz", max_err, worst_f);
     }
+    // ─── b141.35: extended export sets (352.8 / 384 kHz, 512K / 1024K taps) ───
+
+    /// The tap ceiling moved 2^18 → 2^20. `taps_valid` is the single gate in
+    /// front of the vDSP `assert!`, so the boundary is pinned here rather
+    /// than left to the three call sites that quote it in their messages.
+    #[test]
+    fn taps_valid_spans_the_new_ceiling_and_stops_above_it() {
+        for taps in [32usize, 4096, 262_144, 524_288, 1_048_576] {
+            assert!(crate::fir::taps_valid(taps), "{taps} must be accepted");
+        }
+        for taps in [16usize, 1_048_577, 2_097_152] {
+            assert!(!crate::fir::taps_valid(taps), "{taps} must be rejected");
+        }
+        assert_eq!(crate::fir::MAX_TAPS, 1_048_576);
+    }
+
+    /// End-to-end at the new maxima: 1048576 taps at 384 kHz through the IIR
+    /// cascade. Guards the two things a bigger FFT could break — a vDSP setup
+    /// that silently fails to allocate (would give an all-zero or NaN
+    /// impulse) and the N/2 delay convention, which the WAV export and every
+    /// band-alignment test depend on.
+    #[test]
+    fn iir_lr4_at_max_taps_and_384k_keeps_the_half_n_convention() {
+        let lp = lr4_filter(200.0);
+        let cfg = cfg_min(1_048_576, 384_000.0);
+        let freq = log_grid(512, 5.0, 30_000.0);
+        let out = generate_min_phase_fir_iir(&IirPathInput {
+            freq: &freq, hp: None, lp: Some(&lp), low_shelf: None, high_shelf: None,
+            peq: &[], config: &cfg,
+        }).expect("LR4 LP=200 at 1048576 taps / 384 kHz should succeed");
+
+        assert_eq!(out.impulse.len(), 1_048_576);
+        assert!(out.impulse.iter().all(|v| v.is_finite()), "non-finite sample in the impulse");
+        let energy: f64 = out.impulse.iter().map(|v| v * v).sum();
+        assert!(energy > 0.0, "impulse is all zeros — FFT setup failed to allocate?");
+
+        let p = peak_idx(&out.impulse);
+        let half = cfg.taps / 2;
+        // Same bound the 65536/48k tests use, scaled by the tap count: the LP
+        // rise time is a fixed number of seconds, so in samples it grows with
+        // both the taps and the sample rate.
+        let slack = 600 * (cfg.taps / 65_536) * 8;
+        assert!((half.saturating_sub(50)..=half + slack).contains(&p),
+            "peak idx={p} not centred near N/2={half} (slack {slack})");
+    }
+
+    /// 352.8 kHz is the other new rate and the only new one that is not a
+    /// multiple of 48 kHz — the biquad cascade is built from `sr`, so a rate
+    /// the coefficient math mishandles shows up as a wrong -6 dB point.
+    #[test]
+    fn iir_lr4_at_352k8_puts_the_crossover_at_minus_six_db() {
+        let lp = lr4_filter(200.0);
+        let cfg = cfg_min(524_288, 352_800.0);
+        let freq = log_grid(512, 5.0, 30_000.0);
+        let out = generate_min_phase_fir_iir(&IirPathInput {
+            freq: &freq, hp: None, lp: Some(&lp), low_shelf: None, high_shelf: None,
+            peq: &[], config: &cfg,
+        }).expect("LR4 LP=200 at 524288 taps / 352.8 kHz should succeed");
+
+        assert_eq!(out.impulse.len(), 524_288);
+        let at = |f: f64| {
+            let i = freq.iter().enumerate()
+                .min_by(|(_, a), (_, b)| (*a - f).abs().partial_cmp(&(*b - f).abs()).unwrap())
+                .map(|(i, _)| i).unwrap();
+            out.realized_mag[i]
+        };
+        // LR4 in PhaseForge terms = (BU4)^2 = -6 dB at Fc (CLAUDE.md).
+        assert!((at(200.0) - (-6.0)).abs() < 0.5,
+            "LR4 Fc=200 at 352.8 kHz: {:.2} dB, expected -6 dB", at(200.0));
+        assert!((at(20.0) - 0.0).abs() < 0.5,
+            "passband at 20 Hz: {:.2} dB, expected 0 dB", at(20.0));
+    }
 }
 
 #[cfg(test)]
@@ -1059,4 +1131,5 @@ mod wav_tail_tests {
             );
         }
     }
+
 }

@@ -39,11 +39,16 @@ use crate::dsp::minimum_phase_from_magnitude;
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Tap counts the FFT backend accepts: powers of two in 32..=262144.
+/// Tap counts the FFT backend accepts: powers of two in 32..=1048576.
 /// The vDSP backend `assert!`s on non-powers-of-two, and a panic inside an
 /// async Tauri command leaves the IPC promise pending forever, so every
 /// entry point (project load, both FIR generators) checks this first.
-pub const MAX_TAPS: usize = 262_144;
+///
+/// The ceiling is 2^20 since b141.35 (was 2^18). It is a product limit, not
+/// a backend one: `vDSP_create_fftsetupD` returns a working radix-2 setup up
+/// to log2n=23, and `generate_half_window` asks for 2x the tap count, so the
+/// largest transform a 1048576-tap export runs is 2^21 (~18 ms, measured).
+pub const MAX_TAPS: usize = 1_048_576;
 pub fn taps_valid(taps: usize) -> bool {
     taps.is_power_of_two() && (32..=MAX_TAPS).contains(&taps)
 }
@@ -52,11 +57,11 @@ pub fn taps_valid(taps: usize) -> bool {
 ///
 /// Formula: next power of 2 ≥ 3 × sample_rate / lowest_freq, then clamp to standard set.
 pub fn recommend_taps(lowest_freq: f64, sample_rate: f64) -> usize {
-    let standard = [4096, 8192, 16384, 32768, 65536, 131072, 262144];
+    let standard = [4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576];
     let desired = (3.0 * sample_rate / lowest_freq.max(10.0)) as usize;
     let pow2 = desired.next_power_of_two();
     // Find the smallest standard tap count >= pow2
-    *standard.iter().find(|&&s| s >= pow2).unwrap_or(&262144)
+    *standard.iter().find(|&&s| s >= pow2).unwrap_or(&MAX_TAPS)
 }
 
 // b140.13:   `export_wav_f32` / `export_wav_f64`  → `fir/wav.rs`

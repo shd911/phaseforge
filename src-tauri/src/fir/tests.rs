@@ -1434,4 +1434,48 @@ use super::*;
             pb_max, infra_at_7hz, attenuation);
     }
 
+/// b141.35: the cepstral route at the new export maxima. It is the second
+/// generator (linear-phase main, Gaussian, Bessel, composite+subsonic) and
+/// has its own taps gate; `generate_half_window` also asks windowing for 2x
+/// the tap count, so this is the largest transform the app can run — 2^21.
+/// A vDSP setup that failed to allocate would surface here as an all-zero or
+/// non-finite impulse.
+#[test]
+fn cepstral_model_fir_at_max_taps_and_384k_stays_flat() {
+    let n = 256;
+    let freq: Vec<f64> = (0..n)
+        .map(|i| {
+            let t = i as f64 / (n - 1) as f64;
+            (20.0_f64.ln() + t * (30000.0_f64.ln() - 20.0_f64.ln())).exp()
+        })
+        .collect();
+    let mag = vec![0.0; n];
+    let phase = vec![0.0; n];
 
+    let config = FirConfig {
+        taps: 1_048_576,
+        sample_rate: 384_000.0,
+        max_boost_db: 18.0,
+        noise_floor_db: -60.0,
+        window: WindowType::Blackman,
+        phase_mode: PhaseMode::LinearPhase,
+        iterations: 0, freq_weighting: false, narrowband_limit: false,
+        nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0,
+        linear_phase_main: true,
+        subsonic_cutoff_hz: None,
+    };
+
+    let result = generate_model_fir(&freq, &mag, &[], &phase, &config).unwrap();
+    assert_eq!(result.impulse.len(), 1_048_576);
+    assert!(result.impulse.iter().all(|v| v.is_finite()), "non-finite sample");
+    let energy: f64 = result.impulse.iter().map(|v| v * v).sum();
+    assert!(energy > 0.0, "impulse is all zeros — FFT setup failed to allocate?");
+
+    for (i, &f) in freq.iter().enumerate() {
+        if (100.0..=10000.0).contains(&f) {
+            assert!(result.realized_mag[i].abs() < 3.0,
+                "realized mag at {f:.0} Hz should be near 0 dB, got {:.1}",
+                result.realized_mag[i]);
+        }
+    }
+}
