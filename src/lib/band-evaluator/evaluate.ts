@@ -124,6 +124,11 @@ export interface BandEvalResult {
      *  when the shift had to shrink to keep the tail. Bands that disagree
      *  here are out of sync in a convolver. */
     wavDelaySamples: number;
+    /** b141.36: which Rust pipeline produced this FIR. "iir" builds the
+     *  impulse by running a delta through the biquad cascade and applies a
+     *  fixed raised-cosine tail taper — it never reads `window`, so the UI
+     *  disables that dropdown. "cepstral" windows the impulse and does. */
+    route: "iir" | "cepstral";
   };
   /** b139.4c: structured IR for the SPL/IR/Step views. Each sub-field is
    *  populated only when the underlying response exists; `time` is
@@ -465,6 +470,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
       normDb: result.norm_db,
       causality: result.causality,
       wavDelaySamples: result.wav_delay_samples ?? Math.floor(result.impulse.length / 2),
+      route: result.route,
     };
   }
 

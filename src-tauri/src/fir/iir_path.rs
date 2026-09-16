@@ -996,6 +996,42 @@ mod tests {
         assert!(max_err < 0.5,
             "shelved target: realised vs model max {:.2} dB at {:.0} Hz", max_err, worst_f);
     }
+    /// b141.36: the analytical cascade never reads `config.window` — it runs
+    /// a delta through the biquads and fades only the last 5 % of samples with
+    /// its own raised cosine. The Export tab now disables the Win dropdown on
+    /// this route and tells the user it does nothing, so that claim has to stay
+    /// true: if the cascade ever grows a use for the window, this test fails
+    /// and the UI text has to be revisited rather than quietly becoming a lie.
+    #[test]
+    fn iir_route_output_is_identical_for_every_window() {
+        let lp = lr4_filter(200.0);
+        let freq = log_grid(512, 5.0, 22800.0);
+        let windows = [
+            WindowType::Rectangular, WindowType::Hann, WindowType::Blackman,
+            WindowType::BlackmanHarris, WindowType::FlatTop, WindowType::Kaiser,
+            WindowType::DolphChebyshev,
+        ];
+        let mut reference: Option<Vec<f64>> = None;
+        for w in windows {
+            let mut cfg = cfg_min(4096, 48000.0);
+            cfg.window = w.clone();
+            let out = generate_min_phase_fir_iir(&IirPathInput {
+                freq: &freq, hp: None, lp: Some(&lp), low_shelf: None, high_shelf: None,
+                peq: &[], config: &cfg,
+            }).expect("IIR LR4 LP=200 should succeed");
+            match &reference {
+                None => reference = Some(out.impulse),
+                Some(r) => {
+                    let d = r.iter().zip(&out.impulse)
+                        .fold(0.0_f64, |a, (x, y)| a.max((x - y).abs()));
+                    assert_eq!(d, 0.0,
+                        "window {w:?} changed the IIR impulse by {d:e} — the Export tab \
+                         disables the Win dropdown on this route and says it has no effect");
+                }
+            }
+        }
+    }
+
     // ─── b141.35: extended export sets (352.8 / 384 kHz, 512K / 1024K taps) ───
 
     /// The tap ceiling moved 2^18 → 2^20. `taps_valid` is the single gate in

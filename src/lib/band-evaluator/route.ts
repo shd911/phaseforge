@@ -32,6 +32,15 @@ export interface FirInvokeResult {
   wav_delay_samples: number;
 }
 
+/** What `dispatchFirInvoke` returns: the Rust payload plus the route that
+ *  produced it. b141.36: the Export tab needs to know which pipeline ran —
+ *  the IIR cascade ignores the window setting, and a dropdown that silently
+ *  does nothing is worse than a disabled one. Reported by the dispatcher
+ *  rather than re-derived in the UI, so there is still exactly one predicate. */
+export interface FirDispatchResult extends FirInvokeResult {
+  route: "iir" | "cepstral";
+}
+
 /** Structurally-typed subset of FirRequestConfig — keeping a local
  *  interface here avoids importing back from band-evaluator.ts, which
  *  would create a cycle. TypeScript structural typing means the caller
@@ -104,7 +113,7 @@ export async function dispatchFirInvoke(
   firPeqMag: number[],
   firCombinedPhase: number[],
   cfg: DispatchFirConfig,
-): Promise<FirInvokeResult> {
+): Promise<FirDispatchResult> {
   const useIirPath =
     (await pickFirRoute(hp, lp, linearMain, subsonicCutoffHz, tiltDbPerOctave)) === "iir";
   // b141.2: a band whose HP and LP disagree on linear_phase (e.g. HP min +
@@ -116,7 +125,7 @@ export async function dispatchFirInvoke(
   const sharedFirConfig = buildSharedFirConfig(cfg, linearMain, subsonicCutoffHz, mixedPhase);
 
   if (useIirPath) {
-    return invoke<FirInvokeResult>("generate_model_fir_iir", {
+    const out = await invoke<FirInvokeResult>("generate_model_fir_iir", {
       freq: firFreq,
       hp,
       lp,
@@ -125,12 +134,14 @@ export async function dispatchFirInvoke(
       peq: enabledPeq,
       config: sharedFirConfig,
     });
+    return { ...out, route: "iir" };
   }
-  return invoke<FirInvokeResult>("generate_model_fir", {
+  const out = await invoke<FirInvokeResult>("generate_model_fir", {
     freq: firFreq,
     targetMag: firTargetMag,
     peqMag: firPeqMag,
     modelPhase: firCombinedPhase,
     config: sharedFirConfig,
   });
+  return { ...out, route: "cepstral" };
 }

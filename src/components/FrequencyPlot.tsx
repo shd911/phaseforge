@@ -390,6 +390,12 @@ export default function FrequencyPlot() {
   const [exportColors, setExportColors] = createSignal(DEFAULT_EXPORT_COLORS);
   // Export loading indicator
   const [exportComputing, setExportComputing] = createSignal(false);
+  /** b141.36: which FIR pipeline built the exported band. The analytical
+   *  cascade never reads the window setting, so the Win dropdown is
+   *  disabled while it is the active route instead of silently doing
+   *  nothing. Set from the evaluator result — never re-derived here. */
+  const [exportFirRoute, setExportFirRoute] = createSignal<"iir" | "cepstral" | null>(null);
+  const windowIsInert = () => exportFirRoute() === "iir";
   // WAV export state
   const [exportingWav, setExportingWav] = createSignal(false);
   const [exportWavError, setExportWavError] = createSignal<string | null>(null);
@@ -1792,7 +1798,7 @@ export default function FrequencyPlot() {
     const gen = ++renderGen;
     if (!band || !band.target) {
       try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
-      setShowLegend(false); setExportComputing(false);
+      setShowLegend(false); setExportComputing(false); setExportFirRoute(null);
       setCursorFreq("—"); setCursorSPL("—"); setCursorPhase("—");
       return;
     }
@@ -1821,9 +1827,10 @@ export default function FrequencyPlot() {
       });
       if (gen !== renderGen) return;
       if (!evalRes.fir || !evalRes.targetMag) {
-        setExportComputing(false);
+        setExportComputing(false); setExportFirRoute(null);
         return;
       }
+      setExportFirRoute(evalRes.fir.route);
       const freq = evalRes.freq;
       const targetMag = evalRes.targetMag;
       const peqMagArr = peqBands.length > 0 ? evalRes.peqMag : [];
@@ -4085,12 +4092,16 @@ export default function FrequencyPlot() {
               <option value={t}>{t >= 1024 ? (t / 1024) + "K" : t}</option>
             ))}
           </select>
-          <span class="readout-label">Win</span>
+          <span class="readout-label" style={{ opacity: windowIsInert() ? 0.45 : 1 }}>Win</span>
           <select
             class="tb-select tb-select-xs"
             value={exportWindow()}
             onChange={(e) => setExportWindow(e.currentTarget.value as WindowType)}
-            title="Оконная функция"
+            disabled={windowIsInert()}
+            style={{ opacity: windowIsInert() ? 0.45 : 1 }}
+            title={windowIsInert()
+              ? "Окно не применяется: полоса считается аналитическим каскадом (мин-фаза без subsonic и без гауссов). Импульс получается прогоном дельты через биквады, обрыва нет — сглаживать нечего. Окно влияет на линейной фазе, на гауссах/Бесселе, при subsonic и на измеренных таргетах."
+              : "Оконная функция. Заметна при коротких Taps и на резких переходах таргета: агрессивное окно укорачивает предзвон, но увеличивает отклонение от таргета."}
           >
             <optgroup label="Basic">
               <option value="Rectangular">Rectangular</option>
@@ -4121,6 +4132,14 @@ export default function FrequencyPlot() {
               <option value="Riesz">Riesz</option>
             </optgroup>
           </select>
+          <Show when={windowIsInert()}>
+            <span
+              style={{ color: "var(--text-muted)", "font-size": "var(--fs-sm)", "white-space": "nowrap" }}
+              title="Аналитический каскад строит импульс через биквады и гасит только последние 5 % отсчётов собственным спадом."
+            >
+              не применяется
+            </span>
+          </Show>
           <div style={{ "margin-left": "auto", display: "flex", "align-items": "center", gap: "var(--space-sm)" }}>
             <Show when={exportWavError()}>
               <span style={{ color: STATUS_BAD, "font-size": "var(--fs-sm)" }}>{exportWavError()}</span>
