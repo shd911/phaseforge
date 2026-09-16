@@ -1,6 +1,7 @@
 # PhaseForge — Project Rules
 
-> **Last reviewed:** 2026-09-05 (audit b141.26–31: min-phase at true Nyquist, cache snapshot keys, taps/project validation, dead-code −545 LOC; open items in docs/audit-2026-09-05.md).
+> **Last reviewed:** 2026-09-16 (b141.35–36: export sets to 384 kHz / 1024K taps,
+> Win dropdown disabled on the analytical route). Before that 2026-09-05 (audit b141.26–31: min-phase at true Nyquist, cache snapshot keys, taps/project validation, dead-code −545 LOC; open items in docs/audit-2026-09-05.md).
 > Файл актуализируется в конце каждой длинной сессии. Перед началом новой
 > — пробежать сверху вниз и удалить устаревшее.
 
@@ -60,10 +61,31 @@
   b141.27) — never key from the live store proxy and then read the proxy
   after an await. Do NOT JSON-clone bands before `evaluateSum`: the cache
   keys measurements by object identity, a clone = guaranteed miss.
-- **Taps**: `fir::taps_valid` (power of two, 32..=262144) is checked in both
-  generators and in `validate_project` (load_project/load_snapshot). The
+- **Taps**: `fir::taps_valid` (power of two, 32..=`MAX_TAPS`) is checked in
+  both generators and in `validate_project` (load_project/load_snapshot). The
   vDSP FFT `assert!`s otherwise and a panic in an async command hangs the
-  IPC promise forever.
+  IPC promise forever. `MAX_TAPS` = 2^20 since b141.35 (was 2^18) — a product
+  limit, not a backend one: vDSP takes radix-2 setups to log2n=23, and the
+  largest transform a 1024K export runs is 2^21 (`generate_half_window` asks
+  for 2x the taps). Quote the constant, never the number: the three error
+  messages that spelled out 262144 had to be fixed when it moved.
+- **Export sets** (b141.35): `STANDARD_SAMPLE_RATES` / `STANDARD_TAPS` in
+  lib/types.ts are the ONLY values the UI offers, and `loadProject` silently
+  falls back to 48000/65536 for anything else. Rust already accepts
+  8000..768000 for the rate, so a new rate is a frontend-only change; a new
+  tap count is not. Pinned against the Rust limits by
+  `src/lib/__tests__/export-sets.test.ts`.
+- **The window does NOT apply on the IIR route** (b141.36): the analytical
+  cascade builds its impulse by running a delta through the biquads and fades
+  only the last 5 % with its own raised cosine — `config.window` is never
+  read. The Export tab disables the Win dropdown when a band takes that route
+  (`fir.route`, reported by `dispatchFirInvoke` — do NOT re-derive the
+  condition in the UI, that is a second predicate beside `pick_fir_route`).
+  Pinned by `iir_route_output_is_identical_for_every_window`. Window choice
+  matters on the cepstral route, and mostly at short tap counts or sharp
+  target transitions: on a smooth LR4 target at 16384 taps the spread between
+  Rectangular and FlatTop is 0.015 dB, on a brickwall it is 170 ms vs 67 ms
+  of pre-ringing.
 - **Working range 20 Hz–30 kHz** (b141.34): `F_MIN_WORK`/`F_MAX_WORK` in
   lib/types.ts, `dsp::F_MAX_WORK` in Rust — crossover/PEQ input limits,
   extension grid, plot X axis, default crossover split. Sample-rate-bound
