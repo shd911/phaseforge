@@ -354,7 +354,7 @@ pub fn generate_model_fir(
     let causality = compute_causality(&impulse);
     info!("generate_model_fir: causality={:.4} ({}%)", causality, (causality * 100.0) as u32);
 
-    Ok(FirModelResult {
+    let mut result = FirModelResult {
         impulse,
         realized_mag,
         realized_phase,
@@ -363,5 +363,9 @@ pub fn generate_model_fir(
         norm_db,
         causality,
         wav_delay_samples,
-    })
+        ultrasonic_lp_hz: None,
+    };
+    // b141.40: replaces the old 40 kHz brick wall — see fir/ultrasonic.rs.
+    super::ultrasonic::apply_ultrasonic_lp(&mut result, freq);
+    Ok(result)
 }

@@ -112,4 +112,8 @@ pub struct FirModelResult {
     /// desync instead of being promised it never happens.
     #[serde(default)]
     pub wav_delay_samples: usize,
+    /// b141.40: corner of the zero-phase ultrasonic low-pass applied to this
+    /// FIR (`fir::ultrasonic`), None when the export rate is below 88.2 kHz.
+    #[serde(default)]
+    pub ultrasonic_lp_hz: Option<f64>,
 }

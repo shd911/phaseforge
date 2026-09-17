@@ -151,6 +151,23 @@ export default function ExportMetricsBar(props: { m: ExportMetrics }) {
       </>,
     },
     {
+      id: "uslp",
+      show: () => m().ultrasonicLpHz != null,
+      label: () => <>УЗ-ФНЧ: {fmtHz(m().ultrasonicLpHz ?? 0)}</>,
+      title: "Ультразвуковой ФНЧ",
+      body: () => <>
+        <p>При частоте экспорта от 88.2 kHz в каждый FIR встроен ФНЧ Баттерворта
+          8-го порядка (48 dB/oct) на {fmtHz(m().ultrasonicLpHz ?? 0)} с нулевой фазой.</p>
+        <p>Он ограничивает ультразвук, который иначе уходит в твитер и усилитель:
+          шумовая полоса выше 24 kHz — 6.6 kHz против 17 kHz у прежнего обрыва на 40 kHz
+          и 161 kHz у аналитического пути без ограничения (при 352.8 kHz). Худший пик
+          на выходе ниже на ~4 dB, звон обрыва на 40 kHz больше не попадает в предзвон.</p>
+        <p>Нулевая фаза не вносит задержку: ни одна полоса не сдвигается, сведение
+          и выравнивание не меняются. В полосе до 20 kHz потеря 0.007 dB; на графике FIR
+          плавно уходит вниз у правого края (−3 dB на {fmtHz(m().ultrasonicLpHz ?? 0)}).</p>
+      </>,
+    },
+    {
       id: "norm",
       label: () => <>Нормировка: {m().normDb.toFixed(1)} dB</>,
       title: "Нормировка",
@@ -173,11 +190,11 @@ export default function ExportMetricsBar(props: { m: ExportMetrics }) {
       <span>{m().sampleRate / 1000}k</span>
       <span>{m().window}</span>
       <span>{m().phaseLabel}</span>
-      <For each={items.slice(0, -1)}>{(it) => <MetricItem it={it} />}</For>
+      <For each={items.slice(0, -2)}>{(it) => <MetricItem it={it} />}</For>
       <Show when={m().peqCount > 0}>
         <span>PEQ: {m().peqCount}</span>
       </Show>
-      <MetricItem it={items[items.length - 1]} />
+      <For each={items.slice(-2)}>{(it) => <MetricItem it={it} />}</For>
     </div>
   );
 

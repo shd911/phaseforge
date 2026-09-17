@@ -30,6 +30,9 @@ export interface FirInvokeResult {
   /** b141.19: leading zeros applied to the shipped impulse = the band's
    *  latency. N/2 when the tail fits; less when it did not. */
   wav_delay_samples: number;
+  /** b141.40: corner of the zero-phase ultrasonic low-pass Rust applied
+   *  (fir/ultrasonic.rs); null below 88.2 kHz. */
+  ultrasonic_lp_hz?: number | null;
 }
 
 /** What `dispatchFirInvoke` returns: the Rust payload plus the route that

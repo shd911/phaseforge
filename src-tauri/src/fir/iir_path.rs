@@ -505,7 +505,7 @@ pub fn generate_min_phase_fir_iir(input: &IirPathInput) -> Result<FirModelResult
     // version; `realized_mag` / `realized_phase` came from raw FFT above.
     let impulse = wav_impulse;
 
-    Ok(FirModelResult {
+    let mut result = FirModelResult {
         impulse,
         realized_mag,
         realized_phase,
@@ -514,7 +514,12 @@ pub fn generate_min_phase_fir_iir(input: &IirPathInput) -> Result<FirModelResult
         norm_db,
         causality,
         wav_delay_samples: shift,
-    })
+        ultrasonic_lp_hz: None,
+    };
+    // b141.40: the biquads pass everything to Nyquist — same zero-phase
+    // ultrasonic low-pass as the cepstral route (fir/ultrasonic.rs).
+    super::ultrasonic::apply_ultrasonic_lp(&mut result, input.freq);
+    Ok(result)
 }
 
 /// Cosine-fade the last 5 % of samples to zero. Preserves the entire

@@ -96,6 +96,17 @@
   safety" — the plateau also lies inside it (10 periods let a −37 dB
   plateau pass as ringing). Pinned by `export-metrics.test.ts` (real
   impulses in gitignored `test-fixtures/prering/`).
+- **Ultrasonic low-pass** (b141.40, `fir/ultrasonic.rs`): at export rates
+  ≥ 88.2 kHz every FIR (both routes) gets a ZERO-PHASE Butterworth-8 @ 30 kHz,
+  applied as a spectral multiply of the finished impulse. The FIR target now
+  runs to 0.95·Nyquist — the old 40 kHz cap + noise-floor tail was a brick
+  wall whose ringing read as 2.24 ms pre-ring on a 352.8 kHz tweeter. Chosen
+  by measurement over BW4/BW8/LR24/LR48 × 30–50 kHz: 0.007 dB at 20 kHz,
+  6.6 kHz ultrasonic noise bandwidth (wall 17, IIR unlimited 161), −4 dB
+  worst-case peak. Do NOT make it min-phase: ~27 µs delay would reach only
+  bands with content above 30 kHz (19° at a 2 kHz crossover). Causality is
+  taken before the low-pass. 44.1/48 kHz exports are untouched. Pinned by
+  `tests/ultrasonic_lp.rs`.
 - **Working range 20 Hz–30 kHz** (b141.34): `F_MIN_WORK`/`F_MAX_WORK` in
   lib/types.ts, `dsp::F_MAX_WORK` in Rust — crossover/PEQ input limits,
   extension grid, plot X axis, default crossover split. Sample-rate-bound

@@ -1920,6 +1920,7 @@ export default function FrequencyPlot() {
         passbandLoHz: pbLo, passbandHiHz: pbHi,
         maxMagErr: Math.round(maxErr * 100) / 100,
         gdRippleMs: Math.round(gdRipple * 100) / 100,
+        ultrasonicLpHz: evalRes.fir.ultrasonicLpHz,
       });
 
       // Derive colors from band

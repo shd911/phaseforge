@@ -1120,6 +1120,8 @@ export interface ExportMetrics {
   ringZoneMs: number; ringZoneHz: number | null; ringZoneLinear: boolean;
   /** Passband the magnitude error and GD ripple are taken over. */
   passbandLoHz: number; passbandHiHz: number;
+  /** b141.40: zero-phase ultrasonic low-pass corner in the FIR, null if none. */
+  ultrasonicLpHz: number | null;
 }
 export const [exportMetrics, setExportMetrics] = createSignal<ExportMetrics | null>(null);
 

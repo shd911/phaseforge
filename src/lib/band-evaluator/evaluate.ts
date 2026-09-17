@@ -129,6 +129,8 @@ export interface BandEvalResult {
      *  fixed raised-cosine tail taper — it never reads `window`, so the UI
      *  disables that dropdown. "cepstral" windows the impulse and does. */
     route: "iir" | "cepstral";
+    /** b141.40: ultrasonic low-pass corner baked into the FIR, null if none. */
+    ultrasonicLpHz: number | null;
   };
   /** b139.4c: structured IR for the SPL/IR/Step views. Each sub-field is
    *  populated only when the underlying response exists; `time` is
@@ -402,10 +404,17 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
     const cfg = req.fir;
 
     // FIR-specific grid + target evaluation.
-    const fMaxFir = Math.min(40000, cfg.sampleRate / 2 * 0.95);
+    // b141.40: the target runs to 0.95·Nyquist. The old 40 kHz cap, followed
+    // by the noise-floor tail, was a brick wall (0 dB at 40 kHz, −79 dB at
+    // 41 kHz at 352.8 kHz) that rang at 40 kHz; band-limiting is now the
+    // zero-phase ultrasonic low-pass in Rust (fir/ultrasonic.rs). The point
+    // count grows with the span so the audio band keeps the density 512
+    // points gave over 5 Hz–40 kHz. At 44.1/48 kHz nothing changes.
+    const fMaxFir = cfg.sampleRate / 2 * 0.95;
+    const firPoints = Math.max(512, Math.round(512 * Math.log(fMaxFir / 5) / Math.log(40000 / 5)));
     const [firFreqRaw, firResp] = await invoke<[number[], TargetResponse]>(
       "evaluate_target_standalone",
-      { target: targetCurve, nPoints: 512, fMin: 5, fMax: fMaxFir },
+      { target: targetCurve, nPoints: firPoints, fMin: 5, fMax: fMaxFir },
     );
     const firTargetPhaseRaw = await reconstructTargetPhase(
       firFreqRaw, firResp.phase, band.target.high_pass, band.target.low_pass, evalSr,
@@ -471,6 +480,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
       causality: result.causality,
       wavDelaySamples: result.wav_delay_samples ?? Math.floor(result.impulse.length / 2),
       route: result.route,
+      ultrasonicLpHz: result.ultrasonic_lp_hz ?? null,
     };
   }
 

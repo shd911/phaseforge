@@ -15,6 +15,7 @@ mod cepstral;
 pub mod iir_path;
 pub mod dispatch;
 pub mod pipeline;
+pub mod ultrasonic;
 
 pub use types::*;
 pub use dispatch::{Route, route_for};
