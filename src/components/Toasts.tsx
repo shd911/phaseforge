@@ -19,6 +19,7 @@ export default function Toasts() {
       <For each={toasts()}>
         {(t) => (
           <div
+            role={t.kind === "warn" ? "alert" : "status"}
             style={{
               "pointer-events": "auto",
               padding: "10px 14px",

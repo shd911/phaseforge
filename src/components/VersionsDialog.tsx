@@ -198,7 +198,7 @@ export default function VersionsDialog() {
           <Show when={!snapshotsError()}>
             <Show
               when={snapshotsList().length > 0}
-              fallback={<div style={{ padding: "12px", color: "#888" }}>Версий ещё нет.</div>}
+              fallback={<div style={{ padding: "12px", color: "var(--text-secondary)" }}>Версий ещё нет.</div>}
             >
               <div class="versions-list" style={{ "max-height": "320px", "overflow-y": "auto", border: "1px solid #444", "border-radius": "4px" }}>
                 <For each={snapshotsList()}>

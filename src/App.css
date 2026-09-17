@@ -24,10 +24,12 @@
   --danger: #d94a4a;
   --success: #4ad97a;
   --warning: #d9a44a;
-  /* b141.4: single canonical amber for warning/stale states (was forked into
-     var(--warn-amber) / var(--warn-amber-text) / var(--warn-amber) across the sheet). */
-  --warn-amber: var(--warn-amber);
-  --warn-amber-text: var(--warn-amber-text);
+  /* b141.4: single canonical amber for warning/stale states. b141.38: the
+     consolidation left both tokens referencing themselves — a cyclic custom
+     property is invalid, so every amber warning rendered uncoloured. Values
+     are the pre-b141.4 literals. */
+  --warn-amber: #d97706;
+  --warn-amber-text: #fbbf24;
   --color-meas: #4A9EFF; /* b141.4: measurement-curve blue, distinct from --accent */
 
   --mono: "SF Mono", "Menlo", "Monaco", "Consolas", monospace;
@@ -570,6 +572,16 @@ body {
 }
 
 .legend-item:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* b141.38: keyboard focus was only visible on legend items — WebKit draws
+   no ring on the dark buttons. :focus-visible keeps mouse clicks ring-free. */
+button:focus-visible,
+[role="button"]:focus-visible,
+select:focus-visible,
+input[type="checkbox"]:focus-visible {
   outline: 1px solid var(--accent);
   outline-offset: 1px;
 }
@@ -1933,7 +1945,7 @@ body {
 .pn-label {
   display: block;
   font-size: var(--fs-base);
-  color: var(--text-dim);
+  color: var(--text-secondary);
   margin-top: var(--space-lg);
 
   margin-bottom: var(--space-xs);
