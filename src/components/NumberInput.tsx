@@ -81,17 +81,28 @@ export default function NumberInput(props: NumberInputProps) {
   };
   onCleanup(stopRepeat);
 
-  // Commit text edit
+  // Commit text edit. b141.38: a value outside min/max used to be clamped
+  // silently — the field flashes so the substitution is seen.
+  let rootEl!: HTMLDivElement;
+  const flashClamped = () => {
+    rootEl.classList.remove("num-input-clamped");
+    void rootEl.offsetWidth; // restart the animation on repeated clamps
+    rootEl.classList.add("num-input-clamped");
+  };
   const commit = () => {
     const n = parseFloat(inputEl.value);
-    if (!isNaN(n)) push(clamp(n));
-    else inputEl.value = fmt(val);
+    if (isNaN(n)) { inputEl.value = fmt(val); return; }
+    const c = clamp(n);
+    push(c);
+    if (c !== n) flashClamped();
   };
 
   return (
     <div
       class="num-input"
       ref={(el: HTMLDivElement) => {
+        rootEl = el;
+        el.addEventListener("animationend", () => el.classList.remove("num-input-clamped"));
         // Non-passive wheel handler — only when input inside is focused
         el.addEventListener("wheel", (e: WheelEvent) => {
           if (!el.contains(document.activeElement)) return;
@@ -120,6 +131,14 @@ export default function NumberInput(props: NumberInputProps) {
         onKeyDown={(e) => {
           if (e.key === "Enter") { e.preventDefault(); commit(); e.currentTarget.blur(); }
           if (e.key === "Escape") { inputEl.value = fmt(val); e.currentTarget.blur(); }
+          // b141.38: arrows step like the ± buttons (Shift ×10), which are
+          // mouse-only by design (tabIndex -1).
+          if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+            e.preventDefault();
+            commit();
+            const dir = e.key === "ArrowUp" ? 1 : -1;
+            push(clamp(val + dir * step(dir) * (e.shiftKey ? 10 : 1)));
+          }
         }}
         tabIndex={0}
       />

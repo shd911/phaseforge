@@ -2964,3 +2964,12 @@ input[type="checkbox"]:focus-visible {
 .metric-popover-body p:last-child {
   margin-bottom: 0;
 }
+
+/* b141.38: NumberInput flashes when a typed value was clamped to min/max. */
+.num-input-clamped .num-field {
+  animation: num-clamped 0.9s ease-out;
+}
+@keyframes num-clamped {
+  0%, 40% { border-color: var(--warn-amber); box-shadow: 0 0 0 1px var(--warn-amber); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
