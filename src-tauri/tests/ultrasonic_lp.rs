@@ -121,7 +121,7 @@ fn cfg(sr: f64, linear: bool) -> FirConfig {
 /// Mirrors evaluate.ts: log grid to 0.95·Nyquist + noise-floor tail.
 fn fir_grid(sr: f64) -> Vec<f64> {
     let fmax = sr / 2.0 * 0.95;
-    let n = 512.max((512.0 * (fmax / 5.0).ln() / (40_000.0f64 / 5.0).ln()).round() as usize);
+    let n = 512.max((512.0 * (fmax / 5.0).ln() / (40_000.0f64 / 5.0).ln()).ceil() as usize);
     (0..n).map(|i| 5.0 * (fmax / 5.0f64).powf(i as f64 / (n - 1) as f64)).collect()
 }
 

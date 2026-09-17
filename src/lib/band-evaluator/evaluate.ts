@@ -411,7 +411,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
     // count grows with the span so the audio band keeps the density 512
     // points gave over 5 Hz–40 kHz. At 44.1/48 kHz nothing changes.
     const fMaxFir = cfg.sampleRate / 2 * 0.95;
-    const firPoints = Math.max(512, Math.round(512 * Math.log(fMaxFir / 5) / Math.log(40000 / 5)));
+    const firPoints = Math.max(512, Math.ceil(512 * Math.log(fMaxFir / 5) / Math.log(40000 / 5)));
     const [firFreqRaw, firResp] = await invoke<[number[], TargetResponse]>(
       "evaluate_target_standalone",
       { target: targetCurve, nPoints: firPoints, fMin: 5, fMax: fMaxFir },

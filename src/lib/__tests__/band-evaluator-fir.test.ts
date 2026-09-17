@@ -236,12 +236,20 @@ describe("evaluateBandFull FIR grid (b139.5.3)", () => {
     expect(freq[freq.length - 1]).toBeCloseTo(48000 / 2 * 0.999, 0);
   });
 
-  it("FIR grid caps at 40 kHz when Nyquist · 0.95 > 40 kHz (sr=176.4k); tail still appended", async () => {
+  // b141.40: no 40 kHz cap any more — that cap plus the noise-floor tail was
+  // a brick wall. The grid runs to 0.95·Nyquist, keeping the audio-band
+  // density 512 points had over 5 Hz–40 kHz; the ultrasonic low-pass lives
+  // in Rust (fir/ultrasonic.rs).
+  it("FIR grid runs to Nyquist · 0.95 at sr=176.4k with audio-band density kept; tail appended", async () => {
     const band = flatBand();
     const { freq } = await captureFirArgs2(band, 176400);
-    expect(freq.length).toBe(512 + 32);
+    const fMax = 176400 / 2 * 0.95;
+    const n = freq.length - 32;
+    expect(n).toBe(Math.ceil(512 * Math.log(fMax / 5) / Math.log(40000 / 5)));
     expect(freq[0]).toBeCloseTo(5, 5);
-    expect(freq[511]).toBeCloseTo(40000, 0);
+    expect(freq[n - 1]).toBeCloseTo(fMax, 0);
+    const perOctave = (n - 1) / Math.log2(fMax / 5);
+    expect(perOctave).toBeGreaterThanOrEqual(511 / Math.log2(40000 / 5) - 1e-9);
     expect(freq[freq.length - 1]).toBeCloseTo(176400 / 2 * 0.999, 0);
   });
 
