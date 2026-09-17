@@ -112,6 +112,17 @@ describe("compute_peq_complex sample-rate contract (b141.5)", () => {
     for (const c of peqCalls) expect(c.sampleRate).toBe(96000);
   });
 
+  // b141.38: a 96 kHz measurement with a 48 kHz export used to put IR-grid
+  // PEQ evaluations above 24 kHz, where the biquad response mirrors.
+  it("IR grids stop at the export Nyquist when the measurement rate is higher", async () => {
+    const band = bandWithPeq();
+    band.measurement!.sample_rate = 96000;
+    await evaluateBandFull({ band, sampleRate: 48000, includeIr: true });
+    await evaluateSum([band], { includeIr: true, sampleRate: 48000 });
+    expect(peqCalls.length).toBeGreaterThan(2);
+    for (const c of peqCalls) expect(Math.max(...c.freq)).toBeLessThanOrEqual(24000 + 1e-6);
+  });
+
   it("evaluateSum threads sampleRate down to per-band PEQ calls (incl. IR)", async () => {
     await evaluateSum([bandWithPeq()], { includeIr: true, sampleRate: 96000 });
     expect(peqCalls.length).toBeGreaterThan(0);

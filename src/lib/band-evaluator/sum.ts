@@ -471,7 +471,12 @@ async function evaluateSumImpl(
   // then compute_impulse for each category.
   let irOut: SumEvalResult["ir"];
   if (options?.includeIr) {
-    const irSr = Math.max(48000, ...bands.map(b => b.measurement?.sample_rate ?? 48000));
+    // b141.38: capped at the export rate — see evaluate.ts (PEQ above the
+    // export Nyquist mirrors back onto the IR grid).
+    const irSr = Math.min(
+      Math.max(48000, ...bands.map(b => b.measurement?.sample_rate ?? 48000)),
+      sumSr,
+    );
     const irFMax = Math.min(40000, irSr / 2 * 0.95);
     const irFreqBase = buildLogGrid(1024, 5, irFMax);
     // b140.5: extend up to Nyquist with explicit silent tail. The dummy

@@ -479,7 +479,12 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
   let ir: BandEvalResult["ir"];
   if (req.includeIr) {
     ir = {};
-    const sr = measurement?.sample_rate ?? 48000;
+    // b141.38 (external audit): the IR grid ran to the MEASUREMENT Nyquist
+    // while PEQ biquads are evaluated at the export rate. With a 96 kHz
+    // measurement and a 48 kHz export, a biquad above its own Nyquist is
+    // periodic — a 16.9 kHz +3 dB peak reappeared as +3 dB at 31.1 kHz on
+    // IR/Step. The exported filter has nothing above the export Nyquist.
+    const sr = Math.min(measurement?.sample_rate ?? 48000, evalSr);
     /** Raw-grid measurement IR: only when no target is available to extend
      *  with. `interp_single` holds |H(freq[0])| flat down to DC, so a
      *  measurement starting at 20 Hz gets a non-physical step plateau
