@@ -2944,3 +2944,11 @@ body {
   margin-bottom: var(--space-md);
 }
 .sum-hint p { margin: 0 0 var(--space-md); }
+
+/* b141.37: Export metric explanations */
+.metric-popover-body p {
+  margin: 0 0 6px;
+}
+.metric-popover-body p:last-child {
+  margin-bottom: 0;
+}

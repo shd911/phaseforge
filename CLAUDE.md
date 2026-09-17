@@ -86,6 +86,16 @@
   target transitions: on a smooth LR4 target at 16384 taps the spread between
   Rectangular and FlatTop is 0.015 dB, on a brickwall it is 170 ms vs 67 ms
   of pre-ringing.
+- **Export metrics: pre-ring ≠ floor** (b141.37, `lib/export-metrics.ts`).
+  Pre-ring = first crossing of −60 dB → peak; floor = loudest pre-peak
+  level OUTSIDE the ring zone (2 + slope/12 periods, ≥ 4, of the band's
+  linear-phase HP/LP). The old single −80 dB threshold read wrapped tails
+  as ringing: 79 ms at 64K vs 5.5 ms true on a real 352.8 kHz band with
+  20/30 Hz PEQ boosts. A floor louder than −66 dB raises the threshold and
+  the value is shown as a lower bound («≥»). Do not widen the zone "for
+  safety" — the plateau also lies inside it (10 periods let a −37 dB
+  plateau pass as ringing). Pinned by `export-metrics.test.ts` (real
+  impulses in gitignored `test-fixtures/prering/`).
 - **Working range 20 Hz–30 kHz** (b141.34): `F_MIN_WORK`/`F_MAX_WORK` in
   lib/types.ts, `dsp::F_MAX_WORK` in Rust — crossover/PEQ input limits,
   extension grid, plot X axis, default crossover split. Sample-rate-bound

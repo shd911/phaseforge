@@ -1111,6 +1111,15 @@ export interface ExportMetrics {
   taps: number; sampleRate: number; window: string; phaseLabel: string;
   peqCount: number; normDb: number; causality: number;
   preRingMs: number; maxMagErr: number; gdRippleMs: number;
+  /** b141.37: pre-ring threshold (dB re peak), raised above a loud floor. */
+  preRingThresholdDb: number;
+  /** Floor raised the threshold — preRingMs is a lower bound. */
+  preRingLimited: boolean;
+  /** Loudest pre-peak level outside the ring zone; null = no room to measure. */
+  floorDb: number | null;
+  ringZoneMs: number; ringZoneHz: number | null; ringZoneLinear: boolean;
+  /** Passband the magnitude error and GD ripple are taken over. */
+  passbandLoHz: number; passbandHiHz: number;
 }
 export const [exportMetrics, setExportMetrics] = createSignal<ExportMetrics | null>(null);
 

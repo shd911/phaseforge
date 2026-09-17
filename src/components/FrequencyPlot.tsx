@@ -15,6 +15,8 @@ import { exportBandWav } from "../lib/fir-export";
 import { showToast } from "../lib/toast";
 import { alignmentPhaseDeg, STANDARD_SAMPLE_RATES, STANDARD_TAPS, F_MIN_WORK, F_MAX_WORK, F_MAX_REF } from "../lib/types";
 import { preRingZoneMs } from "../lib/pre-ring";
+import { analyzePreRing, ringZone } from "../lib/export-metrics";
+import ExportMetricsBar from "./ExportMetricsBar";
 import { autoRefLevel } from "../lib/band-evaluator/extension";
 import { peqStale } from "../stores/peq-optimize";
 import { showStaleConfirmDialog } from "./StalePeqExportDialog";
@@ -1860,25 +1862,10 @@ export default function FrequencyPlot() {
       // Normalize model mag (combined = target+peq, shifted by FIR norm)
       const normModelMag = targetMag.map((v: number, i: number) => (v + (peqMagArr[i] ?? 0)) - firResult.norm_db);
 
-      // Compute export metrics from FIR result
-      // Pre-ringing: time from first significant sample to peak (ms).
-      // Min-phase WAVs carry N/2 leading zeros (delay convention) — those
-      // exact-zero samples are latency, not pre-ringing, so
-      // the metric starts at the first sample above -80 dB of peak.
-      // -80 dB here is a perceptual display threshold; deliberately looser
-      // than the -100 dB content-preservation threshold of the WAV shift.
-      let peakIdx = 0, peakVal = 0;
-      for (let i = 0; i < firResult.impulse.length; i++) {
-        if (Math.abs(firResult.impulse[i]) > peakVal) {
-          peakVal = Math.abs(firResult.impulse[i]);
-          peakIdx = i;
-        }
-      }
-      let firstSigIdx = peakIdx;
-      for (let i = 0; i < peakIdx; i++) {
-        if (Math.abs(firResult.impulse[i]) > peakVal * 1e-4) { firstSigIdx = i; break; }
-      }
-      const preRingMs = peakIdx > firstSigIdx ? firResult.time_ms[peakIdx] - firResult.time_ms[firstSigIdx] : 0;
+      // b141.37: pre-ring and the pre-peak floor are measured separately —
+      // the floor used to pass as ringing on short filters (export-metrics.ts).
+      const zone = ringZone(band as BandState);
+      const pre = analyzePreRing(firResult.impulse, firResult.sample_rate, zone.ms);
 
       // Max magnitude error in passband (realized vs model)
       const modelMag = targetMag.map((v: number, i: number) => v + (peqMagArr[i] ?? 0));
@@ -1921,7 +1908,11 @@ export default function FrequencyPlot() {
         phaseLabel,
         peqCount: peqBands.length, normDb: firResult.norm_db,
         causality: Math.round(firResult.causality * 100),
-        preRingMs: Math.round(preRingMs * 100) / 100,
+        preRingMs: Math.round(pre.preRingMs * 100) / 100,
+        preRingThresholdDb: pre.thresholdDb, preRingLimited: pre.limited,
+        floorDb: pre.floorDb,
+        ringZoneMs: zone.ms, ringZoneHz: zone.hz, ringZoneLinear: zone.linear,
+        passbandLoHz: pbLo, passbandHiHz: pbHi,
         maxMagErr: Math.round(maxErr * 100) / 100,
         gdRippleMs: Math.round(gdRipple * 100) / 100,
       });
@@ -4209,36 +4200,8 @@ export default function FrequencyPlot() {
             </tbody>
           </table>
         </div>
-        {/* Export metrics bar */}
         <Show when={exportMetrics()}>
-          {(m) => (
-            <div class="export-metrics" style={{
-              display: "flex", "flex-wrap": "wrap", gap: "6px 14px",
-              padding: "3px 8px", "font-size": "var(--fs-sm)", color: "#b0b0bc",
-              "border-top": "1px solid #2a2a35",
-            }}>
-              <span>{m().taps} taps</span>
-              <span>{m().sampleRate / 1000}k</span>
-              <span>{m().window}</span>
-              <span>{m().phaseLabel}</span>
-              <span style={{ color: m().causality >= 95 ? STATUS_GOOD : m().causality >= 80 ? STATUS_WARN : STATUS_BAD }}>
-                Causal: {m().causality}%
-              </span>
-              <Show when={m().preRingMs > 0}>
-                <span>Пред-звон: {m().preRingMs} ms</span>
-              </Show>
-              <span style={{ color: m().maxMagErr <= 0.5 ? STATUS_GOOD : m().maxMagErr <= 1.5 ? STATUS_WARN : STATUS_BAD }}>
-                Mag err: {m().maxMagErr} dB
-              </span>
-              <span style={{ color: m().gdRippleMs <= 1 ? STATUS_GOOD : m().gdRippleMs <= 3 ? STATUS_WARN : STATUS_BAD }}>
-                Рябь ГЗ: {m().gdRippleMs} ms
-              </span>
-              <Show when={m().peqCount > 0}>
-                <span>PEQ: {m().peqCount}</span>
-              </Show>
-              <span>Нормировка: {m().normDb.toFixed(1)} dB</span>
-            </div>
-          )}
+          {(m) => <ExportMetricsBar m={m()} />}
         </Show>
       </Show>
       <Show when={isSum() && legendEntries.length > 0 && plotTab() !== "gd" && plotTab() !== "export"}>
