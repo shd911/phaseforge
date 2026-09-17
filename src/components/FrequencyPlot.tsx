@@ -31,6 +31,7 @@ import {
   STATUS_GOOD, STATUS_WARN, STATUS_BAD,
   DEFAULT_IR_COLORS, DEFAULT_GD_COLORS, DEFAULT_EXPORT_COLORS,
   irDataCacheKey,
+  keptLogXRange,
 } from "../lib/plot-helpers";
 import { hasActiveSubsonicProtect } from "../lib/types";
 import { evaluateBandFull, evaluateSum, reconstructTargetPhase } from "../lib/band-evaluator";
@@ -1744,7 +1745,10 @@ export default function FrequencyPlot() {
     }
     if (chartIsGd) {
       const ys = chart!.scales["y"];
+      const xs = chart!.scales["x"];
       if (ys?.min != null && ys?.max != null) { gdUserYMin = ys.min; gdUserYMax = ys.max; }
+      // b141.39: GD shares the log-frequency X range with SPL/Export.
+      if (xs?.min != null && xs?.max != null) { persistedXMin = xs.min; persistedXMax = xs.max; }
     }
     if (chartIsMag) {
       const ms = chart!.scales["mag"];
@@ -1943,9 +1947,11 @@ export default function FrequencyPlot() {
           { label: "FIR °", stroke: expClr.firPhase, width: 1, dash: [4, 4], scale: "phase" },
         ],
         scales: {
-          x: { min: F_MIN_WORK, max: F_MAX_WORK, distr: 3 },
+          // b141.39: keep the user's frequency and phase zoom across rebuilds
+          // (taps / rate / window / band edits all rebuild this chart).
+          x: { ...keptLogXRange(persistedXMin, persistedXMax, F_MIN_WORK, F_MAX_WORK), distr: 3 },
           mag: { auto: false, range: () => [curMagMin, curMagMax] as uPlot.Range.MinMax },
-          phase: { auto: false, range: [-180, 180] },
+          phase: { auto: false, range: () => [curPhaseMin, curPhaseMax] as uPlot.Range.MinMax },
         },
         axes: [
           { stroke: "#9b9ba6", grid: { stroke: "rgba(255,255,255,0.12)" }, ticks: { stroke: "rgba(255,255,255,0.20)" },
@@ -2858,7 +2864,7 @@ export default function FrequencyPlot() {
       width: w, height: h,
       series: uSeries,
       scales: {
-        x: { min: F_MIN_WORK, max: F_MAX_WORK, distr: 3 },
+        x: { ...keptLogXRange(persistedXMin, persistedXMax, F_MIN_WORK, F_MAX_WORK), distr: 3 },
         y: { auto: false, range: [yMin, yMax] as uPlot.Range.MinMax },
       },
       axes: [

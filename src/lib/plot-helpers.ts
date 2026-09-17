@@ -85,6 +85,20 @@ export const CORRECTED_COLOR = "#22C55E";
 export const MEAS_DEFAULT_COLOR = "#4A9EFF";
 
 // --- Status thresholds use CSS vars, but fallback for canvas ---
+/** b141.39: frequency range a log-X chart (SPL, Export, GD) keeps across a
+ *  rebuild. Export and GD used to hard-code the working range on every
+ *  rebuild, so changing taps, rate, window or any band parameter snapped the
+ *  user's zoom back to 20 Hz–30 kHz. A range saved from a linear time chart
+ *  (IR/Step, ms, may be ≤ 0) is not a frequency range and is ignored. */
+export function keptLogXRange(
+  savedMin: number | null, savedMax: number | null, fallbackMin: number, fallbackMax: number,
+): { min: number; max: number } {
+  if (savedMin != null && savedMax != null && savedMin > 0 && savedMax > savedMin) {
+    return { min: savedMin, max: savedMax };
+  }
+  return { min: fallbackMin, max: fallbackMax };
+}
+
 export const STATUS_GOOD = "#22C55E";
 export const STATUS_WARN = "#FFD700";
 export const STATUS_BAD = "#EF4444";
