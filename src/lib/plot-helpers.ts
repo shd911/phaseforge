@@ -220,40 +220,90 @@ export function wrapPhase(phase: number[]): (number | null)[] {
 
 /** b141.44: frequency always labelled on a log-frequency axis when visible. */
 export const PINNED_FREQ_LABEL_HZ = 20_000;
-/** Minimum centre-to-centre gap between two X labels ("20k", "200", "1.5k"). */
-export const FREQ_LABEL_MIN_PX = 30;
+/** Approximate label metrics for the axis font (for overlap checks). */
+const LABEL_CHAR_PX = 7;
+const LABEL_GAP_PX = 8;
 
-/** Which log-axis splits get a label. uPlot drops labels that do not fit and
- *  20 kHz — the edge of the audio band — was often among them. Priority:
- *  20 kHz, then decades (1·10ⁿ), then 2·10ⁿ and 5·10ⁿ, then the rest; a label
- *  is kept only if it clears every kept label by `minPx`. Returns splits with
- *  unlabelled entries nulled, the shape uPlot's axis `filter` expects. */
+/** "20k", "1.5k", "300", "20" — the one tick format for frequency axes. */
+export function fmtFreqTick(v: number): string {
+  if (v >= 1000) return `${Number((v / 1000).toFixed(2))}k`;
+  return String(Number(v.toFixed(v < 10 ? 1 : 0)));
+}
+
+/** b141.45: tick positions on round frequencies only. uPlot's log splits start
+ *  from the scale minimum, so after a scroll or zoom they landed on values
+ *  like 284.8, 1.085k, 3.255k. Here: m·10ⁿ for m = 1..9 inside [min, max];
+ *  when that leaves fewer than three (deep zoom), a round linear step
+ *  (19.6k, 19.7k …). */
+export function niceFreqSplits(min: number, max: number): number[] {
+  if (!(min > 0) || !(max > min)) return [];
+  const coarse: number[] = [];
+  for (let e = Math.floor(Math.log10(min)); e <= Math.floor(Math.log10(max)); e++) {
+    const dec = Math.pow(10, e);
+    for (let m = 1; m <= 9; m++) {
+      const v = m * dec;
+      if (v >= min && v <= max) coarse.push(v);
+    }
+  }
+  if (coarse.length >= 3) return coarse;
+  // Deep zoom: a round linear step (…, 100, 200, 500 Hz) with at most 12 ticks.
+  const base = Math.pow(10, Math.floor(Math.log10(max - min)));
+  for (const step of [base / 10, base / 5, base / 2, base]) {
+    const first = Math.ceil(min / step) * step;
+    const n = Math.floor((max - first) / step + 1e-9) + 1;
+    if (n <= 12) {
+      return Array.from({ length: Math.max(0, n) }, (_, k) => Math.round((first + k * step) * 1e6) / 1e6);
+    }
+  }
+  return coarse;
+}
+
+/** Which splits get a label. Priority: 20 kHz, then decades (1·10ⁿ), then
+ *  2·10ⁿ and 5·10ⁿ, then the rest; a label is kept only if its text does not
+ *  touch a kept one. Returns splits with unlabelled entries nulled, the shape
+ *  uPlot's axis `filter` expects. */
 export function pickFreqLabels(
-  splits: number[], posOf: (v: number) => number, minPx = FREQ_LABEL_MIN_PX,
+  splits: number[], posOf: (v: number) => number,
+  widthOf: (v: number) => number = (v) => fmtFreqTick(v).length * LABEL_CHAR_PX,
 ): (number | null)[] {
   const rank = (v: number): number => {
     if (Math.abs(v - PINNED_FREQ_LABEL_HZ) < 1e-6) return 0;
-    const m = Math.round(v / Math.pow(10, Math.floor(Math.log10(v) + 1e-9)));
-    return m === 1 ? 1 : m === 2 || m === 5 ? 2 : 3;
+    const dec = Math.pow(10, Math.floor(Math.log10(v) + 1e-9));
+    const m = v / dec;
+    if (Math.abs(m - Math.round(m)) > 1e-6) return 4;
+    const mi = Math.round(m);
+    return mi === 1 ? 1 : mi === 2 || mi === 5 ? 2 : 3;
   };
   const order = splits
     .map((v, i) => ({ v, i, r: v > 0 && Number.isFinite(v) ? rank(v) : 99 }))
     .filter((s) => s.r < 99)
     .sort((a, b) => a.r - b.r || a.i - b.i);
-  const kept: number[] = [];
+  const kept: { px: number; half: number }[] = [];
   const keep = new Set<number>();
   for (const s of order) {
     const px = posOf(s.v);
     if (!Number.isFinite(px)) continue;
-    if (kept.every((k) => Math.abs(k - px) >= minPx)) { kept.push(px); keep.add(s.i); }
+    const half = widthOf(s.v) / 2;
+    if (kept.every((k) => Math.abs(k.px - px) >= k.half + half + LABEL_GAP_PX)) {
+      kept.push({ px, half });
+      keep.add(s.i);
+    }
   }
   return splits.map((v, i) => (keep.has(i) ? v : null));
 }
 
-/** uPlot axis `filter` for log-frequency X axes (SPL, Export, GD, baffle step). */
+/** uPlot axis `filter` for log-frequency X axes. */
 export function freqAxisFilter(u: { valToPos: (v: number, scale: string) => number }, splits: number[]): (number | null)[] {
   return pickFreqLabels(splits, (v) => u.valToPos(v, "x"));
 }
+
+/** Spread into every log-frequency X axis (SPL, Export, GD, baffle step):
+ *  round tick positions, 20 kHz pinned, non-overlapping integer-style labels. */
+export const freqAxisTicks = {
+  splits: (_u: unknown, _axisIdx: number, min: number, max: number) => niceFreqSplits(min, max),
+  filter: freqAxisFilter,
+  values: (_u: unknown, vals: (number | null)[]) => vals.map((v) => (v == null ? "" : fmtFreqTick(v))),
+};
 
 // --- Frequency formatting ---
 export function fmtFreq(v: number): string {
