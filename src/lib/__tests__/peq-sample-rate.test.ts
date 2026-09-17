@@ -129,3 +129,23 @@ describe("compute_peq_complex sample-rate contract (b141.5)", () => {
     for (const c of peqCalls) expect(c.sampleRate).toBe(96000);
   });
 });
+
+// b141.42: Σ IR/Step passed a band's measurement grid straight from the store.
+// A SolidJS proxy array reached the cached result and structuredClone threw
+// DataCloneError — per-band curves vanished and Σ IR/Step drew nothing.
+describe("evaluateBandFull with a store-proxy freq grid (b141.42)", () => {
+  it("does not throw and returns IR curves", async () => {
+    const { createStore } = await import("solid-js/store");
+    const [store] = createStore({ bands: [bandWithPeq()] });
+    const sb = store.bands[0];
+    const res = await evaluateBandFull({
+      band: sb as BandState, freq: sb.measurement!.freq, includeIr: true, sampleRate: 96000,
+    });
+    expect(res.ir?.measurement).toBeTruthy();
+    // second call is served from the cache — the clone path that threw
+    const again = await evaluateBandFull({
+      band: sb as BandState, freq: sb.measurement!.freq, includeIr: true, sampleRate: 96000,
+    });
+    expect(again.ir?.target).toBeTruthy();
+  });
+});

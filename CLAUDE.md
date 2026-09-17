@@ -61,6 +61,9 @@
   b141.27) — never key from the live store proxy and then read the proxy
   after an await. Do NOT JSON-clone bands before `evaluateSum`: the cache
   keys measurements by object identity, a clone = guaranteed miss.
+  The snapshot also copies `freq` (b141.42): a store-proxy grid reaching the
+  cached result makes structuredClone throw DataCloneError — Σ IR/Step drew
+  nothing for 10 releases because of it.
 - **Taps**: `fir::taps_valid` (power of two, 32..=`MAX_TAPS`) is checked in
   both generators and in `validate_project` (load_project/load_snapshot). The
   vDSP FFT `assert!`s otherwise and a panic in an async command hangs the

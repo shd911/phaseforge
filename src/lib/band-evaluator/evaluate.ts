@@ -222,7 +222,13 @@ export function snapshotBandRequest(req: BandEvalRequest): BandEvalRequest {
     settings: b.settings ? JSON.parse(JSON.stringify(b.settings)) : b.settings,
     measurement: b.measurement,
   };
-  return { ...req, band, fir: req.fir ? { ...req.fir } : req.fir };
+  // b141.42: `freq` is copied too. The Σ IR/Step view passed a band's
+  // measurement grid straight from the store — a SolidJS proxy array. It ends
+  // up in the result, and the cache's structuredClone throws DataCloneError on
+  // a proxy: every per-band evaluation failed and Σ IR/Step drew nothing,
+  // except when the band tab had already cached a plain-array result.
+  const freq = req.freq ? Array.from(req.freq) : req.freq;
+  return { ...req, band, freq, fir: req.fir ? { ...req.fir } : req.fir };
 }
 
 async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResult> {
