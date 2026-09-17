@@ -1,6 +1,7 @@
 import { createSignal, createEffect, on, onCleanup, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import uPlot from "uplot";
+import { freqAxisFilter } from "../lib/plot-helpers";
 import type { BaffleConfig, BaffleStepPreview } from "../lib/types";
 import NumberInput from "./NumberInput";
 
@@ -61,6 +62,7 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
           stroke: "#8b8b96",
           grid: { stroke: "rgba(255,255,255,0.06)" },
           ticks: { stroke: "rgba(255,255,255,0.12)" },
+          filter: freqAxisFilter,
           values: (_u: uPlot, vals: number[]) =>
             vals.map((v) => {
               if (v == null) return "";

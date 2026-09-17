@@ -32,6 +32,7 @@ import {
   DEFAULT_IR_COLORS, DEFAULT_GD_COLORS, DEFAULT_EXPORT_COLORS,
   irDataCacheKey,
   keptLogXRange,
+  freqAxisFilter,
 } from "../lib/plot-helpers";
 import { hasActiveSubsonicProtect } from "../lib/types";
 import { evaluateBandFull, evaluateSum, reconstructTargetPhase } from "../lib/band-evaluator";
@@ -1072,6 +1073,7 @@ export default function FrequencyPlot() {
         stroke: "#9b9ba6",
         grid: { stroke: "rgba(255,255,255,0.12)" },
         ticks: { stroke: "rgba(255,255,255,0.20)" },
+        filter: freqAxisFilter,
         values: (_u: uPlot, vals: number[]) =>
           vals.map((v) => {
             if (v == null) return "";
@@ -1958,7 +1960,7 @@ export default function FrequencyPlot() {
           phase: { auto: false, range: () => [curPhaseMin, curPhaseMax] as uPlot.Range.MinMax },
         },
         axes: [
-          { stroke: "#9b9ba6", grid: { stroke: "rgba(255,255,255,0.12)" }, ticks: { stroke: "rgba(255,255,255,0.20)" },
+          { stroke: "#9b9ba6", grid: { stroke: "rgba(255,255,255,0.12)" }, ticks: { stroke: "rgba(255,255,255,0.20)" }, filter: freqAxisFilter,
             values: (_u: uPlot, vals: number[]) => vals.map(v => v == null ? "" : v >= 1000 ? (v/1000)+"k" : String(Math.round(v))) },
           { label: "dB", scale: "mag", stroke: "#9b9ba6", grid: { stroke: "rgba(255,255,255,0.12)" }, ticks: { stroke: "rgba(255,255,255,0.20)" },
             values: (_u: uPlot, vals: number[]) => vals.map(v => v == null ? "" : v.toFixed(1)), size: 50 },
@@ -2872,7 +2874,7 @@ export default function FrequencyPlot() {
         y: { auto: false, range: [yMin, yMax] as uPlot.Range.MinMax },
       },
       axes: [
-        { stroke: "#9b9ba6", grid: { stroke: "rgba(255,255,255,0.12)" }, ticks: { stroke: "rgba(255,255,255,0.20)" },
+        { stroke: "#9b9ba6", grid: { stroke: "rgba(255,255,255,0.12)" }, ticks: { stroke: "rgba(255,255,255,0.20)" }, filter: freqAxisFilter,
           values: (_u: uPlot, vals: number[]) => vals.map(v => v == null ? "" : v >= 1000 ? (v/1000)+"k" : String(Math.round(v))) },
         { label: "ms", scale: "y", stroke: "#9b9ba6", grid: { stroke: "rgba(255,255,255,0.12)" }, ticks: { stroke: "rgba(255,255,255,0.20)" },
           values: (_u: uPlot, vals: number[]) => vals.map(v => v == null ? "" : v.toFixed(1)), size: 50 },

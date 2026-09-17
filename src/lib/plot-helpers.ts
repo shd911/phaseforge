@@ -216,6 +216,45 @@ export function wrapPhase(phase: number[]): (number | null)[] {
   return out;
 }
 
+// --- Frequency axis labels ---
+
+/** b141.44: frequency always labelled on a log-frequency axis when visible. */
+export const PINNED_FREQ_LABEL_HZ = 20_000;
+/** Minimum centre-to-centre gap between two X labels ("20k", "200", "1.5k"). */
+export const FREQ_LABEL_MIN_PX = 30;
+
+/** Which log-axis splits get a label. uPlot drops labels that do not fit and
+ *  20 kHz — the edge of the audio band — was often among them. Priority:
+ *  20 kHz, then decades (1·10ⁿ), then 2·10ⁿ and 5·10ⁿ, then the rest; a label
+ *  is kept only if it clears every kept label by `minPx`. Returns splits with
+ *  unlabelled entries nulled, the shape uPlot's axis `filter` expects. */
+export function pickFreqLabels(
+  splits: number[], posOf: (v: number) => number, minPx = FREQ_LABEL_MIN_PX,
+): (number | null)[] {
+  const rank = (v: number): number => {
+    if (Math.abs(v - PINNED_FREQ_LABEL_HZ) < 1e-6) return 0;
+    const m = Math.round(v / Math.pow(10, Math.floor(Math.log10(v) + 1e-9)));
+    return m === 1 ? 1 : m === 2 || m === 5 ? 2 : 3;
+  };
+  const order = splits
+    .map((v, i) => ({ v, i, r: v > 0 && Number.isFinite(v) ? rank(v) : 99 }))
+    .filter((s) => s.r < 99)
+    .sort((a, b) => a.r - b.r || a.i - b.i);
+  const kept: number[] = [];
+  const keep = new Set<number>();
+  for (const s of order) {
+    const px = posOf(s.v);
+    if (!Number.isFinite(px)) continue;
+    if (kept.every((k) => Math.abs(k - px) >= minPx)) { kept.push(px); keep.add(s.i); }
+  }
+  return splits.map((v, i) => (keep.has(i) ? v : null));
+}
+
+/** uPlot axis `filter` for log-frequency X axes (SPL, Export, GD, baffle step). */
+export function freqAxisFilter(u: { valToPos: (v: number, scale: string) => number }, splits: number[]): (number | null)[] {
+  return pickFreqLabels(splits, (v) => u.valToPos(v, "x"));
+}
+
 // --- Frequency formatting ---
 export function fmtFreq(v: number): string {
   if (v >= 1000) return (v / 1000).toFixed(2) + " kHz";
