@@ -1,4 +1,5 @@
 import { createEffect, onCleanup } from "solid-js";
+import { attachFieldWheel, throttleTrailing } from "../lib/wheel-step";
 
 interface NumberInputProps {
   value: number;
@@ -51,6 +52,10 @@ export default function NumberInput(props: NumberInputProps) {
     inputEl.value = fmt(val);
     props.onChange(val);
   };
+  // b141.43: wheel gestures update the field every step but the parent (a
+  // filter frequency, a tolerance…) at most every 120 ms plus the final
+  // value — each onChange can start a full re-evaluation.
+  const notifyThrottled = throttleTrailing((v: number) => props.onChange(v), 120);
 
   const inc = (dir: number) => {
     const s = step(dir);
@@ -103,16 +108,18 @@ export default function NumberInput(props: NumberInputProps) {
       ref={(el: HTMLDivElement) => {
         rootEl = el;
         el.addEventListener("animationend", () => el.classList.remove("num-input-clamped"));
-        // Non-passive wheel handler — only when input inside is focused
-        el.addEventListener("wheel", (e: WheelEvent) => {
-          if (!el.contains(document.activeElement)) return;
-          e.preventDefault();
-          e.stopPropagation();
-          const dir = e.deltaY < 0 ? 1 : -1;
-          const mult = e.shiftKey ? 10 : 1;
-          const s = step(dir) * mult;
-          push(clamp(val + dir * s));
-        }, { passive: false });
+        // b141.43: shared wheel model (lib/wheel-step.ts) — active only while
+        // the field has focus, trackpad deltas accumulate into steps.
+        attachFieldWheel(el, {
+          onSteps: (steps, coarse) => {
+            const dir = Math.sign(steps);
+            for (let k = 0; k < Math.abs(steps); k++) {
+              val = parseFloat(clamp(val + dir * step(dir) * (coarse ? 10 : 1)).toFixed(prec()));
+            }
+            inputEl.value = fmt(val);
+            notifyThrottled(val);
+          },
+        });
       }}
     >
       <button

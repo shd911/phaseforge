@@ -330,6 +330,12 @@ git diff --stat
 - **CSS tokens must not reference themselves** — a cyclic custom property is
   invalid and silently drops the colour (--warn-amber was dead b141.4→b141.38).
 - Plurals via `pluralRu` (lib/plural.ts), never `n === 1 ? "" : "а"`.
+- **Scroll-wheel adjustment goes through `lib/wheel-step.ts`** (b141.43):
+  active only after the field is clicked (never preventDefault an inactive
+  field — it freezes panel scrolling), steps from `wheelSteps` (macOS mouse
+  notch = exactly 4.000244 px, trackpad deltas accumulate at 40 px), PEQ edits
+  as one interaction (`peqDragging` + begin/commitInteraction) so Export/IR/GD
+  rebuild once at the end.
 
 ## SolidJS Patterns
 - `batch()`: wrap multiple signal updates to prevent intermediate effects

@@ -37,9 +37,8 @@ import { hasActiveSubsonicProtect } from "../lib/types";
 import { evaluateBandFull, evaluateSum, reconstructTargetPhase } from "../lib/band-evaluator";
 import { buildFirGrid, interpOnGrid, interpPhaseOnGrid, irTime, type ImpulseIpc } from "../lib/band-evaluator/grid";
 import { computeAutoAlign } from "../lib/auto-align";
+import { attachFieldWheel, newWheelAccumulator, wheelSteps } from "../lib/wheel-step";
 
-// Track which inputs have been explicitly clicked — wheel only fires when in set
-const wheelEnabled = new WeakSet<Element>();
 
 // ---------------------------------------------------------------------------
 // Crossover point: band[i] LP ↔ band[i+1] HP
@@ -1732,6 +1731,10 @@ export default function FrequencyPlot() {
       peqFastUpdate(band);
       return;
     }
+    // b141.43: a PEQ gesture (chart drag, chart or table wheel) on the IR/GD
+    // or Export tab used to rebuild — FIR included — on every step. Keep the
+    // chart; the gesture's end flips peqDragging and re-runs this effect.
+    if (dragging && pTab !== "freq") return;
 
     // Detect current chart type by its contents (not by pTab, which is already the NEW tab)
     const hasLabel = (substr: string) => chart?.series.some(s => typeof s.label === "string" && s.label.includes(substr));
@@ -3755,6 +3758,9 @@ export default function FrequencyPlot() {
 
   // Scroll wheel on chart → change Q of selected PEQ band
   let peqWheelTimeout: ReturnType<typeof setTimeout> | null = null;
+  // b141.43: trackpad deltas accumulate into steps (lib/wheel-step.ts) —
+  // one event used to be one 15 % Q step, so a trackpad swipe ran away.
+  const peqWheelAcc = newWheelAccumulator();
   function handlePeqWheel(e: WheelEvent) {
     if (isSum() || !chart) return;
     const bd = activeBand();
@@ -3776,12 +3782,16 @@ export default function FrequencyPlot() {
 
     e.preventDefault();
     e.stopPropagation();
-    const delta = e.deltaY > 0 ? -0.15 : 0.15;
-    const newQ = Math.max(0.1, Math.min(30, pb.q + pb.q * delta));
-
-    if (!peqDragging()) { beginInteraction("PEQ wheel"); setPeqDragging(true); }
-    updatePeqBand(bd.id, selIdx!, { q: Math.round(newQ * 100) / 100 });
-    peqFastUpdate(bd);
+    const legacy = (e as WheelEvent & { wheelDeltaY?: number }).wheelDeltaY;
+    const steps = wheelSteps({ deltaY: e.deltaY, deltaMode: e.deltaMode, wheelDeltaY: legacy }, peqWheelAcc, performance.now());
+    if (steps !== 0) {
+      const factor = steps > 0 ? Math.pow(1.15, steps) : Math.pow(0.85, -steps);
+      const newQ = Math.max(0.1, Math.min(30, pb.q * factor));
+      if (!peqDragging()) { beginInteraction("PEQ wheel"); setPeqDragging(true); }
+      updatePeqBand(bd.id, selIdx!, { q: Math.round(newQ * 100) / 100 });
+      peqFastUpdate(bd);
+    }
+    if (!peqDragging()) return;
     if (peqWheelTimeout) clearTimeout(peqWheelTimeout);
     peqWheelTimeout = setTimeout(() => { setPeqDragging(false); commitInteraction(); }, 400);
   }
@@ -4380,16 +4390,20 @@ export default function FrequencyPlot() {
                                       const v = parseFloat(e.currentTarget.value);
                                       if (!isNaN(v)) commitDelay(b().id, v);
                                     }}
-                                    onPointerDown={(e) => wheelEnabled.add(e.currentTarget)}
-                                    onBlur={(e) => wheelEnabled.delete(e.currentTarget)}
-                                    onWheel={(e) => {
-                                      if (!wheelEnabled.has(e.currentTarget)) { e.preventDefault(); return; }
-                                      e.preventDefault();
-                                      const step = e.shiftKey ? 0.1 : 0.01;
-                                      const cur = (b().alignmentDelay ?? 0) * 1000;
-                                      const delta = e.deltaY < 0 ? step : -step;
-                                      e.currentTarget.value = (cur + delta).toFixed(2);
-                                      commitDelay(b().id, cur + delta);
+                                    // b141.43: shared wheel model — active after a click,
+                                    // steps accumulate; the field shows every step, the
+                                    // store is written 250 ms after the last (commitDelay).
+                                    ref={(el) => {
+                                      let draftMs: number | null = null;
+                                      attachFieldWheel(el, {
+                                        onSteps: (steps, coarse) => {
+                                          const base = draftMs ?? (b().alignmentDelay ?? 0) * 1000;
+                                          draftMs = Math.round((base + steps * (coarse ? 0.1 : 0.01)) * 100) / 100;
+                                          el.value = draftMs.toFixed(2);
+                                          commitDelay(b().id, draftMs);
+                                        },
+                                        onEnd: () => { draftMs = null; },
+                                      });
                                     }}
                                   />
                                 )}
