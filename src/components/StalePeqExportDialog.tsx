@@ -1,4 +1,5 @@
 import { createSignal, Show, For } from "solid-js";
+import { handleDialogKeys } from "../lib/dialog-keys";
 
 interface PendingState {
   bandNames: string[];
@@ -36,10 +37,10 @@ export default function StalePeqExportDialog() {
           class="pn-overlay"
           tabIndex={-1}
           ref={(el) => requestAnimationFrame(() => el.focus())}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") { e.preventDefault(); resolveAndClose(false); }
-            else if (e.key === "Enter") { e.preventDefault(); resolveAndClose(true); }
-          }}
+          onKeyDown={(e) => handleDialogKeys(e, {
+            onEnter: () => resolveAndClose(true),
+            onEscape: () => resolveAndClose(false),
+          })}
           onMouseDown={(e) => { if (e.target === e.currentTarget) resolveAndClose(false); }}
         >
           <div class="pn-dialog" style={{ "min-width": "440px", "max-width": "560px" }}>

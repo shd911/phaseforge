@@ -285,7 +285,7 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
             disabled={!isValid()}
             onClick={handleSave}
           >
-            OK
+            Применить
           </button>
         </div>
       </div>

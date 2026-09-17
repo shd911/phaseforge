@@ -1,15 +1,13 @@
 import { Show } from "solid-js";
 import { unsavedDialogVisible, resolveUnsavedDialog } from "../lib/project-io";
+import { handleDialogKeys } from "../lib/dialog-keys";
 
 export default function UnsavedChangesDialog() {
   function handleKeyDown(e: KeyboardEvent) {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      resolveUnsavedDialog("cancel");
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      resolveUnsavedDialog("save");
-    }
+    handleDialogKeys(e, {
+      onEnter: () => resolveUnsavedDialog("save"),
+      onEscape: () => resolveUnsavedDialog("cancel"),
+    });
   }
 
   return (

@@ -1,13 +1,16 @@
 import { createSignal, Show } from "solid-js";
 
-/** Parse a numeric input: keep the previous value on garbage, clamp to the
- *  field's own min/max. (`parseFloat(v) || default` turned a typed 0 into
- *  the default and accepted 500 dB — 2026-09-05 audit.) */
-function numInput(v: string, min: number, max: number, prev: number, integer = false): number {
+import { handleDialogKeys } from "../lib/dialog-keys";
+
+/** Parse a numeric draft: keep the previous value on garbage. (`parseFloat(v)
+ *  || default` turned a typed 0 into the default — 2026-09-05 audit.) The
+ *  field's min/max is applied on blur and Apply, not per keystroke: clamping
+ *  while typing turned the "0" of "0.1" into 0.05 (b141.38). */
+function numDraft(v: string, prev: number, integer = false): number {
   const n = integer ? parseInt(v, 10) : parseFloat(v);
-  if (!Number.isFinite(n)) return prev;
-  return Math.min(max, Math.max(min, n));
+  return Number.isFinite(n) ? n : prev;
 }
+const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 import {
   firIterations, setFirIterations,
   firFreqWeighting, setFirFreqWeighting,
@@ -44,13 +47,13 @@ export default function FirSettingsDialog() {
   }
 
   function handleApply() {
-    setFirIterations(iterations());
+    setFirIterations(clamp(iterations(), 0, 20));
     setFirFreqWeighting(freqWeight());
     setFirNarrowbandLimit(nbLimit());
-    setFirNbSmoothingOct(nbSmoothing());
-    setFirNbMaxExcess(nbExcess());
-    setFirMaxBoost(maxBoost());
-    setFirNoiseFloor(noiseFloor());
+    setFirNbSmoothingOct(clamp(nbSmoothing(), 0.05, 2));
+    setFirNbMaxExcess(clamp(nbExcess(), 1, 24));
+    setFirMaxBoost(clamp(maxBoost(), 0, 60));
+    setFirNoiseFloor(clamp(noiseFloor(), -200, -40));
     closeFirSettings();
   }
 
@@ -59,8 +62,7 @@ export default function FirSettingsDialog() {
   }
 
   function handleKeyDown(e: KeyboardEvent) {
-    if (e.key === "Escape") { e.preventDefault(); handleCancel(); }
-    else if (e.key === "Enter") { e.preventDefault(); handleApply(); }
+    handleDialogKeys(e, { onEnter: handleApply, onEscape: handleCancel });
   }
 
   return (
@@ -76,7 +78,8 @@ export default function FirSettingsDialog() {
               class="xo-input"
               type="number" min="0" max="20" step="1"
               value={iterations()}
-              onInput={(e) => setIterations(numInput(e.currentTarget.value, 0, 20, iterations(), true))}
+              onInput={(e) => setIterations(numDraft(e.currentTarget.value, iterations(), true))}
+              onBlur={() => setIterations(clamp(iterations(), 0, 20))}
               onKeyDown={handleKeyDown}
               ref={(el) => requestAnimationFrame(() => { el.focus(); el.select(); })}
             />
@@ -117,7 +120,8 @@ export default function FirSettingsDialog() {
                 class="xo-input"
                 type="number" min="0.05" max="2" step="0.01"
                 value={nbSmoothing()}
-                onInput={(e) => setNbSmoothing(numInput(e.currentTarget.value, 0.05, 2, nbSmoothing()))}
+                onInput={(e) => setNbSmoothing(numDraft(e.currentTarget.value, nbSmoothing()))}
+                onBlur={() => setNbSmoothing(clamp(nbSmoothing(), 0.05, 2))}
                 onKeyDown={handleKeyDown}
               />
               <span class="xo-unit">oct</span>
@@ -130,7 +134,8 @@ export default function FirSettingsDialog() {
                 class="xo-input"
                 type="number" min="1" max="24" step="0.5"
                 value={nbExcess()}
-                onInput={(e) => setNbExcess(numInput(e.currentTarget.value, 1, 24, nbExcess()))}
+                onInput={(e) => setNbExcess(numDraft(e.currentTarget.value, nbExcess()))}
+                onBlur={() => setNbExcess(clamp(nbExcess(), 1, 24))}
                 onKeyDown={handleKeyDown}
               />
               <span class="xo-unit">dB</span>
@@ -145,7 +150,8 @@ export default function FirSettingsDialog() {
               class="xo-input"
               type="number" min="0" max="60" step="1"
               value={maxBoost()}
-              onInput={(e) => setMaxBoost(numInput(e.currentTarget.value, 0, 60, maxBoost()))}
+              onInput={(e) => setMaxBoost(numDraft(e.currentTarget.value, maxBoost()))}
+              onBlur={() => setMaxBoost(clamp(maxBoost(), 0, 60))}
               onKeyDown={handleKeyDown}
             />
             <span class="xo-unit">dB</span>
@@ -159,7 +165,8 @@ export default function FirSettingsDialog() {
               class="xo-input"
               type="number" min="-200" max="-40" step="5"
               value={noiseFloor()}
-              onInput={(e) => setNoiseFloor(numInput(e.currentTarget.value, -200, -40, noiseFloor()))}
+              onInput={(e) => setNoiseFloor(numDraft(e.currentTarget.value, noiseFloor()))}
+              onBlur={() => setNoiseFloor(clamp(noiseFloor(), -200, -40))}
               onKeyDown={handleKeyDown}
             />
             <span class="xo-unit">dB</span>

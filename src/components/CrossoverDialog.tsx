@@ -3,6 +3,7 @@ import { F_MIN_WORK, F_MAX_WORK } from "../lib/types";
 import type { FilterConfig, FilterType } from "../lib/types";
 import { appState, setBandLowPass } from "../stores/bands";
 import { availableSlopes, orderToSlope, slopeToOrder } from "../lib/slope";
+import { handleDialogKeys } from "../lib/dialog-keys";
 
 export interface CrossoverDialogData {
   bandIndex: number;   // index of band with LP filter
@@ -76,14 +77,16 @@ export default function CrossoverDialog() {
   }
 
   function handleKeyDown(e: KeyboardEvent) {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      handleCancel();
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      handleApply();
-    }
+    handleDialogKeys(e, { onEnter: handleApply, onEscape: handleCancel });
   }
+
+  // b141.38: `parseFloat(v) || 0` rewrote a cleared field to 0 on the first
+  // Backspace. An unparsable draft leaves the value alone (freq goes NaN so
+  // Apply stays disabled and the hint explains why).
+  const finite = (v: string): number | null => {
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : null;
+  };
 
   // 2026-09-05 audit: this dialog showed a raw "order" while the filter
   // block shows dB/oct for the same filter (LR order 2 = 24 dB/oct) and
@@ -112,11 +115,16 @@ export default function CrossoverDialog() {
                 max={F_MAX_WORK}
                 step="1"
                 value={freq()}
-                onInput={(e) => setFreq(parseFloat(e.currentTarget.value) || 0)}
+                onInput={(e) => setFreq(finite(e.currentTarget.value) ?? NaN)}
                 onKeyDown={handleKeyDown}
               />
               <span class="xo-unit">Hz</span>
             </div>
+            <Show when={!freqValid()}>
+              <div class="xo-hint" style={{ color: "var(--warn-amber-text)" }}>
+                Частота: {F_MIN_WORK}–{F_MAX_WORK} Hz
+              </div>
+            </Show>
 
             <div class="xo-row">
               <span class="xo-label">Тип</span>
@@ -176,7 +184,7 @@ export default function CrossoverDialog() {
                   max="10"
                   step="0.1"
                   value={shape()}
-                  onInput={(e) => setShape(parseFloat(e.currentTarget.value) || 1.0)}
+                  onInput={(e) => { const n = finite(e.currentTarget.value); if (n != null) setShape(n); }}
                   onKeyDown={handleKeyDown}
                 />
               </div>
@@ -192,8 +200,8 @@ export default function CrossoverDialog() {
                   min="0.1"
                   max="20"
                   step="0.01"
-                  value={customQ().toFixed(3)}
-                  onInput={(e) => setCustomQ(parseFloat(e.currentTarget.value) || 0.707)}
+                  value={customQ()}
+                  onInput={(e) => { const n = finite(e.currentTarget.value); if (n != null) setCustomQ(n); }}
                   onKeyDown={handleKeyDown}
                 />
               </div>
