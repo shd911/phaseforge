@@ -2041,15 +2041,21 @@ input[type="checkbox"]:focus-visible {
 
 /* PEQ stale state (b136): visual cue when target diverged from snapshot */
 .peq-tab-stale {
-  border: 2px solid var(--warn-amber);
+  /* b141.41: outline, not border+padding. The 12 px the frame took came out
+     of a 280 px panel whose PEQ table and optimizer row are fitted to the
+     pixel — once --warn-amber was valid again (b141.38) the buttons spilled
+     past the frame. An outline takes no layout space. */
+  outline: 2px solid var(--warn-amber);
+  outline-offset: -2px;
   border-radius: 4px;
-  padding: 4px;
 }
 
 .peq-stale-banner {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  /* b141.41: text above, buttons below — side by side the two buttons left
+     the text a one-word column and still overflowed the panel. */
+  flex-direction: column;
+  align-items: stretch;
   gap: var(--space-sm);
   padding: 6px 10px;
   margin-bottom: 8px;

@@ -488,7 +488,7 @@ function PeqTab() {
       <Show when={isStale()}>
         <div class="peq-stale-banner">
           <span>⚠ PEQ устарел: цель изменена после последней оптимизации</span>
-          <span style={{ display: "flex", gap: "var(--space-xs)" }}>
+          <span style={{ display: "flex", gap: "var(--space-xs)", "justify-content": "flex-end", "flex-wrap": "wrap" }}>
             <button
               class="tb-btn tb-btn-sm"
               onClick={handleOptimizePeq}
