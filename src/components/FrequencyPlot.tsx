@@ -220,6 +220,7 @@ export default function FrequencyPlot() {
   let zoomBoxEl: HTMLDivElement | null = null;
 
   const [cursorFreq, setCursorFreq] = createSignal("—");
+  const [autoAligning, setAutoAligning] = createSignal(false);
   const [cursorSPL, setCursorSPL] = createSignal("—");
   const [cursorPhase, setCursorPhase] = createSignal("—");
   // Per-curve values at cursor position: { label, color, value, unit }
@@ -3897,7 +3898,7 @@ export default function FrequencyPlot() {
                 <Show when={plotTab() === "freq"}>
                   <span class="readout-sep" />
                   <button class="tb-btn tb-btn-xs primary" onClick={handleImportMeasurement} title="Импортировать файл измерения">Импорт</button>
-                  <button class="tb-btn tb-btn-xs" onClick={() => setShowMergeDialog(true)} title="Мердж NF+FF">Мердж</button>
+                  <button class="tb-btn tb-btn-xs" onClick={() => setShowMergeDialog(true)} title="Слияние NF + FF">Слияние</button>
                 </Show>
 
                 {/* Smooth — all tabs except Export */}
@@ -4405,9 +4406,10 @@ export default function FrequencyPlot() {
                               title={allPeqReady()
                                 ? "Автоматически подобрать задержки полос (градиентный спуск)"
                                 : "Нужна PEQ-оптимизация всех полос кроссовера"}
-                              disabled={!allPeqReady()}
+                              disabled={!allPeqReady() || autoAligning()}
+                              aria-busy={autoAligning()}
                               onClick={async () => {
-                                if (!allPeqReady()) {
+                                if (!allPeqReady() || autoAligning()) {
                                   console.warn("Auto-align requires PEQ optimization on all bands");
                                   return;
                                 }
@@ -4416,18 +4418,30 @@ export default function FrequencyPlot() {
                                 );
                                 if (bands.length < 2) return;
                                 const plainBands = JSON.parse(JSON.stringify(bands));
-                                const result = await computeAutoAlign(plainBands, exportSampleRate());
-                                batch(() => {
-                                  for (const [id, delay] of Object.entries(result.delays)) {
-                                    setAlignmentDelay(id, delay);
-                                  }
-                                });
+                                // b141.38: busy flag — the button gave no sign of
+                                // work and a second click started a parallel run.
+                                setAutoAligning(true);
+                                try {
+                                  const result = await computeAutoAlign(plainBands, exportSampleRate());
+                                  batch(() => {
+                                    for (const [id, delay] of Object.entries(result.delays)) {
+                                      setAlignmentDelay(id, delay);
+                                    }
+                                  });
+                                } finally {
+                                  setAutoAligning(false);
+                                }
                               }}
                               style={{
-                                cursor: allPeqReady() ? "pointer" : "not-allowed",
+                                cursor: autoAligning() ? "progress" : allPeqReady() ? "pointer" : "not-allowed",
                                 opacity: allPeqReady() ? 1 : 0.4,
                               }}
-                            >AUTO</button>
+                            >
+                              <span class="btn-label-stack">
+                                <span classList={{ "btn-label-off": autoAligning() }}>AUTO</span>
+                                <span classList={{ "btn-label-off": !autoAligning() }}>…</span>
+                              </span>
+                            </button>
                           </td>
                         );
                       })()}
@@ -4493,25 +4507,25 @@ export default function FrequencyPlot() {
             </div>
           </Show>
           <div class="axis-controls axis-controls-y axis-controls-y-left">
-            <button class="axis-btn" onClick={() => zoomY(0.6)} title="Приблизить (dB)">+</button>
-            <button class="axis-btn" onClick={() => scrollY(1)} title="Сдвинуть вверх (dB)">▲</button>
-            <button class="axis-btn" onClick={() => scrollY(-1)} title="Сдвинуть вниз (dB)">▼</button>
-            <button class="axis-btn" onClick={() => zoomY(1.6)} title="Отдалить (dB)">−</button>
-            <button class="axis-btn fit-btn" onClick={fitData} title="Вписать данные в окно">FIT</button>
+            <button class="axis-btn" onClick={() => zoomY(0.6)} aria-label="Приблизить (dB)" title="Приблизить (dB)">+</button>
+            <button class="axis-btn" onClick={() => scrollY(1)} aria-label="Сдвинуть вверх (dB)" title="Сдвинуть вверх (dB)">▲</button>
+            <button class="axis-btn" onClick={() => scrollY(-1)} aria-label="Сдвинуть вниз (dB)" title="Сдвинуть вниз (dB)">▼</button>
+            <button class="axis-btn" onClick={() => zoomY(1.6)} aria-label="Отдалить (dB)" title="Отдалить (dB)">−</button>
+            <button class="axis-btn fit-btn" onClick={fitData} aria-label="Вписать данные в окно" title="Вписать данные в окно">FIT</button>
           </div>
           <Show when={plotTab() === "freq" || plotTab() === "export"}>
             <div class="axis-controls axis-controls-y axis-controls-y-right">
-              <button class="axis-btn" onClick={() => zoomPhase(0.6)} title="Приблизить (фаза)">+</button>
-              <button class="axis-btn" onClick={() => scrollPhase(1)} title="Сдвинуть вверх (фаза)">▲</button>
-              <button class="axis-btn" onClick={() => scrollPhase(-1)} title="Сдвинуть вниз (фаза)">▼</button>
-              <button class="axis-btn" onClick={() => zoomPhase(1.6)} title="Отдалить (фаза)">−</button>
+              <button class="axis-btn" onClick={() => zoomPhase(0.6)} aria-label="Приблизить (фаза)" title="Приблизить (фаза)">+</button>
+              <button class="axis-btn" onClick={() => scrollPhase(1)} aria-label="Сдвинуть вверх (фаза)" title="Сдвинуть вверх (фаза)">▲</button>
+              <button class="axis-btn" onClick={() => scrollPhase(-1)} aria-label="Сдвинуть вниз (фаза)" title="Сдвинуть вниз (фаза)">▼</button>
+              <button class="axis-btn" onClick={() => zoomPhase(1.6)} aria-label="Отдалить (фаза)" title="Отдалить (фаза)">−</button>
             </div>
           </Show>
           <div class="axis-controls axis-controls-x">
-            <button class="axis-btn" onClick={() => zoomX(1.6)} title="Отдалить (частота)">−</button>
-            <button class="axis-btn" onClick={() => scrollX(-1)} title="Сдвинуть влево">◀</button>
-            <button class="axis-btn" onClick={() => scrollX(1)} title="Сдвинуть вправо">▶</button>
-            <button class="axis-btn" onClick={() => zoomX(0.6)} title="Приблизить (частота)">+</button>
+            <button class="axis-btn" onClick={() => zoomX(1.6)} aria-label="Отдалить (частота)" title="Отдалить (частота)">−</button>
+            <button class="axis-btn" onClick={() => scrollX(-1)} aria-label="Сдвинуть влево" title="Сдвинуть влево">◀</button>
+            <button class="axis-btn" onClick={() => scrollX(1)} aria-label="Сдвинуть вправо" title="Сдвинуть вправо">▶</button>
+            <button class="axis-btn" onClick={() => zoomX(0.6)} aria-label="Приблизить (частота)" title="Приблизить (частота)">+</button>
           </div>
         </div>
       </div>

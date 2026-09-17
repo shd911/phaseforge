@@ -12,6 +12,7 @@ import {
   setExportHybridPhase,
 } from "./stores/bands";
 import { handleOptimizePeq, handleOptimizeAll, computing } from "./stores/peq-optimize";
+import { pluralRu } from "./lib/plural";
 import {
   saveProject,
   saveProjectAs,
@@ -142,12 +143,14 @@ function App() {
           class="tb-btn"
           onClick={() => undo()}
           disabled={!canUndo()}
+          aria-label="Откатить"
           title={canUndo() ? `Откатить: ${lastUndoLabel()}` : "Откатить (нет действий)"}
         >↶</button>
         <button
           class="tb-btn"
           onClick={() => redo()}
           disabled={!canRedo()}
+          aria-label="Повторить"
           title={canRedo() ? `Повторить: ${lastRedoLabel()}` : "Повторить (нет действий)"}
         >↷</button>
         <span class="top-project-name" title={currentProjectPath() ?? "Untitled"}>
@@ -181,7 +184,15 @@ function App() {
           onClick={handleOptimizeAll}
           disabled={computing()}
           title="Оптимизировать PEQ для всех бэндов"
-        >{computing() ? "..." : "Оптимизировать все"}</button>
+          aria-busy={computing()}
+        >
+          {/* b141.38: both labels share one grid cell — the button keeps its
+              width while computing instead of shrinking to "..." */}
+          <span class="btn-label-stack">
+            <span classList={{ "btn-label-off": computing() }}>Оптимизировать все</span>
+            <span classList={{ "btn-label-off": !computing() }}>Оптимизация…</span>
+          </span>
+        </button>
         <div class="top-sep" />
       </div>
 
@@ -224,7 +235,7 @@ function App() {
 
       {/* Status bar */}
       <footer class="status-bar">
-        {appState.bands.length} бэнд{appState.bands.length === 1 ? "" : "а"}
+        {appState.bands.length} {pluralRu(appState.bands.length, "бэнд", "бэнда", "бэндов")}
         {isSum() ? " — режим Сумма" : ""}
       </footer>
 

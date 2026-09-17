@@ -2973,3 +2973,15 @@ input[type="checkbox"]:focus-visible {
   0%, 40% { border-color: var(--warn-amber); box-shadow: 0 0 0 1px var(--warn-amber); }
   100% { box-shadow: 0 0 0 0 transparent; }
 }
+
+/* b141.38: two labels in one grid cell — a button keeps its width when its
+   text switches to a busy label. */
+.btn-label-stack {
+  display: inline-grid;
+}
+.btn-label-stack > span {
+  grid-area: 1 / 1;
+}
+.btn-label-stack > .btn-label-off {
+  visibility: hidden;
+}

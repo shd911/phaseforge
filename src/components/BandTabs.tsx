@@ -34,6 +34,11 @@ export default function BandTabs() {
     return null;
   }
 
+  async function confirmRemove(id: string, name: string) {
+    const confirmed = await ask(`Удалить бэнд «${name}»?`, { title: "Удаление бэнда", kind: "warning" });
+    if (confirmed) removeBand(id);
+  }
+
   function handlePointerDown(e: PointerEvent, idx: number) {
     // Игнорируем клик по кнопке закрытия
     if ((e.target as HTMLElement).classList.contains("band-tab-close")) return;
@@ -90,6 +95,13 @@ export default function BandTabs() {
             ref={(el) => { tabEls[idx()] = el; }}
             class={`band-tab ${appState.activeBandId === band.id ? "active" : ""} ${dragIdx() === idx() ? "dragging" : ""} ${overIdx() === idx() && dragIdx() !== null && dragIdx() !== idx() ? "drag-over" : ""}`}
             onPointerDown={(e) => handlePointerDown(e, idx())}
+            // b141.38: selection lived only in the pointer path — a focused
+            // tab ignored Enter/Space.
+            onKeyDown={(e) => {
+              if (editingId() === band.id) return;
+              if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setActiveBand(band.id); }
+              if (e.key === "F2") { e.preventDefault(); setEditingId(band.id); }
+            }}
             onDblClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -125,12 +137,20 @@ export default function BandTabs() {
             <Show when={appState.bands.length > 1}>
               <span
                 class="band-tab-close"
+                role="button"
+                tabIndex={0}
+                aria-label={`Удалить ${band.name}`}
                 onPointerDown={(e) => e.stopPropagation()}
-                onClick={async (e) => {
+                onClick={(e) => {
                   e.stopPropagation();
                   e.preventDefault();
-                  const confirmed = await ask(`Удалить бэнд «${band.name}»?`, { title: "Удаление бэнда", kind: "warning" });
-                  if (confirmed) removeBand(band.id);
+                  confirmRemove(band.id, band.name);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter" && e.key !== " ") return;
+                  e.stopPropagation();
+                  e.preventDefault();
+                  confirmRemove(band.id, band.name);
                 }}
                 title={`Удалить ${band.name}`}
               >×</span>

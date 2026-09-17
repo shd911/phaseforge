@@ -134,6 +134,25 @@ export default function FileMenu() {
             class="file-menu-item file-menu-submenu-trigger"
             onMouseEnter={onRecentEnter}
             onMouseLeave={onRecentLeave}
+            // b141.38: hover was the only way in. Focus/Enter/→ open it, and
+            // it closes once focus leaves the trigger and its submenu.
+            role="button"
+            tabIndex={0}
+            aria-haspopup="menu"
+            aria-expanded={showRecent()}
+            onFocus={onRecentEnter}
+            onFocusOut={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onRecentLeave();
+            }}
+            onKeyDown={(e) => {
+              if (e.target !== e.currentTarget) return;
+              if (e.key === "Enter" || e.key === " " || e.key === "ArrowRight") {
+                e.preventDefault();
+                onRecentEnter();
+                const first = e.currentTarget.querySelector<HTMLElement>(".file-submenu button");
+                first?.focus();
+              }
+            }}
           >
             <span class="file-menu-label">Недавние проекты</span>
             <span class="file-menu-arrow">{"\u25B6"}</span>

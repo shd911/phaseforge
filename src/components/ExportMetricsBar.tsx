@@ -9,7 +9,7 @@ import { FLOOR_BAD_DB, FLOOR_GOOD_DB, FLOOR_MARGIN_DB, PRE_RING_DB } from "../li
 const POPOVER_W = 340;
 
 function fmtHz(hz: number): string {
-  return hz >= 1000 ? `${(hz / 1000).toFixed(hz >= 10000 ? 1 : 2)} кГц` : `${Math.round(hz)} Гц`;
+  return hz >= 1000 ? `${(hz / 1000).toFixed(hz >= 10000 ? 1 : 2)} kHz` : `${Math.round(hz)} Hz`;
 }
 const fmtDb = (db: number) => (db <= -150 ? "≤ −150" : db.toFixed(0).replace("-", "−"));
 
@@ -61,8 +61,8 @@ export default function ExportMetricsBar(props: { m: ExportMetrics }) {
     return f <= FLOOR_GOOD_DB ? STATUS_GOOD : f <= FLOOR_BAD_DB ? STATUS_WARN : STATUS_BAD;
   };
   const zoneText = () => m().ringZoneHz == null
-    ? `${m().ringZoneMs.toFixed(0)} мс (у полосы нет ФВЧ/ФНЧ)`
-    : `${m().ringZoneMs.toFixed(1)} мс — по ${m().ringZoneLinear ? "linear-phase " : ""}фильтру ${fmtHz(m().ringZoneHz!)} и его крутизне`;
+    ? `${m().ringZoneMs.toFixed(0)} ms (у полосы нет ФВЧ/ФНЧ)`
+    : `${m().ringZoneMs.toFixed(1)} ms — по ${m().ringZoneLinear ? "linear-phase " : ""}фильтру ${fmtHz(m().ringZoneHz!)} и его крутизне`;
   const band = () => `${fmtHz(m().passbandLoHz)} – ${fmtHz(m().passbandHiHz)}`;
 
   const items: Item[] = [
@@ -86,15 +86,15 @@ export default function ExportMetricsBar(props: { m: ExportMetrics }) {
       color: () => m().preRingLimited ? STATUS_WARN : undefined,
       title: "Предзвон",
       body: () => <>
-        <p>Время от момента, когда импульс впервые поднимается выше {PRE_RING_DB} дБ
+        <p>Время от момента, когда импульс впервые поднимается выше {PRE_RING_DB} dB
           от пика, до самого пика.</p>
         <p>Его создают linear-phase ФВЧ/ФНЧ полосы, и он определяется их частотой и
           крутизной. От числа отсчётов он не зависит: длинный фильтр его не укорачивает.
           Min-phase полосы не звенят до пика — у них здесь только время нарастания.</p>
         <p>Зона звона: {zoneText()}. Всё, что дальше от пика, — не звон, а фон.</p>
         <Show when={m().preRingLimited}>
-          <p style={{ color: STATUS_WARN }}>Фон ({fmtDb(m().floorDb!)} дБ) громче порога,
-            поэтому порог поднят до {fmtDb(m().preRingThresholdDb)} дБ (фон + {FLOOR_MARGIN_DB} дБ).
+          <p style={{ color: STATUS_WARN }}>Фон ({fmtDb(m().floorDb!)} dB) громче порога,
+            поэтому порог поднят до {fmtDb(m().preRingThresholdDb)} dB (фон + {FLOOR_MARGIN_DB} dB).
             Часть звона под фоном не видна — настоящий предзвон не меньше показанного.
             Увеличьте отсчёты, пока «≥» не пропадёт.</p>
         </Show>
@@ -107,20 +107,20 @@ export default function ExportMetricsBar(props: { m: ExportMetrics }) {
       title: "Фон до пика",
       body: () => <>
         <p>Самый громкий уровень импульса до пика за пределами зоны звона
-          (дальше {m().ringZoneMs.toFixed(1)} мс от пика), в дБ от пика.</p>
+          (дальше {m().ringZoneMs.toFixed(1)} ms от пика), в dB от пика.</p>
         <p>Фильтры полосы там уже не звенят. Остаётся то, что не уместилось в длину FIR:
           долгие хвосты НЧ-коррекции и узких PEQ. Не поместившись после пика, они
           заворачиваются в начало фильтра и ложатся перед пиком. Этот фон записывается в WAV.</p>
         <p>
-          <span style={{ color: STATUS_GOOD }}>ниже {FLOOR_GOOD_DB} дБ</span> — хвосты уместились;{" "}
-          <span style={{ color: STATUS_WARN }}>{FLOOR_GOOD_DB}…{FLOOR_BAD_DB} дБ</span> — пограничный;{" "}
-          <span style={{ color: STATUS_BAD }}>выше {FLOOR_BAD_DB} дБ</span> — фильтр короток для
+          <span style={{ color: STATUS_GOOD }}>ниже {FLOOR_GOOD_DB} dB</span> — хвосты уместились;{" "}
+          <span style={{ color: STATUS_WARN }}>{FLOOR_GOOD_DB}…{FLOOR_BAD_DB} dB</span> — пограничный;{" "}
+          <span style={{ color: STATUS_BAD }}>выше {FLOOR_BAD_DB} dB</span> — фильтр короток для
           этой коррекции.
         </p>
-        <p>Лечится увеличением отсчётов. Важно время, а не число: при 352.8 кГц отсчётов
-          нужно в 7.35 раза больше, чем при 48 кГц.</p>
+        <p>Лечится увеличением отсчётов. Важно время, а не число: при 352.8 kHz отсчётов
+          нужно в 7.35 раза больше, чем при 48 kHz.</p>
         <Show when={m().floorDb == null}>
-          <p style={{ color: STATUS_WARN }}>До пика в фильтре меньше {m().ringZoneMs.toFixed(1)} мс —
+          <p style={{ color: STATUS_WARN }}>До пика в фильтре меньше {m().ringZoneMs.toFixed(1)} ms —
             фон нельзя отделить от звона. Увеличьте отсчёты.</p>
         </Show>
       </>,
@@ -134,7 +134,7 @@ export default function ExportMetricsBar(props: { m: ExportMetrics }) {
         <p>Наибольшее расхождение АЧХ готового FIR с моделью (цель + PEQ) в полосе
           пропускания {band()}.</p>
         <p>Растёт, когда длины фильтра не хватает на крутые склоны и НЧ-коррекцию.
-          Ориентиры: до 0.5 дБ — хорошо, до 1.5 дБ — терпимо.</p>
+          Ориентиры: до 0.5 dB — хорошо, до 1.5 dB — терпимо.</p>
       </>,
     },
     {
@@ -155,7 +155,7 @@ export default function ExportMetricsBar(props: { m: ExportMetrics }) {
       label: () => <>Нормировка: {m().normDb.toFixed(1)} dB</>,
       title: "Нормировка",
       body: () => <>
-        <p>Насколько ослаблен фильтр, чтобы максимум его АЧХ был 0 дБ. Подъёмы PEQ
+        <p>Насколько ослаблен фильтр, чтобы максимум его АЧХ был 0 dB. Подъёмы PEQ
           не перегружают цифровой тракт.</p>
         <p>Каждая полоса нормируется отдельно, так задумано. Уровни полос между собой
           выставляются в плеере или DSP-хосте.</p>

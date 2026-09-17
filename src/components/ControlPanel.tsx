@@ -72,6 +72,7 @@ import {
 } from "../stores/peq-optimize";
 import { showStaleConfirmDialog } from "./StalePeqExportDialog";
 import { showToast } from "../lib/toast";
+import { pluralRu } from "../lib/plural";
 
 /** b141.38: an out-of-range PEQ entry used to be dropped silently while the
  *  field kept showing it — the table and the model disagreed with no hint.
@@ -515,7 +516,7 @@ function PeqTab() {
                   <tr>
                     <td><input class="peq-input" type="number" value={Math.round(z.startHz)} min={20} max={F_MAX_WORK} step={1} onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v) && v >= 20) { const b = band(); if (b) updateExclusionZone(b.id, i, { startHz: v }); } }} /></td>
                     <td><input class="peq-input" type="number" value={Math.round(z.endHz)} min={20} max={F_MAX_WORK} step={1} onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v) && v >= 20) { const b = band(); if (b) updateExclusionZone(b.id, i, { endHz: v }); } }} /></td>
-                    <td><button class="peq-remove" onClick={() => { const b = band(); if (b) removeExclusionZone(b.id, i); }}>×</button></td>
+                    <td><button class="peq-remove" onClick={() => { const b = band(); if (b) removeExclusionZone(b.id, i); }} aria-label="Удалить зону исключения" title="Удалить зону исключения">×</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -550,7 +551,7 @@ function PeqTab() {
                   <td><input class="peq-input" type="number" value={Math.round(pb.freq_hz)} min={20} max={F_MAX_WORK} step={1} onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v) && v >= 20 && v <= F_MAX_WORK) { const bd = band(); if (bd) updatePeqBand(bd.id, pi, { freq_hz: v }); } else rejectPeqInput(e.currentTarget, String(Math.round(pb.freq_hz)), `Частота PEQ: 20–${F_MAX_WORK} Hz`); }} /></td>
                   <td><input class={`peq-input ${pb.gain_db > 0 ? "peq-boost" : "peq-cut"}`} type="number" value={pb.gain_db.toFixed(1)} min={-60} max={60} step={0.1} onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v)) { const bd = band(); if (bd) updatePeqBand(bd.id, pi, { gain_db: v }); } else rejectPeqInput(e.currentTarget, pb.gain_db.toFixed(1), "Усиление PEQ: введите число"); }} /></td>
                   <td><input class="peq-input" type="number" value={pb.q.toFixed(1)} min={0.1} max={20} step={0.1} onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v) && v >= 0.1 && v <= 20) { const bd = band(); if (bd) updatePeqBand(bd.id, pi, { q: v }); } else rejectPeqInput(e.currentTarget, pb.q.toFixed(1), "Q PEQ: 0.1–20"); }} /></td>
-                  <td><button class="peq-commit" onClick={() => { const bd = band(); if (bd) { const ni = commitPeqBand(bd.id, pi); setPendingPeqIdx(null); setSelectedPeqIdx(ni); } }}>✓</button></td>
+                  <td><button class="peq-commit" aria-label="Добавить фильтр" title="Добавить фильтр" onClick={() => { const bd = band(); if (bd) { const ni = commitPeqBand(bd.id, pi); setPendingPeqIdx(null); setSelectedPeqIdx(ni); } }}>✓</button></td>
                 </tr>
               </tbody></table>
             );
@@ -586,7 +587,7 @@ function PeqTab() {
           <Show when={peqError()}><div class="align-error">{peqError()}</div></Show>
           <Show when={peqBands().length > 0}>
             <div class="align-status">
-              {peqBands().length} фильтр{peqBands().length === 1 ? "" : "ов"}
+              {peqBands().length} {pluralRu(peqBands().length, "фильтр", "фильтра", "фильтров")}
               {maxErr() != null ? ` \u00B7 max: ${maxErr()!.toFixed(1)}dB` : ""}
               {iters() != null ? ` \u00B7 ${iters()}it` : ""}
             </div>
@@ -627,7 +628,7 @@ function PeqTab() {
                           <button class="peq-warn-icon" title="" aria-label="Высокая добротность"
                             onClick={(e) => { e.stopPropagation(); openHighQPopup(b, i); }}>⚠</button>
                         ) : null}</td>
-                        <td>{isPending ? <button class="peq-commit" onClick={(e) => { e.stopPropagation(); const bd = band(); if (bd) { const ni = commitPeqBand(bd.id, i); setPendingPeqIdx(null); setSelectedPeqIdx(ni); } }}>✓</button> : <button class="peq-remove" onClick={() => handleRemovePeq(i)}>×</button>}</td>
+                        <td>{isPending ? <button class="peq-commit" aria-label="Добавить фильтр" title="Добавить фильтр" onClick={(e) => { e.stopPropagation(); const bd = band(); if (bd) { const ni = commitPeqBand(bd.id, i); setPendingPeqIdx(null); setSelectedPeqIdx(ni); } }}>✓</button> : <button class="peq-remove" onClick={() => handleRemovePeq(i)} aria-label="Удалить фильтр" title="Удалить фильтр">×</button>}</td>
                       </tr>
                     );
                   })}
