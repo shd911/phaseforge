@@ -307,6 +307,16 @@ git diff --stat
 
 **Когда поздно:** если пользователь сам говорит «давайте refactor» — я опоздал на 2-3 итерации. Должен был заметить раньше.
 
+## UI conventions (b141.38)
+- **Dialog keys go through `handleDialogKeys`** (lib/dialog-keys.ts): Enter on a
+  focused button belongs to that button. Overlay handlers that ran the primary
+  action on any Enter made «Не сохранять»+Enter save the project.
+- **Numeric dialog fields: parse on input, clamp on blur/Apply.** `parseFloat(v)
+  || default` and per-keystroke clamping both make a field uneditable.
+- **CSS tokens must not reference themselves** — a cyclic custom property is
+  invalid and silently drops the colour (--warn-amber was dead b141.4→b141.38).
+- Plurals via `pluralRu` (lib/plural.ts), never `n === 1 ? "" : "а"`.
+
 ## SolidJS Patterns
 - `batch()`: wrap multiple signal updates to prevent intermediate effects
 - PEQ drag: debounce via `peqDragging` signal + `setTimeout(150ms)`
