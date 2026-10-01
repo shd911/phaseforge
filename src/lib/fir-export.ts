@@ -18,13 +18,11 @@ export function driverName(b: BandState): string {
   return name;
 }
 
-async function generateBandImpulse(b: BandState): Promise<{
-  impulse: number[]; delaySamples: number; route: "iir" | "cepstral"; peakBoostDb: number;
-}> {
-  // b139.3: route through canonical BandEvaluator. The b138.4 isLin
-  // demotion (Gaussian linear + subsonic → MinimumPhase) lives inside the
-  // evaluator, so this call site no longer carries duplicate phase logic.
-  const result = await evaluateBandFull({
+/** The evaluator request a WAV export runs — one place, so the Σ view's
+ *  convolver delays come from exactly the FIR that is exported (same cache
+ *  entry). Reads the export signals synchronously: call before any await. */
+export function firExportRequest(b: BandState): Parameters<typeof evaluateBandFull>[0] {
+  return {
     band: b,
     // b141.19 (audit): the same grid the Export tab previews on. Without it
     // the evaluator fell back to the measurement's grid and shipped a
@@ -42,7 +40,16 @@ async function generateBandImpulse(b: BandState): Promise<{
       nbSmoothingOct: firNbSmoothingOct(),
       nbMaxExcessDb: firNbMaxExcess(),
     },
-  });
+  };
+}
+
+async function generateBandImpulse(b: BandState): Promise<{
+  impulse: number[]; delaySamples: number; route: "iir" | "cepstral"; peakBoostDb: number;
+}> {
+  // b139.3: route through canonical BandEvaluator. The b138.4 isLin
+  // demotion (Gaussian linear + subsonic → MinimumPhase) lives inside the
+  // evaluator, so this call site no longer carries duplicate phase logic.
+  const result = await evaluateBandFull(firExportRequest(b));
   if (!result.fir) {
     throw new Error("FIR generation failed");
   }
@@ -82,6 +89,18 @@ export function offCenterWavWarning(
     `половину файла. В конвольвере она заиграет на ${offsetSamples} отсчётов ` +
     `раньше остальных: увеличьте число тапов или скомпенсируйте разницу ` +
     `задержкой в конвольвере (в WAV задержка полосы не запекается).`;
+}
+
+/** b141.61: the delay to type into the convolver for a band (seconds) — its
+ *  alignment delay plus what its WAV lacks of the common N/2 latency (an
+ *  impulse tail that did not fit shrinks the leading zeros, so the band would
+ *  otherwise play that much early). With it the convolver output is the Σ
+ *  the plot shows. */
+export function convolverDelaySeconds(
+  alignmentDelayS: number, wavDelaySamples: number, taps: number, sampleRate: number,
+): number {
+  const shortfall = Math.max(0, Math.floor(taps / 2) - wavDelaySamples);
+  return alignmentDelayS + shortfall / sampleRate;
 }
 
 /** b141.50 (audit 2026-10-01 H6): polarity and alignment delay are shown in
@@ -131,7 +150,9 @@ export async function exportBandWav(b: BandState): Promise<boolean> {
   if (!path) return false;
   await invoke("export_fir_wav", { impulse, sampleRate: sr, path });
   const warn = offCenterWavWarning(delaySamples, impulse.length, driverName(b));
-  const host = hostSettingsNote(b.inverted, b.alignmentDelay ?? 0, driverName(b));
+  const host = hostSettingsNote(
+    b.inverted, convolverDelaySeconds(b.alignmentDelay ?? 0, delaySamples, impulse.length, sr), driverName(b),
+  );
   const boost = boostLimitNote(route, peakBoostDb, firMaxBoost(), driverName(b));
   const msg = [warn, host, boost].filter(Boolean).join(" ");
   if (msg) showToast(msg, "warn", 12000);

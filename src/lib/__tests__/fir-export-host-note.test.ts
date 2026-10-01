@@ -33,3 +33,14 @@ describe("boostLimitNote (b141.53)", () => {
     expect(boostLimitNote("iir", 30, 24, "Sub")).toMatch(/30\.0 dB выше лимита 24\.0 dB/);
   });
 });
+
+import { convolverDelaySeconds } from "../fir-export";
+
+describe("convolverDelaySeconds (b141.61)", () => {
+  it("full N/2 delay → just the alignment", () => {
+    expect(convolverDelaySeconds(0.00082, 131072, 262144, 352800)).toBeCloseTo(0.00082, 9);
+  });
+  it("VPV2 rip: WAV delay 40 803 of 131 072 → +255.9 ms", () => {
+    expect(convolverDelaySeconds(0, 40803, 262144, 352800) * 1000).toBeCloseTo(255.86, 1);
+  });
+});

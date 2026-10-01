@@ -11,7 +11,7 @@ import { openCrossoverDialog, type CrossoverDialogData } from "./CrossoverDialog
 import { handleImportMeasurement, handleMergeComplete, setShowMergeDialog, showMergeDialog } from "../lib/measurement-actions";
 import { setBandDelayInfo, markBandDelayRemoved, restoreBandDelay } from "../stores/bands";
 import MergeDialog from "./MergeDialog";
-import { exportBandWav } from "../lib/fir-export";
+import { exportBandWav, firExportRequest, convolverDelaySeconds } from "../lib/fir-export";
 import { showToast } from "../lib/toast";
 import { alignmentPhaseDeg, STANDARD_SAMPLE_RATES, STANDARD_TAPS, F_MIN_WORK, F_MAX_WORK, F_MAX_REF } from "../lib/types";
 import { preRingZoneMs } from "../lib/pre-ring";
@@ -222,6 +222,36 @@ export default function FrequencyPlot() {
 
   const [cursorFreq, setCursorFreq] = createSignal("—");
   const [autoAligning, setAutoAligning] = createSignal(false);
+
+  // b141.61: the delay each band needs IN THE CONVOLVER — alignment plus the
+  // shortfall of its WAV's leading zeros (a tail that did not fit in N/2).
+  // Computed from the exact FIR the WAV export ships (same evaluator cache),
+  // shown under the Σ DELAY fields when it differs from them.
+  const [convDelays, setConvDelays] = createSignal<Record<string, number>>({});
+  let convGen = 0;
+  createEffect(() => {
+    if (!isSum() || (plotTab() !== "freq" && plotTab() !== "ir") || peqDragging()) return;
+    // Read every input synchronously (signals after an await are not tracked).
+    const taps = exportTaps(), sr = exportSampleRate();
+    const reqs = appState.bands
+      .filter((b) => b.targetEnabled)
+      .map((b) => ({ id: b.id, align: b.alignmentDelay ?? 0, req: firExportRequest(b) }));
+    const gen = ++convGen;
+    setTimeout(async () => {
+      if (gen !== convGen) return;
+      const out: Record<string, number> = {};
+      for (const r of reqs) {
+        try {
+          const res = await evaluateBandFull(r.req);
+          if (gen !== convGen) return;
+          if (res.fir) out[r.id] = convolverDelaySeconds(r.align, res.fir.wavDelaySamples, taps, sr);
+        } catch (e) {
+          console.warn("[Σ convolver delay] FIR failed:", e);
+        }
+      }
+      if (gen === convGen) setConvDelays(out);
+    }, 400);
+  });
   const [cursorSPL, setCursorSPL] = createSignal("—");
   const [cursorPhase, setCursorPhase] = createSignal("—");
   // Per-curve values at cursor position: { label, color, value, unit }
@@ -4374,6 +4404,7 @@ export default function FrequencyPlot() {
                             <td class="sum-cell">
                               <Show when={band()} fallback={<span />}>
                                 {(b) => (
+                                  <>
                                   <input
                                     type="number"
                                     class="delay-input"
@@ -4400,6 +4431,18 @@ export default function FrequencyPlot() {
                                       });
                                     }}
                                   />
+                                  <Show when={(() => {
+                                    const c = convDelays()[b().id];
+                                    return c !== undefined && Math.abs(c - (b().alignmentDelay ?? 0)) >= 5e-6;
+                                  })()}>
+                                    <div
+                                      class="delay-conv"
+                                      title={"Задержка для конвольвера: выравнивание + недобор задержки WAV. " +
+                                        "Хвост фильтра этой полосы не уместился в половину файла, поэтому " +
+                                        "её WAV начинается раньше остальных на разницу."}
+                                    >конв. {((convDelays()[b().id] ?? 0) * 1000).toFixed(2)}</div>
+                                  </Show>
+                                  </>
                                 )}
                               </Show>
                             </td>

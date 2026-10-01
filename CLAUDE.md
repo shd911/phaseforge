@@ -48,7 +48,10 @@
   Идея «генерация на 2N» не нужна: комната для хвоста при задержке N/2 —
   ровно N/2, адаптивный сдвиг честнее (контент важнее задержки).
   Фактическая задержка возвращается в `wav_delay_samples`; недобор
-  (хвост не уместился) — предупреждение при экспорте.
+  (хвост не уместился) — предупреждение при экспорте. С b141.61 окно Σ
+  показывает под полем DELAY «конв. X» = выравнивание + недобор
+  (`convolverDelaySeconds`, по тому же FIR, что экспортируется,
+  `firExportRequest`) — это число вводится в конвольвер.
   Acceptance: `tests/wav_peak_convention.rs` — `two_way_sum_stays_flat`
   (главный инвариант), `wav_delay_matches_the_leading_zeros`,
   `short_taps_lf_tail_falls_short_of_center_and_says_so`.

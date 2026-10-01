@@ -763,6 +763,15 @@ input[type="checkbox"]:focus-visible {
   outline: none;
 }
 .delay-input:focus { border-color: var(--border-focus); }
+/* b141.61: convolver delay under a Σ DELAY field (alignment + WAV shortfall). */
+.delay-conv {
+  font-size: var(--fs-xs);
+  font-family: var(--mono);
+  color: var(--warn-amber);
+  text-align: center;
+  cursor: help;
+  line-height: 1.1;
+}
 
 .plot-body {
   display: flex;
