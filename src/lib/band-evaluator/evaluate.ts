@@ -23,7 +23,7 @@ import {
   smoothingConfig,
 } from "../plot-helpers";
 import { hasActiveSubsonicProtect, F_MIN_WORK, F_MAX_WORK } from "../types";
-import { buildLogGrid, buildCommonGrid, resampleOnLogGrid, interpPhaseOnGrid, irTime, type ImpulseIpc } from "./grid";
+import { buildLogGrid, buildCommonGrid, interpOnGrid, resampleOnLogGrid, interpPhaseOnGrid, irTime, type ImpulseIpc } from "./grid";
 import { dispatchFirInvoke } from "./route";
 import { appendNoiseFloorTail, autoRefLevel, computeExtension } from "./extension";
 import { bandRequestKey, memoEval } from "./cache";
@@ -156,29 +156,44 @@ export async function reconstructTargetPhase(
   lp: FilterConfig | null | undefined,
   sampleRate: number = 48000,
 ): Promise<number[]> {
+  // b141.52 (audit 2026-10-01 H4): every Hilbert term is reconstructed on
+  // ONE grid — the FIR's (5 Hz – 0.95·Nyquist) with the FIR's absolute
+  // −150 dB floor — and only then interpolated onto the caller's grid. On
+  // the 20 Hz display grid with a «peak − 120» floor the plotted phase was
+  // 65° (Gaussian LP 2 kHz at 5 kHz) and 101° (Gaussian HP 100 + subsonic
+  // at 20 Hz) away from the exported FIR.
+  const g = buildLogGrid(HILBERT_GRID_POINTS, 5, (sampleRate / 2) * 0.95);
+  const hilbert = (magnitude: number[]) =>
+    invoke<number[]>("compute_minimum_phase", {
+      freq: g, magnitude, sampleRate, floorDb: HILBERT_FLOOR_DB,
+    }).then((ph) => interpOnGrid(g, ph, freq, { logSpace: true, outside: "clamp" }) as number[]);
+
   // Independent Hilbert reconstructions run in parallel (were serial awaits).
   const jobs: Promise<number[]>[] = [];
   if (isGaussianMinPhase(hp)) {
-    let hpMag = gaussianFilterMagDb(freq, hp!, false);
+    let hpMag = gaussianFilterMagDb(g, hp!, false);
     if (hasActiveSubsonicProtect(hp)) {
-      const subDb = subsonicMagDb(freq, hp!.freq_hz / 8);
+      const subDb = subsonicMagDb(g, hp!.freq_hz / 8);
       hpMag = hpMag.map((db, i) => db + subDb[i]);
     }
-    jobs.push(invoke<number[]>("compute_minimum_phase", { freq, magnitude: hpMag, sampleRate }));
+    jobs.push(hilbert(hpMag));
   } else if (hasActiveSubsonicProtect(hp) && hp!.linear_phase === true) {
     // Linear-phase Gaussian still ships a min-phase subsonic — Hilbert from
     // subsonic-only magnitude.
-    const subDb = subsonicMagDb(freq, hp!.freq_hz / 8);
-    jobs.push(invoke<number[]>("compute_minimum_phase", { freq, magnitude: subDb, sampleRate }));
+    jobs.push(hilbert(subsonicMagDb(g, hp!.freq_hz / 8)));
   }
   if (isGaussianMinPhase(lp)) {
-    const lpMag = gaussianFilterMagDb(freq, lp!, true);
-    jobs.push(invoke<number[]>("compute_minimum_phase", { freq, magnitude: lpMag, sampleRate }));
+    jobs.push(hilbert(gaussianFilterMagDb(g, lp!, true)));
   }
   if (jobs.length === 0) return [...basePhase];
   const parts = await Promise.all(jobs);
   return basePhase.map((v, i) => parts.reduce((acc, ph) => acc + ph[i], v));
 }
+
+/** Grid and floor of the Hilbert terms — the FIR's (fir/cepstral.rs clips at
+ *  the −150 dB default noise floor on a 5 Hz – 0.95·Nyquist grid). */
+const HILBERT_GRID_POINTS = 1024;
+const HILBERT_FLOOR_DB = -150;
 
 /** b141.48 (audit 2026-10-01 H5): the filter section the FIR bakes into a
  *  band on top of the PEQ — HP/LP, tilt, shelves and, at export rates

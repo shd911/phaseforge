@@ -97,9 +97,10 @@ pub fn generate_model_fir_with_sections(
     let n_bins = n_fft / 2 + 1;
 
     // 1. Interpolate target mag (dB) to linear FFT grid
-    let (lin_freq, lin_target_raw, _) = interpolate_linear_grid(
+    let (lin_freq, mut lin_target_raw, _) = interpolate_linear_grid(
         freq, target_mag, None, n_bins, config.sample_rate,
     );
+    extend_below_grid(&lin_freq, &mut lin_target_raw, freq, target_mag);
 
     // b141.51: digital crossover sections for the Composite min-phase main.
     let section = if config.phase_mode == PhaseMode::Composite && !config.linear_phase_main {
@@ -115,9 +116,10 @@ pub fn generate_model_fir_with_sections(
         Some(s) => {
             let resid_log: Vec<f64> = target_mag.iter().zip(&s.analog_db_log)
                 .map(|(&t, &a)| t - a).collect();
-            let (_, resid_lin, _) = interpolate_linear_grid(
+            let (_, mut resid_lin, _) = interpolate_linear_grid(
                 freq, &resid_log, None, n_bins, config.sample_rate,
             );
+            extend_below_grid(&lin_freq, &mut resid_lin, freq, &resid_log);
             resid_lin.iter().zip(&s.db)
                 .map(|(&r, &d)| (d + r.clamp(config.noise_floor_db, config.max_boost_db.max(0.0)))
                     .max(-600.0).min(config.max_boost_db))
@@ -411,4 +413,22 @@ pub fn generate_model_fir_with_sections(
     // b141.40: replaces the old 40 kHz brick wall — see fir/ultrasonic.rs.
     super::ultrasonic::apply_ultrasonic_lp(&mut result, freq);
     Ok(result)
+}
+
+/// b141.52 (audit 2026-10-01 H4): continue the magnitude below the first grid
+/// point (5 Hz) by its log-log slope instead of holding it flat. A flat hold
+/// is a shelf under a still-falling HP (−118 dB held to DC on a Gaussian HP
+/// 100 + subsonic) and moved the phase by 28° at 20 Hz against the same
+/// curve continued — the rule `dsp::minimum_phase_on_log_grid` already
+/// follows for the plot. The noise floor clip downstream bounds it.
+fn extend_below_grid(lin_freq: &[f64], lin: &mut [f64], freq: &[f64], mag: &[f64]) {
+    if freq.len() < 2 || freq[0] <= 0.0 { return; }
+    let df = (freq[1] / freq[0]).log2();
+    if df.abs() < 1e-12 { return; }
+    let slope = (mag[1] - mag[0]) / df; // dB per octave
+    for (v, &f) in lin.iter_mut().zip(lin_freq) {
+        if f >= freq[0] { break; }
+        let oct = (f.max(freq[0] / 4096.0) / freq[0]).log2(); // ≤ 0
+        *v = mag[0] + slope * oct;
+    }
 }

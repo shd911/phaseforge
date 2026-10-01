@@ -950,7 +950,7 @@ use super::*;
         // Captured from b138.4 reference run; any change in the FIR pipeline
         // that touches this config flips the hash → investigate before
         // accepting.
-        let expected = "4574e5da87ade187"; // b141.14: unified WAV peak (N/2 shift)
+        let expected = "2f79559fe1bad9d7"; // b141.52: slope-extended magnitude below the grid
         assert_eq!(hash, expected,
             "FIR impulse hash drift — capture new value from this test failure if intentional");
     }
@@ -1060,7 +1060,7 @@ use super::*;
         let result = generate_model_fir(&freq, &target_mag, &peq_mag, &vec![0.0; n], &b139_3_fir_config(PhaseMode::MinimumPhase))
             .expect("generate_model_fir should succeed");
         let hash = b139_impulse_hash(&result.impulse);
-        let expected = "f5d8b961a20d053a"; // b141.14: unified WAV peak (N/2 shift)
+        let expected = "8a1bca2f18351411"; // b141.52: slope-extended magnitude below the grid
         assert_eq!(hash, expected,
             "LR4 + PEQ FIR hash drift — capture new value if intentional");
     }
