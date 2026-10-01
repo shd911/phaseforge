@@ -7,6 +7,7 @@
 // targets with polarity + alignment_delay phase rotation.
 
 import { describe, it, expect, vi } from "vitest";
+import { sumParts } from "./helpers/sum-parts";
 import type { BandState } from "../../stores/bands";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -39,10 +40,11 @@ vi.mock("@tauri-apps/api/core", () => ({
       const f = args.freq as number[];
       return [new Array(f.length).fill(0), new Array(f.length).fill(0), 0];
     }
-    if (cmd === "compute_impulse") {
+    if (cmd === "compute_impulse" || cmd === "compute_sum_impulse") {
       // Deterministic non-trivial mock so different inputs → different outputs.
-      const mag = args.magnitude as number[];
-      const phase = args.phase as number[];
+      const s = cmd === "compute_sum_impulse" ? sumParts(args.freq, args.parts) : null;
+      const mag = (s ? s.magnitude : args.magnitude) as number[];
+      const phase = (s ? s.phase : args.phase) as number[];
       return {
         time: mag.map((_, i) => i / 48000),
         impulse: [...mag],

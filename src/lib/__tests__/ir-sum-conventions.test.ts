@@ -14,6 +14,7 @@
 //    new_i = max(old) − old_i (relative timing preserved, all ≥ 0).
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { sumParts } from "./helpers/sum-parts";
 import type { Mock } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import type { BandState } from "../../stores/bands";
@@ -66,6 +67,11 @@ vi.mock("@tauri-apps/api/core", () => ({
     }
     if (cmd === "compute_minimum_phase") return (args.freq as number[]).map(() => 0);
     if (cmd === "get_smoothed") return args.magnitude;
+    if (cmd === "compute_sum_impulse") {
+      const s = sumParts(args.freq, args.parts);
+      impulseCalls.push({ freq: [...args.freq], magnitude: s.magnitude, phase: s.phase });
+      return { time: [0, 1], impulse: [1, 0], step: [1, 1] };
+    }
     if (cmd === "compute_impulse") {
       impulseCalls.push({
         freq: [...args.freq], magnitude: [...args.magnitude], phase: [...args.phase],

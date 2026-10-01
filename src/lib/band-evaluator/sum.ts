@@ -490,19 +490,21 @@ async function evaluateSumImpl(
     ).freq;
     const N = irFreq.length;
 
-    const tgtRe = new Float64Array(N), tgtIm = new Float64Array(N);
-    const measRe = new Float64Array(N), measIm = new Float64Array(N);
-    const corrRe = new Float64Array(N), corrIm = new Float64Array(N);
-    let anyTgt = false, anyMeas = false, anyCorr = false;
+    // b141.59: per-band parts, summed in Rust on the linear FFT bins with the
+    // delay and polarity applied there exactly. Summing on this log grid with
+    // the delay ramp baked into the wrapped phase aliased above ~10 kHz at
+    // ~3 ms of alignment delay — a 25 % pre-response in Σ IR/Step.
+    type Part = { magnitude: number[]; phase: number[]; delay: number; sign: number };
+    const tgtParts: Part[] = [], measParts: Part[] = [], corrParts: Part[] = [];
 
     // b140.15.4: per-band IR build runs in parallel. Each band computes
     // its own (tgt|meas|corr) Re/Im partials, then the main thread reduces
     // them into the shared accumulator. Math is identical — accumulation
     // is associative on f64 within the precision we care about.
     interface IrPartial {
-      tgt: { re: Float64Array; im: Float64Array } | null;
-      meas: { re: Float64Array; im: Float64Array } | null;
-      corr: { re: Float64Array; im: Float64Array } | null;
+      tgt: Part | null;
+      meas: Part | null;
+      corr: Part | null;
     }
 
     const partials: IrPartial[] = await Promise.all(bands.map(async (band, bandIdx): Promise<IrPartial> => {
@@ -521,14 +523,7 @@ async function evaluateSumImpl(
           irFreq, resp.phase, band.target.high_pass, band.target.low_pass, sumSr,
         );
         tgtMagOnIr = resp.magnitude;
-        const re = new Float64Array(N), im = new Float64Array(N);
-        for (let j = 0; j < N; j++) {
-          const amp = Math.pow(10, (resp.magnitude[j] ?? -200) / 20) * sign;
-          const phRad = ((tPhase[j] ?? 0) + alignmentPhaseDeg(irFreq[j], delay)) * Math.PI / 180;
-          re[j] = amp * Math.cos(phRad);
-          im[j] = amp * Math.sin(phRad);
-        }
-        out.tgt = { re, im };
+        out.tgt = { magnitude: resp.magnitude, phase: tPhase, delay, sign };
       }
 
       if (!band.measurement) return out;
@@ -555,16 +550,7 @@ async function evaluateSumImpl(
       if (!extMeasMag) return out;
       const measPhaseArr = extMeasPhase ?? new Array<number>(N).fill(0);
 
-      {
-        const re = new Float64Array(N), im = new Float64Array(N);
-        for (let j = 0; j < N; j++) {
-          const amp = Math.pow(10, (extMeasMag[j] ?? -200) / 20) * sign;
-          const phRad = ((measPhaseArr[j] ?? 0) + alignmentPhaseDeg(irFreq[j], delay)) * Math.PI / 180;
-          re[j] = amp * Math.cos(phRad);
-          im[j] = amp * Math.sin(phRad);
-        }
-        out.meas = { re, im };
-      }
+      out.meas = { magnitude: extMeasMag, phase: measPhaseArr, delay, sign };
 
       // Corrected: measurement (extended) + PEQ + cross-section, on irFreq.
       if (band.targetEnabled) {
@@ -587,64 +573,41 @@ async function evaluateSumImpl(
         const corrPhase = await reconstructTargetPhase(
           irFreq, baseP, band.target.high_pass, band.target.low_pass, sumSr,
         );
-        const re = new Float64Array(N), im = new Float64Array(N);
-        for (let j = 0; j < N; j++) {
-          const amp = Math.pow(10, (corrMag[j] ?? -200) / 20) * sign;
-          const phRad = ((corrPhase[j] ?? 0) + alignmentPhaseDeg(irFreq[j], delay)) * Math.PI / 180;
-          re[j] = amp * Math.cos(phRad);
-          im[j] = amp * Math.sin(phRad);
-        }
-        out.corr = { re, im };
+        out.corr = { magnitude: corrMag, phase: corrPhase, delay, sign };
       }
 
       return out;
     }));
 
     for (const p of partials) {
-      if (p.tgt) {
-        anyTgt = true;
-        for (let j = 0; j < N; j++) { tgtRe[j] += p.tgt.re[j]; tgtIm[j] += p.tgt.im[j]; }
-      }
-      if (p.meas) {
-        anyMeas = true;
-        for (let j = 0; j < N; j++) { measRe[j] += p.meas.re[j]; measIm[j] += p.meas.im[j]; }
-      }
-      if (p.corr) {
-        anyCorr = true;
-        for (let j = 0; j < N; j++) { corrRe[j] += p.corr.re[j]; corrIm[j] += p.corr.im[j]; }
-      }
+      if (p.tgt) tgtParts.push(p.tgt);
+      if (p.meas) measParts.push(p.meas);
+      if (p.corr) corrParts.push(p.corr);
     }
 
     irOut = {};
-    const toIR = async (re: Float64Array, im: Float64Array) => {
-      const mag = new Array<number>(N);
-      const phase = new Array<number>(N);
-      for (let j = 0; j < N; j++) {
-        const amp = Math.sqrt(re[j] * re[j] + im[j] * im[j]);
-        mag[j] = amp > 0 ? 20 * Math.log10(amp) : -200;
-        phase[j] = Math.atan2(im[j], re[j]) * 180 / Math.PI;
-      }
+    const toIR = async (parts: Part[]) => {
       try {
         const r = await invoke<ImpulseIpc>(
-          "compute_impulse",
-          { freq: irFreq, magnitude: mag, phase, sampleRate: irSr },
+          "compute_sum_impulse",
+          { freq: irFreq, parts, sampleRate: irSr },
         );
         return { time: irTime(r), impulse: r.impulse, step: r.step };
       } catch (e) {
-        console.warn("[evaluateSum] toIR compute_impulse failed:", e);
+        console.warn("[evaluateSum] toIR compute_sum_impulse failed:", e);
         return null;
       }
     };
-    if (anyMeas) {
-      const r = await toIR(measRe, measIm);
+    if (measParts.length > 0) {
+      const r = await toIR(measParts);
       if (r) irOut.measurement = r;
     }
-    if (anyTgt) {
-      const r = await toIR(tgtRe, tgtIm);
+    if (tgtParts.length > 0) {
+      const r = await toIR(tgtParts);
       if (r) irOut.target = r;
     }
-    if (anyCorr) {
-      const r = await toIR(corrRe, corrIm);
+    if (corrParts.length > 0) {
+      const r = await toIR(corrParts);
       if (r) irOut.corrected = r;
     }
   }

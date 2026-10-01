@@ -138,6 +138,37 @@ async fn compute_impulse(
     Ok(dsp::impulse::compute_impulse_response(&freq, &magnitude, &phase, sr))
 }
 
+/// b141.59: one part of a coherent Σ impulse — the band's own response on the
+/// shared grid plus its alignment delay (s, positive = later) and polarity.
+#[derive(serde::Deserialize)]
+struct SumImpulsePart {
+    magnitude: Vec<f64>,
+    phase: Vec<f64>,
+    delay: f64,
+    sign: f64,
+}
+
+/// Σ IR/Step: each band interpolated on its own (smooth phase), delay and
+/// polarity applied exactly on the linear FFT bins, then summed. Baking a
+/// 3 ms delay ramp into the wrapped phase of the 1024-point log grid gave a
+/// 25 % pre-response at 96 kHz (b141.59).
+#[tauri::command]
+async fn compute_sum_impulse(
+    freq: Vec<f64>,
+    parts: Vec<SumImpulsePart>,
+    sample_rate: Option<f64>,
+) -> Result<ImpulseResult, String> {
+    let sr = sample_rate.unwrap_or(48000.0);
+    if parts.iter().any(|p| p.magnitude.len() != freq.len() || p.phase.len() != freq.len()) {
+        return Err("compute_sum_impulse: part length mismatch".into());
+    }
+    let views: Vec<dsp::impulse::SpectrumPart> = parts.iter().map(|p| dsp::impulse::SpectrumPart {
+        magnitude: &p.magnitude, phase: &p.phase, delay_s: p.delay, sign: p.sign,
+    }).collect();
+    info!("compute_sum_impulse: {} points, {} parts, sr={}", freq.len(), parts.len(), sr);
+    Ok(dsp::impulse::compute_sum_impulse_response(&freq, &views, sr))
+}
+
 /// Compute minimum phase from magnitude spectrum via Hilbert transform.
 /// Input: freq (log grid), magnitude (dB), the export sample rate.
 /// Output: phase (degrees) on the same grid.
@@ -430,7 +461,7 @@ pub fn run() {
         )
         .init();
 
-    info!("PhaseForge b141.58 starting...");
+    info!("PhaseForge b141.59 starting...");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -452,6 +483,7 @@ pub fn run() {
             remove_measurement_delay,
             apply_manual_delay,
             compute_impulse,
+            compute_sum_impulse,
             compute_minimum_phase,
             merge_measurements,
             preview_baffle_step,

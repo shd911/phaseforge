@@ -3,39 +3,75 @@ use num_complex::Complex64;
 use super::fft::FftEngine;
 use super::interpolation::interpolate_linear_grid;
 
-/// Build the conjugate-symmetric spectrum at `fft_size`, IFFT, return the
-/// real impulse (1/N-normalized).
-fn ifft_real_impulse(
-    freq: &[f64],
-    magnitude: &[f64],
-    phase: &[f64],
-    sample_rate: f64,
-    fft_size: usize,
-) -> Vec<f64> {
+/// One band's frequency response feeding an impulse computation.
+/// b141.59: `delay_s` (alignment, positive = later) and `sign` (polarity) are
+/// applied EXACTLY on the linear FFT bins — never baked into the wrapped
+/// phase of the sparse log grid, where a 3 ms ramp turns > 180° per step at
+/// HF and the shortest-arc interpolation turned it into a 25 % pre-response
+/// in Σ IR/Step (96 kHz, delays 0.8–3.1 ms).
+pub struct SpectrumPart<'a> {
+    pub magnitude: &'a [f64],
+    pub phase: &'a [f64],
+    pub delay_s: f64,
+    pub sign: f64,
+}
+
+/// Bulk delay (s) of a wrapped phase curve: median local group delay over
+/// steps that resolve it (|Δφ| < 90°) and carry energy (within 20 dB of the
+/// maximum). Mirrors `bulkDelaySeconds` in band-evaluator/grid.ts.
+fn bulk_delay(freq: &[f64], phase: &[f64], mag: &[f64]) -> f64 {
+    let max_db = mag.iter().cloned().filter(|v| v.is_finite()).fold(f64::NEG_INFINITY, f64::max);
+    let wrap = |d: f64| ((d + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
+    let mut gds: Vec<f64> = Vec::new();
+    for i in 1..freq.len() {
+        if !(mag[i] > max_db - 20.0 && mag[i - 1] > max_db - 20.0) { continue; }
+        let d = wrap(phase[i] - phase[i - 1]);
+        let df = freq[i] - freq[i - 1];
+        if d.abs() < 90.0 && df > 0.0 { gds.push(-d / (360.0 * df)); }
+    }
+    if gds.len() < 8 { return 0.0; }
+    gds.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let t = gds[gds.len() / 2];
+    if t.abs() < 5e-4 { 0.0 } else { t }
+}
+
+/// Sum the parts on the linear grid at `fft_size`, IFFT, return the real
+/// impulse (1/N-normalized). Each part's own bulk delay is removed before
+/// interpolating its wrapped phase (slow residual) and restored exactly per
+/// bin, together with its alignment delay and sign.
+fn ifft_parts(freq: &[f64], parts: &[SpectrumPart], sample_rate: f64, fft_size: usize) -> Vec<f64> {
     let n_bins = fft_size / 2 + 1; // positive freq bins (DC to Nyquist)
-
-    // Interpolate measurement onto linear grid: 0 Hz to Nyquist
-    let (_grid_freq, grid_mag, grid_phase_opt) =
-        interpolate_linear_grid(freq, magnitude, Some(phase), n_bins, sample_rate);
-    let mut grid_phase = grid_phase_opt.expect("phase must be present when Some(phase) was passed");
-    let mut grid_mag = grid_mag;
-    extend_above_grid(freq, phase, &mut grid_mag, &mut grid_phase, sample_rate);
-
-    // Build complex spectrum for positive frequencies. DC and Nyquist must be
-    // real for a real time-domain signal — project them onto the real axis
-    // explicitly (taking `.re` after the IFFT performs exactly this hermitian
-    // projection implicitly; making it explicit keeps the spectrum honest).
-    let mut spectrum: Vec<Complex64> = Vec::with_capacity(fft_size);
-    for i in 0..n_bins {
-        let amp = 10.0_f64.powf(grid_mag[i] / 20.0);
-        let ph_rad = grid_phase[i].to_radians();
-        if i == 0 || i == n_bins - 1 {
-            spectrum.push(Complex64::new(amp * ph_rad.cos(), 0.0));
-        } else {
-            spectrum.push(Complex64::new(amp * ph_rad.cos(), amp * ph_rad.sin()));
+    let nyq = sample_rate / 2.0;
+    let mut acc = vec![Complex64::new(0.0, 0.0); n_bins];
+    for p in parts {
+        let tau_b = bulk_delay(freq, p.phase, p.magnitude);
+        let wrap = |d: f64| ((d + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
+        let resid: Vec<f64> = p.phase.iter().zip(freq)
+            .map(|(&ph, &f)| wrap(ph + 360.0 * f * tau_b)).collect();
+        // Interpolate onto linear grid: 0 Hz to Nyquist
+        let (_grid_freq, mut grid_mag, grid_phase_opt) =
+            interpolate_linear_grid(freq, p.magnitude, Some(&resid), n_bins, sample_rate);
+        let mut grid_phase = grid_phase_opt.expect("phase must be present when Some(phase) was passed");
+        extend_above_grid(freq, &resid, &mut grid_mag, &mut grid_phase, sample_rate);
+        let tau = tau_b + p.delay_s;
+        for i in 0..n_bins {
+            let f = nyq * i as f64 / (n_bins - 1) as f64;
+            let amp = p.sign * 10.0_f64.powf(grid_mag[i] / 20.0);
+            let ph_rad = (grid_phase[i] - 360.0 * f * tau).to_radians();
+            acc[i] += Complex64::from_polar(amp, ph_rad);
         }
     }
 
+    // DC and Nyquist must be real for a real time-domain signal — project
+    // them onto the real axis explicitly.
+    let mut spectrum: Vec<Complex64> = Vec::with_capacity(fft_size);
+    for (i, c) in acc.iter().enumerate() {
+        if i == 0 || i == n_bins - 1 {
+            spectrum.push(Complex64::new(c.re, 0.0));
+        } else {
+            spectrum.push(*c);
+        }
+    }
     // Mirror for negative frequencies (conjugate symmetry): bins n_bins..fft_size
     for i in 1..(fft_size - n_bins + 1) {
         let idx = n_bins - 1 - i;
@@ -125,6 +161,20 @@ pub fn compute_impulse_response(
     phase: &[f64],
     sample_rate: f64,
 ) -> ImpulseResult {
+    compute_sum_impulse_response(
+        freq,
+        &[SpectrumPart { magnitude, phase, delay_s: 0.0, sign: 1.0 }],
+        sample_rate,
+    )
+}
+
+/// Impulse / step of the coherent sum of `parts` (all on `freq`), each with
+/// its own alignment delay and polarity applied on the linear bins (b141.59).
+pub fn compute_sum_impulse_response(
+    freq: &[f64],
+    parts: &[SpectrumPart],
+    sample_rate: f64,
+) -> ImpulseResult {
     // Choose initial FFT size: next power of 2, at least 4096
     let initial_fft_size = {
         let min_size = 4096usize;
@@ -145,7 +195,7 @@ pub fn compute_impulse_response(
     let impulse_raw: Vec<f64>;
     let peak: f64;
     loop {
-        let raw = ifft_real_impulse(freq, magnitude, phase, sample_rate, fft_size);
+        let raw = ifft_parts(freq, parts, sample_rate, fft_size);
         let p = raw.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
         let mid_max = raw[fft_size / 2..fft_size * 3 / 4]
             .iter()
