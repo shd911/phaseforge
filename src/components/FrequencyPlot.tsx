@@ -37,6 +37,7 @@ import {
 import { hasActiveSubsonicProtect } from "../lib/types";
 import { evaluateBandFull, evaluateSum, reconstructTargetPhase } from "../lib/band-evaluator";
 import { buildFirGrid, interpOnGrid, interpPhaseOnGrid, irTime, type ImpulseIpc } from "../lib/band-evaluator/grid";
+import { bandRequestKey } from "../lib/band-evaluator/cache";
 import { computeAutoAlign } from "../lib/auto-align";
 import { attachFieldWheel, newWheelAccumulator, wheelSteps } from "../lib/wheel-step";
 
@@ -233,9 +234,17 @@ export default function FrequencyPlot() {
     if (!isSum() || (plotTab() !== "freq" && plotTab() !== "ir") || peqDragging()) return;
     // Read every input synchronously (signals after an await are not tracked).
     const taps = exportTaps(), sr = exportSampleRate();
+    // bandRequestKey reads every DSP-relevant field (target, enabled PEQ,
+    // smoothing, measurement, FIR settings) through the store proxy, so the
+    // effect re-runs on each of them — reading only the delay missed «Optimize
+    // all» until a tab switch re-ran it (b141.62).
     const reqs = appState.bands
       .filter((b) => b.targetEnabled)
-      .map((b) => ({ id: b.id, align: b.alignmentDelay ?? 0, req: firExportRequest(b) }));
+      .map((b) => {
+        const req = firExportRequest(b);
+        bandRequestKey(req);
+        return { id: b.id, align: b.alignmentDelay ?? 0, req };
+      });
     const gen = ++convGen;
     setTimeout(async () => {
       if (gen !== convGen) return;
