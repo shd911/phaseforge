@@ -132,6 +132,10 @@ export interface BandEvalResult {
     route: "iir" | "cepstral";
     /** b141.40: ultrasonic low-pass corner baked into the FIR, null if none. */
     ultrasonicLpHz: number | null;
+    /** b141.53 (audit 2026-10-01 M2): peak of target + PEQ (dB) the FIR was
+     *  asked for. The cepstral route clips it at «max boost»; the IIR route
+     *  cannot clip a biquad, so the export warns when it exceeds the limit. */
+    peakBoostDb: number;
   };
   /** b139.4c: structured IR for the SPL/IR/Step views. Each sub-field is
    *  populated only when the underlying response exists; `time` is
@@ -525,6 +529,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
       wavDelaySamples: result.wav_delay_samples ?? Math.floor(result.impulse.length / 2),
       route: result.route,
       ultrasonicLpHz: result.ultrasonic_lp_hz ?? null,
+      peakBoostDb: firTargetMag.reduce((m, v, i) => Math.max(m, v + (firPeqMag[i] ?? 0)), -Infinity),
     };
   }
 

@@ -18,7 +18,9 @@ export function driverName(b: BandState): string {
   return name;
 }
 
-async function generateBandImpulse(b: BandState): Promise<{ impulse: number[]; delaySamples: number }> {
+async function generateBandImpulse(b: BandState): Promise<{
+  impulse: number[]; delaySamples: number; route: "iir" | "cepstral"; peakBoostDb: number;
+}> {
   // b139.3: route through canonical BandEvaluator. The b138.4 isLin
   // demotion (Gaussian linear + subsonic → MinimumPhase) lives inside the
   // evaluator, so this call site no longer carries duplicate phase logic.
@@ -44,7 +46,12 @@ async function generateBandImpulse(b: BandState): Promise<{ impulse: number[]; d
   if (!result.fir) {
     throw new Error("FIR generation failed");
   }
-  return { impulse: result.fir.impulse, delaySamples: result.fir.wavDelaySamples };
+  return {
+    impulse: result.fir.impulse,
+    delaySamples: result.fir.wavDelaySamples,
+    route: result.fir.route,
+    peakBoostDb: result.fir.peakBoostDb,
+  };
 }
 
 // b141.14: every route pads the impulse with N/2 leading zeros, so bands
@@ -95,11 +102,23 @@ export function hostSettingsNote(
     `выставьте их в конвольвере, иначе сумма будет не такой, как на графике Σ.`;
 }
 
+/** b141.53 (audit 2026-10-01 M2): «Макс. подъём» caps target + PEQ on the
+ *  cepstral route; the analytic (IIR) route realises the biquads exactly and
+ *  cannot cap them. Say so when the requested boost is above the limit. */
+export function boostLimitNote(
+  route: "iir" | "cepstral", peakBoostDb: number, maxBoostDb: number, bandName: string,
+): string | null {
+  if (route !== "iir" || !(peakBoostDb > maxBoostDb + 0.05)) return null;
+  return `Полоса «${bandName}»: подъём ${peakBoostDb.toFixed(1)} dB выше лимита ` +
+    `${maxBoostDb.toFixed(1)} dB — на аналитическом пути фильтр строится биквадами ` +
+    `точно и лимит не применяется. Уменьшите усиление PEQ или полок.`;
+}
+
 /** Export active band to WAV. Returns true on success, false on cancel, throws on error.
  *  Stale PEQ is gated by a confirm dialog at higher-level call sites — keep this
  *  function focused on the export pipeline. */
 export async function exportBandWav(b: BandState): Promise<boolean> {
-  const { impulse, delaySamples } = await generateBandImpulse(b);
+  const { impulse, delaySamples, route, peakBoostDb } = await generateBandImpulse(b);
   const sr = exportSampleRate();
   const fileName = `${sanitize(driverName(b))}_${sr}_${exportTaps()}_${exportWindow()}.wav`;
   const dir = projectDir();
@@ -113,7 +132,8 @@ export async function exportBandWav(b: BandState): Promise<boolean> {
   await invoke("export_fir_wav", { impulse, sampleRate: sr, path });
   const warn = offCenterWavWarning(delaySamples, impulse.length, driverName(b));
   const host = hostSettingsNote(b.inverted, b.alignmentDelay ?? 0, driverName(b));
-  const msg = [warn, host].filter(Boolean).join(" ");
+  const boost = boostLimitNote(route, peakBoostDb, firMaxBoost(), driverName(b));
+  const msg = [warn, host, boost].filter(Boolean).join(" ");
   if (msg) showToast(msg, "warn", 12000);
   return true;
 }

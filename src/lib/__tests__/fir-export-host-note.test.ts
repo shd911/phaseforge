@@ -19,3 +19,17 @@ describe("hostSettingsNote", () => {
     expect(hostSettingsNote(true, 0.001, "Tw")).toMatch(/инверсия полярности и задержка 1\.000 мс/);
   });
 });
+
+import { boostLimitNote } from "../fir-export";
+
+describe("boostLimitNote (b141.53)", () => {
+  it("silent on the cepstral route (it clips)", () => {
+    expect(boostLimitNote("cepstral", 30, 24, "Sub")).toBeNull();
+  });
+  it("silent within the limit", () => {
+    expect(boostLimitNote("iir", 23.9, 24, "Sub")).toBeNull();
+  });
+  it("warns on the IIR route above the limit", () => {
+    expect(boostLimitNote("iir", 30, 24, "Sub")).toMatch(/30\.0 dB выше лимита 24\.0 dB/);
+  });
+});

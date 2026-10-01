@@ -135,14 +135,20 @@ pub fn generate_model_fir_with_sections(
         let (_, peq_raw, _) = interpolate_linear_grid(
             freq, peq_mag, None, n_bins, config.sample_rate,
         );
-        // PEQ magnitude is typically small — no extreme clipping needed
-        peq_raw.iter().map(|&v| v.max(-60.0).min(config.max_boost_db)).collect()
+        // PEQ magnitude is typically small — no extreme clipping needed.
+        // b141.53: the boost limit applies to the total (below), not to each
+        // part — clipping target and PEQ separately let 2 × max_boost through.
+        peq_raw.iter().map(|&v| v.max(-60.0)).collect()
     } else {
         vec![0.0; n_bins]
     };
 
-    // 3. Total magnitude = target + PEQ (in dB)
-    let lin_mag: Vec<f64> = lin_target.iter().zip(lin_peq.iter()).map(|(&t, &p)| t + p).collect();
+    // 3. Total magnitude = target + PEQ (in dB), capped at the global boost
+    //    limit («Макс. подъём»). The PEQ part is reduced by what the cap takes
+    //    so the composite phase split (total − PEQ = main) stays consistent.
+    let lin_mag: Vec<f64> = lin_target.iter().zip(lin_peq.iter())
+        .map(|(&t, &p)| (t + p).min(config.max_boost_db)).collect();
+    let lin_peq: Vec<f64> = lin_mag.iter().zip(&lin_target).map(|(&m, &t)| m - t).collect();
 
     // b141.2: mixed per-filter phase path. The frontend sends phase_mode =
     // MixedPhase (with an empty gaussian list) for a band whose HP and LP
