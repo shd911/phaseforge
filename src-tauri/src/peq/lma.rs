@@ -312,6 +312,14 @@ impl<'a> LmaSolver<'a> {
         residuals.iter().map(|r| r * r).sum()
     }
 
+    /// The solver's cost for bands of ANY filter type (the parameter vector
+    /// only carries peaking bands). Penalties use the same f/G/Q.
+    pub(crate) fn cost_of_bands(&self, bands: &[PeqBand]) -> f64 {
+        let params = Self::bands_to_params(bands);
+        let correction = apply_peq(self.freq, bands, self.config.sample_rate);
+        self.residuals_from_correction(&params, &correction).iter().map(|r| r * r).sum()
+    }
+
     /// Compute Jacobian via numerical finite differences (parallelized with rayon).
     /// Returns flat row-major Jacobian (m x n_params) and residuals.
     ///
@@ -500,8 +508,16 @@ impl<'a> LmaSolver<'a> {
                 }
             };
 
-            let delta_norm: f64 = delta.iter().map(|d| d * d).sum::<f64>().sqrt();
-            let params_norm: f64 = params.iter().map(|p| p * p).sum::<f64>().sqrt().max(1e-10);
+            // b141.55 (audit 2026-10-01 M5): convergence on a step scaled per
+            // parameter — octaves for f, dB for G, log2 for Q. ‖Δθ‖/‖θ‖ was
+            // dominated by frequencies in Hz (‖θ‖ ≈ 36 000–72 000), so a step
+            // of 3.7–7.2 dB/Q units already read as "converged".
+            let scaled_step: f64 = delta.chunks(3).zip(params.chunks(3)).map(|(d, p)| {
+                let df = ((p[0] + d[0]).max(1e-3) / p[0].max(1e-3)).log2();
+                let dg = d[1];
+                let dq = ((p[2] + d[2]).max(1e-3) / p[2].max(1e-3)).log2();
+                df * df + dg * dg + dq * dq
+            }).sum::<f64>().sqrt();
 
             // Trial step
             let mut params_new: Vec<f64> = params.iter().zip(&delta).map(|(p, d)| p + d).collect();
@@ -511,6 +527,7 @@ impl<'a> LmaSolver<'a> {
 
             if cost_new < cost {
                 // Accept step
+                let rel_gain = (cost - cost_new) / cost.max(1e-30);
                 params = params_new;
                 cost = cost_new;
                 lambda *= 0.5;
@@ -521,8 +538,10 @@ impl<'a> LmaSolver<'a> {
                 // lambda is huge (damping shrinks the step), not that we are
                 // at an optimum — declaring convergence there froze runs at
                 // arbitrary points ("false convergence at large lambda").
-                if delta_norm / params_norm < LMA_CONVERGENCE {
-                    info!("LMA: converged at iter {} (rel step {:.2e})", iter, delta_norm / params_norm);
+                // …or when an accepted step no longer buys anything.
+                if scaled_step < LMA_CONVERGENCE || rel_gain < LMA_MIN_REL_GAIN {
+                    info!("LMA: converged at iter {} (scaled step {:.2e}, cost gain {:.2e})",
+                        iter, scaled_step, rel_gain);
                     break;
                 }
             } else {
@@ -536,56 +555,32 @@ impl<'a> LmaSolver<'a> {
 }
 
 /// Try promoting the lowest/highest frequency bands to LowShelf/HighShelf.
-/// If the shelf version produces equal or lower weighted error, keep it.
-pub(crate) fn try_promote_to_shelves(
-    bands: &mut Vec<PeqBand>,
-    freq: &[f64],
-    meas_mag: &[f64],
-    target: &[f64],
-    config: &PeqConfig,
-) {
+///
+/// b141.55 (audit 2026-10-01 M4): judged by the solver's own weighted cost
+/// (weights, null suppression, Q/gain penalties) with no slack. It compared
+/// an UNWEIGHTED SSE over the whole range with 5 % slack — the stopband
+/// (50–150 dB errors) dominated, so promotions that doubled the weighted
+/// cost (×1.97 on a real woofer) passed. A boosting shelf keeps its gain
+/// beyond the fitted range (to DC / Nyquist), but never more than the
+/// solver's max boost — the same bound a peaking band has.
+pub(crate) fn try_promote_to_shelves(bands: &mut [PeqBand], solver: &LmaSolver) {
     if bands.is_empty() { return; }
-
-    // Helper: weighted SSE in freq_range
-    let compute_sse = |bs: &[PeqBand]| -> f64 {
-        let corr = apply_peq(freq, bs, config.sample_rate);
-        freq.iter().enumerate()
-            .filter(|(_, &f)| f >= config.freq_range.0 && f <= config.freq_range.1)
-            .map(|(i, _)| {
-                let e = meas_mag[i] + corr[i] - target[i];
-                e * e
-            })
-            .sum::<f64>()
-    };
-
-    let baseline = compute_sse(bands);
-
-    // Try lowest band -> LowShelf
-    if bands[0].filter_type == PeqFilterType::Peaking {
-        let mut trial = bands.clone();
-        trial[0].filter_type = PeqFilterType::LowShelf;
-        // Shelf with lower Q for broader effect
-        trial[0].q = (trial[0].q * 0.7).max(Q_MIN);
-        let trial_sse = compute_sse(&trial);
-        if trial_sse <= baseline * 1.05 {
-            bands[0].filter_type = PeqFilterType::LowShelf;
-            bands[0].q = trial[0].q;
-            info!("try_promote_to_shelves: band[0] at {:.0} Hz -> LowShelf", bands[0].freq_hz);
-        }
-    }
-
-    // Try highest band -> HighShelf
     let last = bands.len() - 1;
-    if bands[last].filter_type == PeqFilterType::Peaking {
-        let mut trial = bands.clone();
-        trial[last].filter_type = PeqFilterType::HighShelf;
-        trial[last].q = (trial[last].q * 0.7).max(Q_MIN);
-        let trial_sse = compute_sse(&trial);
-        if trial_sse <= baseline * 1.05 {
-            bands[last].filter_type = PeqFilterType::HighShelf;
-            bands[last].q = trial[last].q;
-            info!("try_promote_to_shelves: band[{}] at {:.0} Hz -> HighShelf", last, bands[last].freq_hz);
+    for (idx, shelf) in [(0usize, PeqFilterType::LowShelf), (last, PeqFilterType::HighShelf)] {
+        if bands[idx].filter_type != PeqFilterType::Peaking {
+            continue;
         }
+        let baseline = solver.cost_of_bands(bands);
+        let mut trial = bands.to_vec();
+        trial[idx].filter_type = shelf.clone();
+        // Shelf with lower Q for broader effect
+        trial[idx].q = (trial[idx].q * 0.7).max(Q_MIN);
+        if solver.cost_of_bands(&trial) < baseline {
+            info!("try_promote_to_shelves: band[{}] at {:.0} Hz -> {:?}", idx, bands[idx].freq_hz, shelf);
+            bands[idx].filter_type = shelf;
+            bands[idx].q = trial[idx].q;
+        }
+        if last == 0 { break; }
     }
 }
 

@@ -105,12 +105,16 @@ pub(crate) const Q_MIN: f64 = 0.5;
 // LMA-specific constants
 /// Maximum Q above LP crossover (phase-safe wide filters)
 pub(crate) const Q_MAX_ABOVE_LP: f64 = 2.5;
-/// Maximum LMA iterations per optimization round
-pub(crate) const LMA_MAX_ITER: usize = 50;
+/// Maximum LMA iterations per optimization round. b141.55: 50 → 150 — three
+/// of four bands of the real 4-way fixture ended on the cap, and a restart
+/// from the result still cut the weighted cost by up to 47 %.
+pub(crate) const LMA_MAX_ITER: usize = 150;
 /// LMA damping factor upper bound (stop if stuck)
 pub(crate) const LMA_LAMBDA_MAX: f64 = 1e6;
-/// LMA convergence threshold (relative step size)
+/// LMA convergence threshold: scaled step (octaves / dB / log2 Q), b141.55.
 pub(crate) const LMA_CONVERGENCE: f64 = 1e-4;
+/// LMA convergence: relative cost decrease of an accepted step, b141.55.
+pub(crate) const LMA_MIN_REL_GAIN: f64 = 1e-5;
 /// Minimum band gain to keep (dB)
 pub(crate) const LMA_MIN_GAIN_DB: f64 = 0.2;
 /// Band addition residual multiplier for weighted threshold

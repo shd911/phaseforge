@@ -287,7 +287,7 @@ pub fn auto_peq_lma(
     // extracted to polish_bands (b141.8) so the no-overshoot property is
     // testable in isolation.
     total_iterations += polish_bands(
-        &mut bands, &solver, freq, meas_mag, target, config, lp_freq, merge_dist,
+        &mut bands, &solver, lp_freq, merge_dist,
     );
 
     // Compute final max error
@@ -320,10 +320,6 @@ pub fn auto_peq_lma(
 pub(crate) fn polish_bands(
     bands: &mut Vec<PeqBand>,
     solver: &LmaSolver,
-    freq: &[f64],
-    meas_mag: &[f64],
-    target: &[f64],
-    config: &PeqConfig,
     lp_freq: f64,
     merge_dist: f64,
 ) -> u32 {
@@ -376,9 +372,9 @@ pub(crate) fn polish_bands(
     }
 
     // Shelf promotion: try converting edge bands to LowShelf / HighShelf
-    // (self-guarding: keeps the shelf only if the weighted error does not
-    // degrade, so no re-fit is required after it).
-    try_promote_to_shelves(bands, freq, meas_mag, target, config);
+    // (self-guarding: keeps the shelf only if the solver's weighted cost
+    // strictly improves, so no re-fit is required after it).
+    try_promote_to_shelves(bands, solver);
 
     extra_iters
 }
@@ -546,7 +542,7 @@ mod tests {
         let err_before = compute_max_error_in_range(&freq, &meas, &target, &corr0, config.freq_range);
         assert!(err_before < 0.01, "fixture: pre-polish correction must be exact, got {err_before:.3} dB");
 
-        polish_bands(&mut bands, &solver, &freq, &meas, &target, &config, 15000.0, MIN_BAND_DISTANCE_OCT);
+        polish_bands(&mut bands, &solver, 15000.0, MIN_BAND_DISTANCE_OCT);
 
         let corr = apply_peq(&freq, &bands, config.sample_rate);
         let err_after = compute_max_error_in_range(&freq, &meas, &target, &corr, config.freq_range);
@@ -572,6 +568,59 @@ mod tests {
         };
         let r = auto_peq_lma(&meas, Some(&target), &freq, &config, 80.0, 15000.0, &[]);
         assert!(r.is_err());
+    }
+
+    fn audit_fixture() -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, PeqConfig) {
+        let freq = make_log_freq(400, 20.0, 20000.0);
+        // Measurement: three resonances and a broad LF lift on a flat target.
+        let bumps = [
+            PeqBand { freq_hz: 45.0, gain_db: 5.0, q: 0.8, enabled: true, filter_type: PeqFilterType::Peaking },
+            PeqBand { freq_hz: 310.0, gain_db: 7.0, q: 5.0, enabled: true, filter_type: PeqFilterType::Peaking },
+            PeqBand { freq_hz: 1900.0, gain_db: -4.0, q: 3.0, enabled: true, filter_type: PeqFilterType::Peaking },
+            PeqBand { freq_hz: 7000.0, gain_db: 3.5, q: 2.0, enabled: true, filter_type: PeqFilterType::Peaking },
+        ];
+        let meas: Vec<f64> = apply_peq(&freq, &bumps, 48000.0).iter().map(|v| 80.0 + v).collect();
+        let target = vec![80.0_f64; freq.len()];
+        let weights = vec![1.0_f64; freq.len()];
+        let config = PeqConfig {
+            max_bands: 10, tolerance_db: 0.5, peak_bias: 1.5, max_boost_db: 6.0, max_cut_db: 18.0,
+            freq_range: (20.0, 20000.0), smoothing_fraction: None, min_band_distance_oct: None,
+            hybrid: false, gain_regularization: 0.0, sample_rate: 48000.0,
+        };
+        (freq, meas, target, weights, config)
+    }
+
+    /// b141.55 (audit 2026-10-01 M5): an optimize() result must be (near) a
+    /// stationary point — restarting from it may not buy more than 1 %. The
+    /// old ‖Δθ‖/‖θ‖ test stopped while dB/Q steps were still several units.
+    #[test]
+    fn lma_result_is_converged() {
+        let (freq, meas, target, weights, config) = audit_fixture();
+        let solver = LmaSolver::new(&freq, &meas, &target, &weights, 20000.0, &config);
+        let start: Vec<PeqBand> = [50.0, 300.0, 2000.0, 6000.0].iter()
+            .map(|&f| PeqBand { freq_hz: f, gain_db: -1.0, q: 1.0, enabled: true, filter_type: PeqFilterType::Peaking })
+            .collect();
+        let (b1, _) = solver.optimize(&start);
+        let (b2, _) = solver.optimize(&b1);
+        let (c1, c2) = (solver.cost_of_bands(&b1), solver.cost_of_bands(&b2));
+        assert!(c2 >= c1 * 0.99, "restart still cut the cost {:.1} % ({c1:.3} → {c2:.3})", 100.0 * (1.0 - c2 / c1));
+    }
+
+    /// b141.55 (audit 2026-10-01 M4): shelf promotion never raises the
+    /// solver's weighted cost.
+    #[test]
+    fn shelf_promotion_never_raises_the_weighted_cost() {
+        let (freq, meas, target, weights, config) = audit_fixture();
+        let solver = LmaSolver::new(&freq, &meas, &target, &weights, 20000.0, &config);
+        for (g0, g1) in [(-5.0, 3.5), (5.0, -3.5), (-2.0, -2.0)] {
+            let mut bands = vec![
+                PeqBand { freq_hz: 45.0, gain_db: g0, q: 0.8, enabled: true, filter_type: PeqFilterType::Peaking },
+                PeqBand { freq_hz: 7000.0, gain_db: g1, q: 2.0, enabled: true, filter_type: PeqFilterType::Peaking },
+            ];
+            let before = solver.cost_of_bands(&bands);
+            try_promote_to_shelves(&mut bands, &solver);
+            assert!(solver.cost_of_bands(&bands) <= before);
+        }
     }
 
     #[test]
