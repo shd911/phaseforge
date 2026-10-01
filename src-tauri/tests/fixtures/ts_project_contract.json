@@ -5,7 +5,7 @@
  "project_name": null,
  "bands": [
   {
-   "id": "eb5ac261-99e1-435a-b991-40db2505f669",
+   "id": "band0",
    "name": "Band 1",
    "measurement": null,
    "measurement_file": null,
@@ -36,7 +36,7 @@
    "peq_optimized_target": null
   },
   {
-   "id": "5464cb4a-035c-4703-9b14-49036d681d8b",
+   "id": "band1",
    "name": "Band 2",
    "measurement": {
     "name": "m",
@@ -165,7 +165,7 @@
    }
   }
  ],
- "active_band_id": "5464cb4a-035c-4703-9b14-49036d681d8b",
+ "active_band_id": "band1",
  "show_phase": true,
  "show_mag": true,
  "show_target": true,

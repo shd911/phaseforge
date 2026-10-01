@@ -8,8 +8,12 @@
  * on any field that does not survive. Re-run cargo test after this changes.
  */
 import { describe, it, expect } from "vitest";
-import { writeFileSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+// No Node typings in the repo (tsc treats src/ as browser code) — load fs
+// through a non-literal specifier, as export-metrics.test.ts does.
+const FS_MODULE = "node:fs";
+const fs: { readFileSync(u: URL, enc: string): string; writeFileSync(u: URL, d: string): void } =
+  await import(/* @vite-ignore */ FS_MODULE);
+const HERE = import.meta.url;
 import {
   appState, addBand, setBandMeasurement, setBandPeqBands, setBandPeqOptimizedTarget,
   setBandTilt, setAlignmentDelay, addExclusionZone, setBandHighPass, setBandLowPass,
@@ -39,11 +43,17 @@ describe("project schema contract (TS → Rust)", () => {
     setBandPeqOptimizedTarget(b.id, captureOptimizedTarget(appState.bands.find((x) => x.id === b.id)!));
 
     const project = buildProjectData();
+    // Band ids are random per run — normalise so the fixture only changes
+    // when the schema does.
+    project.bands.forEach((pb: any, i: number) => {
+      if (project.active_band_id === pb.id) project.active_band_id = `band${i}`;
+      pb.id = `band${i}`;
+    });
     const json = JSON.stringify(project, null, 1);
-    const path = resolve(__dirname, "../../../src-tauri/tests/fixtures/ts_project_contract.json");
+    const path = new URL("../../../src-tauri/tests/fixtures/ts_project_contract.json", HERE);
     let prev = "";
-    try { prev = readFileSync(path, "utf8"); } catch { /* first run */ }
-    if (prev !== json) writeFileSync(path, json);
+    try { prev = fs.readFileSync(path, "utf8"); } catch { /* first run */ }
+    if (prev !== json) fs.writeFileSync(path, json);
     expect(project.bands.length).toBeGreaterThan(0);
   });
 });

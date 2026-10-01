@@ -171,7 +171,9 @@
 - Snapshot site: `snapshotBandRequest` (band-evaluator/evaluate.ts) copies
   target/peqBands/settings — a new DSP-relevant field must be included in
   `bandContentKey` (cache.ts) too, or the cache serves stale results.
-- Copy sites in this repo (актуально с b141.6): `cloneFilterConfig` (lib/types.ts — single source of truth; все прод-сайты идут через него), `captureOptimizedTarget` (stores/peq-optimize.ts), test mirrors (FilterBlock.test.tsx, bands.test.ts), site re-implementations в lib/__tests__/filter-clone.test.ts.
+- Copy sites in this repo (актуально с b141.71): `cloneFilterConfig` (lib/types.ts — single source of truth; все прод-сайты идут через него), `withCrossoverOf` (types.ts — общие поля связанного кроссовера, 3 сайта в bands.ts), `captureOptimizedTarget` (stores/peq-optimize.ts), test mirrors (FilterBlock.test.tsx, bands.test.ts), site re-implementations в lib/__tests__/filter-clone.test.ts.
+- Project schema: a new saved field must also exist in Rust `project.rs` — `tests/project_contract.rs`
+  (fed by `project-contract.test.ts`) fails on any field the Rust round trip drops (b141.71).
 - Forgetting one site = silent loss of the new field across part of the pipeline. Caught only via UI testing on real workflow, expensive.
 
 ## Testing / Verification

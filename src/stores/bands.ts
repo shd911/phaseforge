@@ -1,7 +1,7 @@
 import { createStore, reconcile } from "solid-js/store";
 import { createSignal, batch } from "solid-js";
 import type { Measurement, TargetCurve, MergeConfig, PeqBand, FirResult, WindowType, ExclusionZone, AnalysisResult, PeqOptimizedTarget } from "../lib/types";
-import { MEASUREMENT_COLORS, cloneFilterConfig, F_MIN_WORK, F_MAX_WORK } from "../lib/types";
+import { MEASUREMENT_COLORS, cloneFilterConfig, withCrossoverOf, F_MIN_WORK, F_MAX_WORK } from "../lib/types";
 import {
   pushHistory,
   beginInteraction,
@@ -519,15 +519,7 @@ export function toggleBandLinked(bandId: string) {
       const nextHp = cloneFilterConfig(state.bands[nextIdx].target.high_pass!);
       const lpPlain = cloneFilterConfig(lp);
       setState("bands", nextIdx, "target", "high_pass", null);
-      setState("bands", nextIdx, "target", "high_pass", {
-        ...nextHp,
-        freq_hz: lpPlain.freq_hz,
-        filter_type: lpPlain.filter_type,
-        order: lpPlain.order,
-        shape: lpPlain.shape,
-        linear_phase: lpPlain.linear_phase,
-        q: lpPlain.q,
-      });
+      setState("bands", nextIdx, "target", "high_pass", withCrossoverOf(nextHp, lpPlain));
     }
   }
   markDirty();
@@ -599,15 +591,7 @@ export function setBandHighPass(bandId: string, config: import("../lib/types").F
         try {
           const plain = cloneFilterConfig(prevLp);
           setState("bands", idx - 1, "target", "low_pass", null);
-          setState("bands", idx - 1, "target", "low_pass", {
-            ...plain,
-            freq_hz: config.freq_hz,
-            filter_type: config.filter_type,
-            order: config.order,
-            shape: config.shape,
-            linear_phase: config.linear_phase,
-            q: config.q,
-          });
+          setState("bands", idx - 1, "target", "low_pass", withCrossoverOf(plain, config));
         } finally { _propagating = false; }
       }
     }
@@ -645,15 +629,7 @@ export function setBandLowPass(bandId: string, config: import("../lib/types").Fi
         try {
           const plain = cloneFilterConfig(nextHp);
           setState("bands", idx + 1, "target", "high_pass", null);
-          setState("bands", idx + 1, "target", "high_pass", {
-            ...plain,
-            freq_hz: config.freq_hz,
-            filter_type: config.filter_type,
-            order: config.order,
-            shape: config.shape,
-            linear_phase: config.linear_phase,
-            q: config.q,
-          });
+          setState("bands", idx + 1, "target", "high_pass", withCrossoverOf(plain, config));
         } finally { _propagating = false; }
       }
     }

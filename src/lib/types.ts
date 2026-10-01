@@ -95,6 +95,22 @@ export function cloneFilterConfig(f: FilterConfig | null | undefined): FilterCon
   };
 }
 
+/** b141.71 (audit stage 2): a linked crossover shares every shape field of
+ *  the filter on the other side — but not the HP-only `subsonic_protect`,
+ *  which stays the target's own. One helper for the three link sites in
+ *  stores/bands.ts (each had its own field-by-field copy). */
+export function withCrossoverOf(base: FilterConfig, src: FilterConfig): FilterConfig {
+  return {
+    ...cloneFilterConfig(base),
+    freq_hz: src.freq_hz,
+    filter_type: src.filter_type,
+    order: src.order,
+    shape: src.shape,
+    linear_phase: src.linear_phase,
+    q: src.q,
+  };
+}
+
 export interface TargetResponse {
   magnitude: number[];
   phase: number[];
