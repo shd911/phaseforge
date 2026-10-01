@@ -36,6 +36,7 @@ import {
 } from "../lib/plot-helpers";
 import { hasActiveSubsonicProtect } from "../lib/types";
 import { evaluateBandFull, evaluateSum, reconstructTargetPhase } from "../lib/band-evaluator";
+import { coherentSum } from "../lib/band-evaluator/sum";
 import { buildCommonGrid, buildFirGrid, interpOnGrid, interpPhaseOnGrid, irTime, type ImpulseIpc } from "../lib/band-evaluator/grid";
 import { bandRequestKey } from "../lib/band-evaluator/cache";
 import { computeAutoAlign } from "../lib/auto-align";
@@ -2139,44 +2140,21 @@ export default function FrequencyPlot() {
           // (user_4way: 1011 pts from 20 Hz vs 484 pts from 1220 Hz) — GD at
           // 500 Hz −0.97 ms instead of 0.007, Σ at 8 kHz 74 dB instead of 90.
           gdFreq = buildCommonGrid(bands as BandState[]);
-          const n = gdFreq.length;
-          const sumRe = new Float64Array(n);
-          const sumIm = new Float64Array(n);
-          for (const sb of bands) {
-            const sign = sb.inverted ? -1 : 1;
-            const gdDelay = irDelayByName[sb.name] ?? 0;
+          // b141.72: the shared coherent sum (sum.ts), not a fourth copy of it.
+          const sum = coherentSum(gdFreq, bands.map((sb) => {
             const m = sb.measurement!;
-            const bMag = interpOnGrid(m.freq, m.magnitude, gdFreq, { outside: -200 }) as number[];
-            const bPh = interpPhaseOnGrid(m.freq, m.phase!, gdFreq, { outside: 0, mag: m.magnitude }) as number[];
-            for (let j = 0; j < n; j++) {
-              const amp = Math.pow(10, (bMag[j] ?? -200) / 20) * sign;
-              const phRad = ((bPh[j] ?? 0) + alignmentPhaseDeg(gdFreq[j], gdDelay)) * Math.PI / 180;
-              sumRe[j] += amp * Math.cos(phRad);
-              sumIm[j] += amp * Math.sin(phRad);
-            }
-          }
-          const sumPh: number[] = [];
-          for (let j = 0; j < n; j++) {
-            sumPh.push(Math.atan2(sumIm[j], sumRe[j]) * 180 / Math.PI);
-          }
-          const unwrapped: number[] = [sumPh[0]];
-          for (let i = 1; i < n; i++) {
-            let diff = sumPh[i] - sumPh[i - 1];
-            while (diff > 180) diff -= 360;
-            while (diff <= -180) diff += 360;
-            unwrapped.push(unwrapped[i - 1] + diff);
-          }
+            return {
+              mag: interpOnGrid(m.freq, m.magnitude, gdFreq, { outside: -200 }) as number[],
+              phase: interpPhaseOnGrid(m.freq, m.phase!, gdFreq, { outside: 0, mag: m.magnitude }) as number[],
+              sign: (sb.inverted ? -1 : 1) as 1 | -1,
+              delay: irDelayByName[sb.name] ?? 0,
+            };
+          }));
+          const unwrapped = unwrapDegrees(sum!.phase);
           gdPhase = unwrapped;
         } else {
           // Band mode: unwrap phase before GD computation
-          const uw: number[] = [phase[0]];
-          for (let i = 1; i < phase.length; i++) {
-            let diff = phase[i] - phase[i - 1];
-            while (diff > 180) diff -= 360;
-            while (diff <= -180) diff += 360;
-            uw.push(uw[i - 1] + diff);
-          }
-          gdPhase = uw;
+          gdPhase = unwrapDegrees(phase);
         }
 
         // Measurement GD

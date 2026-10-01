@@ -192,7 +192,7 @@ function powerSumDb(magsDb: number[][]): number[] {
  *  noise from accumulating cos/sin of large delay·freq products. */
 const COHERENT_SUM_NULL_FLOOR = 1e-15;
 
-function coherentSum(
+export function coherentSum(
   freq: number[],
   bandsData: Array<{ mag: number[]; phase: number[]; sign: 1 | -1; delay: number } | null>,
 ): { mag: number[]; phase: number[] } | null {
