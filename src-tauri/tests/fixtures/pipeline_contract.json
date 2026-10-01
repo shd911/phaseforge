@@ -5,11 +5,11 @@
   },
   "contract_01_lr4_hp_only": {
     "route": "Iir",
-    "hash": "9a879f70c4ea7cb5d529b2b83afd021de00328349010ca60b095b8c3f1a116d4"
+    "hash": "ab064e45feadb335ed7f303c470f0c83947f74df05fc9110364a494381ec72ef"
   },
   "contract_02_lr4_bandpass_with_peq": {
     "route": "Iir",
-    "hash": "fb242d5d9b95ce9227dae38f58d8cbedd2265fe35b83c7f38e578d6bf81fd512"
+    "hash": "8264322fae490634a8d328250a426d1c4ab0036a4dd3d3213a7473ce4892c7d9"
   },
   "contract_03_bw2_hp_only": {
     "route": "Iir",

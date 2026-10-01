@@ -396,45 +396,6 @@ pub fn generate_min_phase_fir_iir(input: &IirPathInput) -> Result<FirModelResult
         .max_by(|(_, a), (_, b)| a.abs().partial_cmp(&b.abs()).unwrap_or(std::cmp::Ordering::Equal))
         .map(|(i, _)| i).unwrap_or(0);
 
-    // 3. Compute realised mag/phase from the RAW (un-centred) cascade
-    //    impulse — its FFT phase is the analytical filter phase exactly,
-    //    no shift correction needed. This is what the UI plot uses to
-    //    overlay the model.
-    let n_bins = n_fft / 2 + 1;
-    let mut engine = FftEngine::new();
-    let mut spec_raw: Vec<Complex64> = raw_impulse.iter().map(|&v| Complex64::new(v, 0.0)).collect();
-    engine.fft_forward(&mut spec_raw);
-    let mut realized_mag_lin: Vec<f64> = Vec::with_capacity(n_bins);
-    let mut realized_phase_lin: Vec<f64> = Vec::with_capacity(n_bins);
-    for c in spec_raw.iter().take(n_bins) {
-        let amp = c.norm();
-        let mag_db = if amp > 1e-20 { 20.0 * amp.log10() } else { -400.0 };
-        realized_mag_lin.push(mag_db);
-        realized_phase_lin.push(c.arg() * 180.0 / PI);
-    }
-    // Unwrap phase across linear bins for smooth interpolation onto the log grid.
-    for i in 1..realized_phase_lin.len() {
-        let diff = realized_phase_lin[i] - realized_phase_lin[i - 1];
-        if diff > 180.0 {
-            realized_phase_lin[i] -= 360.0 * ((diff + 180.0) / 360.0).floor();
-        } else if diff < -180.0 {
-            realized_phase_lin[i] += 360.0 * ((-diff + 180.0) / 360.0).floor();
-        }
-    }
-    let lin_freq: Vec<f64> = (0..n_bins).map(|k| sr * k as f64 / n_fft as f64).collect();
-    let mut realized_mag = crate::dsp::interp_1d(&lin_freq, &realized_mag_lin, input.freq);
-    let mut realized_phase = crate::dsp::interp_1d(&lin_freq, &realized_phase_lin, input.freq);
-    // b140.7.7: at sr < 88 k the caller's log grid extends to 22.8 / 40 k
-    // but Nyquist is sr/2 (< grid max). Bins above Nyquist get extrapolated
-    // garbage from `interp_1d` — clamp to noise floor / 0.
-    let nyquist = sr / 2.0;
-    for (i, &f) in input.freq.iter().enumerate() {
-        if f > nyquist {
-            realized_mag[i] = cfg.noise_floor_db;
-            realized_phase[i] = 0.0;
-        }
-    }
-
     // 4. b140.7.10: build the WAV impulse separately from the plot data.
     //    Pad with exactly N/2 leading zeros (REPhase convention) so REW's
     //    WAV-import path auto-locates the peak near the centre — REW
@@ -483,6 +444,51 @@ pub fn generate_min_phase_fir_iir(input: &IirPathInput) -> Result<FirModelResult
     // 5. Tail taper: fade the last ~5 % of WAV samples to avoid a hard
     //    truncation glitch.
     apply_tail_taper(&mut wav_impulse);
+
+    // 5b. Compute realised mag/phase from the SHIPPED impulse with its WAV
+    //    delay undone — the raw cascade, truncated where the shift dropped
+    //    it and faded by the tail taper. b141.54 (audit 2026-10-01 M3): this
+    //    used the untapered raw impulse, so with a short delay (few taps, LF
+    //    content) the Export curve hid what the taper cut — 4.17 dB at
+    //    120 Hz on a 4096-tap sub. Undoing the shift (not subtracting a
+    //    linear phase) keeps the FFT phase exact, no wrap artefacts.
+    let mut realized_src = wav_impulse[shift.min(n)..].to_vec();
+    realized_src.resize(n, 0.0);
+    let n_bins = n_fft / 2 + 1;
+    let mut engine = FftEngine::new();
+    let mut spec_raw: Vec<Complex64> = realized_src.iter().map(|&v| Complex64::new(v, 0.0)).collect();
+    engine.fft_forward(&mut spec_raw);
+    let mut realized_mag_lin: Vec<f64> = Vec::with_capacity(n_bins);
+    let mut realized_phase_lin: Vec<f64> = Vec::with_capacity(n_bins);
+    for c in spec_raw.iter().take(n_bins) {
+        let amp = c.norm();
+        let mag_db = if amp > 1e-20 { 20.0 * amp.log10() } else { -400.0 };
+        realized_mag_lin.push(mag_db);
+        realized_phase_lin.push(c.arg() * 180.0 / PI);
+    }
+    // Unwrap phase across linear bins for smooth interpolation onto the log grid.
+    for i in 1..realized_phase_lin.len() {
+        let diff = realized_phase_lin[i] - realized_phase_lin[i - 1];
+        if diff > 180.0 {
+            realized_phase_lin[i] -= 360.0 * ((diff + 180.0) / 360.0).floor();
+        } else if diff < -180.0 {
+            realized_phase_lin[i] += 360.0 * ((-diff + 180.0) / 360.0).floor();
+        }
+    }
+    let lin_freq: Vec<f64> = (0..n_bins).map(|k| sr * k as f64 / n_fft as f64).collect();
+    let mut realized_mag = crate::dsp::interp_1d(&lin_freq, &realized_mag_lin, input.freq);
+    let mut realized_phase = crate::dsp::interp_1d(&lin_freq, &realized_phase_lin, input.freq);
+    // b140.7.7: at sr < 88 k the caller's log grid extends to 22.8 / 40 k
+    // but Nyquist is sr/2 (< grid max). Bins above Nyquist get extrapolated
+    // garbage from `interp_1d` — clamp to noise floor / 0.
+    let nyquist = sr / 2.0;
+    for (i, &f) in input.freq.iter().enumerate() {
+        if f > nyquist {
+            realized_mag[i] = cfg.noise_floor_db;
+            realized_phase[i] = 0.0;
+        }
+    }
+
 
     // 6. Passband normalisation: scale impulse so the peak realised
     //    magnitude is 0 dB. Same convention as the FFT path. Applied to
@@ -1199,5 +1205,48 @@ mod wav_tail_tests {
                     "fc={fc} f={f}: IIR {iir_db:.4} dB vs model {model_db:.4} dB");
             }
         }
+    }
+
+    /// b141.54 (audit 2026-10-01 M3): the Export-tab curve (`realized_mag`)
+    /// must be the spectrum of the shipped WAV, taper included. Sub band from
+    /// the audit at 4096 taps / 48 kHz — delay 0, so the 5 % tail taper cuts
+    /// real content; the old untapered curve was 4.17 dB off at 120 Hz.
+    #[test]
+    fn realized_curve_is_the_shipped_wav_spectrum() {
+        let (taps, sr) = (4096usize, 48_000.0);
+        let hp = FilterConfig { filter_type: FilterType::Butterworth, order: 4, freq_hz: 25.0,
+            shape: None, linear_phase: false, q: None, subsonic_protect: None };
+        let lp = FilterConfig { filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: 80.0,
+            shape: None, linear_phase: false, q: None, subsonic_protect: None };
+        let peq = PeqBand { freq_hz: 30.0, gain_db: 6.0, q: 4.0, enabled: true, filter_type: PeqFilterType::Peaking };
+        let cfg = FirConfig {
+            taps, sample_rate: sr, max_boost_db: 24.0, noise_floor_db: -150.0,
+            window: WindowType::Blackman, phase_mode: PhaseMode::MinimumPhase, iterations: 0,
+            freq_weighting: false, narrowband_limit: false, nb_smoothing_oct: 0.333,
+            nb_max_excess_db: 6.0, linear_phase_main: false, subsonic_cutoff_hz: None,
+        };
+        let log_freq: Vec<f64> = (0..512).map(|i| 5.0 * (sr / 2.0 * 0.95 / 5.0_f64).powf(i as f64 / 511.0)).collect();
+        let out = generate_min_phase_fir_iir(&IirPathInput {
+            freq: &log_freq, hp: Some(&hp), lp: Some(&lp), low_shelf: None, high_shelf: None,
+            peq: std::slice::from_ref(&peq), config: &cfg,
+        }).unwrap();
+        let mut worst: f64 = 0.0;
+        // At bin frequencies (11.7 Hz apart): between bins a dB lerp of this
+        // sharp sub response is its own error, unrelated to the taper.
+        for k in 2..=17usize {
+            let f = k as f64 * sr / taps as f64;
+            let w = -2.0 * PI * f / sr;
+            let h: Complex64 = out.impulse.iter().enumerate()
+                .map(|(n, &x)| Complex64::from_polar(x, w * n as f64)).sum();
+            let wav_db = 20.0 * h.norm().log10();
+            let i = log_freq.iter().position(|&q| q >= f).unwrap();
+            let t = (f - log_freq[i - 1]) / (log_freq[i] - log_freq[i - 1]);
+            let plot_db = out.realized_mag[i - 1] + t * (out.realized_mag[i] - out.realized_mag[i - 1]);
+            // Skip the deep null near 140 Hz: a −60 dB notch is ill-sampled on
+            // any grid. Elsewhere, incl. the −47 dB taper floor the old curve
+            // hid, the two must agree.
+            if wav_db > -55.0 { worst = worst.max((wav_db - plot_db).abs()); }
+        }
+        assert!(worst < 0.4, "Export curve vs WAV spectrum: {worst:.2} dB");
     }
 }
