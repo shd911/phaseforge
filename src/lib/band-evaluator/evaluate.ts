@@ -116,7 +116,6 @@ export interface BandEvalResult {
 
   fir?: {
     impulse: number[];
-    timeMs: number[];
     realizedMag: number[];
     realizedPhase: number[];
     taps: number;
@@ -374,12 +373,17 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
   const peqSampleRate = req.sampleRate ?? req.fir?.sampleRate ?? 48000;
   let peqMag: number[] = new Array(freq.length).fill(0);
   let peqPhase: number[] = new Array(freq.length).fill(0);
-  if (enabledPeq.length > 0) {
-    const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", {
-      freq, bands: enabledPeq, sampleRate: peqSampleRate,
-    });
-    peqMag = pm;
-    peqPhase = pp;
+  // b141.68 (audit stage 2 P4): PEQ and the filter section are independent —
+  // one round trip instead of two in a row.
+  const [peqRes, xsRes] = await Promise.all([
+    enabledPeq.length > 0
+      ? invoke<[number[], number[]]>("compute_peq_complex", { freq, bands: enabledPeq, sampleRate: peqSampleRate })
+      : Promise.resolve(null),
+    band.targetEnabled ? filterSection(freq, band.target, peqSampleRate) : Promise.resolve(null),
+  ]);
+  if (peqRes) {
+    peqMag = peqRes[0];
+    peqPhase = peqRes[1];
   }
 
   // 5. Combined target + PEQ (what the listener experiences after correction).
@@ -398,9 +402,8 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
   let crossSectionMag: number[] | null = null;
   let crossSectionPhase: number[] | null = null;
   if (band.targetEnabled) {
-    const xs = await filterSection(freq, band.target, peqSampleRate);
-    crossSectionMag = xs?.mag ?? null;
-    crossSectionPhase = xs?.phase ?? null;
+    crossSectionMag = xsRes?.mag ?? null;
+    crossSectionPhase = xsRes?.phase ?? null;
   }
 
   // 5c. Corrected = measurement + PEQ + cross-section. Phase goes through
@@ -522,7 +525,6 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
     fir = {
       impulse: result.impulse,
       // b141.6: ramp derived locally — was a ~MB linear array in the payload.
-      timeMs: Array.from({ length: result.impulse.length }, (_, i) => i * 1000 / result.sample_rate),
       realizedMag: realizedMagOnFreq,
       realizedPhase: realizedPhaseOnFreq,
       taps: result.taps,

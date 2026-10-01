@@ -19,7 +19,7 @@ import { alignmentPhaseDeg, F_MAX_REF } from "../types";
 import { buildCommonGrid, buildLogGrid, interpOnGrid, interpPhaseOnGrid, irTime, type ImpulseIpc } from "./grid";
 import { appendNoiseFloorTail, computeExtension } from "./extension";
 import { evaluateBandFull, filterSection, reconstructTargetPhase, snapshotBandRequest } from "./evaluate";
-import { memoEval, sumRequestKey } from "./cache";
+import { bandContentKey, hashGrid, memoEval, sumRequestKey } from "./cache";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -332,12 +332,21 @@ async function evaluateSumImpl(
   } else {
     await Promise.all(bands.map(async (band, i) => {
       if (!band.targetEnabled) return;
-      const target = JSON.parse(JSON.stringify(band.target));
-      const response = await invoke<TargetResponse>("evaluate_target", {
-        target, freq,
-      });
-      const phase = await reconstructTargetPhase(
-        freq, response.phase, band.target.high_pass, band.target.low_pass, sumSr,
+      // b141.68 (audit stage 2 P3): per-band pieces are cached by band
+      // content — the Σ key carries delays and order, so a DELAY keystroke
+      // missed the whole sum and re-ran every band's target + Hilbert terms.
+      const { response, phase } = await memoEval(
+        `sumtgt|${bandContentKey(band)}|${hashGrid(freq)}|${sumSr}`,
+        async () => {
+          const target = JSON.parse(JSON.stringify(band.target));
+          const response = await invoke<TargetResponse>("evaluate_target", {
+            target, freq,
+          });
+          const phase = await reconstructTargetPhase(
+            freq, response.phase, band.target.high_pass, band.target.low_pass, sumSr,
+          );
+          return { response, phase };
+        },
       );
       perBandTargetData[i] = {
         mag: response.magnitude,
@@ -510,6 +519,18 @@ async function evaluateSumImpl(
     const partials: IrPartial[] = await Promise.all(bands.map(async (band, bandIdx): Promise<IrPartial> => {
       const sign: 1 | -1 = band.inverted ? -1 : 1;
       const delay = band.alignmentDelay ?? 0;
+      // b141.68 (P3): the parts are delay/sign-free in substance (Rust applies
+      // both per bin) — cache them by band content, re-stamp sign and delay.
+      const key = `sumir|${bandContentKey(band)}|${hashGrid(irFreq)}|${irSr}|${sumSr}|` +
+        `${options?.sampleRate ?? 48000}|lvl:${corrLevelOffsetDb[bandIdx]}`;
+      const cached = await memoEval(key, () => buildIrPartial(band, bandIdx, sign, delay));
+      for (const part of [cached.tgt, cached.meas, cached.corr]) {
+        if (part) { part.sign = sign; part.delay = delay; }
+      }
+      return cached;
+    }));
+
+    async function buildIrPartial(band: BandState, bandIdx: number, sign: 1 | -1, delay: number): Promise<IrPartial> {
       const out: IrPartial = { tgt: null, meas: null, corr: null };
 
       // Target on irFreq (also reused as extension shape for measurement / corrected).
@@ -577,7 +598,7 @@ async function evaluateSumImpl(
       }
 
       return out;
-    }));
+    }
 
     for (const p of partials) {
       if (p.tgt) tgtParts.push(p.tgt);

@@ -1885,7 +1885,6 @@ export default function FrequencyPlot() {
         realized_mag: evalRes.fir.realizedMag,
         realized_phase: evalRes.fir.realizedPhase,
         impulse: evalRes.fir.impulse,
-        time_ms: evalRes.fir.timeMs,
         norm_db: evalRes.fir.normDb,
         causality: evalRes.fir.causality,
         taps: evalRes.fir.taps,
@@ -2194,7 +2193,8 @@ export default function FrequencyPlot() {
         // b139.4b: target / corrected GD share BandEvaluator's
         // target+peq computation on the measurement grid.
         const gdEval = (!sumMode && band && band.targetEnabled)
-          ? await evaluateBandFull({ band, freq, sampleRate: exportSampleRate() }).catch((e) => { console.error("[GD] band eval failed:", e); return null; })
+          // b141.68 (P5): same request as the SPL view (no explicit grid) → cache hit.
+          ? await evaluateBandFull({ band, sampleRate: exportSampleRate() }).catch((e) => { console.error("[GD] band eval failed:", e); return null; })
           : null;
         if (gen !== renderGen) return;
 

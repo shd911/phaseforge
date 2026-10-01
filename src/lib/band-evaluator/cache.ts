@@ -47,7 +47,7 @@ function measurementKey(m: { freq?: number[]; magnitude?: number[]; phase?: numb
 /** FNV-1a (32-bit) over the raw float bits of a numeric array. Endpoints +
  *  length are NOT collision-safe as a grid key (a log grid and a measurement
  *  grid can share both), so the hash covers every value. */
-function hashGrid(values: number[] | undefined): string | null {
+export function hashGrid(values: number[] | undefined): string | null {
   if (!values || values.length === 0) return null;
   const f = new Float64Array(values);
   const u = new Uint32Array(f.buffer);
@@ -62,7 +62,7 @@ function hashGrid(values: number[] | undefined): string | null {
 /** DSP-relevant band content as read by evaluateBandFull: targetEnabled,
  *  target curve, ENABLED PEQ bands (disabled ones never reach the pipeline),
  *  smoothing mode, measurement identity. */
-function bandContentKey(band: BandState): string {
+export function bandContentKey(band: BandState): string {
   const enabledPeq = (band.peqBands ?? []).filter((p) => p.enabled);
   return JSON.stringify({
     te: band.targetEnabled,
@@ -95,16 +95,35 @@ export function sumRequestKey(bands: BandState[], options?: SumEvalOptions): str
   });
 }
 
+/** b141.68 (audit stage 2 P2): every return is a structuredClone (callers
+ *  mutate the envelope), EXCEPT the FIR impulse — up to 2^20 doubles that no
+ *  caller writes to. It is frozen once and shared by reference; cloning it on
+ *  every hit cost a multi-MB copy on the main thread. */
+function cloneOut<T>(v: T): T {
+  const fir = (v as { fir?: { impulse?: number[] } } | null)?.fir;
+  const imp = fir?.impulse;
+  if (!fir || !Array.isArray(imp) || imp.length < 4096) return structuredClone(v);
+  if (!Object.isFrozen(imp)) Object.freeze(imp);
+  fir.impulse = [];
+  try {
+    const c = structuredClone(v) as { fir: { impulse: number[] } };
+    c.fir.impulse = imp;
+    return c as T;
+  } finally {
+    fir.impulse = imp;
+  }
+}
+
 export async function memoEval<T>(key: string, compute: () => Promise<T>): Promise<T> {
   const hit = store.get(key);
   if (hit !== undefined) {
     // LRU bump: delete + re-set moves the key to the back of the Map.
     store.delete(key);
     store.set(key, hit);
-    return structuredClone(hit) as T;
+    return cloneOut(hit) as T;
   }
   const pending = inflight.get(key);
-  if (pending) return structuredClone(await pending) as T;
+  if (pending) return cloneOut(await pending) as T;
   const p = compute();
   inflight.set(key, p);
   try {
@@ -113,7 +132,7 @@ export async function memoEval<T>(key: string, compute: () => Promise<T>): Promi
     if (store.size > CACHE_CAP) {
       store.delete(store.keys().next().value as string);
     }
-    return structuredClone(result);
+    return cloneOut(result);
   } finally {
     inflight.delete(key);
   }
