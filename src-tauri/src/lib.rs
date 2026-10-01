@@ -281,33 +281,43 @@ async fn compute_peq_complex(
 ///    makeup gain to bring corrected up to target.
 /// 4. Return total (filter + makeup) magnitude and phase corrections.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn compute_cross_section(
     freq: Vec<f64>,
     high_pass: Option<target::FilterConfig>,
     low_pass: Option<target::FilterConfig>,
+    low_shelf: Option<target::ShelfConfig>,
+    high_shelf: Option<target::ShelfConfig>,
+    tilt_db_per_octave: Option<f64>,
+    tilt_ref_freq: Option<f64>,
+    sample_rate: Option<f64>,
 ) -> Result<(Vec<f64>, Vec<f64>, f64), String> {
     let n = freq.len();
     if n == 0 {
         return Err("cross_section: empty freq".into());
     }
 
-    // b140.15.9: complex-accumulator path. Scalar phase summation produced
-    // 1-bin spikes (~358° jump) where HP or LP wrapped at ±180° on a single
-    // bin — visible as ~120° downward spikes in SUM corrected phase. The
-    // complex form is wrap-invariant (cos/sin are periodic) so the final
-    // atan2 sees the true product phase modulo 360° without ever crossing
-    // a wrong wrap boundary.
-    let mut filt_mag = vec![0.0_f64; n];
-    let mut re_acc = vec![1.0_f64; n];
-    let mut im_acc = vec![0.0_f64; n];
-    if let Some(hp) = &high_pass {
-        target::apply_filter_complex(&mut filt_mag, &mut re_acc, &mut im_acc, &freq, hp, false);
+    // b141.48 (audit 2026-10-01 H5): the section is the level-free target —
+    // HP/LP, tilt and shelves through the very `target::evaluate` the FIR
+    // target uses — plus (at ≥ 88.2 kHz) the zero-phase ultrasonic low-pass.
+    // It used to be HP/LP only, so «Corrected» missed +2.3 dB at 100 Hz on a
+    // −1 dB/oct tilt and +3.3 dB under a +4 dB low shelf that the WAV has.
+    let section = target::TargetCurve {
+        reference_level_db: 0.0,
+        tilt_db_per_octave: tilt_db_per_octave.unwrap_or(0.0),
+        tilt_ref_freq: tilt_ref_freq.unwrap_or(1000.0),
+        high_pass: high_pass.clone(),
+        low_pass: low_pass.clone(),
+        low_shelf,
+        high_shelf,
+    };
+    let target::TargetResponse { magnitude: mut filt_mag, phase: filt_phase } =
+        target::evaluate(&section, &freq);
+    if let Some(corner) = sample_rate.and_then(fir::ultrasonic::ultrasonic_lp_for) {
+        for (m, &f) in filt_mag.iter_mut().zip(&freq) {
+            *m += 20.0 * fir::ultrasonic::ultrasonic_lp_gain(f, corner).max(1e-30).log10();
+        }
     }
-    if let Some(lp) = &low_pass {
-        target::apply_filter_complex(&mut filt_mag, &mut re_acc, &mut im_acc, &freq, lp, true);
-    }
-    let mut filt_phase = vec![0.0_f64; n];
-    target::complex_acc_to_phase_deg(&re_acc, &im_acc, &mut filt_phase);
 
     // Return filter-only response (no makeup).
     // Makeup was a preview artifact — FIR export recomputes correction from scratch.
@@ -443,7 +453,7 @@ pub fn run() {
         )
         .init();
 
-    info!("PhaseForge b141.47 starting...");
+    info!("PhaseForge b141.48 starting...");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())

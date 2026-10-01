@@ -18,7 +18,7 @@ import type { PeqBand, TargetResponse } from "../types";
 import { alignmentPhaseDeg, F_MAX_REF } from "../types";
 import { buildCommonGrid, buildLogGrid, interpOnGrid, interpPhaseOnGrid, irTime, type ImpulseIpc } from "./grid";
 import { appendNoiseFloorTail, computeExtension } from "./extension";
-import { evaluateBandFull, reconstructTargetPhase, snapshotBandRequest } from "./evaluate";
+import { evaluateBandFull, filterSection, reconstructTargetPhase, snapshotBandRequest } from "./evaluate";
 import { memoEval, sumRequestKey } from "./cache";
 
 // ---------------------------------------------------------------------------
@@ -576,19 +576,9 @@ async function evaluateSumImpl(
           });
           irPeqMag = pm; irPeqPhase = pp;
         }
-        let irXsMag: number[] = new Array(N).fill(0);
-        let irXsPhase: number[] = new Array(N).fill(0);
-        if (band.target.high_pass || band.target.low_pass) {
-          try {
-            const [xm, xp] = await invoke<[number[], number[], number]>(
-              "compute_cross_section",
-              { freq: irFreq, highPass: band.target.high_pass, lowPass: band.target.low_pass },
-            );
-            irXsMag = xm; irXsPhase = xp;
-          } catch (e) {
-            console.warn("[evaluateSum] IR compute_cross_section failed (leaving zeros):", e);
-          }
-        }
+        const irXs = await filterSection(irFreq, band.target, options?.sampleRate ?? 48000);
+        const irXsMag: number[] = irXs?.mag ?? new Array(N).fill(0);
+        const irXsPhase: number[] = irXs?.phase ?? new Array(N).fill(0);
         // b141.10: same scalar level shift as the SPL Σ corrected curve.
         const lvl = corrLevelOffsetDb[bandIdx];
         const corrMag = extMeasMag.map((m, j) => m + irPeqMag[j] + irXsMag[j] + lvl);

@@ -81,8 +81,9 @@ export interface BandEvalResult {
   combinedTargetMag: number[] | null;
   combinedTargetPhase: number[] | null;
 
-  /** b139.4c: HP/LP cross-section magnitudes/phases applied as a filter
-   *  (compute_cross_section). Used for the corrected curve and sanity. */
+  /** b139.4c: the filter section (see `filterSection`: HP/LP, tilt, shelves,
+   *  ultrasonic LP since b141.48) applied as a filter. Used for the
+   *  corrected curve and sanity. */
   crossSectionMag: number[] | null;
   crossSectionPhase: number[] | null;
 
@@ -177,6 +178,38 @@ export async function reconstructTargetPhase(
   if (jobs.length === 0) return [...basePhase];
   const parts = await Promise.all(jobs);
   return basePhase.map((v, i) => parts.reduce((acc, ph) => acc + ph[i], v));
+}
+
+/** b141.48 (audit 2026-10-01 H5): the filter section the FIR bakes into a
+ *  band on top of the PEQ — HP/LP, tilt, shelves and, at export rates
+ *  ≥ 88.2 kHz, the zero-phase ultrasonic low-pass. Level-free (the
+ *  reference level is not part of it). The single builder for every
+ *  «Corrected» curve (band view, band IR, Σ, Σ IR): they used HP/LP only,
+ *  so the plot missed what the exported WAV contains. Phase is the analytic
+ *  phase before the Gaussian/subsonic Hilbert terms (callers add those via
+ *  reconstructTargetPhase). */
+export async function filterSection(
+  freq: number[],
+  target: BandState["target"],
+  sampleRate: number,
+): Promise<{ mag: number[]; phase: number[] } | null> {
+  try {
+    const [xm, xp] = await invoke<[number[], number[], number]>("compute_cross_section", {
+      freq,
+      highPass: target.high_pass ?? null,
+      lowPass: target.low_pass ?? null,
+      lowShelf: target.low_shelf ?? null,
+      highShelf: target.high_shelf ?? null,
+      tiltDbPerOctave: target.tilt_db_per_octave ?? 0,
+      tiltRefFreq: target.tilt_ref_freq ?? 1000,
+      sampleRate,
+    });
+    if (!xm || xm.length !== freq.length) return null;
+    return { mag: xm, phase: xp };
+  } catch (e) {
+    console.warn("[filterSection] compute_cross_section failed:", e);
+    return null;
+  }
 }
 
 async function applyMeasurementSmoothing(m: Measurement, mode: string | null | undefined): Promise<Measurement> {
@@ -342,20 +375,10 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
   //      — used to build the corrected response (measurement + PEQ + xs).
   let crossSectionMag: number[] | null = null;
   let crossSectionPhase: number[] | null = null;
-  if (band.targetEnabled && (band.target.high_pass || band.target.low_pass)) {
-    try {
-      const [xm, xp] = await invoke<[number[], number[], number]>(
-        "compute_cross_section",
-        { freq, highPass: band.target.high_pass, lowPass: band.target.low_pass },
-      );
-      crossSectionMag = xm;
-      crossSectionPhase = xp;
-    } catch (e) {
-      // No filters → leave null; corrected = meas + PEQ alone. Most
-      // common cause: HP/LP both null. Logged so genuine compute
-      // failures (e.g. malformed config) surface in console.
-      console.warn("[evaluateBandFull] compute_cross_section failed:", e);
-    }
+  if (band.targetEnabled) {
+    const xs = await filterSection(freq, band.target, peqSampleRate);
+    crossSectionMag = xs?.mag ?? null;
+    crossSectionPhase = xs?.phase ?? null;
   }
 
   // 5c. Corrected = measurement + PEQ + cross-section. Phase goes through
@@ -590,19 +613,9 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
             irPeqMag = pm; irPeqPhase = pp;
           }
 
-          let irXsMag: number[] = new Array(irFreq.length).fill(0);
-          let irXsPhase: number[] = new Array(irFreq.length).fill(0);
-          if (band.target.high_pass || band.target.low_pass) {
-            try {
-              const [xm, xp] = await invoke<[number[], number[], number]>(
-                "compute_cross_section",
-                { freq: irFreq, highPass: band.target.high_pass, lowPass: band.target.low_pass },
-              );
-              irXsMag = xm; irXsPhase = xp;
-            } catch (e) {
-              console.warn("[evaluateBandFull] IR compute_cross_section failed (leaving zeros):", e);
-            }
-          }
+          const irXs = band.targetEnabled ? await filterSection(irFreq, band.target, peqSampleRate) : null;
+          const irXsMag: number[] = irXs?.mag ?? new Array(irFreq.length).fill(0);
+          const irXsPhase: number[] = irXs?.phase ?? new Array(irFreq.length).fill(0);
 
           const irCorrMag = extMeas.mag.map((m, i) => m + irPeqMag[i] + irXsMag[i]);
           const basePhase = (extMeas.phase ?? new Array<number>(irFreq.length).fill(0))
