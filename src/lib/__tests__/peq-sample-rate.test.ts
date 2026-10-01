@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { BandState } from "../../stores/bands";
 
 interface PeqCall { freq: number[]; sampleRate?: number }
+const bandFirCalls: any[] = [];
 const peqCalls: PeqCall[] = [];
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -41,6 +42,19 @@ vi.mock("@tauri-apps/api/core", () => ({
         pre_peak_count: 0,
         impulse: new Array(n).fill(0),
         step: new Array(n).fill(0),
+      };
+    }
+    if (cmd === "compute_cross_section") {
+      const n = (args.freq as number[]).length;
+      return [new Array(n).fill(0), new Array(n).fill(0), 0];
+    }
+    if (cmd === "generate_band_fir") {
+      bandFirCalls.push(args);
+      const taps = args.settings.taps as number;
+      return {
+        impulse: new Array(taps).fill(0), realized_mag: [0, 0], realized_phase: [0, 0],
+        taps, sample_rate: args.settings.sample_rate, norm_db: 0, causality: 1,
+        wav_delay_samples: taps / 2, route: "cepstral", peak_boost_db: 0, freq: [5, 20000],
       };
     }
     if (cmd === "pick_fir_route") return "Cepstral";
@@ -101,9 +115,14 @@ describe("compute_peq_complex sample-rate contract (b141.5)", () => {
   });
 
   it("evaluateBandFull FIR path passes fir.sampleRate to every PEQ call", async () => {
+    bandFirCalls.length = 0;
     await evaluateBandFull({ band: bandWithPeq(), fir: FIR_CFG });
-    expect(peqCalls.length).toBeGreaterThanOrEqual(2); // display grid + FIR grid
+    expect(peqCalls.length).toBeGreaterThanOrEqual(1); // display grid
     for (const c of peqCalls) expect(c.sampleRate).toBe(96000);
+    // b141.70: the FIR's own PEQ evaluation runs in Rust at settings.sample_rate.
+    expect(bandFirCalls.length).toBe(1);
+    expect(bandFirCalls[0].settings.sample_rate).toBe(96000);
+    expect(bandFirCalls[0].peq.length).toBeGreaterThan(0);
   });
 
   it("evaluateBandFull IR path passes sampleRate on the IR grid too", async () => {

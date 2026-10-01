@@ -18,7 +18,13 @@
   magnitude in dB and phase). Internally consistent and REPhase-validated;
   textbook "LR-N = N total order" convention is NOT used here. UI Slope
   dropdown reflects the actual slope (LR4 → 48 dB/oct, b140.7.13).
-- **FIR pipeline routing** (`src/lib/band-evaluator.ts`):
+- **Band → FIR request lives in Rust** (b141.70, `fir/band.rs::generate_band_fir`,
+  Tauri `generate_band_fir`): FIR grid, target, Gaussian/subsonic Hilbert terms,
+  noise tail, PEQ, routing, config, dispatch. The frontend sends the TargetCurve
+  WHOLE; the release-readiness gate drives the same function (`fir::band::evaluate_on`)
+  with each band's real target. Golden-verified on 27 real-project bands (bit-identical).
+  Display phase uses the same terms (`compute_target_hilbert_phase`).
+- **FIR pipeline routing** (`fir::route_for`, called inside generate_band_fir):
   - **IIR analytical cascade** (`fir/iir_path.rs`) — Min-Phase main +
     non-Gaussian (LR / Butterworth / Custom HP+LP + PEQ peaking) +
     no subsonic. Peak-at-0 by construction, REPhase-parity tested.
@@ -372,4 +378,4 @@ git diff --stat
 - `batch()`: wrap multiple signal updates to prevent intermediate effects
 - PEQ drag: debounce via `peqDragging` signal + `setTimeout(150ms)`
 - Store proxies: deep clone via `JSON.parse(JSON.stringify(obj))` before passing to async
-- Gaussian min-phase: Rust returns 0 phase for Gaussian filters; frontend calls `compute_minimum_phase` (Hilbert) when `linear_phase=false`
+- Gaussian min-phase: Rust `target::evaluate` returns 0 phase for Gaussian filters; the min-phase terms come from Rust `compute_target_hilbert_phase` (b141.70), which `reconstructTargetPhase` calls only when a Gaussian/subsonic term exists

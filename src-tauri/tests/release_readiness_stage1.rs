@@ -10,7 +10,7 @@
 // Skips cleanly when the fixture is missing (24MB, gitignored) so
 // clean checkouts / CI still pass.
 
-use phaseforge_lib::fir::pipeline::pick_pipeline;
+use phaseforge_lib::fir::band::evaluate_on;
 use phaseforge_lib::fir::{route_for, FirConfig, PhaseMode, Route, WindowType};
 use phaseforge_lib::io::import_measurement;
 use phaseforge_lib::peq::apply_peq_complex;
@@ -210,9 +210,7 @@ fn release_readiness_stage1_4way_real_project() {
             linear_phase_main: false,
             subsonic_cutoff_hz: None,
         };
-        let pipeline = pick_pipeline(hp, lp, &fir_config);
-        let fir_res = pipeline
-            .evaluate(hp, lp, &band.peq_bands, &fir_config, &freq)
+        let fir_res = evaluate_on(&band.target, &band.peq_bands, &fir_config, &freq)
             .unwrap_or_else(|e| panic!("B{bi} FIR pipeline failed: {e}"));
 
         assert_eq!(fir_res.impulse.len(), taps, "B{bi} FIR taps mismatch");

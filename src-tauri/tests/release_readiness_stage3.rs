@@ -14,7 +14,7 @@
 //
 // Skips when fixture missing.
 
-use phaseforge_lib::fir::pipeline::pick_pipeline;
+use phaseforge_lib::fir::band::evaluate_on;
 use phaseforge_lib::fir::{export_wav_f32, export_wav_f64, FirConfig, PhaseMode, WindowType};
 use phaseforge_lib::project::ProjectFile;
 
@@ -87,8 +87,6 @@ fn release_readiness_stage3_export_sweep() {
         return;
     };
     let band = &project.bands[0];
-    let hp = band.target.high_pass.as_ref();
-    let lp = band.target.low_pass.as_ref();
 
     let freq = log_freq_grid(256, 22.0, 22_000.0);
 
@@ -120,8 +118,7 @@ fn release_readiness_stage3_export_sweep() {
                         linear_phase_main: false,
                         subsonic_cutoff_hz: None,
                     };
-                    let pipeline = pick_pipeline(hp, lp, &cfg);
-                    let res = match pipeline.evaluate(hp, lp, &band.peq_bands, &cfg, &freq) {
+                    let res = match evaluate_on(&band.target, &band.peq_bands, &cfg, &freq) {
                         Ok(r) => r,
                         Err(e) => {
                             failures.push(format!("{label}: pipeline err: {e}"));

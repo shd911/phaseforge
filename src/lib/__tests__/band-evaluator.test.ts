@@ -6,6 +6,7 @@
 // behaviour for the commands we actually call.
 
 import { describe, it, expect, vi } from "vitest";
+import { hilbertTermsMock } from "./helpers/hilbert-terms-mock";
 import { invoke } from "@tauri-apps/api/core";
 import { fixtureMeasurement, FIXTURE_CONFIGS } from "./fixtures/eval-fixtures";
 import type { BandState } from "../../stores/bands";
@@ -20,6 +21,7 @@ vi.mock("@tauri-apps/api/core", () => ({
       return [f, r];
     }
     if (cmd === "compute_minimum_phase") return mockHilbert(args.freq as number[], args.magnitude as number[]);
+    if (cmd === "compute_target_hilbert_phase") return hilbertTermsMock(args, mockHilbert);
     if (cmd === "compute_peq_complex") {
       const n = (args.freq as number[]).length;
       return [new Array(n).fill(0), new Array(n).fill(0)];

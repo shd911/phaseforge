@@ -12,7 +12,7 @@
 //
 // Skips when fixture missing.
 
-use phaseforge_lib::fir::pipeline::pick_pipeline;
+use phaseforge_lib::fir::band::evaluate_on;
 use phaseforge_lib::fir::{FirConfig, PhaseMode, WindowType};
 use phaseforge_lib::project::ProjectFile;
 use phaseforge_lib::target::FilterConfig;
@@ -88,7 +88,9 @@ fn release_readiness_stage2_pipeline_matrix() {
 
     for (bi, band) in project.bands.iter().enumerate() {
         let hp: Option<&FilterConfig> = band.target.high_pass.as_ref();
-        let lp: Option<&FilterConfig> = band.target.low_pass.as_ref();
+        // b141.70: evaluate_on derives route/linear-main/subsonic from the
+        // band's own target (the app's rule), so the sweep below varies taps,
+        // window and rate; the old linear/subsonic overrides no longer apply.
 
         // subsonic_cutoff candidates: None, and (if HP exists) fc/8
         let mut subsonic_opts: Vec<Option<f64>> = vec![None];
@@ -116,13 +118,12 @@ fn release_readiness_stage2_pipeline_matrix() {
                             linear_phase_main: lin_main,
                             subsonic_cutoff_hz: subsonic,
                         };
-                        let pipeline = pick_pipeline(hp, lp, &cfg);
                         let label = format!(
                             "B{bi}/{pm_name}/{win_name}/lin={lin_main}/subsonic={:?}",
                             subsonic
                         );
 
-                        match pipeline.evaluate(hp, lp, &band.peq_bands, &cfg, &freq) {
+                        match evaluate_on(&band.target, &band.peq_bands, &cfg, &freq) {
                             Ok(res) => {
                                 let mut local_fail: Option<String> = None;
                                 if res.impulse.len() != taps {

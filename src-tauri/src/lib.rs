@@ -360,6 +360,32 @@ async fn generate_model_fir(
     .map_err(|e| e.to_string())
 }
 
+/// b141.70: the whole band → FIR request in Rust (`fir::band`) — the same
+/// function the release-readiness and golden tests drive.
+#[tauri::command]
+async fn generate_band_fir(
+    target: target::TargetCurve,
+    peq: Vec<peq::PeqBand>,
+    settings: fir::band::BandFirSettings,
+    omit_impulse: Option<bool>,
+) -> Result<fir::band::BandFirResult, String> {
+    info!("generate_band_fir: taps={}, sr={}, peq={}", settings.taps, settings.sample_rate, peq.len());
+    fir::band::generate_band_fir(&target, &peq, &settings, omit_impulse == Some(true))
+        .map_err(|e| e.to_string())
+}
+
+/// b141.70: the Gaussian / subsonic minimum-phase terms of a target (degrees
+/// on `freq`) — what the frontend adds to the analytic target phase.
+#[tauri::command]
+async fn compute_target_hilbert_phase(
+    freq: Vec<f64>,
+    high_pass: Option<target::FilterConfig>,
+    low_pass: Option<target::FilterConfig>,
+    sample_rate: f64,
+) -> Result<Vec<f64>, String> {
+    fir::band::target_hilbert_phase(&freq, high_pass.as_ref(), low_pass.as_ref(), sample_rate)
+}
+
 /// b141.64: callers that need only the FIR's metadata (the Σ convolver delay)
 /// skip the impulse — 5.9 MB of JSON at 262144 taps, 24 MB at 1024K.
 fn strip_impulse(mut r: FirModelResult, omit: Option<bool>) -> FirModelResult {
@@ -406,44 +432,6 @@ async fn generate_model_fir_iir(
     .map_err(|e| e.to_string())
 }
 
-/// b140.15.5: Tauri-exposed FIR routing predicate — single source of truth.
-///
-/// JS-side `pickFirRoute` (src/lib/fir-routing.ts) was a textual mirror of
-/// `fir::route_for`. If both predicates drifted identically, the existing
-/// `pipeline_contract` test could not catch it. With this command JS calls
-/// into the Rust predicate directly; the JS-side mirror is now deleted.
-///
-/// Returns "Iir" or "Cepstral" as a plain string so the JS side doesn't
-/// need to mirror the enum.
-#[tauri::command]
-fn pick_fir_route(
-    hp: Option<target::FilterConfig>,
-    lp: Option<target::FilterConfig>,
-    linear_main: bool,
-    subsonic_cutoff_hz: Option<f64>,
-    // b141.17 (audit): a non-zero target tilt cannot be expressed by the
-    // biquad cascade and forces the cepstral route.
-    tilt_db_per_octave: Option<f64>,
-) -> String {
-    use fir::FirConfig;
-    // route_for() reads only linear_phase_main + subsonic_cutoff_hz from
-    // FirConfig — build a minimal struct with the rest zeroed. Avoids
-    // shipping the full FirConfig across the boundary just to check two
-    // fields.
-    let cfg = FirConfig {
-        taps: 0, sample_rate: 0.0,
-        max_boost_db: 0.0, noise_floor_db: 0.0,
-        window: fir::WindowType::Hann, phase_mode: fir::PhaseMode::Composite,
-        iterations: 0, freq_weighting: false,
-        narrowband_limit: false, nb_smoothing_oct: 0.0, nb_max_excess_db: 0.0,
-        linear_phase_main: linear_main,
-        subsonic_cutoff_hz,
-    };
-    match fir::route_for(hp.as_ref(), lp.as_ref(), tilt_db_per_octave.unwrap_or(0.0), &cfg) {
-        fir::Route::Iir => "Iir".into(),
-        fir::Route::Cepstral => "Cepstral".into(),
-    }
-}
 
 #[tauri::command]
 async fn export_fir_wav(impulse: Vec<f64>, sample_rate: f64, path: String) -> Result<(), String> {
@@ -472,7 +460,7 @@ pub fn run() {
             .init();
     }
 
-    info!("PhaseForge b141.69 starting...");
+    info!("PhaseForge b141.70 starting...");
     info!("log file: {}", applog::log_path().map(|p| p.display().to_string()).unwrap_or_else(|| "—".into()));
 
     tauri::Builder::default()
@@ -505,8 +493,9 @@ pub fn run() {
             compute_peq_complex,
             compute_cross_section,
             generate_model_fir,
+            generate_band_fir,
+            compute_target_hilbert_phase,
             generate_model_fir_iir,
-            pick_fir_route,
             export_fir_wav,
             project::save_project,
             project::load_project,

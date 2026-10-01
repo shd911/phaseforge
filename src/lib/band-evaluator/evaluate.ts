@@ -3,7 +3,7 @@
  *
  * Houses `evaluateBandFull` — the canonical per-band evaluator that
  * builds magnitude / phase / cross-section / corrected curves, runs
- * optional FIR generation (via `dispatchFirInvoke`), and packages the
+ * optional FIR generation (Rust `generate_band_fir`, b141.70), and packages the
  * full result envelope. Also owns the supporting types:
  * FirRequestConfig, BandEvalRequest, BandEvalResult, plus the
  * `reconstructTargetPhase` and `applyMeasurementSmoothing` helpers
@@ -16,15 +16,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { untrack } from "solid-js";
 import type { FilterConfig, Measurement, PeqBand, TargetResponse } from "../types";
 import type { BandState } from "../../stores/bands";
-import {
-  isGaussianMinPhase,
-  gaussianFilterMagDb,
-  subsonicMagDb,
-  smoothingConfig,
-} from "../plot-helpers";
+import { isGaussianMinPhase, smoothingConfig } from "../plot-helpers";
 import { hasActiveSubsonicProtect, F_MIN_WORK, F_MAX_WORK } from "../types";
 import { buildLogGrid, buildCommonGrid, interpOnGrid, resampleOnLogGrid, interpPhaseOnGrid, irTime, type ImpulseIpc } from "./grid";
-import { dispatchFirInvoke } from "./route";
 import { appendNoiseFloorTail, autoRefLevel, computeExtension } from "./extension";
 import { bandRequestKey, memoEval } from "./cache";
 
@@ -162,44 +156,17 @@ export async function reconstructTargetPhase(
   lp: FilterConfig | null | undefined,
   sampleRate: number = 48000,
 ): Promise<number[]> {
-  // b141.52 (audit 2026-10-01 H4): every Hilbert term is reconstructed on
-  // ONE grid — the FIR's (5 Hz – 0.95·Nyquist) with the FIR's absolute
-  // −150 dB floor — and only then interpolated onto the caller's grid. On
-  // the 20 Hz display grid with a «peak − 120» floor the plotted phase was
-  // 65° (Gaussian LP 2 kHz at 5 kHz) and 101° (Gaussian HP 100 + subsonic
-  // at 20 Hz) away from the exported FIR.
-  const g = buildLogGrid(HILBERT_GRID_POINTS, 5, (sampleRate / 2) * 0.95);
-  const hilbert = (magnitude: number[]) =>
-    invoke<number[]>("compute_minimum_phase", {
-      freq: g, magnitude, sampleRate, floorDb: HILBERT_FLOOR_DB,
-    }).then((ph) => interpOnGrid(g, ph, freq, { logSpace: true, outside: "clamp" }) as number[]);
-
-  // Independent Hilbert reconstructions run in parallel (were serial awaits).
-  const jobs: Promise<number[]>[] = [];
-  if (isGaussianMinPhase(hp)) {
-    let hpMag = gaussianFilterMagDb(g, hp!, false);
-    if (hasActiveSubsonicProtect(hp)) {
-      const subDb = subsonicMagDb(g, hp!.freq_hz / 8);
-      hpMag = hpMag.map((db, i) => db + subDb[i]);
-    }
-    jobs.push(hilbert(hpMag));
-  } else if (hasActiveSubsonicProtect(hp) && hp!.linear_phase === true) {
-    // Linear-phase Gaussian still ships a min-phase subsonic — Hilbert from
-    // subsonic-only magnitude.
-    jobs.push(hilbert(subsonicMagDb(g, hp!.freq_hz / 8)));
-  }
-  if (isGaussianMinPhase(lp)) {
-    jobs.push(hilbert(gaussianFilterMagDb(g, lp!, true)));
-  }
-  if (jobs.length === 0) return [...basePhase];
-  const parts = await Promise.all(jobs);
-  return basePhase.map((v, i) => parts.reduce((acc, ph) => acc + ph[i], v));
+  // b141.70 (audit stage 2 A6): the Gaussian / subsonic minimum-phase terms
+  // come from Rust (`fir::band::target_hilbert_phase`) — the same function
+  // the exported FIR uses, on the FIR grid with the FIR floor (b141.52).
+  // The TS copy of the term selection and magnitudes is gone.
+  const needs = isGaussianMinPhase(hp) || isGaussianMinPhase(lp) || hasActiveSubsonicProtect(hp);
+  if (!needs) return [...basePhase];
+  const terms = await invoke<number[]>("compute_target_hilbert_phase", {
+    freq, highPass: hp ?? null, lowPass: lp ?? null, sampleRate,
+  });
+  return basePhase.map((v, i) => v + (terms[i] ?? 0));
 }
-
-/** Grid and floor of the Hilbert terms — the FIR's (fir/cepstral.rs clips at
- *  the −150 dB default noise floor on a 5 Hz – 0.95·Nyquist grid). */
-const HILBERT_GRID_POINTS = 1024;
-const HILBERT_FLOOR_DB = -150;
 
 /** b141.48 (audit 2026-10-01 H5): the filter section the FIR bakes into a
  *  band on top of the PEQ — HP/LP, tilt, shelves and, at export rates
@@ -442,99 +409,46 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
   //    generateBandImpulse used.
   let fir: BandEvalResult["fir"];
   if (req.fir && band.targetEnabled) {
-    const isUserLin = (f: FilterConfig | null | undefined) =>
-      !f || f.linear_phase === true;
-    // b141.2 (audit): AND-collapse is intentional. A single FIR cannot realise a
-    // mixed-phase main (HP linear + LP min) — physical limitation, see CLAUDE.md.
-    // So "both linear" → linear FIR, otherwise → min-phase IIR path. A user who
-    // sets only one crossover to linear via the per-block toggle gets a min-phase
-    // FIR (the displayed per-filter target may then differ from the realised FIR
-    // for that filter). Left as-is by product decision — this combination is not
-    // a supported configuration.
-    const linearMain =
-      isUserLin(band.target.high_pass) && isUserLin(band.target.low_pass);
-    const hp = band.target.high_pass;
-    const subsonicCutoff = hasActiveSubsonicProtect(hp) ? hp!.freq_hz / 8 : null;
+    // b141.70 (audit stage 2 A1/A2/A6): the whole band → FIR request runs in
+    // Rust (`fir::band::generate_band_fir`): FIR grid, target, Gaussian /
+    // subsonic Hilbert terms, noise tail, PEQ, routing, config, dispatch.
+    // It used to be assembled here while the release gate drove a separate
+    // Rust harness; now both run the same function, and the target travels
+    // whole instead of field by field.
     const cfg = req.fir;
-
-    // FIR-specific grid + target evaluation.
-    // b141.40: the target runs to 0.95·Nyquist. The old 40 kHz cap, followed
-    // by the noise-floor tail, was a brick wall (0 dB at 40 kHz, −79 dB at
-    // 41 kHz at 352.8 kHz) that rang at 40 kHz; band-limiting is now the
-    // zero-phase ultrasonic low-pass in Rust (fir/ultrasonic.rs). The point
-    // count grows with the span so the audio band keeps the density 512
-    // points gave over 5 Hz–40 kHz. At 44.1/48 kHz nothing changes.
-    const fMaxFir = cfg.sampleRate / 2 * 0.95;
-    const firPoints = Math.max(512, Math.ceil(512 * Math.log(fMaxFir / 5) / Math.log(40000 / 5)));
-    const [firFreqRaw, firResp] = await invoke<[number[], TargetResponse]>(
-      "evaluate_target_standalone",
-      { target: targetCurve, nPoints: firPoints, fMin: 5, fMax: fMaxFir },
-    );
-    const firTargetPhaseRaw = await reconstructTargetPhase(
-      firFreqRaw, firResp.phase, band.target.high_pass, band.target.low_pass, evalSr,
-    );
-
-    // b140.5: extend log grid + target trio up to Nyquist with a noise-floor
-    // tail to avoid Rust's constant boundary clamp on linear FFT bins above
-    // fMaxFir (was shifting apparent rolloff by ~½ oct at sr=44.1/48 kHz).
-    const firExt = appendNoiseFloorTail(
-      firFreqRaw, firResp.magnitude, firTargetPhaseRaw,
-      cfg.sampleRate, cfg.noiseFloorDb,
-    );
-    const firFreq = firExt.freq;
-    const firTargetMag = firExt.mag;
-    const firTargetPhase = firExt.phase;
-
-    // PEQ on the FIR grid, at the FIR's sample rate (b141.5: biquads warp
-    // near Nyquist — the baked-in PEQ curve must match the realized rate).
-    let firPeqMag: number[] = new Array(firFreq.length).fill(0);
-    let firPeqPhase: number[] = new Array(firFreq.length).fill(0);
-    if (enabledPeq.length > 0) {
-      const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", {
-        freq: firFreq, bands: enabledPeq, sampleRate: cfg.sampleRate,
-      });
-      firPeqMag = pm;
-      firPeqPhase = pp;
-    }
-    const firCombinedPhase = firTargetPhase.map((p, i) => p + firPeqPhase[i]);
-
-    // b140.14.1: routing predicate + Rust-side dispatch extracted to
-    // ./band-evaluator/route.ts so the JS-side dispatch surface (decision +
-    // Tauri payload mapping) has a single home. Behaviour unchanged.
-    const result = await dispatchFirInvoke(
-      band.target.high_pass,
-      band.target.low_pass,
-      band.target.low_shelf ?? null,
-      band.target.high_shelf ?? null,
-      band.target.tilt_db_per_octave ?? 0,
-      enabledPeq,
-      linearMain,
-      subsonicCutoff,
-      firFreq, firTargetMag, firPeqMag, firCombinedPhase,
-      cfg,
-    );
-    // b140.6: realized_mag/phase come back on `firFreq` (5..fMaxFir, where
-    // fMaxFir = 0.95·Nyquist since b141.40). At sr=44.1/48 kHz this is < 40 kHz,
-    // so its 512 points compress 0..fMaxFir while `freq` (the caller-side
-    // grid that the SPL/Export plot uses) covers up to 40 kHz. Plotting
-    // them positionally on a single x-axis shifted FIR by ~0.8 oct on
-    // rolloff. Resample onto `freq` here so every consumer gets FIR on the
-    // same grid as Model.
-    const realizedMagOnFreq = resampleOnLogGrid(firFreq, result.realized_mag, freq);
-    const realizedPhaseOnFreq = resampleOnLogGrid(firFreq, result.realized_phase, freq);
+    const result = await invoke<{
+      impulse: number[]; realized_mag: number[]; realized_phase: number[];
+      taps: number; sample_rate: number; norm_db: number; causality: number;
+      wav_delay_samples: number; ultrasonic_lp_hz?: number | null;
+      route: "iir" | "cepstral"; peak_boost_db: number; freq: number[];
+    }>("generate_band_fir", {
+      target: targetCurve,
+      peq: enabledPeq,
+      settings: {
+        taps: cfg.taps, sample_rate: cfg.sampleRate, window: cfg.window,
+        max_boost_db: cfg.maxBoostDb, noise_floor_db: cfg.noiseFloorDb,
+        iterations: cfg.iterations, freq_weighting: cfg.freqWeighting,
+        narrowband_limit: cfg.narrowbandLimit, nb_smoothing_oct: cfg.nbSmoothingOct,
+        nb_max_excess_db: cfg.nbMaxExcessDb,
+      },
+      omitImpulse: cfg.omitImpulse ?? false,
+    });
+    // b140.6: realized_mag/phase come back on the FIR grid (5 Hz – Nyquist);
+    // resample onto `freq` so every consumer gets FIR on the same grid as Model.
+    const realizedMagOnFreq = resampleOnLogGrid(result.freq, result.realized_mag, freq);
+    const realizedPhaseOnFreq = resampleOnLogGrid(result.freq, result.realized_phase, freq);
     fir = {
       impulse: result.impulse,
-      // b141.6: ramp derived locally — was a ~MB linear array in the payload.
       realizedMag: realizedMagOnFreq,
       realizedPhase: realizedPhaseOnFreq,
       taps: result.taps,
       sampleRate: result.sample_rate,
       normDb: result.norm_db,
       causality: result.causality,
-      wavDelaySamples: result.wav_delay_samples ?? Math.floor(result.impulse.length / 2),
+      wavDelaySamples: result.wav_delay_samples,
       route: result.route,
       ultrasonicLpHz: result.ultrasonic_lp_hz ?? null,
-      peakBoostDb: firTargetMag.reduce((m, v, i) => Math.max(m, v + (firPeqMag[i] ?? 0)), -Infinity),
+      peakBoostDb: result.peak_boost_db,
     };
   }
 

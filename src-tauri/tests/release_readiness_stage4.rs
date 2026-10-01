@@ -16,7 +16,7 @@
 //      change is measurable (not a no-op).
 
 use phaseforge_lib::dsp::impulse::compute_impulse_response;
-use phaseforge_lib::fir::pipeline::pick_pipeline;
+use phaseforge_lib::fir::band::evaluate_on;
 use phaseforge_lib::fir::{FirConfig, PhaseMode, WindowType};
 use phaseforge_lib::io::import_measurement;
 use phaseforge_lib::peq::{
@@ -221,18 +221,7 @@ fn release_readiness_stage4_sum_ir_peq_alignment() {
             linear_phase_main: false,
             subsonic_cutoff_hz: None,
         };
-        let pipe = pick_pipeline(
-            band.target.high_pass.as_ref(),
-            band.target.low_pass.as_ref(),
-            &cfg_fir,
-        );
-        let _ = pipe.evaluate(
-            band.target.high_pass.as_ref(),
-            band.target.low_pass.as_ref(),
-            &band.peq_bands,
-            &cfg_fir,
-            &freq,
-        );
+        let _ = evaluate_on(&band.target, &band.peq_bands, &cfg_fir, &freq);
 
         band_reports.push(serde_json::json!({
             "index": bi,

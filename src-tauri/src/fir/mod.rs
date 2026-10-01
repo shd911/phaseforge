@@ -16,6 +16,7 @@ pub mod iir_path;
 pub mod dispatch;
 pub mod pipeline;
 pub mod ultrasonic;
+pub mod band;
 
 pub use types::*;
 pub use dispatch::{Route, route_for};
