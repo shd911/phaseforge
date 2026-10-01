@@ -17,7 +17,7 @@ import { alignmentPhaseDeg, STANDARD_SAMPLE_RATES, STANDARD_TAPS, F_MIN_WORK, F_
 import { preRingZoneMs } from "../lib/pre-ring";
 import { analyzePreRing, ringZone } from "../lib/export-metrics";
 import ExportMetricsBar from "./ExportMetricsBar";
-import { autoRefLevel } from "../lib/band-evaluator/extension";
+import { passbandRange } from "../lib/band-evaluator/extension";
 import { peqStale } from "../stores/peq-optimize";
 import { showStaleConfirmDialog } from "./StalePeqExportDialog";
 import { highQIndices } from "../lib/peq-quality";
@@ -1860,17 +1860,10 @@ export default function FrequencyPlot() {
       // 5–40k log grid keeps the result independent of whether the band has a
       // measurement attached. b141.19: shared with the WAV export via
       // buildFirGrid so preview and file are one computation, not two.
-      const exportFreq = buildFirGrid();
-      const evalRes = await evaluateBandFull({
-        band, freq: exportFreq,
-        fir: {
-          taps, sampleRate: sr, window: win,
-          maxBoostDb: firMaxBoost(), noiseFloorDb: firNoiseFloor(),
-          iterations: firIterations(), freqWeighting: firFreqWeighting(),
-          narrowbandLimit: firNarrowbandLimit(),
-          nbSmoothingOct: firNbSmoothingOct(), nbMaxExcessDb: firNbMaxExcess(),
-        },
-      });
+      // b141.69 (audit stage 2 A5): THE export request, not a hand-built copy
+      // of it — a field added in one place would not reach the other and the
+      // preview would drift from the WAV.
+      const evalRes = await evaluateBandFull(firExportRequest(band));
       if (gen !== renderGen) return;
       if (!evalRes.fir || !evalRes.targetMag) {
         setExportComputing(false); setExportFirRoute(null);
@@ -3010,13 +3003,7 @@ export default function FrequencyPlot() {
       // Compute zoom anchor: avg magnitude in passband (adaptive to HP/LP), or 0 dB without measurement
       if (result.measurement) {
         // Determine passband from actual HP/LP filters
-        const hpFreq = band.target.high_pass?.freq_hz ?? 20;
-        const lpFreq = band.target.low_pass?.freq_hz ?? F_MAX_REF;
-        const pbLow = Math.max(20, hpFreq * 1.5);
-        const pbHigh = Math.min(F_MAX_REF, lpFreq * 0.7);
-        // Fallback to 200-2000 if no filters or range is empty
-        const effLow = pbLow < pbHigh ? pbLow : 200;
-        const effHigh = pbLow < pbHigh ? pbHigh : 2000;
+        const [effLow, effHigh] = passbandRange(band.target.high_pass?.freq_hz, band.target.low_pass?.freq_hz);
 
         let s = 0, n = 0;
         for (let i = 0; i < result.measurement.freq.length; i++) {
@@ -3132,12 +3119,7 @@ export default function FrequencyPlot() {
 
           // Normalize corrected to target in passband (b82.06)
           if (result.targetMag) {
-            const hpF = band.target.high_pass?.freq_hz ?? 20;
-            const lpF = band.target.low_pass?.freq_hz ?? F_MAX_REF;
-            const pbL = Math.max(20, hpF * 1.5);
-            const pbH = Math.min(F_MAX_REF, lpF * 0.7);
-            const eL = pbL < pbH ? pbL : 200;
-            const eH = pbL < pbH ? pbH : 2000;
+            const [eL, eH] = passbandRange(band.target.high_pass?.freq_hz, band.target.low_pass?.freq_hz);
             let dSum = 0, dN = 0;
             for (let k = 0; k < result.measurement.freq.length; k++) {
               const t = result.targetMag[k], c = fullCorrected[k];

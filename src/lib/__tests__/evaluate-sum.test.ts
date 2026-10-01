@@ -629,3 +629,11 @@ describe("evaluateSum (b140.3.1.4) — global shift extras", () => {
     expect(mag[i700]).toBeCloseTo(0.1, 1);
   });
 });
+
+import { passbandRange } from "../band-evaluator/extension";
+describe("passbandRange (b141.69)", () => {
+  it("normal band", () => { expect(passbandRange(100, 2000)).toEqual([150, 1400]); });
+  it("narrow band uses its crossover span", () => { expect(passbandRange(1000, 1400)).toEqual([1000, 1400]); });
+  it("inverted pair keeps 200–2000", () => { expect(passbandRange(15000, 20)).toEqual([200, 2000]); });
+  it("no filters", () => { expect(passbandRange(null, null)).toEqual([30, 14000]); });
+});

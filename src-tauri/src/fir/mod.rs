@@ -56,14 +56,6 @@ pub fn taps_valid(taps: usize) -> bool {
 
 /// Recommend tap count based on lowest frequency and sample rate.
 ///
-/// Formula: next power of 2 ≥ 3 × sample_rate / lowest_freq, then clamp to standard set.
-pub fn recommend_taps(lowest_freq: f64, sample_rate: f64) -> usize {
-    let standard = [4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576];
-    let desired = (3.0 * sample_rate / lowest_freq.max(10.0)) as usize;
-    let pow2 = desired.next_power_of_two();
-    // Find the smallest standard tap count >= pow2
-    *standard.iter().find(|&&s| s >= pow2).unwrap_or(&MAX_TAPS)
-}
 
 // b140.13:   `export_wav_f32` / `export_wav_f64`  → `fir/wav.rs`
 // b140.13.1: `generate_fir` / `generate_hybrid_fir` → `fir/legacy.rs`

@@ -19,6 +19,7 @@ import {
 } from "./bands";
 import type { BandState } from "./bands";
 import { pushHistory, registerHistoryHooks, type HistoryEntry } from "./history";
+import { passbandRange } from "../lib/band-evaluator/extension";
 import { showToast } from "../lib/toast";
 
 // --- Signals ---
@@ -84,11 +85,8 @@ async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBa
   const exclusionZonesSnap: ExclusionZone[] = JSON.parse(JSON.stringify(b.exclusionZones ?? []));
   const fLow = b.target?.high_pass?.freq_hz ?? 20;
   const fHigh = b.target?.low_pass?.freq_hz ?? F_MAX_REF;
-  // adaptive passband for refOffset (matches FrequencyPlot autoRef)
-  const pbLow = Math.max(20, fLow * 1.5);
-  const pbHigh = Math.min(F_MAX_REF, fHigh * 0.7);
-  const refLow = pbLow < pbHigh ? pbLow : 200;
-  const refHigh = pbLow < pbHigh ? pbHigh : 2000;
+  // adaptive passband for refOffset (the one shared rule)
+  const [refLow, refHigh] = passbandRange(b.target?.high_pass?.freq_hz, b.target?.low_pass?.freq_hz);
   let refOffset = 0, count = 0;
   for (let i = 0; i < meas.freq.length; i++) {
     if (meas.freq[i] >= refLow && meas.freq[i] <= refHigh) {

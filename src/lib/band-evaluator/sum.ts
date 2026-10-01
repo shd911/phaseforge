@@ -17,7 +17,7 @@ import type { BandState } from "../../stores/bands";
 import type { PeqBand, TargetResponse } from "../types";
 import { alignmentPhaseDeg, F_MAX_REF } from "../types";
 import { buildCommonGrid, buildLogGrid, interpOnGrid, interpPhaseOnGrid, irTime, type ImpulseIpc } from "./grid";
-import { appendNoiseFloorTail, computeExtension } from "./extension";
+import { appendNoiseFloorTail, computeExtension, passbandRange } from "./extension";
 import { evaluateBandFull, filterSection, reconstructTargetPhase, snapshotBandRequest } from "./evaluate";
 import { bandContentKey, hashGrid, memoEval, sumRequestKey } from "./cache";
 
@@ -115,8 +115,10 @@ function applyGlobalShiftIfWideExcess(
   const NARROW_OCT = 1 / 8;
   const WIDE_OCT = 1 / 2;
 
-  const pbLow = hpFreqHz ? hpFreqHz * 1.5 : 20;
-  const pbHigh = lpFreqHz ? lpFreqHz * 0.7 : F_MAX_REF;
+  // An inverted pair (HP ≥ LP) has no passband to control — leave it as is
+  // (the raw HP·1.5..LP·0.7 zone used to be empty there).
+  if (hpFreqHz && lpFreqHz && hpFreqHz >= lpFreqHz) return corrected;
+  const [pbLow, pbHigh] = passbandRange(hpFreqHz, lpFreqHz);
   const zoneLow = Math.max(20, pbLow / 2);
   const zoneHigh = Math.min(F_MAX_REF, pbHigh * 2);
 
@@ -414,10 +416,7 @@ async function evaluateSumImpl(
     if (pbTarget) {
       const hp = bands[i].target.high_pass;
       const lp = bands[i].target.low_pass;
-      const pbLow = hp ? Math.max(20, hp.freq_hz * 1.5) : 20;
-      const pbHigh = lp ? Math.min(F_MAX_REF, lp.freq_hz * 0.7) : F_MAX_REF;
-      const eL = pbLow < pbHigh ? pbLow : 200;
-      const eH = pbLow < pbHigh ? pbHigh : 2000;
+      const [eL, eH] = passbandRange(hp?.freq_hz, lp?.freq_hz);
       let dSum = 0, dN = 0;
       for (let j = 0; j < freq.length; j++) {
         if (freq[j] < eL || freq[j] > eH) continue;

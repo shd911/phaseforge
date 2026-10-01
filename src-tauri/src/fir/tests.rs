@@ -10,16 +10,6 @@
 
 use super::*;
 
-    #[test]
-    fn test_recommend_taps() {
-        // For 20 Hz at 48000 Hz: 3 * 48000 / 20 = 7200 → next pow2 = 8192
-        let taps = recommend_taps(20.0, 48000.0);
-        assert_eq!(taps, 8192);
-
-        // For 80 Hz at 48000 Hz: 3 * 48000 / 80 = 1800 → next pow2 = 2048 → clamp to 4096
-        let taps = recommend_taps(80.0, 48000.0);
-        assert_eq!(taps, 4096);
-    }
 
     #[test]
     fn test_flat_correction_produces_dirac() {

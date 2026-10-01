@@ -433,8 +433,8 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
   //    degenerates to LinearPhase / MinimumPhase when no subsonic is on,
   //    so this single path replaces the old isLin / demotion logic.
   //
-  //    b139.5.3: FIR runs on its OWN log grid (5 Hz – min(40 kHz, Nyquist·0.95),
-  //    512 points) — independent of the measurement grid that drives the
+  //    b139.5.3: FIR runs on its OWN log grid (5 Hz – 0.95·Nyquist since
+  //    b141.40, ≥ 512 points) — independent of the measurement grid that drives the
   //    SPL display. The display grid is fine for "what the listener
   //    perceives" but truncates the FIR's HP rolloff (no bins below 20 Hz)
   //    and its anti-aliasing headroom (no bins above 20 kHz when
@@ -514,7 +514,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
       cfg,
     );
     // b140.6: realized_mag/phase come back on `firFreq` (5..fMaxFir, where
-    // fMaxFir = min(40000, sr·0.95/2)). At sr=44.1/48 kHz this is < 40 kHz,
+    // fMaxFir = 0.95·Nyquist since b141.40). At sr=44.1/48 kHz this is < 40 kHz,
     // so its 512 points compress 0..fMaxFir while `freq` (the caller-side
     // grid that the SPL/Export plot uses) covers up to 40 kHz. Plotting
     // them positionally on a single x-axis shifted FIR by ~0.8 oct on

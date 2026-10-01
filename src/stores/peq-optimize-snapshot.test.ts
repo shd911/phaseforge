@@ -21,7 +21,7 @@ vi.mock("@tauri-apps/api/core", () => ({
       const freq = args.freq as number[];
       return { magnitude: freq.map(() => 80), phase: freq.map(() => 0) };
     }
-    if (cmd === "compute_peq_response") {
+    if (cmd === "compute_peq_response") { // (command removed in b141.69; kept to assert it is never called)
       peqResponseCalls.push(JSON.parse(JSON.stringify(args)));
       onPeqResponse?.();
       return (args.freq as number[]).map(() => 0);

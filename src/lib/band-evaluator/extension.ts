@@ -49,7 +49,25 @@ export function appendNoiseFloorTail(
   return out;
 }
 
-/** Average magnitude in the band passband (HP·1.5 .. LP·0.7),
+/** b141.69 (audit stage 2 A4): THE level-matching passband of a band —
+ *  HP·1.5 .. LP·0.7, clamped to 20 Hz .. F_MAX_REF. It was copied six times
+ *  (auto-ref, PEQ ref offset, Σ normalisation, Σ excess zone, two plot
+ *  anchors), one copy without the clamps. A band too narrow for that window
+ *  (LP < 2.14·HP) uses the span between its crossover points instead of the
+ *  old fixed 200–2000 Hz, which could lie outside the band entirely. */
+export function passbandRange(hpHz: number | null | undefined, lpHz: number | null | undefined): [number, number] {
+  const hp = hpHz ?? 20;
+  const lp = lpHz ?? F_MAX_REF;
+  const lo = Math.max(20, hp * 1.5);
+  const hi = Math.min(F_MAX_REF, lp * 0.7);
+  if (lo < hi) return [lo, hi];
+  // Narrow band (HP < LP but < 2.14× apart): its crossover span. An inverted
+  // pair (HP ≥ LP, no passband at all) keeps the historical 200–2000 Hz.
+  const a = Math.max(20, hp), b = Math.min(F_MAX_REF, lp);
+  return hp < lp && a < b ? [a, b] : [200, 2000];
+}
+
+/** Average magnitude in the band passband (see passbandRange),
  *  fallback [200, 2000] when the passband is inverted. */
 export function autoRefLevel(
   freq: number[],
@@ -57,12 +75,7 @@ export function autoRefLevel(
   hp: FilterConfig | null | undefined,
   lp: FilterConfig | null | undefined,
 ): number {
-  const hpFreq = hp?.freq_hz ?? 20;
-  const lpFreq = lp?.freq_hz ?? F_MAX_REF;
-  const pbLow = Math.max(20, hpFreq * 1.5);
-  const pbHigh = Math.min(F_MAX_REF, lpFreq * 0.7);
-  const refLow = pbLow < pbHigh ? pbLow : 200;
-  const refHigh = pbLow < pbHigh ? pbHigh : 2000;
+  const [refLow, refHigh] = passbandRange(hp?.freq_hz, lp?.freq_hz);
   let sum = 0, n = 0;
   for (let i = 0; i < freq.length; i++) {
     if (freq[i] >= refLow && freq[i] <= refHigh) { sum += magnitude[i]; n++; }

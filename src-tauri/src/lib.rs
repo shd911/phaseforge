@@ -252,17 +252,6 @@ async fn auto_peq_lma(
 }
 
 #[tauri::command]
-async fn compute_peq_response(
-    freq: Vec<f64>,
-    bands: Vec<PeqBand>,
-    sample_rate: Option<f64>,
-) -> Result<Vec<f64>, String> {
-    let sr = sample_rate.unwrap_or(48000.0);
-    info!("compute_peq_response: {} points, {} bands, sr={}", freq.len(), bands.len(), sr);
-    Ok(peq::apply_peq(&freq, &bands, sr))
-}
-
-#[tauri::command]
 async fn compute_peq_complex(
     freq: Vec<f64>,
     bands: Vec<PeqBand>,
@@ -345,7 +334,8 @@ async fn compute_cross_section(
 // `recommend_fir_taps` — the frontend never invoked them (production FIR routes
 // through generate_model_fir / generate_model_fir_iir). The underlying
 // fir::generate_fir / generate_hybrid_fir live on under cfg(test) as the
-// golden-snapshot baseline; fir::recommend_taps remains for tests.
+// golden-snapshot baseline. b141.69: compute_peq_response (no caller since
+// the frozen-PEQ bake went in b141.46) and fir::recommend_taps removed.
 
 #[tauri::command]
 async fn generate_model_fir(
@@ -482,7 +472,7 @@ pub fn run() {
             .init();
     }
 
-    info!("PhaseForge b141.68 starting...");
+    info!("PhaseForge b141.69 starting...");
     info!("log file: {}", applog::log_path().map(|p| p.display().to_string()).unwrap_or_else(|| "—".into()));
 
     tauri::Builder::default()
@@ -512,7 +502,6 @@ pub fn run() {
             merge_measurements,
             preview_baffle_step,
             auto_peq_lma,
-            compute_peq_response,
             compute_peq_complex,
             compute_cross_section,
             generate_model_fir,
