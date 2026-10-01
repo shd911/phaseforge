@@ -165,16 +165,14 @@ function optimizePairDelay(
 
   const nSteps = 200;
   const step = (2 * scanRange) / nSteps;
-  let bestDelay = 0;
-  let bestCost = cost(0);
+  const ds: number[] = [], amps: number[] = [];
   for (let i = 0; i <= nSteps; i++) {
     const d = -scanRange + step * i;
-    const c = cost(d);
-    if (c < bestCost) {
-      bestCost = c;
-      bestDelay = d;
-    }
+    ds.push(d);
+    amps.push(-cost(d));
   }
+  let bestDelay = pickScanPeak(ds, amps);
+  let bestCost = cost(bestDelay);
 
   // Golden-section refinement inside ±1 scan step of the best grid point.
   // (The old gradient step lr·grad was ~0.1 s and always rejected, so the
@@ -190,4 +188,31 @@ function optimizePairDelay(
   }
   const refined = (lo + hi) / 2;
   return cost(refined) <= bestCost ? refined : bestDelay;
+}
+
+/**
+ * Pick the delay from a coherence scan. b141.60 (user report, VPV2 220 Hz
+ * LR2): the coherence over the crossover octave has maxima one period of the
+ * crossover apart; the global maximum sat ON the scan edge (−3.00 ms, still
+ * rising past it) while an interior one (+1.35 ms) was 1 % lower — the edge
+ * value put the upper bands 3 ms late and wrapped the Σ phase every 333 Hz.
+ * An edge point is not a located optimum, so interior local maxima win;
+ * among those within 0.5 % of the best, the smallest |delay| (the
+ * period-consistent solution, not a skipped period). The scan edges are
+ * used only when the scan has no interior maximum at all.
+ */
+export function pickScanPeak(ds: number[], amps: number[]): number {
+  const n = ds.length;
+  const interior: number[] = [];
+  for (let i = 1; i < n - 1; i++) {
+    if (amps[i] >= amps[i - 1] && amps[i] >= amps[i + 1]) interior.push(i);
+  }
+  const pool = interior.length > 0 ? interior : [...Array(n).keys()];
+  let best = pool[0];
+  for (const i of pool) if (amps[i] > amps[best]) best = i;
+  let pick = best;
+  for (const i of pool) {
+    if (amps[i] >= amps[best] * 0.995 && Math.abs(ds[i]) < Math.abs(ds[pick])) pick = i;
+  }
+  return ds[pick];
 }
