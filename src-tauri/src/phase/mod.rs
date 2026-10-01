@@ -25,6 +25,10 @@ pub fn unwrap_phase(phase_deg: &[f64]) -> Vec<f64> {
 
 /// Compute group delay at each frequency point.
 ///
+/// The phase must be UNWRAPPED (b141.75, external audit): the differences are
+/// taken as they are. Unwrapping here would corrupt a steep but correctly
+/// unwrapped phase (e.g. 5 ms at 100 Hz spacing = 180° per step).
+///
 /// Group delay τ(f) = -(1/360) · dφ/df  (seconds)
 /// where φ is in degrees and f is in Hz.
 ///

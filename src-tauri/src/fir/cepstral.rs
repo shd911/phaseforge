@@ -138,7 +138,10 @@ pub fn generate_model_fir_with_sections(
         // PEQ magnitude is typically small — no extreme clipping needed.
         // b141.53: the boost limit applies to the total (below), not to each
         // part — clipping target and PEQ separately let 2 × max_boost through.
-        peq_raw.iter().map(|&v| v.max(-60.0)).collect()
+        // b141.75 (external audit, glm-5.2): floor at the noise floor, not
+        // −60 dB — overlapping cuts summing deeper were clipped here but not
+        // on the IIR route.
+        peq_raw.iter().map(|&v| v.max(config.noise_floor_db)).collect()
     } else {
         vec![0.0; n_bins]
     };

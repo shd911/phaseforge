@@ -89,8 +89,8 @@ fn ifft_parts(freq: &[f64], parts: &[SpectrumPart], sample_rate: f64, fft_size: 
 /// linear-grid interpolation held the magnitude flat and FROZE the phase up
 /// to Nyquist — a band with zero group delay, i.e. a spike at t = 0 (20 % of
 /// the peak for a 2 ms measurement ending at 20 kHz). Continue the phase with
-/// the last group delay and fade the magnitude out over one octave
-/// (raised cosine) instead. Callers that already extend to Nyquist (noise-
+/// the last group delay and fade the magnitude out with a raised cosine over
+/// one octave, or up to Nyquist when that is closer. Callers that already extend to Nyquist (noise-
 /// floor tail) are untouched: nothing lies above their last point.
 fn extend_above_grid(freq: &[f64], phase: &[f64], mag: &mut [f64], ph: &mut [f64], sample_rate: f64) {
     let n = freq.len();

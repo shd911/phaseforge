@@ -623,6 +623,25 @@ mod tests {
         }
     }
 
+    /// b141.75 (external audit): a single band may become a HighShelf.
+    #[test]
+    fn single_band_can_become_a_high_shelf() {
+        let freq = make_log_freq(400, 20.0, 20000.0);
+        let hs = PeqBand { freq_hz: 6000.0, gain_db: 4.0, q: 0.7, enabled: true, filter_type: PeqFilterType::HighShelf };
+        let meas: Vec<f64> = apply_peq(&freq, &[hs], 48000.0).iter().map(|v| 80.0 + v).collect();
+        let target = vec![80.0_f64; freq.len()];
+        let weights = vec![1.0_f64; freq.len()];
+        let config = PeqConfig {
+            max_bands: 3, tolerance_db: 0.5, peak_bias: 1.0, max_boost_db: 6.0, max_cut_db: 18.0,
+            freq_range: (20.0, 20000.0), smoothing_fraction: None, min_band_distance_oct: None,
+            hybrid: false, gain_regularization: 0.0, sample_rate: 48000.0,
+        };
+        let solver = LmaSolver::new(&freq, &meas, &target, &weights, 20000.0, &config);
+        let mut bands = vec![PeqBand { freq_hz: 6000.0, gain_db: -4.0, q: 1.0, enabled: true, filter_type: PeqFilterType::Peaking }];
+        try_promote_to_shelves(&mut bands, &solver);
+        assert_eq!(bands[0].filter_type, PeqFilterType::HighShelf);
+    }
+
     #[test]
     fn test_biquad_at_center_frequency() {
         let gain = 6.0;

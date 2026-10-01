@@ -580,7 +580,10 @@ pub(crate) fn try_promote_to_shelves(bands: &mut [PeqBand], solver: &LmaSolver) 
             bands[idx].filter_type = shelf;
             bands[idx].q = trial[idx].q;
         }
-        if last == 0 { break; }
+        // b141.75 (external audit, glm-5.2): a single band is both the lowest
+        // and the highest — try HighShelf too when LowShelf did not win (the
+        // old `break` never tried it, so a lone HF band could not become one).
+        if last == 0 && bands[0].filter_type != PeqFilterType::Peaking { break; }
     }
 }
 

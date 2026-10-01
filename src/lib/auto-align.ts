@@ -159,7 +159,10 @@ function optimizePairDelay(
   };
 
   // Adaptive sweep range: wider for low-frequency crossovers
-  const xoCenterFreq = (freqRange[0] + freqRange[1]) / 2;
+  // b141.75 (external audit, deepseek-v4-pro): the GEOMETRIC centre (= the
+  // crossover). The arithmetic mean of [fc/√2, fc·√2] is 6 % high and moved
+  // a 200 Hz crossover into the ±3 ms bucket instead of ±5 ms.
+  const xoCenterFreq = Math.sqrt(freqRange[0] * freqRange[1]);
   const adaptiveMaxMs = xoCenterFreq < 200 ? 5.0 : xoCenterFreq < 500 ? 3.0 : 2.0;
   const scanRange = adaptiveMaxMs / 1000;
 
