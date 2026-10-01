@@ -1,5 +1,7 @@
 // Phase engine: group delay, distance computation, delay removal
 
+use tracing::info;
+
 /// Unwrap phase: remove discontinuities greater than 180 degrees.
 ///
 /// Input phase is in degrees (wrapped ±180°). Output is continuous (unwrapped).
@@ -128,6 +130,42 @@ pub fn compute_average_delay(
     }
 
     delay
+}
+
+/// Estimate a measurement's time of flight (seconds).
+///
+/// b141.56 (audit 2026-10-01 M6): the least-squares fit now runs on the
+/// EXCESS phase (measured − minimum phase of the measured magnitude), and a
+/// rejected fit (it returns exactly 0 for R² < 0.5 or < 0.1 ms) never wins
+/// over the impulse estimate. Before, a fit on the raw phase carried the
+/// driver's own min-phase group delay (tweeter BW2 2 kHz, true 0.08 ms:
+/// LS 0.178 ms beat IR 0.083 → −352° at 10 kHz), and a rejected fit's 0
+/// overrode a correct 0.083 ms IR (288° at 10 kHz). The impulse estimate is
+/// now the fallback for a rejected fit only.
+pub fn estimate_delay(freq: &[f64], magnitude: &[f64], phase: &[f64], sample_rate: Option<f64>) -> f64 {
+    let f_first = freq.first().copied().unwrap_or(20.0);
+    let f_last = freq.last().copied().unwrap_or(20000.0);
+    let (f_lo, f_hi) = smart_delay_range(f_first, f_last);
+    let excess: Option<Vec<f64>> = crate::dsp::minimum_phase_on_log_grid(freq, magnitude, sample_rate, None)
+        .ok()
+        .map(|mp| phase.iter().zip(&mp).map(|(p, m)| p - m).collect());
+    let ls_delay = compute_average_delay(freq, excess.as_deref().unwrap_or(phase), f_lo, f_hi);
+    let Some(sr) = sample_rate else {
+        info!("estimate_delay: excess-phase LS fit {:.4}ms (range {:.0}-{:.0} Hz)", ls_delay * 1000.0, f_lo, f_hi);
+        return ls_delay;
+    };
+    // The excess-phase fit is unbiased and sub-sample; the impulse estimate
+    // is quantised to a sample (12.5 µs off at 1.2 ms / 48 kHz = 54° at
+    // 12 kHz), so it only stands in when the fit was rejected.
+    // A negative time of flight is not physical (seen on a merged NF+FF
+    // curve whose phase is synthetic) — treat it as a rejected fit too.
+    if ls_delay > 0.0 {
+        info!("estimate_delay: excess-phase LS {:.4}ms (range {:.0}-{:.0} Hz)", ls_delay * 1000.0, f_lo, f_hi);
+        return ls_delay;
+    }
+    let ir_delay = compute_ir_delay(freq, magnitude, phase, sr);
+    info!("estimate_delay: LS fit rejected, IR={:.4}ms", ir_delay * 1000.0);
+    ir_delay
 }
 
 /// Select delay estimation range based on measurement bandwidth.
@@ -462,5 +500,29 @@ mod tests {
         let gd = compute_group_delay(&[1000.0], &[45.0]);
         assert_eq!(gd.len(), 1);
         assert_eq!(gd[0], 0.0);
+    }
+
+    /// b141.56 (audit 2026-10-01 M6): production-like grids (1/48 oct,
+    /// 20 Hz–20 kHz, 48 kHz) and the two failure cases from the audit.
+    #[test]
+    fn estimate_delay_short_time_of_flight() {
+        let freq: Vec<f64> = (0..481).map(|i| 20.0 * 2f64.powf(i as f64 / 48.0)).collect();
+        for tau in [0.00008, 0.0012] {
+        let wrap = |d: f64| ((d + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
+        // Flat driver.
+        let mag = vec![0.0; freq.len()];
+        let ph: Vec<f64> = freq.iter().map(|&f| wrap(-360.0 * f * tau)).collect();
+        let d = estimate_delay(&freq, &mag, &ph, Some(48000.0));
+        assert!((d - tau).abs() < 1e-5, "flat τ={tau}: {:.4} ms", d * 1e3);
+        // Tweeter: BW2 HP 2 kHz (min-phase) + 0.08 ms.
+        let (mag, ph): (Vec<f64>, Vec<f64>) = freq.iter().map(|&f| {
+            let w = f / 2000.0;
+            let m = w * w / ((1.0 - w * w).powi(2) + 2.0 * w * w).sqrt();
+            let p = 180.0 - (2f64.sqrt() * w).atan2(1.0 - w * w).to_degrees();
+            (20.0 * m.log10(), wrap(p - 360.0 * f * tau))
+        }).unzip();
+        let d = estimate_delay(&freq, &mag, &ph, Some(48000.0));
+        assert!((d - tau).abs() < 1e-5, "tweeter τ={tau}: {:.4} ms", d * 1e3);
+        }
     }
 }
