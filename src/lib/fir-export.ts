@@ -77,6 +77,24 @@ export function offCenterWavWarning(
     `задержкой в конвольвере (в WAV задержка полосы не запекается).`;
 }
 
+/** b141.50 (audit 2026-10-01 H6): polarity and alignment delay are shown in
+ *  Σ but, like the per-band level, are NOT baked into the WAV — they belong
+ *  to the convolver/host (HQPlayer parity). An inverted LR tweeter whose WAV
+ *  ships uninverted sums to a null where the plot shows +3 dB, so the export
+ *  says so. Returns a user-facing note, or null when nothing is left to set. */
+export function hostSettingsNote(
+  inverted: boolean, alignmentDelayS: number, bandName: string,
+): string | null {
+  const parts: string[] = [];
+  if (inverted) parts.push("инверсия полярности");
+  if (Math.abs(alignmentDelayS) >= 1e-7) {
+    parts.push(`задержка ${(alignmentDelayS * 1000).toFixed(3)} мс`);
+  }
+  if (parts.length === 0) return null;
+  return `Полоса «${bandName}»: ${parts.join(" и ")} в WAV не записаны — ` +
+    `выставьте их в конвольвере, иначе сумма будет не такой, как на графике Σ.`;
+}
+
 /** Export active band to WAV. Returns true on success, false on cancel, throws on error.
  *  Stale PEQ is gated by a confirm dialog at higher-level call sites — keep this
  *  function focused on the export pipeline. */
@@ -94,6 +112,8 @@ export async function exportBandWav(b: BandState): Promise<boolean> {
   if (!path) return false;
   await invoke("export_fir_wav", { impulse, sampleRate: sr, path });
   const warn = offCenterWavWarning(delaySamples, impulse.length, driverName(b));
-  if (warn) showToast(warn, "warn", 12000);
+  const host = hostSettingsNote(b.inverted, b.alignmentDelay ?? 0, driverName(b));
+  const msg = [warn, host].filter(Boolean).join(" ");
+  if (msg) showToast(msg, "warn", 12000);
   return true;
 }
