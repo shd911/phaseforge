@@ -27,8 +27,9 @@ use crate::error::AppError;
 
 use super::helpers::{
     assemble_complex_spectrum, circular_shift_to_center, compose_target_phase,
-    compute_causality, iterative_refine,
+    compute_causality, digital_section, iterative_refine,
 };
+use crate::target::FilterConfig;
 use super::windowing::{generate_half_window, generate_window};
 use super::types::{FirConfig, FirModelResult, PhaseMode};
 
@@ -57,6 +58,23 @@ pub fn generate_model_fir(
     model_phase: &[f64],
     config: &FirConfig,
 ) -> Result<FirModelResult, AppError> {
+    generate_model_fir_with_sections(freq, target_mag, peq_mag, model_phase, config, None, None)
+}
+
+/// `generate_model_fir` that knows the band's HP/LP. b141.51 (audit
+/// 2026-10-01 H3): on the Composite min-phase main, the IIR-realisable
+/// sections (LR/BW/Custom) take their exact digital phase from the biquad
+/// cascade and only the residual goes through the Hilbert transform — see
+/// `helpers::DigitalSection`.
+pub fn generate_model_fir_with_sections(
+    freq: &[f64],
+    target_mag: &[f64],
+    peq_mag: &[f64],
+    model_phase: &[f64],
+    config: &FirConfig,
+    high_pass: Option<&FilterConfig>,
+    low_pass: Option<&FilterConfig>,
+) -> Result<FirModelResult, AppError> {
     let n = freq.len();
     if n < 2 || target_mag.len() != n || model_phase.len() != n {
         return Err(AppError::Config {
@@ -83,10 +101,32 @@ pub fn generate_model_fir(
         freq, target_mag, None, n_bins, config.sample_rate,
     );
 
-    // Clip target magnitude to prevent Hilbert instability from extreme HP/LP rolloff
-    let lin_target: Vec<f64> = lin_target_raw.iter().map(|&v| {
-        v.max(config.noise_floor_db).min(config.max_boost_db)
-    }).collect();
+    // b141.51: digital crossover sections for the Composite min-phase main.
+    let section = if config.phase_mode == PhaseMode::Composite && !config.linear_phase_main {
+        digital_section(high_pass, low_pass, freq, n_bins, config.sample_rate)
+    } else {
+        None
+    };
+
+    // Clip target magnitude to prevent Hilbert instability from extreme HP/LP rolloff.
+    // b141.51: with a section, target = digital section + bounded residual —
+    // the section keeps its true stopband (no floor), the residual is clipped.
+    let lin_target: Vec<f64> = match &section {
+        Some(s) => {
+            let resid_log: Vec<f64> = target_mag.iter().zip(&s.analog_db_log)
+                .map(|(&t, &a)| t - a).collect();
+            let (_, resid_lin, _) = interpolate_linear_grid(
+                freq, &resid_log, None, n_bins, config.sample_rate,
+            );
+            resid_lin.iter().zip(&s.db)
+                .map(|(&r, &d)| (d + r.clamp(config.noise_floor_db, config.max_boost_db.max(0.0)))
+                    .max(-600.0).min(config.max_boost_db))
+                .collect()
+        }
+        None => lin_target_raw.iter().map(|&v| {
+            v.max(config.noise_floor_db).min(config.max_boost_db)
+        }).collect(),
+    };
 
     // 2. Interpolate PEQ mag (dB) to linear FFT grid (if present)
     let lin_peq: Vec<f64> = if has_peq {
@@ -168,6 +208,8 @@ pub fn generate_model_fir(
             config.linear_phase_main,
             config.subsonic_cutoff_hz,
             config.noise_floor_db,
+            section.as_ref(),
+            config.max_boost_db,
         )
     } else if effective_linear {
         vec![0.0; n_bins]
@@ -232,6 +274,7 @@ pub fn generate_model_fir(
             &phase_rad,       // phase on linear grid
             config,
             (20.0, crate::dsp::F_MAX_WORK),  // model FIR: full range, no crossover
+            section.as_ref(),
         );
     }
 

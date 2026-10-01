@@ -11,6 +11,76 @@ use crate::dsp::minimum_phase_from_magnitude;
 
 use super::types::*;
 use super::windowing::*;
+use crate::target::FilterConfig;
+
+/// b141.51 (audit 2026-10-01 H3): the analytic crossover sections of a
+/// cepstral min-phase band, realised as the same bilinear biquad cascade the
+/// IIR route ships, evaluated on the linear FFT grid. Their phase is the
+/// exact phase of a causal discrete system, so the Hilbert transform only
+/// has to reconstruct what is left (tilt, shelves, Gaussian, PEQ). Taking
+/// the steep LR/BW rolloff through the Hilbert of a magnitude clipped at
+/// the noise floor turned the clip into a shelf a few octaves below the
+/// corner: −35° at an LR4 2 kHz crossover, −2.46 dB in a two-way sum.
+pub(crate) struct DigitalSection {
+    /// |H| in dB on the linear grid (−∞ at a zero, capped at −600).
+    pub db: Vec<f64>,
+    /// ∠H in radians on the linear grid.
+    pub phase: Vec<f64>,
+    /// The analog magnitude (dB) of the same sections on the caller's log
+    /// grid — subtracted from the target to leave the residual.
+    pub analog_db_log: Vec<f64>,
+}
+
+/// Build the section for the IIR-realisable, min-phase filters among
+/// `hp`/`lp`. None when neither qualifies.
+pub(crate) fn digital_section(
+    hp: Option<&FilterConfig>,
+    lp: Option<&FilterConfig>,
+    freq_log: &[f64],
+    n_bins: usize,
+    sample_rate: f64,
+) -> Option<DigitalSection> {
+    use crate::fir::iir_path::build_filter_cascade;
+    use crate::target::FilterType;
+    let realisable = |f: &FilterConfig| !f.linear_phase && matches!(
+        f.filter_type, FilterType::Butterworth | FilterType::LinkwitzRiley | FilterType::Custom);
+    let mut biquads = Vec::new();
+    let mut parts: Vec<(&FilterConfig, bool)> = Vec::new();
+    for (f, is_lp) in [(hp, false), (lp, true)] {
+        let Some(f) = f else { continue };
+        if !realisable(f) { continue; }
+        let Ok(bs) = build_filter_cascade(f, is_lp, sample_rate) else { continue };
+        biquads.extend(bs);
+        parts.push((f, is_lp));
+    }
+    if parts.is_empty() { return None; }
+
+    let nyq = sample_rate / 2.0;
+    let mut db = Vec::with_capacity(n_bins);
+    let mut phase = Vec::with_capacity(n_bins);
+    for k in 0..n_bins {
+        let w = std::f64::consts::PI * k as f64 / (n_bins - 1) as f64;
+        let z1 = Complex64::from_polar(1.0, -w);
+        let z2 = z1 * z1;
+        let mut h = Complex64::new(1.0, 0.0);
+        for b in &biquads {
+            h *= (b.b0 + b.b1 * z1 + b.b2 * z2) / (1.0 + b.a1 * z1 + b.a2 * z2);
+        }
+        let a = h.norm();
+        db.push(if a > 1e-30 { 20.0 * a.log10() } else { -600.0 });
+        phase.push(h.arg());
+    }
+    let _ = nyq;
+
+    let n = freq_log.len();
+    let mut analog_db_log = vec![0.0_f64; n];
+    let mut re = vec![1.0_f64; n];
+    let mut im = vec![0.0_f64; n];
+    for (f, is_lp) in parts {
+        crate::target::apply_filter_complex(&mut analog_db_log, &mut re, &mut im, freq_log, f, is_lp);
+    }
+    Some(DigitalSection { db, phase, analog_db_log })
+}
 
 // Test-only capture for iterative_refine per-iteration errors. Production
 // `info!` logging stays untouched; this lets cargo tests see the same
@@ -95,6 +165,7 @@ pub(crate) fn iterative_refine(
     phase_rad: &[f64],              // phase on linear grid (n_bins)
     config: &FirConfig,
     crossover_range: (f64, f64),
+    section: Option<&DigitalSection>,
 ) {
     let iterations = config.iterations.min(10);
     if iterations == 0 {
@@ -184,8 +255,15 @@ pub(crate) fn iterative_refine(
 
             // Weighted error correction with damping factor (0.7) for stability
             let correction = err * weights[k] * 0.7;
+            // b141.51: with a digital section the stopband legitimately sits
+            // below the noise floor (true zeros) — never lift it to the floor.
+            let floor = if section.is_some() {
+                config.noise_floor_db.min(target_correction_db[k])
+            } else {
+                config.noise_floor_db
+            };
             refined_db[k] = (refined_db[k] + correction)
-                .max(config.noise_floor_db)
+                .max(floor)
                 .min(config.max_boost_db);
 
             let abs_err = err.abs();
@@ -227,6 +305,8 @@ pub(crate) fn iterative_refine(
                 n_fft,
                 config.linear_phase_main,
                 config.noise_floor_db,
+                section,
+                config.max_boost_db,
             );
             debug_assert_eq!(iter_phase.len(), n_bins);
         }
@@ -470,20 +550,33 @@ pub(crate) fn composite_phase_inner(
     n_fft: usize,
     linear_phase_main: bool,
     noise_floor_db: f64,
+    section: Option<&DigitalSection>,
+    max_boost_db: f64,
 ) -> Vec<f64> {
     debug_assert_eq!(total_mag_db.len(), subsonic_mag_db.len());
     debug_assert_eq!(total_mag_db.len(), peq_mag_db.len());
     let n = total_mag_db.len();
 
     // Main = total − subsonic − peq (clamped to noise floor).
+    // b141.51: minus the digital section too, whose exact phase is added
+    // back below; the residual is bounded, so it is clamped on both sides.
     let base_mag: Vec<f64> = (0..n)
-        .map(|k| (total_mag_db[k] - subsonic_mag_db[k] - peq_mag_db[k]).max(noise_floor_db))
+        .map(|k| {
+            let b = total_mag_db[k] - subsonic_mag_db[k] - peq_mag_db[k];
+            match section {
+                Some(s) => (b - s.db[k]).clamp(noise_floor_db, max_boost_db.max(0.0)),
+                None => b.max(noise_floor_db),
+            }
+        })
         .collect();
-    let base_phase = if linear_phase_main {
+    let mut base_phase = if linear_phase_main {
         vec![0.0_f64; n]
     } else {
         minimum_phase_from_magnitude(&base_mag, n_fft)
     };
+    if let (Some(s), false) = (section, linear_phase_main) {
+        for (p, sp) in base_phase.iter_mut().zip(&s.phase) { *p += sp; }
+    }
 
     // PEQ contribution — Hilbert only when a real PEQ magnitude exists,
     // otherwise the Hilbert of zeros is itself zero (skip the FFT cost).
@@ -509,6 +602,7 @@ pub(crate) fn composite_phase_inner(
 /// assembly (before iterative_refine). Builds the subsonic mag internally.
 /// b140.1: takes peq_mag_db so the PEQ phase contribution is reconstructed
 /// as a third independent Hilbert source, not bundled into base_mag.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn compose_target_phase(
     total_mag_db: &[f64],
     peq_mag_db: &[f64],
@@ -518,6 +612,8 @@ pub(crate) fn compose_target_phase(
     linear_phase_main: bool,
     cutoff_hz: Option<f64>,
     noise_floor_db: f64,
+    section: Option<&DigitalSection>,
+    max_boost_db: f64,
 ) -> Vec<f64> {
     debug_assert_eq!(total_mag_db.len(), n_bins);
     debug_assert_eq!(peq_mag_db.len(), n_bins);
@@ -529,6 +625,8 @@ pub(crate) fn compose_target_phase(
         n_fft,
         linear_phase_main,
         noise_floor_db,
+        section,
+        max_boost_db,
     )
 }
 

@@ -145,6 +145,11 @@ export async function dispatchFirInvoke(
     peqMag: firPeqMag,
     modelPhase: firCombinedPhase,
     config: sharedFirConfig,
+    // b141.51 (audit 2026-10-01 H3): LR/BW/Custom sections get their exact
+    // digital phase from the biquad cascade instead of a Hilbert of the
+    // floor-clipped magnitude (−35° at an LR4 corner).
+    highPass: hp,
+    lowPass: lp,
   });
   return { ...out, route: "cepstral" };
 }

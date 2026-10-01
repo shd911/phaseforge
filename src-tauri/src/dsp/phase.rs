@@ -57,6 +57,7 @@ pub fn minimum_phase_on_log_grid(
     freq: &[f64],
     magnitude: &[f64],
     sample_rate: Option<f64>,
+    floor_db: Option<f64>,
 ) -> Result<Vec<f64>, String> {
     let n = freq.len();
     if n < 2 { return Err("compute_minimum_phase: need at least 2 points".into()); }
@@ -73,7 +74,10 @@ pub fn minimum_phase_on_log_grid(
 
     // Clamp magnitude to a dynamic range the Hilbert kernel handles cleanly.
     let mag_peak = magnitude.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    let mag_floor = mag_peak - 120.0;
+    // b141.51 (audit 2026-10-01 H4): an absolute floor when the caller has
+    // one (the FIR's noise floor) — the cepstral FIR clips at −150 dB
+    // absolute, and «peak − 120» put a Gaussian LP 65° away from it.
+    let mag_floor = floor_db.unwrap_or(mag_peak - 120.0);
     let clamped: Vec<f64> = magnitude.iter().map(|&v| v.max(mag_floor)).collect();
 
     // Log-log slope at each grid edge (dB per octave), used to continue the
@@ -146,7 +150,7 @@ mod tests {
                 .map(|i| f_min * (f_max / f_min).powf(i as f64 / (n - 1) as f64))
                 .collect();
             let mags: Vec<f64> = freq.iter().map(|&f| mag(f)).collect();
-            let ph = super::minimum_phase_on_log_grid(&freq, &mags, Some(48000.0)).unwrap();
+            let ph = super::minimum_phase_on_log_grid(&freq, &mags, Some(48000.0), None).unwrap();
             for probe in [20.0, 40.0, 80.0, 160.0, 1000.0] {
                 if probe < f_min { continue; }
                 let i = freq.iter().position(|&f| f >= probe).unwrap();

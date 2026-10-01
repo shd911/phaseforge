@@ -151,6 +151,7 @@ pub fn generate_fir(
             &phase_rad,       // phase on linear grid
             config,
             crossover_range,
+            None,
         );
     }
 

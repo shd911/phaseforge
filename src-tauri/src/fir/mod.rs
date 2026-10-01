@@ -22,7 +22,7 @@ pub use dispatch::{Route, route_for};
 pub use wav::{export_wav_f32, export_wav_f64};
 #[cfg(test)]
 pub use legacy::generate_fir;
-pub use cepstral::generate_model_fir;
+pub use cepstral::{generate_model_fir, generate_model_fir_with_sections};
 pub use pipeline::{FirPipeline, IirAnalyticalPipeline, CepstralFftPipeline, pick_pipeline};
 // b140.13.2: production code in `mod.rs` no longer imports these — the
 // last in-module pipeline (`generate_model_fir`) moved to

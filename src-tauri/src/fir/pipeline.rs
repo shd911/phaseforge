@@ -24,7 +24,7 @@ use crate::error::AppError;
 use crate::peq::{apply_peq_complex, PeqBand};
 use crate::target::{self, FilterConfig, TargetCurve};
 
-use super::cepstral::generate_model_fir;
+use super::cepstral::generate_model_fir_with_sections;
 use super::dispatch::{route_for, Route};
 use super::iir_path::{generate_min_phase_fir_iir, IirPathInput};
 use super::types::{FirConfig, FirModelResult};
@@ -111,12 +111,14 @@ impl FirPipeline for CepstralFftPipeline {
                 .collect()
         };
 
-        generate_model_fir(
+        generate_model_fir_with_sections(
             freq,
             &target_resp.magnitude,
             &peq_mag,
             &combined_phase,
             config,
+            hp,
+            lp,
         )
     }
 }

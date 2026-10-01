@@ -183,8 +183,9 @@ async fn compute_minimum_phase(
     freq: Vec<f64>,
     magnitude: Vec<f64>,
     sample_rate: Option<f64>,
+    floor_db: Option<f64>,
 ) -> Result<Vec<f64>, String> {
-    dsp::minimum_phase_on_log_grid(&freq, &magnitude, sample_rate)
+    dsp::minimum_phase_on_log_grid(&freq, &magnitude, sample_rate, floor_db)
 }
 
 #[tauri::command]
@@ -350,13 +351,18 @@ async fn generate_model_fir(
     peq_mag: Vec<f64>,
     model_phase: Vec<f64>,
     config: FirConfig,
+    high_pass: Option<target::FilterConfig>,
+    low_pass: Option<target::FilterConfig>,
 ) -> Result<FirModelResult, String> {
     info!(
         "generate_model_fir: {} points, taps={}, sr={}, phase_mode={:?}, peq_points={}",
         freq.len(), config.taps, config.sample_rate, config.phase_mode, peq_mag.len()
     );
-    fir::generate_model_fir(&freq, &target_mag, &peq_mag, &model_phase, &config)
-        .map_err(|e| e.to_string())
+    fir::generate_model_fir_with_sections(
+        &freq, &target_mag, &peq_mag, &model_phase, &config,
+        high_pass.as_ref(), low_pass.as_ref(),
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// b140.7: IIR-cascade min-phase FIR pipeline. Produces an analytical
@@ -453,7 +459,7 @@ pub fn run() {
         )
         .init();
 
-    info!("PhaseForge b141.50 starting...");
+    info!("PhaseForge b141.51 starting...");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
