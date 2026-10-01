@@ -36,7 +36,7 @@ import {
 } from "../lib/plot-helpers";
 import { hasActiveSubsonicProtect } from "../lib/types";
 import { evaluateBandFull, evaluateSum, reconstructTargetPhase } from "../lib/band-evaluator";
-import { buildFirGrid, interpOnGrid, interpPhaseOnGrid, irTime, type ImpulseIpc } from "../lib/band-evaluator/grid";
+import { buildCommonGrid, buildFirGrid, interpOnGrid, interpPhaseOnGrid, irTime, type ImpulseIpc } from "../lib/band-evaluator/grid";
 import { bandRequestKey } from "../lib/band-evaluator/cache";
 import { computeAutoAlign } from "../lib/auto-align";
 import { attachFieldWheel, newWheelAccumulator, wheelSteps } from "../lib/wheel-step";
@@ -2141,15 +2141,24 @@ export default function FrequencyPlot() {
         let gdFreq = freq;
         let gdPhase: number[];
         if (sumMode && bands.length > 1) {
-          const n = freq.length;
+          // b141.65 (audit stage 2 B1): each band is resampled onto ONE common
+          // grid first (fence outside its own range, delay-aware phase). The
+          // sum ran index-wise over bands[0]'s grid although the grids differ
+          // (user_4way: 1011 pts from 20 Hz vs 484 pts from 1220 Hz) — GD at
+          // 500 Hz −0.97 ms instead of 0.007, Σ at 8 kHz 74 dB instead of 90.
+          gdFreq = buildCommonGrid(bands as BandState[]);
+          const n = gdFreq.length;
           const sumRe = new Float64Array(n);
           const sumIm = new Float64Array(n);
           for (const sb of bands) {
             const sign = sb.inverted ? -1 : 1;
             const gdDelay = irDelayByName[sb.name] ?? 0;
+            const m = sb.measurement!;
+            const bMag = interpOnGrid(m.freq, m.magnitude, gdFreq, { outside: -200 }) as number[];
+            const bPh = interpPhaseOnGrid(m.freq, m.phase!, gdFreq, { outside: 0, mag: m.magnitude }) as number[];
             for (let j = 0; j < n; j++) {
-              const amp = Math.pow(10, (sb.measurement!.magnitude[j] ?? -200) / 20) * sign;
-              const phRad = ((sb.measurement!.phase![j] ?? 0) + alignmentPhaseDeg(freq[j], gdDelay)) * Math.PI / 180;
+              const amp = Math.pow(10, (bMag[j] ?? -200) / 20) * sign;
+              const phRad = ((bPh[j] ?? 0) + alignmentPhaseDeg(gdFreq[j], gdDelay)) * Math.PI / 180;
               sumRe[j] += amp * Math.cos(phRad);
               sumIm[j] += amp * Math.sin(phRad);
             }
