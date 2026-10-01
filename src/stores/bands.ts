@@ -269,11 +269,28 @@ export function addBand() {
   markDirty();
 }
 
+// b141.66 (audit stage 2 B2): history entries are "light" — they carry no
+// measurement/settings (MBs per band). Undo of a deletion therefore had no
+// source for them and brought the band back empty. The heavy parts of a
+// removed band are parked here by id and picked up by _applyBandsLight.
+// Measurements are immutable (the eval cache keys them by identity), so
+// holding the reference is enough.
+const parkedHeavy = new Map<string, Pick<BandState,
+  "measurement" | "measurementFile" | "settings" | "firResult" | "crossNormDb">>();
+
 export function removeBand(id: string) {
   if (state.bands.length <= 1) return; // нельзя удалить последнюю полосу
   const idx = bandIndex(id);
   if (idx < 0) return;
   pushHistory("Remove band");
+  {
+    const b = state.bands[idx];
+    parkedHeavy.set(id, {
+      measurement: b.measurement, measurementFile: b.measurementFile,
+      settings: b.settings ? JSON.parse(JSON.stringify(b.settings)) : null,
+      firResult: b.firResult, crossNormDb: b.crossNormDb,
+    });
+  }
   batch(() => {
     // b140.8.2: linkedToNext describes positional coupling — after the
     // filter() removes the deleted band, prev's link transfers to the new
@@ -303,11 +320,26 @@ export function setActiveBandSum() {
   setState("activeBandId", SUM_ID);
 }
 
+/** b141.66 (audit stage 2 B4): band names are unique — the Σ table, legend
+ *  visibility and IR exclusions look bands up by name, so a duplicate made
+ *  the second band's DELAY field edit the first band. A taken name gets
+ *  " (2)", " (3)", … */
+export function uniqueBandName(name: string, others: readonly { id: string; name: string }[], selfId: string): string {
+  const taken = new Set(others.filter((b) => b.id !== selfId).map((b) => b.name));
+  if (!taken.has(name)) return name;
+  for (let k = 2; ; k++) {
+    const c = `${name} (${k})`;
+    if (!taken.has(c)) return c;
+  }
+}
+
 export function renameBand(id: string, name: string) {
   const idx = bandIndex(id);
   if (idx < 0) return;
+  const unique = uniqueBandName(name, state.bands, id);
+  if (unique === state.bands[idx].name) return;
   pushHistory("Rename band");
-  setState("bands", idx, "name", name);
+  setState("bands", idx, "name", unique);
   markDirty();
 }
 
@@ -1052,7 +1084,7 @@ export function _applyBandsLight(entry: HistoryEntry): void {
   batch(() => {
     const currentById = new Map(state.bands.map((b) => [b.id, b]));
     const newBands: BandState[] = entry.bands.map((lb) => {
-      const cur = currentById.get(lb.id);
+      const cur = currentById.get(lb.id) ?? parkedHeavy.get(lb.id);
       const target = JSON.parse(JSON.stringify(lb.target)) as TargetCurve;
       const peqBands = JSON.parse(JSON.stringify(lb.peqBands));
       const exclusionZones = JSON.parse(JSON.stringify(lb.exclusionZones));

@@ -26,6 +26,7 @@ import {
   firNbMaxExcess, setFirNbMaxExcess,
   firMaxBoost, setFirMaxBoost,
   firNoiseFloor, setFirNoiseFloor,
+  uniqueBandName,
 } from "../stores/bands";
 import { MEASUREMENT_COLORS, cloneFilterConfig, migrateDelayConvention } from "../lib/types";
 import type { FilterConfig } from "../lib/types";
@@ -397,6 +398,8 @@ export async function restoreState(project: ProjectFile, projDir: string | null)
   console.log(`[project] open ${projDir ?? "(no folder)"} · ${project.bands.length} bands · ` +
     `${project.export_sample_rate ?? "?"} Hz / ${project.export_taps ?? "?"} taps`);
   const bands = project.bands.map((b, i) => mapBandFromProject(b, i));
+  // b141.66: older projects may carry duplicate band names (see uniqueBandName).
+  for (const b of bands) b.name = uniqueBandName(b.name, bands, b.id);
   // b141.10: legacy projects stored alignment delays under the inverted
   // (positive = advance) convention — convert preserving relative timing.
   if (!project.delay_positive_is_late) {

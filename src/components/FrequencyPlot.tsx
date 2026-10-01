@@ -3940,15 +3940,23 @@ export default function FrequencyPlot() {
               if (s()?.delay_removed) {
                 restoreBandDelay(b().id);
               } else {
+                // b141.66 (audit stage 2 B3): read the band ONCE before the
+                // await — b() is the ACTIVE band, and switching bands while
+                // the command ran wrote band A's result into band B.
+                const id = b().id;
+                const meas = m()!;
+                const origPhase = s()?.originalPhase ?? meas.phase!;
                 try {
-                  const origPhase = s()?.originalPhase ?? m()?.phase!;
                   const [newPhase, delay, distance] = await invoke<[number[], number, number]>(
                     "remove_measurement_delay",
-                    { freq: m()!.freq, magnitude: m()!.magnitude, phase: origPhase, sampleRate: m()!.sample_rate }
+                    { freq: meas.freq, magnitude: meas.magnitude, phase: origPhase, sampleRate: meas.sample_rate }
                   );
-                  setBandDelayInfo(b().id, delay, distance);
-                  markBandDelayRemoved(b().id, newPhase);
-                } catch (e) { console.error("Remove delay failed:", e); }
+                  setBandDelayInfo(id, delay, distance);
+                  markBandDelayRemoved(id, newPhase);
+                } catch (e) {
+                  console.error("[delay] remove failed:", e);
+                  showToast(`Не удалось снять задержку: ${e}`, "warn");
+                }
               }
             }
 
@@ -3988,9 +3996,14 @@ export default function FrequencyPlot() {
                     <input
                       type="checkbox"
                       checked={s()?.delay_removed ?? false}
-                      onChange={() => handleToggleDelay()}
+                      // After the async toggle the box shows the store's truth
+                      // (on failure it stayed ticked although nothing changed).
+                      onChange={(e) => {
+                        const el = e.currentTarget;
+                        void handleToggleDelay().finally(() => { el.checked = s()?.delay_removed ?? false; });
+                      }}
                     />
-                    <span>D:{s()?.delay_removed ? (Math.abs(s()!.delay_seconds ?? 0) * 1000).toFixed(2) : ((s()?.delay_seconds ?? 0) * 1000).toFixed(2)}ms</span>
+                    <span>{((s()?.delay_seconds ?? 0) * 1000).toFixed(2)} ms</span>
                   </label>
                 </Show>
 
