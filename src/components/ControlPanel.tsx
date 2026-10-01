@@ -594,14 +594,14 @@ function PeqTab() {
           <Show when={peqBands().length > 0}>
             <div class="align-status">
               {peqBands().length} {pluralRu(peqBands().length, "фильтр", "фильтра", "фильтров")}
-              {maxErr() != null ? ` \u00B7 max: ${maxErr()!.toFixed(1)}dB` : ""}
-              {iters() != null ? ` \u00B7 ${iters()}it` : ""}
+              {maxErr() != null ? ` \u00B7 макс. ошибка ${maxErr()!.toFixed(1)} dB` : ""}
+              {iters() != null ? ` \u00B7 ${iters()} ${pluralRu(iters()!, "итерация", "итерации", "итераций")}` : ""}
             </div>
           </Show>
           <Show when={peqBands().length > 0}>
             <div class="peq-sidebar-table-scroll">
               <table class="peq-table">
-                <thead><tr><th></th><th>Тип</th><th>Гц</th><th>dB</th><th>Q</th><th></th><th></th></tr></thead>
+                <thead><tr><th></th><th>Тип</th><th>Hz</th><th>dB</th><th>Q</th><th></th><th></th></tr></thead>
                 <tbody>
                   {peqBands().map((b, i) => {
                     const isPending = pendingPeqIdx() === i;

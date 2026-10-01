@@ -255,7 +255,9 @@ export default function FrequencyPlot() {
       await Promise.all(reqs.map(async (r) => {
         try {
           const res = await evaluateBandFull(r.req);
-          if (res.fir) out[r.id] = convolverDelaySeconds(r.align, res.fir.wavDelaySamples, taps, sr);
+          // b141.74: keep only the WAV shortfall; the alignment part is read
+          // live at render, so typing a delay never shows a stale total.
+          if (res.fir) out[r.id] = convolverDelaySeconds(r.align, res.fir.wavDelaySamples, taps, sr) - r.align;
         } catch (e) {
           console.warn("[Σ convolver delay] FIR failed:", e);
         }
@@ -4038,7 +4040,7 @@ export default function FrequencyPlot() {
                     {(() => {
                       const zone = () => preRingZoneMs(appState.bands as BandState[]);
                       const zoneTitle = () => zone() != null
-                        ? `Зона предзвона: ${zone()!.toFixed(2)} мс — 2 периода нижнего linear-phase кроссовера`
+                        ? `Зона предзвона: ${zone()!.toFixed(2)} ms — 2 периода нижнего linear-phase кроссовера`
                         : "Нет linear-phase кроссоверов — предзвон не ожидается";
                       return (
                         <>
@@ -4125,7 +4127,7 @@ export default function FrequencyPlot() {
             disabled={windowIsInert()}
             style={{ opacity: windowIsInert() ? 0.45 : 1 }}
             title={windowIsInert()
-              ? "Окно не применяется: полоса считается аналитическим каскадом (мин-фаза без subsonic и без гауссов). Импульс получается прогоном дельты через биквады, обрыва нет — сглаживать нечего. Окно влияет на линейной фазе, на гауссах/Бесселе, при subsonic и на измеренных таргетах."
+              ? "Окно не применяется: бэнд считается аналитическим каскадом (мин-фаза без subsonic и без гауссов). Импульс получается прогоном дельты через биквады, обрыва нет — сглаживать нечего. Окно влияет на линейной фазе, на гауссах/Бесселе, при subsonic и на измеренных таргетах."
               : "Оконная функция. Заметна при коротких Taps и на резких переходах таргета: агрессивное окно укорачивает предзвон, но увеличивает отклонение от таргета."}
           >
             <optgroup label="Basic">
@@ -4423,16 +4425,13 @@ export default function FrequencyPlot() {
                                       });
                                     }}
                                   />
-                                  <Show when={(() => {
-                                    const c = convDelays()[b().id];
-                                    return c !== undefined && Math.abs(c - (b().alignmentDelay ?? 0)) >= 5e-6;
-                                  })()}>
+                                  <Show when={(convDelays()[b().id] ?? 0) >= 5e-6}>
                                     <div
                                       class="delay-conv"
-                                      title={"Задержка для конвольвера: выравнивание + недобор задержки WAV. " +
-                                        "Хвост фильтра этой полосы не уместился в половину файла, поэтому " +
-                                        "её WAV начинается раньше остальных на разницу."}
-                                    >конв. {((convDelays()[b().id] ?? 0) * 1000).toFixed(2)}</div>
+                                      title={"Задержка для конвольвера: выравнивание + нехватка ведущих нулей в WAV. " +
+                                        "Хвост фильтра этого бэнда не уместился в половину файла, поэтому " +
+                                        "его WAV начинается раньше остальных на разницу."}
+                                    >конв. {(((b().alignmentDelay ?? 0) + (convDelays()[b().id] ?? 0)) * 1000).toFixed(2)} ms</div>
                                   </Show>
                                   </>
                                 )}
@@ -4454,8 +4453,8 @@ export default function FrequencyPlot() {
                             <button
                               class="auto-align-btn"
                               title={allPeqReady()
-                                ? "Автоматически подобрать задержки полос (градиентный спуск)"
-                                : "Нужна PEQ-оптимизация всех полос кроссовера"}
+                                ? "Автоматически подобрать задержки бэндов"
+                                : "Нужна PEQ-оптимизация всех бэндов кроссовера"}
                               disabled={!allPeqReady() || autoAligning()}
                               aria-busy={autoAligning()}
                               onClick={async () => {
@@ -4554,7 +4553,7 @@ export default function FrequencyPlot() {
           <div ref={containerRef} class="frequency-plot" />
           <Show when={exportComputing()}>
             <div class="plot-computing-overlay">
-              <span class="plot-computing-text">Computing FIR...</span>
+              <span class="plot-computing-text">Расчёт FIR…</span>
             </div>
           </Show>
           <div class="axis-controls axis-controls-y axis-controls-y-left">

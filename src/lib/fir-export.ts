@@ -87,11 +87,11 @@ export function offCenterWavWarning(
   // 64 samples ≈ 1.3 ms @ 48k — below that the desync is inaudible.
   if (delaySamples >= half - 64) return null;
   const offsetSamples = half - delaySamples;
-  return `Внимание: полоса «${bandName}» экспортирована с задержкой ` +
+  return `Внимание: бэнд «${bandName}» экспортирован с задержкой ` +
     `${delaySamples} отсчётов вместо ${half} — хвост фильтра не уместился в ` +
-    `половину файла. В конвольвере она заиграет на ${offsetSamples} отсчётов ` +
+    `половину файла. В конвольвере он заиграет на ${offsetSamples} отсчётов ` +
     `раньше остальных: увеличьте число тапов или скомпенсируйте разницу ` +
-    `задержкой в конвольвере (в WAV задержка полосы не запекается).`;
+    `задержкой в конвольвере (в WAV задержка бэнда не запекается).`;
 }
 
 /** b141.61: the delay to type into the convolver for a band (seconds) — its
@@ -112,16 +112,27 @@ export function convolverDelaySeconds(
  *  ships uninverted sums to a null where the plot shows +3 dB, so the export
  *  says so. Returns a user-facing note, or null when nothing is left to set. */
 export function hostSettingsNote(
-  inverted: boolean, alignmentDelayS: number, bandName: string,
+  inverted: boolean, alignmentDelayS: number, bandName: string, shortfallS = 0,
 ): string | null {
+  // b141.74 (audit stage 2 UI): ONE number for the convolver with its parts —
+  // the shortfall used to be a separate warning in samples next to a delay
+  // in ms, and neither said that the second already included the first.
+  const total = alignmentDelayS + shortfallS;
   const parts: string[] = [];
-  if (inverted) parts.push("инверсия полярности");
-  if (Math.abs(alignmentDelayS) >= 1e-7) {
-    parts.push(`задержка ${(alignmentDelayS * 1000).toFixed(3)} мс`);
+  if (Math.abs(total) >= 1e-7) {
+    const ms = (v: number) => (v * 1000).toFixed(2);
+    const why = shortfallS >= 1e-7
+      ? ` (выравнивание ${ms(alignmentDelayS)} + нехватка ведущих нулей в WAV ${ms(shortfallS)} — ` +
+        `хвост фильтра не уместился в половину файла)`
+      : "";
+    parts.push(`задержку ${ms(total)} ms${why}`);
   }
+  if (inverted) parts.push("инверсию полярности");
   if (parts.length === 0) return null;
-  return `Полоса «${bandName}»: ${parts.join(" и ")} в WAV не записаны — ` +
-    `выставьте их в конвольвере, иначе сумма будет не такой, как на графике Σ.`;
+  // «задержка» and «инверсия» are both feminine.
+  const what = parts.length > 1 ? "Они не записаны" : "Она не записана";
+  return `Бэнд «${bandName}»: в конвольвере задайте ${parts.join(" и ")}. ` +
+    `${what} в WAV — иначе сумма будет не такой, как на графике Σ.`;
 }
 
 /** b141.53 (audit 2026-10-01 M2): «Макс. подъём» caps target + PEQ on the
@@ -131,7 +142,7 @@ export function boostLimitNote(
   route: "iir" | "cepstral", peakBoostDb: number, maxBoostDb: number, bandName: string,
 ): string | null {
   if (route !== "iir" || !(peakBoostDb > maxBoostDb + 0.05)) return null;
-  return `Полоса «${bandName}»: подъём ${peakBoostDb.toFixed(1)} dB выше лимита ` +
+  return `Бэнд «${bandName}»: подъём ${peakBoostDb.toFixed(1)} dB выше лимита ` +
     `${maxBoostDb.toFixed(1)} dB — на аналитическом пути фильтр строится биквадами ` +
     `точно и лимит не применяется. Уменьшите усиление PEQ или полок.`;
 }
@@ -142,7 +153,9 @@ export function boostLimitNote(
 export async function exportBandWav(b: BandState): Promise<boolean> {
   const { impulse, delaySamples, route, peakBoostDb } = await generateBandImpulse(b);
   const sr = exportSampleRate();
-  const fileName = `${sanitize(driverName(b))}_${sr}_${exportTaps()}_${exportWindow()}.wav`;
+  // b141.74: the analytic route never applies the window — name it as IIR.
+  const winTag = route === "iir" ? "IIR" : exportWindow();
+  const fileName = `${sanitize(driverName(b))}_${sr}_${exportTaps()}_${winTag}.wav`;
   const dir = projectDir();
   if (dir) await invoke("ensure_dir", { path: `${dir}/export` }).catch(() => {});
   const defPath = dir ? `${dir}/export/${fileName}` : fileName;
@@ -152,12 +165,15 @@ export async function exportBandWav(b: BandState): Promise<boolean> {
   });
   if (!path) return false;
   await invoke("export_fir_wav", { impulse, sampleRate: sr, path });
-  const warn = offCenterWavWarning(delaySamples, impulse.length, driverName(b));
-  const host = hostSettingsNote(
-    b.inverted, convolverDelaySeconds(b.alignmentDelay ?? 0, delaySamples, impulse.length, sr), driverName(b),
-  );
+  const align = b.alignmentDelay ?? 0;
+  const shortfall = convolverDelaySeconds(align, delaySamples, impulse.length, sr) - align;
+  const host = hostSettingsNote(b.inverted, align, driverName(b), shortfall);
   const boost = boostLimitNote(route, peakBoostDb, firMaxBoost(), driverName(b));
-  const msg = [warn, host, boost].filter(Boolean).join(" ");
-  if (msg) showToast(msg, "warn", 12000);
+  const saved = path.split(/[\\/]/).pop() ?? path;
+  const msg = [host, boost].filter(Boolean).join(" ");
+  // A note carries the number to type into the convolver — it stays until
+  // clicked. Without one, a short confirmation (there was none at all).
+  if (msg) showToast(`Сохранено: ${saved}. ${msg}`, "warn", 0);
+  else showToast(`Сохранено: ${saved}`, "info", 4000);
   return true;
 }

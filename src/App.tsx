@@ -75,7 +75,7 @@ function App() {
     if (e.shiftKey && k === "v") {
       e.preventDefault();
       if (projectDir() !== null) openVersionsDialog();
-      else showToast("Сохраните проект через Save As, чтобы создавать версии", "info");
+      else showToast("Сохраните проект через «Сохранить как…», чтобы создавать версии", "info");
       return;
     }
     if (k === "s") {

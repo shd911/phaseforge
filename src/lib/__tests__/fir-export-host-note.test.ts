@@ -8,15 +8,19 @@ describe("hostSettingsNote", () => {
     expect(hostSettingsNote(false, 0, "Mid")).toBeNull();
   });
   it("names the inversion", () => {
-    expect(hostSettingsNote(true, 0, "Tw")).toMatch(/инверсия полярности/);
+    expect(hostSettingsNote(true, 0, "Tw")).toMatch(/задайте инверсию полярности\. Она не записана/);
   });
   it("names the delay in ms", () => {
     const s = hostSettingsNote(false, 0.000473, "Woofer")!;
-    expect(s).toMatch(/задержка 0\.473 мс/);
+    expect(s).toMatch(/задержку 0\.47 ms\. Она не записана/);
     expect(s).toMatch(/«Woofer»/);
   });
   it("names both", () => {
-    expect(hostSettingsNote(true, 0.001, "Tw")).toMatch(/инверсия полярности и задержка 1\.000 мс/);
+    expect(hostSettingsNote(true, 0.001, "Tw")).toMatch(/задержку 1\.00 ms и инверсию полярности\. Они не записаны/);
+  });
+  it("one number with its parts when the WAV lacks leading zeros (b141.74)", () => {
+    const s = hostSettingsNote(false, 0.00082, "rip", 0.255)!;
+    expect(s).toMatch(/задержку 255\.82 ms \(выравнивание 0\.82 \+ нехватка ведущих нулей в WAV 255\.00/);
   });
 });
 
