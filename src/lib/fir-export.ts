@@ -21,7 +21,9 @@ export function driverName(b: BandState): string {
 /** The evaluator request a WAV export runs — one place, so the Σ view's
  *  convolver delays come from exactly the FIR that is exported (same cache
  *  entry). Reads the export signals synchronously: call before any await. */
-export function firExportRequest(b: BandState): Parameters<typeof evaluateBandFull>[0] {
+export function firExportRequest(
+  b: BandState, opts?: { omitImpulse?: boolean },
+): Parameters<typeof evaluateBandFull>[0] {
   return {
     band: b,
     // b141.19 (audit): the same grid the Export tab previews on. Without it
@@ -39,6 +41,7 @@ export function firExportRequest(b: BandState): Parameters<typeof evaluateBandFu
       narrowbandLimit: firNarrowbandLimit(),
       nbSmoothingOct: firNbSmoothingOct(),
       nbMaxExcessDb: firNbMaxExcess(),
+      ...(opts?.omitImpulse ? { omitImpulse: true } : {}),
     },
   };
 }

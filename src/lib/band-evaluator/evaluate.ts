@@ -39,6 +39,9 @@ export interface FirRequestConfig {
   narrowbandLimit: boolean;
   nbSmoothingOct: number;
   nbMaxExcessDb: number;
+  /** b141.64: return the FIR without its impulse (metadata only — e.g. the
+   *  WAV delay for the Σ convolver hint). Part of the cache key. */
+  omitImpulse?: boolean;
 }
 
 export interface BandEvalRequest {

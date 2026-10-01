@@ -59,6 +59,7 @@ interface DispatchFirConfig {
   narrowbandLimit: boolean;
   nbSmoothingOct: number;
   nbMaxExcessDb: number;
+  omitImpulse?: boolean;
 }
 
 /** Build the snake_case Rust-side FirConfig payload from the camelCase
@@ -136,6 +137,7 @@ export async function dispatchFirInvoke(
       highShelf,
       peq: enabledPeq,
       config: sharedFirConfig,
+      omitImpulse: cfg.omitImpulse ?? false,
     });
     return { ...out, route: "iir" };
   }
@@ -150,6 +152,7 @@ export async function dispatchFirInvoke(
     // floor-clipped magnitude (−35° at an LR4 corner).
     highPass: hp,
     lowPass: lp,
+    omitImpulse: cfg.omitImpulse ?? false,
   });
   return { ...out, route: "cepstral" };
 }

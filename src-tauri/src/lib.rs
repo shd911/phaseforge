@@ -356,6 +356,7 @@ async fn generate_model_fir(
     config: FirConfig,
     high_pass: Option<target::FilterConfig>,
     low_pass: Option<target::FilterConfig>,
+    omit_impulse: Option<bool>,
 ) -> Result<FirModelResult, String> {
     info!(
         "generate_model_fir: {} points, taps={}, sr={}, phase_mode={:?}, peq_points={}",
@@ -365,7 +366,15 @@ async fn generate_model_fir(
         &freq, &target_mag, &peq_mag, &model_phase, &config,
         high_pass.as_ref(), low_pass.as_ref(),
     )
+    .map(|r| strip_impulse(r, omit_impulse))
     .map_err(|e| e.to_string())
+}
+
+/// b141.64: callers that need only the FIR's metadata (the Σ convolver delay)
+/// skip the impulse — 5.9 MB of JSON at 262144 taps, 24 MB at 1024K.
+fn strip_impulse(mut r: FirModelResult, omit: Option<bool>) -> FirModelResult {
+    if omit == Some(true) { r.impulse = Vec::new(); }
+    r
 }
 
 /// b140.7: IIR-cascade min-phase FIR pipeline. Produces an analytical
@@ -385,6 +394,7 @@ async fn generate_model_fir_iir(
     high_shelf: Option<target::ShelfConfig>,
     peq: Vec<peq::PeqBand>,
     config: FirConfig,
+    omit_impulse: Option<bool>,
 ) -> Result<FirModelResult, String> {
     info!(
         "generate_model_fir_iir: {} log points, taps={}, sr={}, hp={:?} lp={:?} peq_bands={}",
@@ -401,7 +411,9 @@ async fn generate_model_fir_iir(
         high_shelf: high_shelf.as_ref(),
         peq: &peq,
         config: &config,
-    }).map_err(|e| e.to_string())
+    })
+    .map(|r| strip_impulse(r, omit_impulse))
+    .map_err(|e| e.to_string())
 }
 
 /// b140.15.5: Tauri-exposed FIR routing predicate — single source of truth.
@@ -470,7 +482,7 @@ pub fn run() {
             .init();
     }
 
-    info!("PhaseForge b141.63 starting...");
+    info!("PhaseForge b141.64 starting...");
     info!("log file: {}", applog::log_path().map(|p| p.display().to_string()).unwrap_or_else(|| "—".into()));
 
     tauri::Builder::default()

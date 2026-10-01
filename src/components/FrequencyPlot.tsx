@@ -241,7 +241,7 @@ export default function FrequencyPlot() {
     const reqs = appState.bands
       .filter((b) => b.targetEnabled)
       .map((b) => {
-        const req = firExportRequest(b);
+        const req = firExportRequest(b, { omitImpulse: true });
         bandRequestKey(req);
         return { id: b.id, align: b.alignmentDelay ?? 0, req };
       });
@@ -249,15 +249,16 @@ export default function FrequencyPlot() {
     setTimeout(async () => {
       if (gen !== convGen) return;
       const out: Record<string, number> = {};
-      for (const r of reqs) {
+      // b141.64: metadata-only FIRs (no impulse over IPC), all bands in
+      // parallel — async commands run on the multi-thread runtime.
+      await Promise.all(reqs.map(async (r) => {
         try {
           const res = await evaluateBandFull(r.req);
-          if (gen !== convGen) return;
           if (res.fir) out[r.id] = convolverDelaySeconds(r.align, res.fir.wavDelaySamples, taps, sr);
         } catch (e) {
           console.warn("[Σ convolver delay] FIR failed:", e);
         }
-      }
+      }));
       if (gen === convGen) setConvDelays(out);
     }, 400);
   });
