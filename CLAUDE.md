@@ -1,6 +1,7 @@
 # PhaseForge — Project Rules
 
-> **Last reviewed:** 2026-09-16 (b141.35–36: export sets to 384 kHz / 1024K taps,
+> **Last reviewed:** 2026-10-01 (b141.46–58: functional audit, docs/audit-2026-10-01.md).
+> Before that 2026-09-16 (b141.35–36: export sets to 384 kHz / 1024K taps,
 > Win dropdown disabled on the analytical route). Before that 2026-09-05 (audit b141.26–31: min-phase at true Nyquist, cache snapshot keys, taps/project validation, dead-code −545 LOC; open items in docs/audit-2026-09-05.md).
 > Файл актуализируется в конце каждой длинной сессии. Перед началом новой
 > — пробежать сверху вниз и удалить устаревшее.
@@ -116,6 +117,29 @@
   grids cap at Nyquist·0.95 (`fMaxForRate`). The LEVEL-MATCHING passband
   (auto-ref, Σ level match, export metrics) stays capped at `F_MAX_REF` =
   20 kHz on purpose — do not "unify" it with F_MAX_WORK.
+- **Cepstral min-phase: LR/BW/Custom come from the digital cascade**
+  (b141.51, `helpers::DigitalSection`): the Tauri `generate_model_fir`
+  receives `highPass/lowPass`; on Composite + min main those sections are
+  the same bilinear biquads the IIR route ships, and only the bounded
+  residual (tilt, shelves, Gaussian, level) goes through Hilbert. A Hilbert
+  of the floor-clipped steep rolloff stole 35° at an LR4 corner. Do NOT feed
+  the ANALOG model phase to a causal realisation — an HP's analog phase is
+  not causal in discrete time (zeros at f=0 ⇒ N/2-sample offset). Pinned by
+  `tests/cepstral_model_phase.rs` (cepstral vs IIR 0.000°).
+- **One Hilbert grid for plot and FIR** (b141.52): `reconstructTargetPhase`
+  runs every Gaussian/subsonic term on 5 Hz–0.95·Nyquist with the absolute
+  −150 dB floor; the FIR continues magnitude below its first grid point by
+  slope (never flat). Pinned by `tests/plot_min_phase_matches_fir.rs`.
+- **«Corrected» = measurement + PEQ + `filterSection`** (b141.48): HP/LP,
+  tilt, shelves and the ultrasonic LP — the whole level-free section the FIR
+  bakes in. One TS builder for band, band IR, Σ and Σ IR.
+- **Host-side settings** (b141.50): per-band level, INV and alignment delay
+  are NOT written to the WAV; the export names INV/delay for the convolver.
+- **«Макс. подъём»** (b141.53) caps target+PEQ once on the cepstral route;
+  the IIR route cannot cap biquads and the export warns above the limit.
+- **Wrapped-phase interpolation is delay-aware** (b141.49,
+  `interpPhaseOnGrid` with `mag`): bulk delay removed before shortest-arc
+  interpolation — > 180° per bin above ~10 kHz at 2–3 ms otherwise.
 - **Bilinear digital cascade** (IIR path) has frequency-dependent
   deviation up to ~20° vs analog reference accumulated over 8 biquads.
   REPhase reference comparison gives tighter empirical bound (≤ 2.5° on
