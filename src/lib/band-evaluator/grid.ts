@@ -132,14 +132,60 @@ export function interpOnGrid(
 }
 
 /** interpOnGrid specialised for WRAPPED phase (degrees): shortest-arc
- *  interpolation. See InterpOptions.phase for when NOT to use this. */
+ *  interpolation. See InterpOptions.phase for when NOT to use this.
+ *
+ *  b141.49 (audit 2026-10-01 H9): with `mag` (dB, parallel to srcPhase) the
+ *  bulk delay of the band is removed before interpolating and restored
+ *  after. A measurement that keeps its time of flight turns by 360·f·τ;
+ *  at 3 ms that is > 180° between neighbouring bins of a 1/48-octave or
+ *  512-point grid above ~10 kHz, and shortest-arc then turns the wrong way
+ *  (179° error at 16 kHz). The residual after removing τ is slow, so the
+ *  same interpolation is exact enough. Values at the source nodes are
+ *  unchanged; bands with |τ| < 0.5 ms are interpolated as before. */
 export function interpPhaseOnGrid(
   srcFreq: number[],
   srcPhase: readonly (number | null)[],
   dstFreq: number[],
-  opts?: Omit<InterpOptions, "phase">,
+  opts?: Omit<InterpOptions, "phase"> & { mag?: readonly number[] },
 ): (number | null)[] {
-  return interpOnGrid(srcFreq, srcPhase, dstFreq, { ...opts, phase: true });
+  const { mag, ...base } = opts ?? {};
+  const plain = interpOnGrid(srcFreq, srcPhase, dstFreq, { ...base, phase: true });
+  const tau = mag ? bulkDelaySeconds(srcFreq, srcPhase, mag) : 0;
+  if (Math.abs(tau) < 5e-4) return plain;
+  const resid = srcPhase.map((p, i) => (p == null ? null : shortestPhaseDelta(p + 360 * srcFreq[i] * tau)));
+  const r = interpOnGrid(srcFreq, resid, dstFreq, { ...base, phase: true });
+  const n = srcFreq.length;
+  return dstFreq.map((f, k) => {
+    if (f < srcFreq[0] || f > srcFreq[n - 1]) return plain[k];
+    const v = r[k];
+    return v == null ? null : shortestPhaseDelta(v - 360 * f * tau);
+  });
+}
+
+/** Bulk delay (s) of a wrapped phase curve: the median local group delay
+ *  over bins that resolve it (|Δφ| < 90° per step) and carry energy
+ *  (within 20 dB of the band's maximum). That is the passband, where the
+ *  time of flight dominates the driver's own min-phase group delay. */
+export function bulkDelaySeconds(
+  freq: readonly number[],
+  phase: readonly (number | null)[],
+  mag: readonly number[],
+): number {
+  let maxDb = -Infinity;
+  for (const m of mag) if (isFinite(m) && m > maxDb) maxDb = m;
+  const gds: number[] = [];
+  for (let i = 1; i < freq.length; i++) {
+    const a = phase[i - 1], b = phase[i];
+    if (a == null || b == null) continue;
+    if (!(mag[i] > maxDb - 20 && mag[i - 1] > maxDb - 20)) continue;
+    const d = shortestPhaseDelta(b - a);
+    if (Math.abs(d) >= 90) continue;
+    const df = freq[i] - freq[i - 1];
+    if (df > 0) gds.push(-d / (360 * df));
+  }
+  if (gds.length < 8) return 0;
+  gds.sort((x, y) => x - y);
+  return gds[gds.length >> 1];
 }
 
 /** Linear interpolation of `srcVals` (defined at `srcFreq`) onto

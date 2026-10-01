@@ -16,7 +16,7 @@
  *                              for phase reconstruction.
  */
 import { invoke } from "@tauri-apps/api/core";
-import { shortestPhaseDelta } from "./grid";
+import { interpPhaseOnGrid } from "./grid";
 import type { FilterConfig } from "../types";
 import { F_MAX_REF } from "../types";
 
@@ -107,10 +107,12 @@ export async function computeExtension(
     const dt = srcFreq[hi] - srcFreq[lo];
     const frac = dt > 0 ? (f - srcFreq[lo]) / dt : 0;
     nativeMag[k] = srcMag[lo] + frac * (srcMag[hi] - srcMag[lo]);
-    if (nativePhase && srcPhase) {
-      // b141.9: wrapped phase — shortest-arc lerp (see grid.ts).
-      nativePhase[k] = srcPhase[lo] + frac * shortestPhaseDelta(srcPhase[hi] - srcPhase[lo]);
-    }
+  }
+  if (nativePhase && srcPhase) {
+    // b141.9: wrapped phase — shortest-arc lerp; b141.49: delay-aware
+    // (see interpPhaseOnGrid in grid.ts).
+    const ph = interpPhaseOnGrid(srcFreq, srcPhase, dstFreq, { outside: "nan", mag: srcMag });
+    for (let k = 0; k < n; k++) if (inNative[k]) nativePhase[k] = ph[k] as number;
   }
 
   let idxLo = -1, idxHi = -1;

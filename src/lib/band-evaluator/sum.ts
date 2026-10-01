@@ -93,7 +93,7 @@ function resampleOntoCommon(
   // otherwise the LR-crossover wrap at fc poisons the nearest bin and the
   // coherent sum shows a narrow dip there (user 3WAY, 200 Hz).
   const phase = srcPhase
-    ? interpPhaseOnGrid(srcFreq, srcPhase, dstFreq, { outside: 0 }) as number[]
+    ? interpPhaseOnGrid(srcFreq, srcPhase, dstFreq, { outside: 0, mag: srcMag }) as number[]
     : null;
   return { mag, phase };
 }
@@ -380,15 +380,16 @@ async function evaluateSumImpl(
       continue;
     }
     anyCorrected = true;
-    // b140.3.2: prefer the extended-onto-wide-grid corrected from
-    // evaluateBandFull (single source of truth). Fall back to native
-    // corrected (with -200 dB fence outside) when no extension exists.
-    const sourceFreq = r.extendedFreq ?? r.freq;
-    const sourceMag = r.extendedCorrectedMag ?? r.correctedMag;
-    const sourcePhase = r.extendedCorrectedPhase ?? r.correctedPhase ?? null;
-    const resampled = resampleOntoCommon(
-      sourceFreq, sourceMag, sourcePhase, freq,
-    );
+    // b141.49 (audit 2026-10-01 H9): extend the NATIVE corrected curve
+    // straight onto the common grid (same rule as evaluateBandFull's
+    // extension and the Σ IR path). Resampling the 512-point extended curve
+    // a second time interpolated wrapped phase across >180° per bin once the
+    // measurement kept ~2 ms of time of flight — 179° wrong at 16 kHz, a
+    // 2.7 dB error in the Σ at 3 ms. The dense native grid has no such gap.
+    const pbt = perBandTarget[i];
+    const resampled = pbt
+      ? await computeExtension(r.freq, r.correctedMag, r.correctedPhase ?? null, freq, pbt.mag, sumSr)
+      : resampleOntoCommon(r.freq, r.correctedMag, r.correctedPhase ?? null, freq);
     if (!resampled) {
       perBandCorrected.push(null);
       correctedDataForSum.push(null);

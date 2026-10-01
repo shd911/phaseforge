@@ -337,7 +337,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
         magnitude: resampleOnLogGrid(mf, measurement.magnitude, freq),
         // b141.9: measurement phase is wrapped (±180) — shortest-arc interp.
         phase: measurement.phase
-          ? interpPhaseOnGrid(mf, measurement.phase, freq, { logSpace: true, outside: "clamp" }) as number[]
+          ? interpPhaseOnGrid(mf, measurement.phase, freq, { logSpace: true, outside: "clamp", mag: measurement.magnitude }) as number[]
           : null,
       };
     }
