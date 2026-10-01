@@ -64,6 +64,13 @@ pub fn auto_peq_lma(
             ),
         });
     }
+    // b141.46 (audit 2026-10-01 L3): a NaN reaching `clamp_params` panics in
+    // f64::clamp, and a panic in an async command hangs the IPC promise.
+    let finite = freq.iter().chain(meas_mag).chain(target_mag.into_iter().flatten())
+        .all(|v| v.is_finite());
+    if !finite {
+        return Err(AppError::Dsp { message: "auto_peq_lma: input contains NaN/Inf".into() });
+    }
     if config.freq_range.0 >= config.freq_range.1 {
         return Err(AppError::Config {
             message: format!(
@@ -547,6 +554,24 @@ mod tests {
             err_after <= 0.5,
             "polish must not overshoot after merging: max_error {err_after:.2} dB"
         );
+    }
+
+    /// b141.46 (audit 2026-10-01 L3): NaN in the measurement is an error,
+    /// not a panic inside the async command.
+    #[test]
+    fn auto_peq_rejects_non_finite_input() {
+        let freq = make_log_freq(100, 20.0, 20000.0);
+        let mut meas = vec![80.0_f64; 100];
+        meas[40] = f64::NAN;
+        let target = vec![80.0_f64; 100];
+        let config = PeqConfig {
+            max_bands: 5, tolerance_db: 1.0, peak_bias: 1.5, max_boost_db: 6.0,
+            max_cut_db: 18.0, freq_range: (80.0, 15000.0), smoothing_fraction: None,
+            min_band_distance_oct: None, hybrid: false, gain_regularization: 0.0,
+            sample_rate: 48000.0,
+        };
+        let r = auto_peq_lma(&meas, Some(&target), &freq, &config, 80.0, 15000.0, &[]);
+        assert!(r.is_err());
     }
 
     #[test]

@@ -398,16 +398,21 @@ fn butterworth_hp_complex(f: f64, fc: f64, n: u8) -> (f64, f64) {
 /// Each entry is (real, imag) for left-half-plane poles with imag >= 0.
 /// Conjugate pairs are implied for complex poles.
 fn bessel_poles(order: u8) -> Vec<(f64, f64)> {
+    // b141.46 (audit 2026-10-01 L1): roots of the reverse Bessel polynomial
+    // θₙ(s), scaled so |H(jω)| = −3.0103 dB at ω = 1, to 10 digits. The old
+    // 4-digit table (with 0.6368 for 0.6360 at order 2) was up to 0.043 dB
+    // and 0.17° off. Order 0 is rejected by `validate_project`; out-of-range
+    // orders still clamp to 8 rather than panic.
     match order {
         1 => vec![(-1.0, 0.0)],
-        2 => vec![(-1.1016, 0.6368)],
-        3 => vec![(-1.3226, 0.0), (-1.0474, 0.9992)],
-        4 => vec![(-1.3700, 0.4102), (-0.9953, 1.2571)],
-        5 => vec![(-1.5069, 0.0), (-1.3810, 0.7179), (-0.9576, 1.4711)],
-        6 => vec![(-1.5735, 0.3213), (-1.3836, 0.9727), (-0.9307, 1.6620)],
-        7 => vec![(-1.6853, 0.0), (-1.6130, 0.5896), (-1.3797, 1.1923), (-0.9104, 1.8364)],
-        8 => vec![(-1.7575, 0.2737), (-1.6365, 0.8230), (-1.3690, 1.3883), (-0.8955, 1.9983)],
-        _ => bessel_poles(8), // clamp to 8
+        2 => vec![(-1.1016013306, 0.6360098248)],
+        3 => vec![(-1.3226757999, 0.0), (-1.0474091610, 0.9992644363)],
+        4 => vec![(-1.3700678306, 0.4102497175), (-0.9952087644, 1.2571057395)],
+        5 => vec![(-1.5023162714, 0.0), (-1.3808773259, 0.7179095876), (-0.9576765486, 1.4711243207)],
+        6 => vec![(-1.5714904036, 0.3208963742), (-1.3818580976, 0.9714718907), (-0.9306565229, 1.6618632689)],
+        7 => vec![(-1.6843681793, 0.0), (-1.6120387662, 0.5892445069), (-1.3789032168, 1.1915667778), (-0.9098677806, 1.8364513530)],
+        8 => vec![(-1.7574084004, 0.2728675751), (-1.6369394181, 0.8227956251), (-1.3738412176, 1.3883565759), (-0.8928697188, 1.9983258436)],
+        _ => bessel_poles(8),
     }
 }
 
@@ -1907,6 +1912,16 @@ mod tests {
             let mag: Vec<String> = r.magnitude.iter().map(|v| format!("{:.6}", v)).collect();
             eprintln!("// {}", name);
             eprintln!("vec![{}]", mag.join(", "));
+        }
+    }
+
+    /// b141.46 (audit 2026-10-01 L1): every Bessel order sits at −3.0103 dB
+    /// at fc to 1e-6 dB (the 4-digit table missed by up to 0.01 dB).
+    #[test]
+    fn bessel_minus_3db_at_fc_all_orders() {
+        for n in 1..=8u8 {
+            let (lp_db, _) = bessel_lp_complex(1000.0, 1000.0, n);
+            assert!((lp_db + 3.010_299_957).abs() < 1e-6, "order {n}: {lp_db:.7} dB at fc");
         }
     }
 }

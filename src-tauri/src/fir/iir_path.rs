@@ -260,8 +260,12 @@ fn shelf_as_peq(shelf: &ShelfConfig, filter_type: PeqFilterType) -> PeqBand {
 }
 
 pub fn build_peq_biquad(band: &PeqBand, sr: f64) -> DigitalBiquad {
-    // Clamp below Nyquist: the bilinear RBJ form degenerates at ω = π.
-    let f0 = band.freq_hz.max(1.0).min(sr * 0.45);
+    // No upper clamp: the plot model (`peq::biquad`) and the cepstral route
+    // evaluate the same RBJ form at the band's own frequency, and the form is
+    // well defined up to ω = π (it becomes the identity there). b141.46
+    // (audit 2026-10-01 M1): a 0.45·sr clamp here moved a 21 kHz PEQ at
+    // 44.1 kHz to 19.85 kHz in the WAV only — +5.48 dB at 20 kHz vs +0.68.
+    let f0 = band.freq_hz.max(1.0);
     let q = band.q.max(1e-6);
     let a = 10f64.powf(band.gain_db / 40.0);
     let omega = 2.0 * PI * f0 / sr;
@@ -1173,4 +1177,27 @@ mod wav_tail_tests {
         }
     }
 
+
+    /// b141.46 (audit 2026-10-01 M1): a PEQ biquad on the IIR route must be
+    /// the same filter the plot model evaluates, also above 0.45·sr.
+    #[test]
+    fn iir_peq_biquad_matches_model_near_nyquist() {
+        let sr = 44_100.0;
+        for &(fc, gain, q) in &[(21_000.0, 6.0, 2.0), (20_000.0, -8.0, 4.0), (1_000.0, 3.0, 1.0)] {
+            let band = PeqBand { freq_hz: fc, gain_db: gain, q, enabled: true, filter_type: PeqFilterType::Peaking };
+            let bq = build_peq_biquad(&band, sr);
+            for &f in &[1_000.0, 15_000.0, 19_000.0, 20_000.0, 21_000.0, 21_900.0] {
+                let w = 2.0 * PI * f / sr;
+                let (c1, s1, c2, s2) = (w.cos(), w.sin(), (2.0 * w).cos(), (2.0 * w).sin());
+                let nr = bq.b0 + bq.b1 * c1 + bq.b2 * c2;
+                let ni = -bq.b1 * s1 - bq.b2 * s2;
+                let dr = 1.0 + bq.a1 * c1 + bq.a2 * c2;
+                let di = -bq.a1 * s1 - bq.a2 * s2;
+                let iir_db = 10.0 * ((nr * nr + ni * ni) / (dr * dr + di * di)).log10();
+                let model_db = crate::peq::peq_band_response(&[f], &band, sr)[0];
+                assert!((iir_db - model_db).abs() < 1e-9,
+                    "fc={fc} f={f}: IIR {iir_db:.4} dB vs model {model_db:.4} dB");
+            }
+        }
+    }
 }

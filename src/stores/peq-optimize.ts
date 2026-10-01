@@ -55,8 +55,8 @@ export function peqRange(): [number, number] {
 }
 
 // --- Internal: optimize a specific band ---
-// If some PEQ bands are disabled, they are "frozen": their correction is baked
-// into the measurement and the optimizer re-fits only the remaining enabled slots.
+// Disabled PEQ bands are kept in the table as they are; the optimizer re-fits
+// only the remaining enabled slots and does not count the disabled ones.
 async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBands: PeqBand[] }> {
   // b141.5 (audit): pre-read EVERY store-proxy field into plain objects
   // BEFORE the first await. Proxy reads after an await observe concurrent
@@ -85,27 +85,13 @@ async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBa
     target: targetCurve, freq: meas.freq,
   });
 
-  // Separate frozen (disabled) bands from active ones
+  // Disabled bands are kept in the table untouched, but they do NOT play:
+  // the plot, the Σ and the FIR all skip them (evaluate.ts filters on
+  // `enabled`). b141.46 (audit 2026-10-01 H2): they used to be baked into the
+  // measurement as "frozen", so the optimizer fitted around a correction the
+  // exported filter never contained — +6 dB left over where it reported 0.
   const frozenBands = peqBandsSnap.filter((p) => !p.enabled);
-  let measMag = meas.magnitude;
-
-  // If there are frozen bands, bake their correction into measurement
-  if (frozenBands.length > 0) {
-    const frozenCorrection = await invoke<number[]>("compute_peq_response", {
-      freq: meas.freq, bands: frozenBands.map((fb) => ({ ...fb, enabled: true })),
-    });
-    // b141.2: guard length mismatch (backend error path can return []). Mirrors
-    // the auto-align guard; without it `v + undefined = NaN` silently poisons
-    // the fit fed into auto_peq_lma. Skip baking rather than corrupt the input.
-    if (frozenCorrection.length === meas.magnitude.length) {
-      measMag = meas.magnitude.map((v, i) => v + frozenCorrection[i]);
-    } else {
-      console.error(
-        `[PEQ optimize] frozen correction length ${frozenCorrection.length} ≠ ` +
-        `measurement ${meas.magnitude.length}; skipping frozen-band bake`,
-      );
-    }
-  }
+  const measMag = meas.magnitude;
 
   const isHybrid = exportHybridPhase();
   let peqLow: number;
@@ -166,7 +152,7 @@ async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBa
   return { result, frozenBands };
 }
 
-/** Merge frozen (disabled) bands with newly optimized bands, sorted by freq */
+/** Merge kept (disabled) bands with newly optimized bands, sorted by freq */
 function mergeBands(frozen: PeqBand[], optimized: PeqBand[]): PeqBand[] {
   const all = [...frozen, ...optimized];
   all.sort((a, b) => a.freq_hz - b.freq_hz);

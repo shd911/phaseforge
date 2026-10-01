@@ -79,22 +79,26 @@ beforeEach(() => {
 });
 
 describe("optimizeBand snapshots store state before awaits (b141.5)", () => {
-  it("frozen-band set is taken before the first await, not after", async () => {
-    // While evaluate_target is in flight the user re-enables the frozen band.
+  it("disabled bands are kept but never baked into the fit (b141.46)", async () => {
+    // While evaluate_target is in flight the user re-enables the disabled band.
     onEvaluateTarget = () => updatePeqBand(bandId, 0, { enabled: true });
 
     await handleOptimizePeq();
 
-    // The bake must still see the pre-await frozen band (fc=100).
-    expect(peqResponseCalls.length).toBe(1);
-    expect(peqResponseCalls[0].bands.length).toBe(1);
-    expect(peqResponseCalls[0].bands[0].freq_hz).toBe(100);
+    // Audit 2026-10-01 H2: a disabled band does not play (plot/Σ/FIR skip it),
+    // so the optimizer must see the raw measurement, not measurement + band.
+    expect(peqResponseCalls.length).toBe(0);
+    expect(lmaCalls.length).toBe(1);
+    expect(lmaCalls[0].measurementMag.every((v: number) => v === 80)).toBe(true);
+    // The pre-await disabled set survives the merge unchanged.
+    const kept = appState.bands[bandIdx].peqBands.filter((p) => p.freq_hz === 100);
+    expect(kept.length).toBe(1);
   });
 
   it("exclusion zones are taken before awaits, not after the bake IPC", async () => {
     addExclusionZone(bandId, { startHz: 200, endHz: 400 });
-    // While the frozen-band bake IPC is in flight the user deletes the zone.
-    onPeqResponse = () => {
+    // While the target IPC is in flight the user deletes the zone.
+    onEvaluateTarget = () => {
       while (appState.bands[bandIdx].exclusionZones.length > 0) {
         removeExclusionZone(bandId, 0);
       }

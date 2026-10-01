@@ -268,6 +268,14 @@ pub(crate) fn validate_project(project: &ProjectFile) -> Result<(), String> {
         return Err(format!("export_sample_rate={sr} is out of range (8000..768000)"));
     }
     for band in &project.bands {
+        // b141.46 (audit 2026-10-01 L2): order 0 silently fell through to
+        // Bessel-8 (and to "no filter" for the others). The UI offers 1..=8.
+        for f in [&band.target.high_pass, &band.target.low_pass].into_iter().flatten() {
+            let ordered = !matches!(f.filter_type, crate::target::FilterType::Gaussian);
+            if ordered && !(1..=8).contains(&f.order) {
+                return Err(format!("band '{}': filter order {} is out of range (1..8)", band.name, f.order));
+            }
+        }
         if let Some(m) = &band.measurement {
             let n = m.freq.len();
             if n < 2 {
@@ -593,6 +601,23 @@ mod tests {
         let project: ProjectFile = serde_json::from_str(&src).expect("parse band");
         let err = validate_project(&project).unwrap_err();
         assert!(err.contains("length mismatch"), "{err}");
+    }
+
+    /// b141.46 (audit 2026-10-01 L2): filter order 0 must be rejected.
+    #[test]
+    fn validate_project_rejects_filter_order_zero() {
+        let band = r#"{"id":"b1","name":"W","measurement":null,"settings":null,
+            "target":{"reference_level_db":80.0,"tilt_db_per_octave":0.0,"tilt_ref_freq":1000.0,
+            "high_pass":{"filter_type":"Bessel","order":0,"freq_hz":80.0,"shape":null},
+            "low_pass":null,"low_shelf":null,"high_shelf":null},"target_enabled":true}"#;
+        let src = format!(r#"{{"version": 2, "app_name": "PhaseForge", "bands": [{band}],
+            "active_band_id": "b1", "show_phase": true, "show_mag": true,
+            "show_target": true, "next_band_num": 2, "export_taps": 65536}}"#);
+        let project: ProjectFile = serde_json::from_str(&src).expect("parse");
+        let err = validate_project(&project).unwrap_err();
+        assert!(err.contains("order"), "{err}");
+        let ok: ProjectFile = serde_json::from_str(&src.replace("\"order\":0", "\"order\":4")).unwrap();
+        assert!(validate_project(&ok).is_ok());
     }
 
     #[test]
