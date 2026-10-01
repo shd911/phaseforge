@@ -188,6 +188,14 @@ export interface PeqOptimizedTarget {
    *  persists, so the mismatch survives a reload. Optional: snapshots written
    *  before b141.22 have no rate and are not treated as stale on that ground. */
   sample_rate?: number;
+  /** b141.67 (audit stage 2 B7): tilt and shelves also change the target the
+   *  PEQ was fitted against. Optional: older snapshots lack it (not stale). */
+  shaping?: {
+    tilt_db_per_octave: number;
+    tilt_ref_freq: number;
+    low_shelf: ShelfConfig | null;
+    high_shelf: ShelfConfig | null;
+  };
 }
 
 // Measurement analysis (b135). Mirrors Rust src-tauri/src/analysis/mod.rs.

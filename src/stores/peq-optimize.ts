@@ -32,8 +32,25 @@ export const [peqDirectLow, setPeqDirectLow] = createSignal(20);
 export const [peqDirectHigh, setPeqDirectHigh] = createSignal(F_MAX_WORK);
 export const [computing, setComputing] = createSignal(false);
 export const [peqError, setPeqError] = createSignal<string | null>(null);
-export const [maxErr, setMaxErr] = createSignal<number | null>(null);
-export const [iters, setIters] = createSignal<number | null>(null);
+// b141.67 (audit stage 2 B5): fit statistics are PER BAND. Global signals
+// showed band A's error on band B and, after «Оптимизировать все», the
+// maximum over all bands and the sum of all iterations on every band.
+const [peqStats, setPeqStats] = createSignal<Record<string, { maxErr: number; iters: number }>>({});
+export function maxErr(): number | null {
+  const b = activeBand();
+  return b ? peqStats()[b.id]?.maxErr ?? null : null;
+}
+export function iters(): number | null {
+  const b = activeBand();
+  return b ? peqStats()[b.id]?.iters ?? null : null;
+}
+function setBandStats(id: string, stats: { maxErr: number; iters: number } | null) {
+  setPeqStats((prev) => {
+    const next = { ...prev };
+    if (stats) next[id] = stats; else delete next[id];
+    return next;
+  });
+}
 
 // --- Helpers ---
 export function crossoverRange(): [number, number] {
@@ -79,6 +96,12 @@ async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBa
     }
   }
   refOffset = count > 0 ? refOffset / count : 0;
+  // b141.67 (audit stage 2 B6): every setting is read BEFORE the first await —
+  // a Standard/Hybrid switch during the run used to mix both modes in one fit.
+  const isHybrid = exportHybridPhase();
+  const rangeMode = peqRangeMode(), directLow = peqDirectLow(), directHigh = peqDirectHigh();
+  const floorDb = peqFloor(), sampleRate = exportSampleRate();
+  const bandBudget = maxBands(), tol = tolerance(), gainReg = gainRegularization();
   const targetCurve = JSON.parse(JSON.stringify(b.target));
   targetCurve.reference_level_db += refOffset;
   const targetResp = await invoke<{ magnitude: number[]; phase: number[] }>("evaluate_target", {
@@ -93,23 +116,21 @@ async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBa
   const frozenBands = peqBandsSnap.filter((p) => !p.enabled);
   const measMag = meas.magnitude;
 
-  const isHybrid = exportHybridPhase();
   let peqLow: number;
   let peqHigh: number;
 
-  if (peqRangeMode() === "direct") {
+  if (rangeMode === "direct") {
     // Direct mode: user-specified range, ignore floor and crossover
-    peqLow = peqDirectLow();
-    peqHigh = Math.min(peqDirectHigh(), fMaxForRate(exportSampleRate()));
+    peqLow = Math.min(directLow, directHigh);
+    peqHigh = Math.min(Math.max(directLow, directHigh), fMaxForRate(sampleRate));
   } else {
     // Auto mode: derive from crossover + floor
     peqLow = isHybrid ? 20 : Math.max(20, fLow / 8);
     // Cap at Nyquist·0.95 of the export rate: a PEQ above Nyquist is not
     // realisable by the biquad it will be exported as.
-    peqHigh = fMaxForRate(exportSampleRate());
+    peqHigh = fMaxForRate(sampleRate);
 
     // Trim PEQ range by target floor: don't optimize where target is below threshold
-    const floorDb = peqFloor();
     if (floorDb > 0) {
       const refLevel = targetCurve.reference_level_db;
       const threshold = refLevel - floorDb;
@@ -127,18 +148,18 @@ async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBa
       }
     }
   }
-  const activeBandBudget = Math.max(1, maxBands() - frozenBands.length);
+  const activeBandBudget = Math.max(1, bandBudget - frozenBands.length);
   const config: PeqConfig = {
     max_bands: activeBandBudget,
-    tolerance_db: tolerance(),
+    tolerance_db: tol,
     peak_bias: isHybrid ? 1.0 : 1.5,
     max_boost_db: isHybrid ? 60.0 : 6.0,
     max_cut_db: isHybrid ? 60.0 : 18.0,
     freq_range: [peqLow, peqHigh],
     hybrid: isHybrid,
-    gain_regularization: gainRegularization(),
+    gain_regularization: gainReg,
     // b141.5 (audit): optimize at the rate the biquads will actually run at.
-    sample_rate: exportSampleRate(),
+    sample_rate: sampleRate,
   };
   const result = await invoke<PeqResult>("auto_peq_lma", {
     freq: meas.freq,
@@ -170,7 +191,36 @@ export function captureOptimizedTarget(b: BandState): PeqOptimizedTarget {
     exclusion_zones: JSON.parse(JSON.stringify(b.exclusionZones)),
     // b141.22 (audit): the rate the biquads were fitted at — see PeqOptimizedTarget.
     sample_rate: exportSampleRate(),
+    shaping: currentShaping(b),
   };
+}
+
+function currentShaping(b: BandState): NonNullable<PeqOptimizedTarget["shaping"]> {
+  return {
+    tilt_db_per_octave: b.target.tilt_db_per_octave ?? 0,
+    tilt_ref_freq: b.target.tilt_ref_freq ?? 1000,
+    low_shelf: b.target.low_shelf ? JSON.parse(JSON.stringify(b.target.low_shelf)) : null,
+    high_shelf: b.target.high_shelf ? JSON.parse(JSON.stringify(b.target.high_shelf)) : null,
+  };
+}
+
+/** Why the PEQ is stale (for the banner), or null when it is not. */
+export function peqStaleReason(b: BandState): string | null {
+  if (!b.peqBands || b.peqBands.length === 0 || !b.peqOptimizedTarget) return null;
+  const snap = b.peqOptimizedTarget;
+  if (!filterEquals(b.target.high_pass, snap.high_pass) || !filterEquals(b.target.low_pass, snap.low_pass)) {
+    return "кроссовер изменён";
+  }
+  if (snap.shaping && JSON.stringify(snap.shaping) !== JSON.stringify(currentShaping(b))) {
+    return "наклон или полки цели изменены";
+  }
+  if (!exclusionZonesEquals(b.exclusionZones, snap.exclusion_zones)) return "зоны исключения изменены";
+  // b141.22: a fit made at another export rate no longer describes the biquads
+  // that will ship. Snapshots from before b141.22 carry no rate — "unknown".
+  if (snap.sample_rate !== undefined && snap.sample_rate !== exportSampleRate()) {
+    return "частота дискретизации экспорта изменена";
+  }
+  return null;
 }
 
 function filterEquals(a: FilterConfig | null, b: FilterConfig | null): boolean {
@@ -202,23 +252,13 @@ function exclusionZonesEquals(a: ExclusionZone[], b: ExclusionZone[]): boolean {
  *  exclusion zones diverge from the snapshot. Pure read — safe inside Solid
  *  reactive contexts. */
 export function peqStale(b: BandState): boolean {
-  if (!b.peqBands || b.peqBands.length === 0) return false;
-  if (!b.peqOptimizedTarget) return false;
-  const snap = b.peqOptimizedTarget;
-  if (!filterEquals(b.target.high_pass, snap.high_pass)) return true;
-  if (!filterEquals(b.target.low_pass, snap.low_pass)) return true;
-  if (!exclusionZonesEquals(b.exclusionZones, snap.exclusion_zones)) return true;
-  // b141.22: a fit made at another export rate no longer describes the biquads
-  // that will ship. Snapshots from before b141.22 carry no rate — treat those
-  // as "unknown", not as stale.
-  if (snap.sample_rate !== undefined && snap.sample_rate !== exportSampleRate()) return true;
-  return false;
+  return peqStaleReason(b) !== null;
 }
 
 // --- Main actions ---
 export async function handleOptimizePeq() {
   const b = activeBand();
-  if (!b || !b.measurement) return;
+  if (!b || !b.measurement || computing()) return;
   pushHistory("Optimize PEQ");
   // Snapshot the target the optimizer is about to consume — concurrent edits
   // during the await must not poison the staleness check.
@@ -229,8 +269,7 @@ export async function handleOptimizePeq() {
     const { result, frozenBands } = await optimizeBand(b);
     setBandPeqBands(b.id, mergeBands(frozenBands, result.bands));
     setBandPeqOptimizedTarget(b.id, optimizedTarget);
-    setMaxErr(result.max_error_db);
-    setIters(result.iterations);
+    setBandStats(b.id, { maxErr: result.max_error_db, iters: result.iterations });
     setSelectedPeqIdx(null);
     showToast(
       `PEQ оптимизирован · фильтров: ${result.bands.length} · макс. ошибка ${result.max_error_db.toFixed(2)} dB`,
@@ -247,7 +286,7 @@ export async function handleOptimizePeq() {
 export async function handleOptimizeAll() {
   const bands = appState.bands;
   const eligible = bands.filter((b) => b.measurement);
-  if (eligible.length === 0) return;
+  if (eligible.length === 0 || computing()) return;
   pushHistory("Optimize all");
   setComputing(true);
   setPeqError(null);
@@ -255,26 +294,26 @@ export async function handleOptimizeAll() {
     // 1. Compute ALL results first (no store writes during loop). Snapshot
     //    each band's target BEFORE its await so a concurrent target edit
     //    cannot retroactively make the post-optimize state look "fresh".
-    const results: { id: string; peqBands: PeqBand[]; maxErr: number; iters: number; target: PeqOptimizedTarget }[] = [];
-    for (const b of eligible) {
+    // b141.67 (audit stage 2 P6): bands are independent — fit them in
+    // parallel (async commands run on the multi-thread runtime).
+    const results = await Promise.all(eligible.map(async (b) => {
       const target = captureOptimizedTarget(b);
       const { result, frozenBands } = await optimizeBand(b);
-      results.push({
+      return {
         id: b.id,
         peqBands: mergeBands(frozenBands, result.bands),
         maxErr: result.max_error_db,
         iters: result.iterations,
         target,
-      });
-    }
+      };
+    }));
     // 2. Apply all at once → single reactive update
     batch(() => {
       for (const r of results) {
         setBandPeqBands(r.id, r.peqBands);
         setBandPeqOptimizedTarget(r.id, r.target);
       }
-      setMaxErr(Math.max(...results.map(r => r.maxErr)));
-      setIters(results.reduce((sum, r) => sum + r.iters, 0));
+      for (const r of results) setBandStats(r.id, { maxErr: r.maxErr, iters: r.iters });
       setSelectedPeqIdx(null);
     });
     showToast(
@@ -290,8 +329,7 @@ export async function handleOptimizeAll() {
 
 export function handleClearPeq() {
   const b = activeBand();
-  if (b) clearBandPeqBands(b.id);
-  setMaxErr(null);
+  if (b) { clearBandPeqBands(b.id); setBandStats(b.id, null); }
   setSelectedPeqIdx(null);
 }
 

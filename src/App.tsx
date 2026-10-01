@@ -116,7 +116,8 @@ function App() {
   // Confirm first when any band already has PEQ so a stray click can't wipe
   // hand-tuning across the whole project.
   const switchStrategy = async (toHybrid: boolean) => {
-    if (exportHybridPhase() === toHybrid) return;
+    // b141.67 (audit stage 2 B6): never start a second fit over a running one.
+    if (exportHybridPhase() === toHybrid || computing()) return;
     const hasPeq = appState.bands.some((b) => (b.peqBands?.length ?? 0) > 0);
     if (hasPeq) {
       const ok = await ask(
@@ -166,11 +167,13 @@ function App() {
           <button
             class={`strategy-btn ${!exportHybridPhase() ? "active" : ""}`}
             onClick={() => switchStrategy(false)}
+            disabled={computing()}
             title="Стандартная коррекция (мин./лин. фаза). Переключение переоптимизирует все бэнды."
           >Standard</button>
           <button
             class={`strategy-btn ${exportHybridPhase() ? "active" : ""}`}
             onClick={() => switchStrategy(true)}
+            disabled={computing()}
             title="Гибридная фаза экспорта. Переключение переоптимизирует все бэнды."
           >Hybrid</button>
         </div>

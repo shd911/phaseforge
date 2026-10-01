@@ -70,7 +70,7 @@ import {
   peqDirectHigh, setPeqDirectHigh,
   computing, peqError, maxErr, iters,
   peqRange, formatFreq,
-  handleOptimizePeq, handleClearPeq, peqStale,
+  handleOptimizePeq, handleClearPeq, peqStale, peqStaleReason,
 } from "../stores/peq-optimize";
 import { showStaleConfirmDialog } from "./StalePeqExportDialog";
 import { showToast } from "../lib/toast";
@@ -97,6 +97,13 @@ const FILTER_TYPES: FilterType[] = ["Butterworth", "Bessel", "LinkwitzRiley", "G
 // Remember last filter config per band so toggle off→on restores settings
 const lastHP = new Map<string, import("../lib/types").FilterConfig>();
 const lastLP = new Map<string, import("../lib/types").FilterConfig>();
+
+
+/** b141.67 (audit stage 2 B9): the optimizer places LF bands at 20.6 Hz —
+ *  rounding them to 21 in the table hid the real value. */
+function fmtPeqFreq(f: number): string {
+  return f < 100 ? f.toFixed(1) : String(Math.round(f));
+}
 
 export default function ControlPanel(props: { rightPanel?: boolean }) {
   const tab = activeTab;
@@ -486,7 +493,7 @@ function PeqTab() {
     >
       <Show when={isStale()}>
         <div class="peq-stale-banner">
-          <span>⚠ PEQ устарел: цель изменена после последней оптимизации</span>
+          <span>⚠ PEQ устарел: {peqStaleReason(band()!) ?? "цель изменена"} после последней оптимизации</span>
           <span style={{ display: "flex", gap: "var(--space-xs)", "justify-content": "flex-end", "flex-wrap": "wrap" }}>
             <button
               class="tb-btn tb-btn-sm"
@@ -627,9 +634,9 @@ function PeqTab() {
                         onClick={() => setSelectedPeqIdx(selectedPeqIdx() === i ? null : i)}>
                         <td><input type="checkbox" class="peq-toggle" checked={b.enabled} onChange={(e) => { e.stopPropagation(); const bd = band(); if (bd) updatePeqBand(bd.id, i, { enabled: !b.enabled }); }} onClick={(e) => e.stopPropagation()} /></td>
                         <td><select class="peq-type-select" value={b.filter_type ?? "Peaking"} onChange={(e) => { e.stopPropagation(); const bd = band(); if (bd) updatePeqBand(bd.id, i, { filter_type: e.currentTarget.value as any }); }} onClick={(e) => e.stopPropagation()}><option value="Peaking">PK</option><option value="LowShelf">LS</option><option value="HighShelf">HS</option></select></td>
-                        <td><input class="peq-input" type="number" value={Math.round(b.freq_hz)} min={20} max={F_MAX_WORK} step={1} ref={peqWheel("freq_hz")} onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v) && v >= 20 && v <= F_MAX_WORK) { const bd = band(); if (bd) updatePeqBand(bd.id, i, { freq_hz: v }); } else rejectPeqInput(e.currentTarget, String(Math.round(b.freq_hz)), `Частота PEQ: 20–${F_MAX_WORK} Hz`); }} /></td>
+                        <td><input class="peq-input" type="number" value={fmtPeqFreq(b.freq_hz)} min={20} max={F_MAX_WORK} step={1} ref={peqWheel("freq_hz")} onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v) && v >= 20 && v <= F_MAX_WORK) { const bd = band(); if (bd) updatePeqBand(bd.id, i, { freq_hz: v }); } else rejectPeqInput(e.currentTarget, fmtPeqFreq(b.freq_hz), `Частота PEQ: 20–${F_MAX_WORK} Hz`); }} /></td>
                         <td><input class={`peq-input ${b.gain_db > 0 ? "peq-boost" : "peq-cut"}`} type="number" value={b.gain_db.toFixed(1)} min={exportHybridPhase() ? -60 : -18} max={exportHybridPhase() ? 60 : 6} step={0.1} ref={peqWheel("gain_db")} onChange={(e) => { const v = parseFloat(e.currentTarget.value); const lim = exportHybridPhase() ? 60 : 18; const hi = exportHybridPhase() ? 60 : 6; if (isNaN(v)) { rejectPeqInput(e.currentTarget, b.gain_db.toFixed(1), `Усиление PEQ: −${lim}…+${hi} dB`); return; } const g = Math.max(-lim, Math.min(hi, v)); if (g !== v) rejectPeqInput(e.currentTarget, g.toFixed(1), `Усиление PEQ: −${lim}…+${hi} dB`); const bd = band(); if (bd) updatePeqBand(bd.id, i, { gain_db: g }); }} /></td>
-                        <td><input class="peq-input" type="number" value={b.q.toFixed(1)} min={0.1} max={20} step={0.1} ref={peqWheel("q")} onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v) && v >= 0.1 && v <= 20) { const bd = band(); if (bd) updatePeqBand(bd.id, i, { q: v }); } else rejectPeqInput(e.currentTarget, b.q.toFixed(1), "Q PEQ: 0.1–20"); }} /></td>
+                        <td><input class="peq-input" type="number" value={b.q.toFixed(2)} min={0.1} max={20} step={0.1} ref={peqWheel("q")} onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v) && v >= 0.1 && v <= 20) { const bd = band(); if (bd) updatePeqBand(bd.id, i, { q: v }); } else rejectPeqInput(e.currentTarget, b.q.toFixed(2), "Q PEQ: 0.1–20"); }} /></td>
                         <td>{b.enabled && b.q > qWarnAt(b.freq_hz) ? (
                           <button class="peq-warn-icon" title="" aria-label="Высокая добротность"
                             onClick={(e) => { e.stopPropagation(); openHighQPopup(b, i); }}>⚠</button>

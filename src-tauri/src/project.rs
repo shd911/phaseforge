@@ -132,6 +132,9 @@ pub struct PeqOptimizedTargetData {
     /// rather than stale.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sample_rate: Option<f64>,
+    /// b141.67: tilt + shelves at fit time (opaque to Rust; read by `peqStale`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shaping: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
