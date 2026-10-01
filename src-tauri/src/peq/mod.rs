@@ -244,6 +244,14 @@ pub fn auto_peq_lma(
             }
         }
 
+        // b141.76 (external audit, gemini-3.7-flash): no available bin inside
+        // the range (all excluded or masked by existing bands) left worst_idx
+        // at 0 — freq[0], outside the range — and a band was added there.
+        if worst_val <= 0.0 {
+            info!("auto_peq_lma: add round {}: no available bin in range, stopping", add_round);
+            break;
+        }
+
         // Raw error at worst point
         let raw_err = meas_mag[worst_idx] + correction[worst_idx] - target[worst_idx];
 
@@ -640,6 +648,24 @@ mod tests {
         let mut bands = vec![PeqBand { freq_hz: 6000.0, gain_db: -4.0, q: 1.0, enabled: true, filter_type: PeqFilterType::Peaking }];
         try_promote_to_shelves(&mut bands, &solver);
         assert_eq!(bands[0].filter_type, PeqFilterType::HighShelf);
+    }
+
+    /// b141.76 (external audit): a fully excluded range adds no band at freq[0].
+    #[test]
+    fn fully_excluded_range_adds_no_band_outside_it() {
+        let freq = make_log_freq(300, 20.0, 20000.0);
+        // Big error at 20 Hz (outside the range), flat inside.
+        let meas: Vec<f64> = freq.iter().map(|&f| if f < 60.0 { 50.0 } else { 80.0 }).collect();
+        let target = vec![80.0_f64; freq.len()];
+        let config = PeqConfig {
+            max_bands: 5, tolerance_db: 1.0, peak_bias: 1.5, max_boost_db: 6.0, max_cut_db: 18.0,
+            freq_range: (500.0, 2000.0), smoothing_fraction: None, min_band_distance_oct: None,
+            hybrid: false, gain_regularization: 0.0, sample_rate: 48000.0,
+        };
+        let zones = [ExclusionZone { start_hz: 400.0, end_hz: 2500.0 }];
+        let r = auto_peq_lma(&meas, Some(&target), &freq, &config, 20.0, 20000.0, &zones).unwrap();
+        assert!(r.bands.iter().all(|b| b.gain_db.abs() < 0.5),
+            "no correction expected in an excluded range: {:?}", r.bands);
     }
 
     #[test]
