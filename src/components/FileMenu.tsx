@@ -10,6 +10,7 @@ import {
 } from "../lib/project-io";
 import { isDirty } from "../stores/bands";
 import { openVersionsDialog } from "./VersionsDialog";
+import { showToast } from "../lib/toast";
 
 export default function FileMenu() {
   const [isOpen, setIsOpen] = createSignal(false);
@@ -218,6 +219,20 @@ export default function FileMenu() {
           >
             <span class="file-menu-label">{"\u0412\u0435\u0440\u0441\u0438\u0438\u2026"}</span>
             <span class="file-menu-shortcut">{"\u21E7\u2318"}V</span>
+          </button>
+
+          <div class="file-menu-sep" />
+
+          <button
+            class="file-menu-item"
+            title="Журнал работы программы: ошибки, предупреждения, диагностика"
+            onClick={async () => {
+              closeMenu();
+              try { await invoke("reveal_log_file"); }
+              catch (e) { showToast(`Не удалось открыть журнал: ${e}`, "warn"); }
+            }}
+          >
+            <span class="file-menu-label">Показать журнал…</span>
           </button>
         </div>
       </Show>

@@ -151,6 +151,10 @@
 
 ## Debugging Rules
 - **NEVER guess at root cause.** Always add diagnostic logging first, get user's console output, then fix based on evidence.
+- **Log file (b141.63):** `~/Library/Logs/PhaseForge/phaseforge.log` (Windows `%LOCALAPPDATA%\PhaseForge\logs`)
+  holds all Rust `tracing` output plus the frontend's console.error/warn and every `console.log("[TAG] …")`
+  (lib/log-forward.ts → `log_frontend`), project opens included. Read it yourself after the user reproduces —
+  don't ask them to copy the devtools console. Tag diagnostics `[XX]` so they are forwarded. Menu: Файл → «Показать журнал…».
 - Do not attempt more than 2 fix iterations without diagnostic data.
 - Before fixing chart/rendering bugs, read the relevant render function END TO END — don't patch blindly.
 - SolidJS gotcha: signals inside async functions are NOT tracked by createEffect. Read them synchronously before any await.

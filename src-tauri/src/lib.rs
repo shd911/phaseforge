@@ -2,6 +2,7 @@ pub mod analysis;
 pub mod dsp;
 pub mod error;
 pub mod export;
+pub mod applog;
 pub mod fir;
 pub mod io;
 pub mod peq;
@@ -454,14 +455,23 @@ async fn export_fir_wav(impulse: Vec<f64>, sample_rate: f64, path: String) -> Re
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    {
+        use tracing_subscriber::prelude::*;
+        let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+        // b141.63: stdout as before + a plain-text copy in the log file.
+        let file_layer = applog::open_log_file().map(|f| {
+            tracing_subscriber::fmt::layer().with_ansi(false).with_writer(f)
+        });
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(tracing_subscriber::fmt::layer())
+            .with(file_layer)
+            .init();
+    }
 
-    info!("PhaseForge b141.62 starting...");
+    info!("PhaseForge b141.63 starting...");
+    info!("log file: {}", applog::log_path().map(|p| p.display().to_string()).unwrap_or_else(|| "—".into()));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -476,6 +486,8 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            applog::log_frontend,
+            applog::reveal_log_file,
             import_measurement,
             get_smoothed,
             evaluate_target,

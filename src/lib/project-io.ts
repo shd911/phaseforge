@@ -393,6 +393,9 @@ function mapBandFromProject(b: ProjectBand, idx: number): BandState {
 
 /** Restore state from a loaded project. For v2, re-import measurements from files. */
 export async function restoreState(project: ProjectFile, projDir: string | null) {
+  // b141.63: tagged → lands in the log file, so later errors map to a project.
+  console.log(`[project] open ${projDir ?? "(no folder)"} · ${project.bands.length} bands · ` +
+    `${project.export_sample_rate ?? "?"} Hz / ${project.export_taps ?? "?"} taps`);
   const bands = project.bands.map((b, i) => mapBandFromProject(b, i));
   // b141.10: legacy projects stored alignment delays under the inverted
   // (positive = advance) convention — convert preserving relative timing.
