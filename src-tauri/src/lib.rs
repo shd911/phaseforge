@@ -443,7 +443,7 @@ pub fn run() {
         )
         .init();
 
-    info!("PhaseForge b141.46 starting...");
+    info!("PhaseForge b141.47 starting...");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())

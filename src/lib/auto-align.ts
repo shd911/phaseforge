@@ -11,41 +11,46 @@
  * higher bands, keeping all delays >= 0.
  */
 
-import { invoke } from "@tauri-apps/api/core";
 import type { BandState } from "../stores/bands";
-import { interpOnGrid } from "./band-evaluator/grid";
+import { evaluateSum } from "./band-evaluator/sum";
 import { alignmentPhaseDeg } from "./types";
-import { unwrapDegrees } from "./plot-helpers";
 
 /** Result of auto-align: map from bandId → delay in seconds */
 export interface AlignResult {
   delays: Record<string, number>;
 }
 
-/** Linear interpolation, NaN outside source range (b141.6: shared helper). */
-function interpNanOutside(srcFreq: number[], srcData: number[], dstFreq: number[]): number[] {
-  if (srcFreq.length < 2) return dstFreq.map(() => NaN);
-  return interpOnGrid(srcFreq, srcData, dstFreq, { outside: "nan" }) as number[];
+/** One band as the alignment sees it: its corrected curve on the common
+ *  grid (exactly what Σ Corrected sums), its polarity, its crossover. */
+export interface AlignBand {
+  mag: number[];
+  ph: number[];
+  sign: 1 | -1;
+  hpHz: number | null;
+  lpHz: number | null;
 }
 
 /**
  * Compute optimal alignment delays for all bands.
  *
- * @param bands - array of BandState (must have measurement + phase + target with crossovers)
- * @param sampleRate - realization sample rate for PEQ biquads (b141.5; = export sample rate)
+ * b141.47 (audit 2026-10-01 H7/H8): the band responses come from
+ * `evaluateSum` — the same corrected curves the Σ draws (min-phase
+ * Gaussian/subsonic, level match, extension) — and the polarity sign is
+ * applied. The old private pipeline (measurement + PEQ + cross-section)
+ * gave Gaussian a zero phase and ignored INV, so with an inverted tweeter
+ * it picked 0.47 ms and dropped the Σ to −20.7 dB at the crossover.
+ *
+ * @param bands - bands with measurement phase; store bands are fine
+ *                (evaluateSum snapshots them)
+ * @param sampleRate - realization sample rate (= export sample rate)
  * @returns delays in seconds per band id
  */
 export async function computeAutoAlign(bands: BandState[], sampleRate = 48000): Promise<AlignResult> {
-  // Filter bands with measurement + phase data
   const validBands = bands.filter(
     b => b.measurement?.phase && b.measurement.phase.length > 0
   );
 
   if (validBands.length < 2) {
-    // Reset alignment delay for ALL bands before returning
-    for (const b of bands) {
-      b.alignmentDelay = 0;
-    }
     const delays: Record<string, number> = {};
     for (const b of validBands) delays[b.id] = 0;
     return { delays };
@@ -59,98 +64,49 @@ export async function computeAutoAlign(bands: BandState[], sampleRate = 48000): 
     return bands.indexOf(a) - bands.indexOf(b);
   });
 
-  // Use the frequency grid with widest coverage (lowest start freq, most points)
-  let refBand = sorted[0];
-  for (const b of sorted) {
-    if (b.measurement!.freq.length > refBand.measurement!.freq.length) {
-      refBand = b;
-    } else if (b.measurement!.freq.length === refBand.measurement!.freq.length
-      && b.measurement!.freq[0] < refBand.measurement!.freq[0]) {
-      refBand = b;
-    }
-  }
-  const freq = [...refBand.measurement!.freq];
-  const nPts = freq.length;
-
-  // Get corrected magnitude + phase for each band (measurement + PEQ + crossover)
-  const bandDataPromises = sorted.map(async (b) => {
-    let mag = [...b.measurement!.magnitude];
-    let ph = [...b.measurement!.phase!];
-
-    // Apply PEQ
-    const peqBands = b.peqBands?.filter(p => p.enabled) ?? [];
-    if (peqBands.length > 0) {
-      const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", {
-        freq: [...b.measurement!.freq],
-        bands: JSON.parse(JSON.stringify(peqBands)),
-        sampleRate,
-      });
-      if (!pm || pm.length !== mag.length) {
-        console.warn('[AA] peq response length mismatch, skipping PEQ');
-      } else {
-        mag = mag.map((v, i) => v + pm[i]);
-        if (pp && pp.length === ph.length) {
-          ph = unwrapDegrees(ph.map((v, i) => v + pp[i]));
-        }
-      }
-    }
-
-    // Apply crossover filters
-    if (b.targetEnabled && (b.target.high_pass || b.target.low_pass)) {
-      const [xm, xp] = await invoke<[number[], number[], number]>("compute_cross_section", {
-        freq: [...b.measurement!.freq],
-        highPass: b.target.high_pass ? JSON.parse(JSON.stringify(b.target.high_pass)) : null,
-        lowPass: b.target.low_pass ? JSON.parse(JSON.stringify(b.target.low_pass)) : null,
-      });
-      if (!xm || xm.length !== mag.length) {
-        console.warn('[AA] cross_section response length mismatch, skipping XO');
-      } else {
-        mag = mag.map((v, i) => v + xm[i]);
-        if (xp && xp.length === ph.length) {
-          ph = unwrapDegrees(ph.map((v, i) => v + xp[i]));
-        }
-      }
-    }
-
-    return { id: b.id, name: b.name, mag, ph, freq: [...b.measurement!.freq] };
+  const sum = await evaluateSum(sorted, { sampleRate });
+  const freq = sum.freq;
+  const alignBands: AlignBand[] = sorted.map((b, i) => {
+    const pc = sum.perBandCorrected[i];
+    return {
+      mag: pc ? pc.mag : freq.map(() => -200),
+      ph: pc ? pc.phase : freq.map(() => 0),
+      sign: b.inverted ? -1 : 1,
+      hpHz: b.target?.high_pass?.freq_hz ?? null,
+      lpHz: b.target?.low_pass?.freq_hz ?? null,
+    };
   });
 
-  const bandData = await Promise.all(bandDataPromises);
-
-  // Interpolate all bands onto common freq grid
-  for (const bd of bandData) {
-    if (bd.freq.length !== nPts || bd.freq[0] !== freq[0]) {
-      const interpMag = interpNanOutside(bd.freq, bd.mag, freq);
-      const interpPh = interpNanOutside(bd.freq, bd.ph, freq);
-      // Replace with interpolated data; NaN → -200 dB / 0°
-      bd.mag = interpMag.map(v => isNaN(v) ? -200 : v);
-      bd.ph = interpPh.map(v => isNaN(v) ? 0 : v);
-      bd.freq = [...freq];
-    }
+  const delays = alignDelays(freq, alignBands);
+  const result: Record<string, number> = {};
+  for (let i = 0; i < sorted.length; i++) {
+    result[sorted[i].id] = Math.round(delays[i] * 1e6) / 1e6;
   }
+  return { delays: result };
+}
 
-  // Find crossover regions between adjacent bands (HF→LF order)
+/**
+ * Pure core: delays (s, all ≥ 0) for bands sorted HF→LF.
+ * Each lower band is fitted to its upper neighbour at their crossover.
+ */
+export function alignDelays(freq: number[], bandData: AlignBand[]): number[] {
   // sorted[i] = higher freq, sorted[i+1] = lower freq
-  const crossoverRegions: { refIdx: number; optIdx: number; freqRange: [number, number] }[] = [];
-  for (let i = 0; i < sorted.length - 1; i++) {
-    const hpFreq = sorted[i].target?.high_pass?.freq_hz;
-    const lpFreq = sorted[i + 1].target?.low_pass?.freq_hz;
+  const crossoverRegions: { optIdx: number; freqRange: [number, number] }[] = [];
+  for (let i = 0; i < bandData.length - 1; i++) {
+    const hpFreq = bandData[i].hpHz;
+    const lpFreq = bandData[i + 1].lpHz;
     if (lpFreq && hpFreq) {
       const xoFreq = Math.sqrt(lpFreq * hpFreq); // geometric mean (log-scale center)
-      const fLo = xoFreq / 1.4142;
-      const fHi = xoFreq * 1.4142;
-      crossoverRegions.push({ refIdx: i, optIdx: i + 1, freqRange: [fLo, fHi] });
+      crossoverRegions.push({ optIdx: i + 1, freqRange: [xoFreq / 1.4142, xoFreq * 1.4142] });
     }
   }
 
   // Initialize delays: HF band = 0 (reference)
-  const delays = new Array(sorted.length).fill(0);
+  const delays = new Array(bandData.length).fill(0);
 
   // Optimize sequentially HF→LF
   for (const xo of crossoverRegions) {
-    const bestDelay = optimizePairDelay(
-      freq, bandData, delays, xo.refIdx, xo.optIdx, xo.freqRange
-    );
+    const bestDelay = optimizePairDelay(freq, bandData, delays, xo.optIdx, xo.freqRange);
 
     if (bestDelay >= 0) {
       // Positive delay: lower band needs more delay — just assign
@@ -158,43 +114,31 @@ export async function computeAutoAlign(bands: BandState[], sampleRate = 48000): 
     } else {
       // Negative delay: lower band should be EARLIER than upper bands
       // → propagate |bestDelay| to ALL already-processed bands (indices 0..optIdx-1)
-      const shift = -bestDelay; // positive amount to add
+      const shift = -bestDelay;
       for (let k = 0; k < xo.optIdx; k++) {
         delays[k] += shift;
       }
       delays[xo.optIdx] = 0;
     }
   }
-
-  // Build result map (all delays guaranteed >= 0)
-  const result: Record<string, number> = {};
-  for (let i = 0; i < sorted.length; i++) {
-    result[sorted[i].id] = Math.round(delays[i] * 1e6) / 1e6;
-  }
-
-  return { delays: result };
+  return delays;
 }
 
 /**
- * Optimize delay for band hiIdx relative to loIdx to maximize
- * coherent sum amplitude in the crossover region.
+ * Optimize delay for band hiIdx to maximize coherent sum amplitude in the
+ * crossover region (all other bands at their current delays).
  */
 function optimizePairDelay(
   freq: number[],
-  bandData: { id: string; mag: number[]; ph: number[] }[],
+  bandData: AlignBand[],
   delays: number[],
-  loIdx: number,
   hiIdx: number,
   freqRange: [number, number],
 ): number {
-  // Find frequency indices in the crossover region
   const xoIndices: number[] = [];
   for (let j = 0; j < freq.length; j++) {
-    if (freq[j] >= freqRange[0] && freq[j] <= freqRange[1]) {
-      xoIndices.push(j);
-    }
+    if (freq[j] >= freqRange[0] && freq[j] <= freqRange[1]) xoIndices.push(j);
   }
-
   if (xoIndices.length === 0) return 0;
 
   // Cost function: negative mean amplitude in crossover region
@@ -202,10 +146,9 @@ function optimizePairDelay(
     let totalAmp = 0;
     for (const j of xoIndices) {
       let re = 0, im = 0;
-      // Sum all bands with their current delays
       for (let b = 0; b < bandData.length; b++) {
         const d = b === hiIdx ? delayHi : delays[b];
-        const amp = Math.pow(10, bandData[b].mag[j] / 20);
+        const amp = bandData[b].sign * Math.pow(10, bandData[b].mag[j] / 20);
         const phRad = (bandData[b].ph[j] + alignmentPhaseDeg(freq[j], d)) * Math.PI / 180;
         re += amp * Math.cos(phRad);
         im += amp * Math.sin(phRad);
@@ -215,20 +158,17 @@ function optimizePairDelay(
     return -totalAmp / xoIndices.length;
   };
 
-  // Phase scan: adaptive range based on crossover frequency
-  const xoCenterFreq = (freqRange[0] + freqRange[1]) / 2;
-
   // Adaptive sweep range: wider for low-frequency crossovers
+  const xoCenterFreq = (freqRange[0] + freqRange[1]) / 2;
   const adaptiveMaxMs = xoCenterFreq < 200 ? 5.0 : xoCenterFreq < 500 ? 3.0 : 2.0;
   const scanRange = adaptiveMaxMs / 1000;
 
-  // Scan over ±scanRange in fine steps
   const nSteps = 200;
+  const step = (2 * scanRange) / nSteps;
   let bestDelay = 0;
   let bestCost = cost(0);
-
   for (let i = 0; i <= nSteps; i++) {
-    const d = -scanRange + (2 * scanRange * i) / nSteps;
+    const d = -scanRange + step * i;
     const c = cost(d);
     if (c < bestCost) {
       bestCost = c;
@@ -236,27 +176,18 @@ function optimizePairDelay(
     }
   }
 
-  // Gradient descent refinement
-  let lr = scanRange / nSteps / 2; // half step size
-  let currentDelay = bestDelay;
-
-  for (let iter = 0; iter < 50; iter++) {
-    const eps = 1e-7;
-    const grad = (cost(currentDelay + eps) - cost(currentDelay - eps)) / (2 * eps);
-    const newDelay = currentDelay - lr * grad;
-    // Clamp to scan range to prevent runaway
-    const clampedDelay = Math.max(-scanRange, Math.min(scanRange, newDelay));
-    const newCost = cost(clampedDelay);
-
-    if (newCost < cost(currentDelay)) {
-      currentDelay = clampedDelay;
-    } else {
-      lr *= 0.5; // shrink step
-    }
-
-    if (lr < 1e-9) break;
+  // Golden-section refinement inside ±1 scan step of the best grid point.
+  // (The old gradient step lr·grad was ~0.1 s and always rejected, so the
+  // result never left the 20 µs scan grid.)
+  const g = (Math.sqrt(5) - 1) / 2;
+  let lo = Math.max(-scanRange, bestDelay - step);
+  let hi = Math.min(scanRange, bestDelay + step);
+  let x1 = hi - g * (hi - lo), x2 = lo + g * (hi - lo);
+  let c1 = cost(x1), c2 = cost(x2);
+  for (let iter = 0; iter < 40; iter++) {
+    if (c1 < c2) { hi = x2; x2 = x1; c2 = c1; x1 = hi - g * (hi - lo); c1 = cost(x1); }
+    else { lo = x1; x1 = x2; c1 = c2; x2 = lo + g * (hi - lo); c2 = cost(x2); }
   }
-
-  return currentDelay;
+  const refined = (lo + hi) / 2;
+  return cost(refined) <= bestCost ? refined : bestDelay;
 }
-

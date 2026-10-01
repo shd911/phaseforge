@@ -4432,12 +4432,13 @@ export default function FrequencyPlot() {
                                   b => b.measurement?.phase && b.measurement.phase.length > 0
                                 );
                                 if (bands.length < 2) return;
-                                const plainBands = JSON.parse(JSON.stringify(bands));
+                                // b141.47: store bands go straight to evaluateSum (it snapshots;
+                                // a JSON clone would only miss the eval cache).
                                 // b141.38: busy flag — the button gave no sign of
                                 // work and a second click started a parallel run.
                                 setAutoAligning(true);
                                 try {
-                                  const result = await computeAutoAlign(plainBands, exportSampleRate());
+                                  const result = await computeAutoAlign(bands, exportSampleRate());
                                   batch(() => {
                                     for (const [id, delay] of Object.entries(result.delays)) {
                                       setAlignmentDelay(id, delay);
