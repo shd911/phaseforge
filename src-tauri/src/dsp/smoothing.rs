@@ -67,7 +67,7 @@ pub fn fractional_octave_smooth(freq: &[f64], mag: &[f64], idx: usize, fraction:
         return mag[idx];
     }
 
-    let k = 2.0_f64.powf(fraction / 2.0);
+    let k = window_k(freq, center, fraction);
     let f_low = center / k;
     let f_high = center * k;
 
@@ -86,6 +86,19 @@ pub fn fractional_octave_smooth(freq: &[f64], mag: &[f64], idx: usize, fraction:
     if avg_power > 1e-30 { 10.0 * avg_power.log10() } else { -300.0 }
 }
 
+/// Half-width ratio of the smoothing window around `center`. b141.58 (audit
+/// 2026-10-01 L4): near the ends of the grid the window is shrunk to stay
+/// SYMMETRIC in log-frequency. Truncating only the missing side averaged a
+/// sloped curve one-sidedly — +2.16 dB at 20 kHz on a −24 dB/oct slope with
+/// 1/3 octave, fed into the PEQ error near the band limits.
+fn window_k(freq: &[f64], center: f64, fraction: f64) -> f64 {
+    let (first, last) = (freq[0], freq[freq.len() - 1]);
+    let mut h = fraction / 2.0; // octaves each side
+    if first > 0.0 { h = h.min((center / first).log2()); }
+    if last > 0.0 { h = h.min((last / center).log2()); }
+    2.0_f64.powf(h.max(0.0))
+}
+
 /// Internal: smooth using pre-computed prefix sum (O(log n) per bin)
 fn smooth_bin_prefix(freq: &[f64], prefix: &[f64], idx: usize, fraction: f64) -> f64 {
     let center = freq[idx];
@@ -94,7 +107,7 @@ fn smooth_bin_prefix(freq: &[f64], prefix: &[f64], idx: usize, fraction: f64) ->
         return prefix[idx + 1] - prefix[idx];
     }
 
-    let k = 2.0_f64.powf(fraction / 2.0);
+    let k = window_k(freq, center, fraction);
     let f_low = center / k;
     let f_high = center * k;
 
@@ -138,6 +151,24 @@ mod tests {
             let old_val = fractional_octave_smooth(&freq, &mag, i, fraction);
             assert!((smoothed_prefix[i] - old_val).abs() < 1e-10,
                 "Mismatch at bin {}: prefix={} old={}", i, smoothed_prefix[i], old_val);
+        }
+    }
+
+    /// b141.58 (audit 2026-10-01 L4): a straight −24 dB/oct slope must stay
+    /// on the line at the grid ends (symmetric window in log f).
+    #[test]
+    fn smoothing_keeps_a_slope_at_the_edges() {
+        let freq: Vec<f64> = (0..481).map(|i| 20.0 * 2f64.powf(i as f64 / 48.0)).collect();
+        let mag: Vec<f64> = freq.iter().map(|f| -24.0 * (f / 1000.0).log2()).collect();
+        let cfg = SmoothingConfig { variable: false, fixed_fraction: Some(1.0 / 3.0) };
+        let sm = variable_smoothing(&freq, &mag, &cfg);
+        let n = freq.len();
+        for i in [0, 1, 4, n / 2, n - 5, n - 2, n - 1] {
+            // Power averaging of a symmetric dB slope lifts by a known, small
+            // amount mid-band; at the edges it must not exceed it.
+            let mid_lift = sm[n / 2] - mag[n / 2];
+            let lift = sm[i] - mag[i];
+            assert!(lift <= mid_lift + 1e-9, "bin {i} ({:.0} Hz): +{lift:.2} dB vs mid +{mid_lift:.2}", freq[i]);
         }
     }
 }
