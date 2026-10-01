@@ -17,7 +17,9 @@ fn ifft_real_impulse(
     // Interpolate measurement onto linear grid: 0 Hz to Nyquist
     let (_grid_freq, grid_mag, grid_phase_opt) =
         interpolate_linear_grid(freq, magnitude, Some(phase), n_bins, sample_rate);
-    let grid_phase = grid_phase_opt.expect("phase must be present when Some(phase) was passed");
+    let mut grid_phase = grid_phase_opt.expect("phase must be present when Some(phase) was passed");
+    let mut grid_mag = grid_mag;
+    extend_above_grid(freq, phase, &mut grid_mag, &mut grid_phase, sample_rate);
 
     // Build complex spectrum for positive frequencies. DC and Nyquist must be
     // real for a real time-domain signal — project them onto the real axis
@@ -45,6 +47,46 @@ fn ifft_real_impulse(
     engine.fft_inverse(&mut spectrum);
     let norm = 1.0 / fft_size as f64;
     spectrum.iter().map(|c| c.re * norm).collect()
+}
+
+/// b141.57 (audit 2026-10-01 M7): above the last measured frequency the
+/// linear-grid interpolation held the magnitude flat and FROZE the phase up
+/// to Nyquist — a band with zero group delay, i.e. a spike at t = 0 (20 % of
+/// the peak for a 2 ms measurement ending at 20 kHz). Continue the phase with
+/// the last group delay and fade the magnitude out over one octave
+/// (raised cosine) instead. Callers that already extend to Nyquist (noise-
+/// floor tail) are untouched: nothing lies above their last point.
+fn extend_above_grid(freq: &[f64], phase: &[f64], mag: &mut [f64], ph: &mut [f64], sample_rate: f64) {
+    let n = freq.len();
+    if n < 2 { return; }
+    let n_bins = mag.len();
+    let nyq = sample_rate / 2.0;
+    let f_last = freq[n - 1];
+    if f_last >= nyq * 0.999 { return; }
+    // Group delay from the highest steps that still resolve it (|Δφ| < 90°):
+    // the last steps of a log grid can alias a few ms of delay (2 ms over a
+    // 290 Hz step at 20 kHz is 209°, read as −151° — the wrong sign).
+    let wrap = |d: f64| ((d + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
+    let mut gds: Vec<f64> = Vec::new();
+    for i in (1..n).rev() {
+        let d = wrap(phase[i] - phase[i - 1]);
+        let df = freq[i] - freq[i - 1];
+        if d.abs() < 90.0 && df > 0.0 { gds.push(d / df); }
+        if gds.len() >= 16 { break; }
+    }
+    if gds.is_empty() { return; }
+    gds.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let slope = gds[gds.len() / 2]; // deg per Hz
+    let f_end = (2.0 * f_last).min(nyq);
+    for k in 0..n_bins {
+        let f = nyq * k as f64 / (n_bins - 1) as f64;
+        if f <= f_last { continue; }
+        ph[k] = phase[n - 1] + slope * (f - f_last);
+        let fade = if f >= f_end { 0.0 } else {
+            0.5 * (1.0 + (std::f64::consts::PI * (f - f_last) / (f_end - f_last)).cos())
+        };
+        mag[k] = mag[k] + 20.0 * fade.max(1e-15).log10();
+    }
 }
 
 /// Result of impulse response computation
@@ -397,5 +439,38 @@ mod tests {
 
         // IR and Step peaks should NOT be at the same time for bandpass
         assert_ne!(ir_peak_idx, st_peak_idx, "IR and Step peaks should be at different times for bandpass");
+    }
+
+    /// b141.57 (audit 2026-10-01 M7): a measurement that ends at 20 kHz and
+    /// keeps a 2 ms time of flight must not grow a spike at t = 0. Reference:
+    /// the same response measured up to 23.99 kHz (nothing to extend). The
+    /// frozen phase gave 22.7 % at t = 0; the reference has 1.1 % (wrap of the
+    /// 40 Hz ringing, unrelated).
+    #[test]
+    fn no_false_spike_at_zero_for_a_grid_ending_below_nyquist() {
+        let sr = 48_000.0;
+        let tau = 0.002;
+        let near_zero = |top: f64| -> f64 {
+            let nn = (48.0 * (top / 20.0f64).log2()).round() as usize + 1;
+            let freq: Vec<f64> = (0..nn).map(|i| 20.0 * (top / 20.0f64).powf(i as f64 / (nn - 1) as f64)).collect();
+            let (mag, ph): (Vec<f64>, Vec<f64>) = freq.iter().map(|&f| {
+                // BW4 HP 40 Hz magnitude and phase, plus the delay.
+                let w = f / 40.0;
+                let m = w.powi(4) / (1.0 + w.powi(8)).sqrt();
+                let mut p = 0.0;
+                for k in 0..2 {
+                    let q = 1.0 / (2.0 * (std::f64::consts::PI * (2 * k + 1) as f64 / 8.0).sin());
+                    p += 180.0 - (w / q).atan2(1.0 - w * w).to_degrees();
+                }
+                let p = p - 360.0 * f * tau;
+                (20.0 * m.log10(), ((p + 180.0) % 360.0 + 360.0) % 360.0 - 180.0)
+            }).unzip();
+            let r = compute_impulse_response(&freq, &mag, &ph, sr);
+            let t0 = r.pre_peak_count;
+            r.impulse[t0.saturating_sub(5)..t0 + 5].iter().fold(0.0_f64, |a, &v| a.max(v.abs()))
+        };
+        let (short, full) = (near_zero(20_000.0), near_zero(23_990.0));
+        println!("|impulse| near t=0: grid to 20 kHz {short:.2} %, to 23.99 kHz {full:.2} %");
+        assert!(short < full + 1.0, "spike at t=0: {short:.2} % vs {full:.2} % reference");
     }
 }
