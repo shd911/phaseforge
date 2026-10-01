@@ -18,7 +18,7 @@ import type { PeqBand, TargetResponse } from "../types";
 import { alignmentPhaseDeg, F_MAX_REF } from "../types";
 import { buildCommonGrid, buildLogGrid, interpOnGrid, interpPhaseOnGrid, irTime, type ImpulseIpc } from "./grid";
 import { appendNoiseFloorTail, computeExtension, passbandRange } from "./extension";
-import { evaluateBandFull, filterSection, reconstructTargetPhase, snapshotBandRequest } from "./evaluate";
+import { composeCorrected, evaluateBandFull, reconstructTargetPhase, snapshotBandRequest } from "./evaluate";
 import { bandContentKey, hashGrid, memoEval, sumRequestKey } from "./cache";
 
 // ---------------------------------------------------------------------------
@@ -575,25 +575,11 @@ async function evaluateSumImpl(
       // Corrected: measurement (extended) + PEQ + cross-section, on irFreq.
       if (band.targetEnabled) {
         const enabledPeq = (band.peqBands ?? []).filter((p: PeqBand) => p.enabled);
-        let irPeqMag: number[] = new Array(N).fill(0);
-        let irPeqPhase: number[] = new Array(N).fill(0);
-        if (enabledPeq.length > 0) {
-          const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", {
-            freq: irFreq, bands: enabledPeq, sampleRate: options?.sampleRate ?? 48000,
-          });
-          irPeqMag = pm; irPeqPhase = pp;
-        }
-        const irXs = await filterSection(irFreq, band.target, options?.sampleRate ?? 48000);
-        const irXsMag: number[] = irXs?.mag ?? new Array(N).fill(0);
-        const irXsPhase: number[] = irXs?.phase ?? new Array(N).fill(0);
         // b141.10: same scalar level shift as the SPL Σ corrected curve.
-        const lvl = corrLevelOffsetDb[bandIdx];
-        const corrMag = extMeasMag.map((m, j) => m + irPeqMag[j] + irXsMag[j] + lvl);
-        const baseP = measPhaseArr.map((p, j) => p + irPeqPhase[j] + irXsPhase[j]);
-        const corrPhase = await reconstructTargetPhase(
-          irFreq, baseP, band.target.high_pass, band.target.low_pass, sumSr,
-        );
-        out.corr = { magnitude: corrMag, phase: corrPhase, delay, sign };
+        const c = await composeCorrected(irFreq, extMeasMag, measPhaseArr, band, sumSr, {
+          levelDb: corrLevelOffsetDb[bandIdx],
+        });
+        out.corr = { magnitude: c.mag, phase: c.phase!, delay, sign };
       }
 
       return out;

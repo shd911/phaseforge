@@ -1,0 +1,192 @@
+{
+ "version": 1,
+ "delay_positive_is_late": true,
+ "app_name": "PhaseForge",
+ "project_name": null,
+ "bands": [
+  {
+   "id": "eb5ac261-99e1-435a-b991-40db2505f669",
+   "name": "Band 1",
+   "measurement": null,
+   "measurement_file": null,
+   "settings": null,
+   "target": {
+    "reference_level_db": 0,
+    "tilt_db_per_octave": 0,
+    "tilt_ref_freq": 1000,
+    "high_pass": null,
+    "low_pass": {
+     "filter_type": "Gaussian",
+     "order": 4,
+     "freq_hz": 80,
+     "shape": 1.2,
+     "linear_phase": false,
+     "q": null,
+     "subsonic_protect": null
+    },
+    "low_shelf": null,
+    "high_shelf": null
+   },
+   "target_enabled": true,
+   "inverted": false,
+   "linked_to_next": true,
+   "peq_bands": [],
+   "color": "#4A9EFF",
+   "alignment_delay": 0,
+   "peq_optimized_target": null
+  },
+  {
+   "id": "5464cb4a-035c-4703-9b14-49036d681d8b",
+   "name": "Band 2",
+   "measurement": {
+    "name": "m",
+    "source_path": null,
+    "sample_rate": 48000,
+    "freq": [
+     20,
+     200,
+     2000,
+     20000
+    ],
+    "magnitude": [
+     80,
+     81,
+     82,
+     83
+    ],
+    "phase": [
+     0,
+     -10,
+     -20,
+     -30
+    ],
+    "metadata": {
+     "date": null,
+     "mic": null,
+     "notes": null,
+     "smoothing": null
+    }
+   },
+   "measurement_file": null,
+   "settings": {
+    "smoothing": "off",
+    "delay_seconds": null,
+    "distance_meters": null,
+    "delay_removed": false,
+    "original_phase": null,
+    "floor_bounce": null,
+    "merge_source": null,
+    "analysis_dismissed": false
+   },
+   "target": {
+    "reference_level_db": 0,
+    "tilt_db_per_octave": -0.5,
+    "tilt_ref_freq": 1000,
+    "high_pass": {
+     "filter_type": "Gaussian",
+     "order": 4,
+     "freq_hz": 80,
+     "shape": 1.2,
+     "linear_phase": false,
+     "q": null,
+     "subsonic_protect": true
+    },
+    "low_pass": {
+     "filter_type": "Custom",
+     "order": 2,
+     "freq_hz": 2500,
+     "shape": null,
+     "linear_phase": true,
+     "q": 0.6,
+     "subsonic_protect": null
+    },
+    "low_shelf": null,
+    "high_shelf": null
+   },
+   "target_enabled": true,
+   "inverted": false,
+   "linked_to_next": false,
+   "peq_bands": [
+    {
+     "freq_hz": 40,
+     "gain_db": -3,
+     "q": 4,
+     "enabled": true,
+     "filter_type": "Peaking"
+    },
+    {
+     "freq_hz": 9000,
+     "gain_db": 1.5,
+     "q": 0.8,
+     "enabled": false,
+     "filter_type": "HighShelf"
+    }
+   ],
+   "exclusion_zones": [
+    {
+     "startHz": 300,
+     "endHz": 500
+    }
+   ],
+   "color": "#FF6B6B",
+   "alignment_delay": 0.00123,
+   "peq_optimized_target": {
+    "high_pass": {
+     "filter_type": "Gaussian",
+     "order": 4,
+     "freq_hz": 80,
+     "shape": 1.2,
+     "linear_phase": false,
+     "q": null,
+     "subsonic_protect": true
+    },
+    "low_pass": {
+     "filter_type": "Custom",
+     "order": 2,
+     "freq_hz": 2500,
+     "shape": null,
+     "linear_phase": true,
+     "q": 0.6,
+     "subsonic_protect": null
+    },
+    "exclusion_zones": [
+     {
+      "startHz": 300,
+      "endHz": 500
+     }
+    ],
+    "sample_rate": 48000,
+    "shaping": {
+     "tilt_db_per_octave": -0.5,
+     "tilt_ref_freq": 1000,
+     "low_shelf": null,
+     "high_shelf": null
+    }
+   }
+  }
+ ],
+ "active_band_id": "5464cb4a-035c-4703-9b14-49036d681d8b",
+ "show_phase": true,
+ "show_mag": true,
+ "show_target": true,
+ "next_band_num": 3,
+ "export_sample_rate": 48000,
+ "export_taps": 65536,
+ "export_window": "Blackman",
+ "active_tab": "measurements",
+ "export_hybrid_phase": false,
+ "peq_tolerance": 1,
+ "peq_max_bands": 20,
+ "peq_gain_regularization": 0,
+ "peq_floor": 60,
+ "peq_range_mode": "auto",
+ "peq_direct_low": 20,
+ "peq_direct_high": 30000,
+ "fir_iterations": 3,
+ "fir_freq_weighting": true,
+ "fir_narrowband_limit": true,
+ "fir_nb_smoothing_oct": 0.333,
+ "fir_nb_max_excess_db": 6,
+ "fir_max_boost_db": 24,
+ "fir_noise_floor_db": -150
+}

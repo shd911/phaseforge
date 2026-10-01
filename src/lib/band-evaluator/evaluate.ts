@@ -168,6 +168,42 @@ export async function reconstructTargetPhase(
   return basePhase.map((v, i) => v + (terms[i] ?? 0));
 }
 
+/** b141.71 (audit stage 2 A3): THE «Corrected» response of a band on a grid —
+ *  measurement + enabled PEQ + filter section (+ a scalar level shift), its
+ *  phase completed with the Gaussian/subsonic terms. It was assembled in four
+ *  places (band SPL, band IR, Σ, Σ IR). PEQ and section can be passed in when
+ *  the caller already has them on `freq` (the band view shares them with the
+ *  combined target). */
+export async function composeCorrected(
+  freq: number[],
+  measMag: number[],
+  measPhase: number[] | null,
+  band: BandState,
+  sampleRate: number,
+  pre?: {
+    peq?: { mag: number[]; phase: number[] };
+    section?: { mag: number[]; phase: number[] } | null;
+    levelDb?: number;
+  },
+): Promise<{ mag: number[]; phase: number[] | null }> {
+  const enabledPeq = (band.peqBands ?? []).filter((p: PeqBand) => p.enabled);
+  const [peq, section] = await Promise.all([
+    pre?.peq ?? (enabledPeq.length > 0
+      ? invoke<[number[], number[]]>("compute_peq_complex", { freq, bands: enabledPeq, sampleRate })
+          .then(([mag, phase]) => ({ mag, phase }))
+      : Promise.resolve(null)),
+    pre?.section !== undefined
+      ? Promise.resolve(pre.section)
+      : (band.targetEnabled ? filterSection(freq, band.target, sampleRate) : Promise.resolve(null)),
+  ]);
+  const lvl = pre?.levelDb ?? 0;
+  const mag = measMag.map((m, i) => m + (peq?.mag[i] ?? 0) + (section?.mag[i] ?? 0) + lvl);
+  if (!measPhase) return { mag, phase: null };
+  const base = measPhase.map((p, i) => p + (peq?.phase[i] ?? 0) + (section?.phase[i] ?? 0));
+  const phase = await reconstructTargetPhase(freq, base, band.target.high_pass, band.target.low_pass, sampleRate);
+  return { mag, phase };
+}
+
 /** b141.48 (audit 2026-10-01 H5): the filter section the FIR bakes into a
  *  band on top of the PEQ — HP/LP, tilt, shelves and, at export rates
  *  ≥ 88.2 kHz, the zero-phase ultrasonic low-pass. Level-free (the
@@ -380,18 +416,12 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
   let correctedMag: number[] | null = null;
   let correctedPhase: number[] | null = null;
   if (measurement) {
-    correctedMag = measurement.magnitude.map((m, i) =>
-      m + (peqMag[i] ?? 0) + (crossSectionMag?.[i] ?? 0)
-    );
-    if (measurement.phase) {
-      let basePhase = measurement.phase.map((p, i) =>
-        p + (peqPhase[i] ?? 0) + (crossSectionPhase?.[i] ?? 0)
-      );
-      basePhase = await reconstructTargetPhase(
-        freq, basePhase, band.target.high_pass, band.target.low_pass, evalSr,
-      );
-      correctedPhase = basePhase;
-    }
+    const c = await composeCorrected(freq, measurement.magnitude, measurement.phase ?? null, band, evalSr, {
+      peq: { mag: peqMag, phase: peqPhase },
+      section: crossSectionMag && crossSectionPhase ? { mag: crossSectionMag, phase: crossSectionPhase } : null,
+    });
+    correctedMag = c.mag;
+    correctedPhase = c.phase;
   }
 
   // 6. Optional FIR. b139.4a: send PhaseMode::Composite, which lets Rust
@@ -543,25 +573,11 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
             console.warn("[evaluateBandFull] extended measurement compute_impulse failed:", e);
           }
 
-          let irPeqMag: number[] = new Array(irFreq.length).fill(0);
-          let irPeqPhase: number[] = new Array(irFreq.length).fill(0);
-          if (enabledPeq.length > 0) {
-            const [pm, pp] = await invoke<[number[], number[]]>("compute_peq_complex", {
-              freq: irFreq, bands: enabledPeq, sampleRate: peqSampleRate,
-            });
-            irPeqMag = pm; irPeqPhase = pp;
-          }
-
-          const irXs = band.targetEnabled ? await filterSection(irFreq, band.target, peqSampleRate) : null;
-          const irXsMag: number[] = irXs?.mag ?? new Array(irFreq.length).fill(0);
-          const irXsPhase: number[] = irXs?.phase ?? new Array(irFreq.length).fill(0);
-
-          const irCorrMag = extMeas.mag.map((m, i) => m + irPeqMag[i] + irXsMag[i]);
-          const basePhase = (extMeas.phase ?? new Array<number>(irFreq.length).fill(0))
-            .map((p, i) => p + irPeqPhase[i] + irXsPhase[i]);
-          const irCorrPhase = await reconstructTargetPhase(
-            irFreq, basePhase, band.target.high_pass, band.target.low_pass, evalSr,
+          const irCorr = await composeCorrected(
+            irFreq, extMeas.mag, extMeas.phase ?? new Array<number>(irFreq.length).fill(0), band, peqSampleRate,
           );
+          const irCorrMag = irCorr.mag;
+          const irCorrPhase = irCorr.phase!;
           const cr = await invoke<ImpulseIpc>(
             "compute_impulse",
             { freq: irFreq, magnitude: irCorrMag, phase: irCorrPhase, sampleRate: sr },
