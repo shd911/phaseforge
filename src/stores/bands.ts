@@ -875,7 +875,7 @@ export const [peqDragging, setPeqDragging] = createSignal(false);
 // ---------------------------------------------------------------------------
 
 export const [plotShowOnly, setPlotShowOnly] =
-  createSignal<("measurement" | "target" | "corrected" | "peq" | "snapshot" | "fir")[] | null>(null);
+  createSignal<("measurement" | "target" | "corrected" | "peq" | "snapshot" | "fir" | "corrfir")[] | null>(null);
 
 // ---------------------------------------------------------------------------
 // Shared X-scale (sync frequency axis between top FrequencyPlot and bottom PeqResponsePlot)

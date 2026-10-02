@@ -97,7 +97,7 @@ interface LegendEntry {
   dash: boolean;
   visible: boolean;
   seriesIdx: number;
-  category: "measurement" | "target" | "corrected" | "peq" | "snapshot" | "fir";
+  category: "measurement" | "target" | "corrected" | "peq" | "snapshot" | "fir" | "corrfir";
 }
 
 // Per-band IR/Step data for SUM mode rendering
@@ -903,7 +903,7 @@ export default function FrequencyPlot() {
 
   // Find a legend entry for a specific [bandName, category] cell
   // On IR/Step tab: returns the IR entry (the Step entry is toggled via pairing in toggleLegendEntry)
-  function findCellEntry(colName: string, cat: "measurement" | "target" | "corrected" | "fir"): LegendEntry | undefined {
+  function findCellEntry(colName: string, cat: "measurement" | "target" | "corrected" | "fir" | "corrfir"): LegendEntry | undefined {
     const pTab = plotTab();
     const onIrStep = pTab === "ir";
     for (let i = 0; i < legendEntries.length; i++) {
@@ -927,7 +927,7 @@ export default function FrequencyPlot() {
           if (cat === "measurement" && e.label === colName) return e;
           if (cat === "target" && e.label === colName + " tgt") return e;
           if (cat === "corrected" && e.label.startsWith(colName + " corr+XO") && !e.label.endsWith(" \u00B0")) return e;
-          if (cat === "fir" && e.label === colName + " FIR") return e;
+          if (cat === "corrfir" && e.label === colName + " FIR") return e;
         }
       }
     }
@@ -935,7 +935,7 @@ export default function FrequencyPlot() {
   }
 
   // Find both IR and Step entries for a cell (IR/Step tab only)
-  function findCellEntryPair(colName: string, cat: "measurement" | "target" | "corrected" | "fir"): { ir: LegendEntry | undefined; step: LegendEntry | undefined } {
+  function findCellEntryPair(colName: string, cat: "measurement" | "target" | "corrected" | "fir" | "corrfir"): { ir: LegendEntry | undefined; step: LegendEntry | undefined } {
     let ir: LegendEntry | undefined, step: LegendEntry | undefined;
     for (let i = 0; i < legendEntries.length; i++) {
       const e = legendEntries[i];
@@ -958,7 +958,7 @@ export default function FrequencyPlot() {
   }
 
   // Переключение всей категории (targets / measurements / corrected)
-  function toggleCategory(cat: "measurement" | "target" | "corrected" | "peq" | "fir") {
+  function toggleCategory(cat: "measurement" | "target" | "corrected" | "peq" | "fir" | "corrfir") {
     const pTab = plotTab();
 
     const indices: number[] = [];
@@ -3155,7 +3155,7 @@ export default function FrequencyPlot() {
                 result.freq![k] < nyq && isFinite(c) ? c + dev[k] : NaN);
               uSeries.push({ label: "Corr FIR dB", stroke: cf.corrected, width: 1.5, dash: [2, 3], scale: "mag" });
               uData.push(firCorr);
-              legend.push({ label: "Corr FIR", color: cf.corrected, dash: true, visible: true, seriesIdx: sIdx, category: "fir" });
+              legend.push({ label: "Corr FIR", color: cf.corrected, dash: false, visible: true, seriesIdx: sIdx, category: "corrfir" });
               sIdx++;
 
               // b141.79: THE curve that goes into the file (the Export tab's
@@ -3203,7 +3203,7 @@ export default function FrequencyPlot() {
             const dv = firDevForPhase;
             uSeries.push({ label: "Corr FIR °", stroke: cf.correctedPhase, width: 1, dash: [2, 3], scale: "phase" });
             uData.push(wrapPhase(fullCorrectedPhase.map((p, k) => p + (dv[k] ?? 0))));
-            legend.push({ label: "Corr FIR °", color: cf.correctedPhase, dash: true, visible: false, seriesIdx: sIdx, category: "fir" });
+            legend.push({ label: "Corr FIR °", color: cf.correctedPhase, dash: true, visible: false, seriesIdx: sIdx, category: "corrfir" });
             sIdx++;
           }
           if (showPhase && fileForPhase) {
@@ -3538,19 +3538,19 @@ export default function FrequencyPlot() {
           const cf = bandColorFamily(bands[i].color);
           uSeries.push({ label: `${bands[i].name} FIR`, stroke: cf.corrected, width: 1.5, dash: [2, 3], scale: "mag" });
           uData.push(fp.mag);
-          legend.push({ label: `${bands[i].name} FIR`, color: cf.corrected, dash: true, visible: false, seriesIdx: sIdx, category: "fir" });
+          legend.push({ label: `${bands[i].name} FIR`, color: cf.corrected, dash: true, visible: false, seriesIdx: sIdx, category: "corrfir" });
           sIdx++;
         }
         const firSum = result.correctedCoherent ? coherentSum(freq, firParts) : null;
         if (firSum) {
           uSeries.push({ label: "Σ corr FIR", stroke: SUM_CORRECTED_COLOR, width: 2, dash: [2, 3], scale: "mag" });
           uData.push(firSum.mag);
-          legend.push({ label: "Σ corr FIR", color: SUM_CORRECTED_COLOR, dash: true, visible: true, seriesIdx: sIdx, category: "fir" });
+          legend.push({ label: "Σ corr FIR", color: SUM_CORRECTED_COLOR, dash: true, visible: true, seriesIdx: sIdx, category: "corrfir" });
           sIdx++;
           if (showPhase) {
             uSeries.push({ label: "Σ corr FIR °", stroke: SUM_CORRECTED_COLOR, width: 1, dash: [2, 3], scale: "phase" });
             uData.push(wrapPhase(firSum.phase));
-            legend.push({ label: "Σ corr FIR °", color: SUM_CORRECTED_COLOR, dash: true, visible: false, seriesIdx: sIdx, category: "fir" });
+            legend.push({ label: "Σ corr FIR °", color: SUM_CORRECTED_COLOR, dash: true, visible: false, seriesIdx: sIdx, category: "corrfir" });
             sIdx++;
           }
         }
@@ -4359,10 +4359,10 @@ export default function FrequencyPlot() {
             const bandNames = () => appState.bands.map(b => b.name);
             const cols = () => [...bandNames(), "\u03A3"];
             // b141.78: «FIR» row (exported filters) on the SPL tab only.
-            const categories = (): ("target" | "measurement" | "corrected" | "fir")[] =>
-              plotTab() === "ir" ? ["target", "measurement", "corrected"] : ["target", "measurement", "corrected", "fir"];
-            const catLabels: Record<string, string> = { target: "TARGETS", measurement: "MEAS", corrected: "CORR+XO", fir: "CORR FIR" };
-            const catColors: Record<string, string> = { target: SUM_TARGET_COLOR, measurement: SUM_MEAS_COLOR, corrected: SUM_CORRECTED_COLOR, fir: SUM_CORRECTED_COLOR };
+            const categories = (): ("target" | "measurement" | "corrected" | "corrfir")[] =>
+              plotTab() === "ir" ? ["target", "measurement", "corrected"] : ["target", "measurement", "corrected", "corrfir"];
+            const catLabels: Record<string, string> = { target: "TARGETS", measurement: "MEAS", corrected: "CORR+XO", corrfir: "CORR FIR" };
+            const catColors: Record<string, string> = { target: SUM_TARGET_COLOR, measurement: SUM_MEAS_COLOR, corrected: SUM_CORRECTED_COLOR, corrfir: SUM_CORRECTED_COLOR };
             return (
               <table>
                 <thead><tr>
@@ -4624,8 +4624,11 @@ export default function FrequencyPlot() {
         {/* Freq band matrix — checkboxes like IR/Step */}
         <div class="sum-vis-table">
           {(() => {
-            const categories: ("target" | "measurement" | "corrected" | "peq")[] = ["measurement", "target", "peq", "corrected"];
-            const catLabels: Record<string, string> = { target: "TARGET", measurement: "MEAS", corrected: "CORR", peq: "PEQ" };
+            // b141.80: FIR (the file's own curve) and CORR FIR (measurement
+            // through the file) rows — the band legend has a fixed row list.
+            const categories: ("target" | "measurement" | "corrected" | "peq" | "fir" | "corrfir")[] =
+              ["measurement", "target", "peq", "corrected", "fir", "corrfir"];
+            const catLabels: Record<string, string> = { target: "TARGET", measurement: "MEAS", corrected: "CORR", peq: "PEQ", fir: "FIR", corrfir: "CORR FIR" };
             return (
               <table>
                 <thead><tr><th class="sum-corner" /><th>dB</th><th>°</th></tr></thead>
