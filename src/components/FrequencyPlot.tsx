@@ -3110,6 +3110,7 @@ export default function FrequencyPlot() {
           // Normalize corrected to target in passband (b82.06)
           let corrOffsetUsed = 0;
           let firDevForPhase: number[] | null = null;
+          let fileForPhase: number[] | null = null;
           if (result.targetMag) {
             const [eL, eH] = passbandRange(band.target.high_pass?.freq_hz, band.target.low_pass?.freq_hz);
             let dSum = 0, dN = 0;
@@ -3152,10 +3153,32 @@ export default function FrequencyPlot() {
               const nyq = firRes.fir.sampleRate / 2;
               const firCorr = fullCorrected.map((c: number, k: number) =>
                 result.freq![k] < nyq && isFinite(c) ? c + dev[k] : NaN);
-              uSeries.push({ label: "FIR dB", stroke: cf.corrected, width: 1.5, dash: [2, 3], scale: "mag" });
+              uSeries.push({ label: "Corr FIR dB", stroke: cf.corrected, width: 1.5, dash: [2, 3], scale: "mag" });
               uData.push(firCorr);
-              legend.push({ label: "FIR", color: cf.corrected, dash: true, visible: true, seriesIdx: sIdx, category: "fir" });
+              legend.push({ label: "Corr FIR", color: cf.corrected, dash: true, visible: true, seriesIdx: sIdx, category: "fir" });
               sIdx++;
+
+              // b141.79: THE curve that goes into the file (the Export tab's
+              // «FIR»): the realized filter response itself, placed on the
+              // target level by matching «target + PEQ» in the passband.
+              const model = evalRes.combinedTargetMag ?? evalRes.targetMag;
+              if (model) {
+                const rMag = resampleOnLogGrid(firRes.freq, firRes.fir.realizedMag, result.freq!);
+                const [pL, pH] = passbandRange(band.target.high_pass?.freq_hz, band.target.low_pass?.freq_hz);
+                let dS = 0, dN = 0;
+                for (let k = 0; k < result.freq!.length; k++) {
+                  const f = result.freq![k];
+                  if (f < pL || f > pH || !isFinite(model[k]) || !isFinite(rMag[k])) continue;
+                  dS += model[k] - rMag[k]; dN++;
+                }
+                const lift = dN > 0 ? dS / dN : 0;
+                const fileMag = rMag.map((v, k) => result.freq![k] < nyq ? v + lift : NaN);
+                uSeries.push({ label: "FIR dB", stroke: cf.target, width: 1.5, scale: "mag" });
+                uData.push(fileMag);
+                legend.push({ label: "FIR", color: cf.target, dash: false, visible: true, seriesIdx: sIdx, category: "fir" });
+                sIdx++;
+                fileForPhase = resampleOnLogGrid(firRes.freq, firRes.fir.realizedPhase, result.freq!);
+              }
               firDevForPhase = interpPhaseOnGrid(firRes.freq, firRes.fir.devPhase, result.freq!, { logSpace: true, outside: "clamp" }) as number[];
             }
           }
@@ -3178,9 +3201,15 @@ export default function FrequencyPlot() {
           }
           if (fullCorrectedPhase && showPhase && firDevForPhase) {
             const dv = firDevForPhase;
-            uSeries.push({ label: "FIR °", stroke: cf.correctedPhase, width: 1, dash: [2, 3], scale: "phase" });
+            uSeries.push({ label: "Corr FIR °", stroke: cf.correctedPhase, width: 1, dash: [2, 3], scale: "phase" });
             uData.push(wrapPhase(fullCorrectedPhase.map((p, k) => p + (dv[k] ?? 0))));
-            legend.push({ label: "FIR °", color: cf.correctedPhase, dash: true, visible: true, seriesIdx: sIdx, category: "fir" });
+            legend.push({ label: "Corr FIR °", color: cf.correctedPhase, dash: true, visible: false, seriesIdx: sIdx, category: "fir" });
+            sIdx++;
+          }
+          if (showPhase && fileForPhase) {
+            uSeries.push({ label: "FIR °", stroke: cf.targetPhase, width: 1, dash: [4, 4], scale: "phase" });
+            uData.push(wrapPhase(fileForPhase));
+            legend.push({ label: "FIR °", color: cf.targetPhase, dash: true, visible: true, seriesIdx: sIdx, category: "fir" });
             sIdx++;
           }
 
@@ -3514,14 +3543,14 @@ export default function FrequencyPlot() {
         }
         const firSum = result.correctedCoherent ? coherentSum(freq, firParts) : null;
         if (firSum) {
-          uSeries.push({ label: "Σ FIR", stroke: SUM_CORRECTED_COLOR, width: 2, dash: [2, 3], scale: "mag" });
+          uSeries.push({ label: "Σ corr FIR", stroke: SUM_CORRECTED_COLOR, width: 2, dash: [2, 3], scale: "mag" });
           uData.push(firSum.mag);
-          legend.push({ label: "Σ FIR", color: SUM_CORRECTED_COLOR, dash: true, visible: true, seriesIdx: sIdx, category: "fir" });
+          legend.push({ label: "Σ corr FIR", color: SUM_CORRECTED_COLOR, dash: true, visible: true, seriesIdx: sIdx, category: "fir" });
           sIdx++;
           if (showPhase) {
-            uSeries.push({ label: "Σ FIR °", stroke: SUM_CORRECTED_COLOR, width: 1, dash: [2, 3], scale: "phase" });
+            uSeries.push({ label: "Σ corr FIR °", stroke: SUM_CORRECTED_COLOR, width: 1, dash: [2, 3], scale: "phase" });
             uData.push(wrapPhase(firSum.phase));
-            legend.push({ label: "Σ FIR °", color: SUM_CORRECTED_COLOR, dash: true, visible: false, seriesIdx: sIdx, category: "fir" });
+            legend.push({ label: "Σ corr FIR °", color: SUM_CORRECTED_COLOR, dash: true, visible: false, seriesIdx: sIdx, category: "fir" });
             sIdx++;
           }
         }
@@ -4332,7 +4361,7 @@ export default function FrequencyPlot() {
             // b141.78: «FIR» row (exported filters) on the SPL tab only.
             const categories = (): ("target" | "measurement" | "corrected" | "fir")[] =>
               plotTab() === "ir" ? ["target", "measurement", "corrected"] : ["target", "measurement", "corrected", "fir"];
-            const catLabels: Record<string, string> = { target: "TARGETS", measurement: "MEAS", corrected: "CORR+XO", fir: "FIR" };
+            const catLabels: Record<string, string> = { target: "TARGETS", measurement: "MEAS", corrected: "CORR+XO", fir: "CORR FIR" };
             const catColors: Record<string, string> = { target: SUM_TARGET_COLOR, measurement: SUM_MEAS_COLOR, corrected: SUM_CORRECTED_COLOR, fir: SUM_CORRECTED_COLOR };
             return (
               <table>
