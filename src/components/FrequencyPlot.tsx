@@ -4629,40 +4629,37 @@ export default function FrequencyPlot() {
             const categories: ("target" | "measurement" | "corrected" | "peq" | "fir" | "corrfir")[] =
               ["measurement", "target", "peq", "corrected", "fir", "corrfir"];
             const catLabels: Record<string, string> = { target: "TARGET", measurement: "MEAS", corrected: "CORR", peq: "PEQ", fir: "FIR", corrfir: "CORR FIR" };
+            // b141.83: one line — «NAME dB °» groups side by side. The old
+            // row-per-category table took chart height and left the width empty.
             return (
-              <table>
-                <thead><tr><th class="sum-corner" /><th>dB</th><th>°</th></tr></thead>
-                <tbody>
-                  <For each={categories}>
-                    {(cat) => {
-                      const catEnts = () => legendEntries.filter(e => e.category === cat);
-                      const magE = () => catEnts().find(e => !e.dash);
-                      const phE = () => catEnts().find(e => e.dash);
-                      return (
-                        <Show when={catEnts().length > 0}>
-                          <tr>
-                            <td class="sum-row-header" onClick={() => toggleCategory(cat)} style={{ opacity: (magE()?.visible || phE()?.visible) ? 1 : 0.4 }}>{catLabels[cat]}</td>
-                            <td class="sum-cell">
-                              <Show when={magE()}>{(e) => (
-                                <button class={`legend-item ${e().visible ? "" : "legend-off"}`} onClick={() => toggleLegendEntry(legendEntries.indexOf(e()))}>
-                                  <span class="legend-swatch" style={{ "background-color": e().visible ? e().color : "transparent", "border-color": e().color }} />
-                                </button>
-                              )}</Show>
-                            </td>
-                            <td class="sum-cell">
-                              <Show when={phE()}>{(e) => (
-                                <button class={`legend-item ${e().visible ? "" : "legend-off"}`} onClick={() => toggleLegendEntry(legendEntries.indexOf(e()))}>
-                                  <span class={`legend-swatch legend-swatch-dash`} style={{ "background-color": "transparent", "border-color": e().color, opacity: e().visible ? 1 : 0.3 }} />
-                                </button>
-                              )}</Show>
-                            </td>
-                          </tr>
-                        </Show>
-                      );
-                    }}
-                  </For>
-                </tbody>
-              </table>
+              <div class="band-legend-row">
+                <For each={categories}>
+                  {(cat) => {
+                    const catEnts = () => legendEntries.filter(e => e.category === cat);
+                    const magE = () => catEnts().find(e => !e.dash);
+                    const phE = () => catEnts().find(e => e.dash);
+                    return (
+                      <Show when={catEnts().length > 0}>
+                        <span class="band-legend-group">
+                          <span class="sum-row-header band-legend-name" onClick={() => toggleCategory(cat)}
+                            style={{ opacity: (magE()?.visible || phE()?.visible) ? 1 : 0.4 }}>{catLabels[cat]}</span>
+                          <Show when={magE()}>{(e) => (
+                            <button class={`legend-item ${e().visible ? "" : "legend-off"}`} title="dB" onClick={() => toggleLegendEntry(legendEntries.indexOf(e()))}>
+                              <span class="legend-swatch" style={{ "background-color": e().visible ? e().color : "transparent", "border-color": e().color }} />
+                            </button>
+                          )}</Show>
+                          <Show when={phE()}>{(e) => (
+                            <button class={`legend-item ${e().visible ? "" : "legend-off"}`} title="°" onClick={() => toggleLegendEntry(legendEntries.indexOf(e()))}>
+                              <span class="legend-swatch legend-swatch-dash" style={{ "background-color": "transparent", "border-color": e().color, opacity: e().visible ? 1 : 0.3 }} />
+                            </button>
+                          )}</Show>
+                        </span>
+                      </Show>
+                    );
+                  }}
+                </For>
+                <span class="band-legend-hint">■ dB · ┅ °</span>
+              </div>
             );
           })()}
         </div>

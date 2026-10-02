@@ -2996,3 +2996,26 @@ input[type="checkbox"]:focus-visible {
 .btn-label-stack > .btn-label-off {
   visibility: hidden;
 }
+
+/* b141.83: band legend in one line */
+.band-legend-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs) var(--space-md);
+  padding: var(--space-xxs) var(--space-sm);
+}
+.band-legend-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.band-legend-name {
+  cursor: pointer;
+  margin-right: 2px;
+}
+.band-legend-hint {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
