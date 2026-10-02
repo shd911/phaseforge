@@ -796,7 +796,7 @@ input[type="checkbox"]:focus-visible {
   min-height: 0;
 }
 
-/* Axis controls — float inside plot, hidden until hover */
+/* Axis controls */
 .axis-controls-y,
 .axis-controls-x {
   position: absolute;
@@ -804,23 +804,11 @@ input[type="checkbox"]:focus-visible {
   display: flex;
   gap: var(--space-xxs);
 
-  opacity: 0;
-  transition: opacity 0.2s ease;
-  pointer-events: none;
+  /* b141.82: always visible — they no longer cover anything. */
 }
 
-.plot-body:hover .axis-controls-y,
-.plot-body:hover .axis-controls-x,
-.impulse-body:hover .axis-controls-y,
-.impulse-body:hover .axis-controls-x {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-/* b141.81: the controls live in the free gutters, not over the tick labels —
-   vertical ones in the axis-title column (left of the dB numbers / right of
-   the phase numbers), horizontal ones as a 2×2 block in the empty bottom-left
-   corner between the two axes. */
+/* b141.81: vertical controls live in the axis-title columns (left of the dB
+   numbers / right of the phase numbers), not over the tick labels. */
 .axis-controls-y {
   flex-direction: column;
   top: 8px;
@@ -835,12 +823,13 @@ input[type="checkbox"]:focus-visible {
   right: 2px;
 }
 
+/* b141.82: the horizontal controls are a row of their own under the chart
+   (in the layout flow, not floating over the frequency labels). */
 .axis-controls-x {
-  bottom: 2px;
-  left: 2px;
-  display: grid;
-  grid-template-columns: repeat(2, auto);
-  padding: 0;
+  position: static;
+  justify-content: center;
+  padding: var(--space-xxs) 0;
+  flex: 0 0 auto;
 }
 
 .axis-btn {
