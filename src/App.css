@@ -817,27 +817,30 @@ input[type="checkbox"]:focus-visible {
   pointer-events: auto;
 }
 
+/* b141.81: the controls live in the free gutters, not over the tick labels —
+   vertical ones in the axis-title column (left of the dB numbers / right of
+   the phase numbers), horizontal ones as a 2×2 block in the empty bottom-left
+   corner between the two axes. */
 .axis-controls-y {
   flex-direction: column;
-  top: 28px;
-  padding: var(--space-xs) var(--space-xxs);
-
+  top: 8px;
+  padding: 0;
 }
 
 .axis-controls-y-left {
-  left: 52px;
+  left: 2px;
 }
 
 .axis-controls-y-right {
-  right: 48px;
+  right: 2px;
 }
 
 .axis-controls-x {
-  bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: var(--space-xxs) var(--space-xs);
-
+  bottom: 2px;
+  left: 2px;
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  padding: 0;
 }
 
 .axis-btn {
