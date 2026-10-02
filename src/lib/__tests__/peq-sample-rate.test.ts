@@ -55,6 +55,7 @@ vi.mock("@tauri-apps/api/core", () => ({
         impulse: new Array(taps).fill(0), realized_mag: [0, 0], realized_phase: [0, 0],
         taps, sample_rate: args.settings.sample_rate, norm_db: 0, causality: 1,
         wav_delay_samples: taps / 2, route: "cepstral", peak_boost_db: 0, freq: [5, 20000],
+        dev_mag: [0, 0], dev_phase: [0, 0],
       };
     }
     if (cmd === "pick_fir_route") return "Cepstral";

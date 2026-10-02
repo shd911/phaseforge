@@ -24,6 +24,7 @@ vi.mock("@tauri-apps/api/core", () => ({
         realized_mag: g.map(() => 0), realized_phase: g.map(() => 0),
         taps: args.settings.taps, sample_rate: args.settings.sample_rate, norm_db: 0, causality: 1,
         wav_delay_samples: args.settings.taps / 2, route: "cepstral", peak_boost_db: 1.5, freq: g,
+        dev_mag: g.map(() => 0), dev_phase: g.map(() => 0),
       };
     }
     throw new Error(`Unmocked command: ${cmd}`);

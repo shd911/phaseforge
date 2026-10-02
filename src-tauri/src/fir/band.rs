@@ -62,6 +62,12 @@ pub struct BandFirResult {
     pub peak_boost_db: f64,
     /// The FIR grid the realized curves are on (5 Hz – Nyquist, with tail).
     pub freq: Vec<f64>,
+    /// b141.78: what the realized FIR does beyond the model it was asked for
+    /// (target + PEQ, ultrasonic LP included), on `freq`: magnitude in dB
+    /// (un-normalised) and wrapped phase in degrees. «Corrected» + this =
+    /// the measurement through the exported file.
+    pub dev_mag: Vec<f64>,
+    pub dev_phase: Vec<f64>,
 }
 
 fn is_gaussian_min_phase(f: Option<&FilterConfig>) -> bool {
@@ -243,8 +249,17 @@ pub fn generate_band_fir(
             &freq, &mag, &peq_mag, &combined, &config, hp, lp,
         )?, BandFirRoute::Cepstral),
     };
+    // Deviation of the realized FIR from the request (same grid, no interp).
+    let us = super::ultrasonic::ultrasonic_lp_for(sr);
+    let wrap = |d: f64| ((d + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
+    let dev_mag: Vec<f64> = (0..freq.len()).map(|i| {
+        let mut req = mag[i] + peq_mag[i];
+        if let Some(c) = us { req += 20.0 * super::ultrasonic::ultrasonic_lp_gain(freq[i], c).max(1e-30).log10(); }
+        fir.realized_mag[i] + fir.norm_db - req
+    }).collect();
+    let dev_phase: Vec<f64> = (0..freq.len()).map(|i| wrap(fir.realized_phase[i] - combined[i])).collect();
     if omit_impulse { fir.impulse = Vec::new(); }
-    Ok(BandFirResult { fir, route, peak_boost_db, freq })
+    Ok(BandFirResult { fir, route, peak_boost_db, freq, dev_mag, dev_phase })
 }
 
 /// Test / harness entry: [`generate_band_fir`] driven by a `FirConfig` (its
@@ -333,6 +348,18 @@ mod tests {
         assert_eq!(r.route, BandFirRoute::Cepstral);
         for (f, m) in r.freq.iter().zip(&r.fir.realized_mag) {
             if *f >= 20.0 && *f <= 20_000.0 { assert!(m.abs() < 0.1, "{m:.3} dB at {f:.0} Hz"); }
+        }
+    }
+
+    #[test]
+    fn deviation_is_small_where_the_fir_realises_the_model() {
+        let lr4 = |fc: f64| FilterConfig { filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: fc,
+            shape: None, linear_phase: false, q: None, subsonic_protect: None };
+        let mut s = settings(96_000.0);
+        s.taps = 65_536;
+        let r = generate_band_fir(&curve(Some(lr4(200.0)), Some(lr4(3000.0))), &[], &s, true).unwrap();
+        for (f, d) in r.freq.iter().zip(&r.dev_mag) {
+            if *f >= 300.0 && *f <= 2000.0 { assert!(d.abs() < 0.05, "dev {d:.3} dB at {f:.0} Hz"); }
         }
     }
 }

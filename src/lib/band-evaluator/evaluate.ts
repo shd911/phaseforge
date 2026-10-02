@@ -128,6 +128,10 @@ export interface BandEvalResult {
     route: "iir" | "cepstral";
     /** b141.40: ultrasonic low-pass corner baked into the FIR, null if none. */
     ultrasonicLpHz: number | null;
+    /** b141.78: what the exported FIR does beyond the model it was asked for
+     *  (dB, wrapped °) on `freq`. «Corrected» + dev = measurement × the file. */
+    devMag: number[];
+    devPhase: number[];
     /** b141.53 (audit 2026-10-01 M2): peak of target + PEQ (dB) the FIR was
      *  asked for. The cepstral route clips it at «max boost»; the IIR route
      *  cannot clip a biquad, so the export warns when it exceeds the limit. */
@@ -451,6 +455,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
       taps: number; sample_rate: number; norm_db: number; causality: number;
       wav_delay_samples: number; ultrasonic_lp_hz?: number | null;
       route: "iir" | "cepstral"; peak_boost_db: number; freq: number[];
+      dev_mag: number[]; dev_phase: number[];
     }>("generate_band_fir", {
       target: targetCurve,
       peq: enabledPeq,
@@ -479,6 +484,9 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
       route: result.route,
       ultrasonicLpHz: result.ultrasonic_lp_hz ?? null,
       peakBoostDb: result.peak_boost_db,
+      // b141.78: realized − requested, on the caller's grid (see fir::band).
+      devMag: interpOnGrid(result.freq, result.dev_mag, freq, { logSpace: true, outside: "clamp" }) as number[],
+      devPhase: interpPhaseOnGrid(result.freq, result.dev_phase, freq, { logSpace: true, outside: "clamp" }) as number[],
     };
   }
 

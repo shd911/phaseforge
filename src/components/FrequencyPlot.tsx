@@ -97,7 +97,7 @@ interface LegendEntry {
   dash: boolean;
   visible: boolean;
   seriesIdx: number;
-  category: "measurement" | "target" | "corrected" | "peq" | "snapshot";
+  category: "measurement" | "target" | "corrected" | "peq" | "snapshot" | "fir";
 }
 
 // Per-band IR/Step data for SUM mode rendering
@@ -903,7 +903,7 @@ export default function FrequencyPlot() {
 
   // Find a legend entry for a specific [bandName, category] cell
   // On IR/Step tab: returns the IR entry (the Step entry is toggled via pairing in toggleLegendEntry)
-  function findCellEntry(colName: string, cat: "measurement" | "target" | "corrected"): LegendEntry | undefined {
+  function findCellEntry(colName: string, cat: "measurement" | "target" | "corrected" | "fir"): LegendEntry | undefined {
     const pTab = plotTab();
     const onIrStep = pTab === "ir";
     for (let i = 0; i < legendEntries.length; i++) {
@@ -927,6 +927,7 @@ export default function FrequencyPlot() {
           if (cat === "measurement" && e.label === colName) return e;
           if (cat === "target" && e.label === colName + " tgt") return e;
           if (cat === "corrected" && e.label.startsWith(colName + " corr+XO") && !e.label.endsWith(" \u00B0")) return e;
+          if (cat === "fir" && e.label === colName + " FIR") return e;
         }
       }
     }
@@ -934,7 +935,7 @@ export default function FrequencyPlot() {
   }
 
   // Find both IR and Step entries for a cell (IR/Step tab only)
-  function findCellEntryPair(colName: string, cat: "measurement" | "target" | "corrected"): { ir: LegendEntry | undefined; step: LegendEntry | undefined } {
+  function findCellEntryPair(colName: string, cat: "measurement" | "target" | "corrected" | "fir"): { ir: LegendEntry | undefined; step: LegendEntry | undefined } {
     let ir: LegendEntry | undefined, step: LegendEntry | undefined;
     for (let i = 0; i < legendEntries.length; i++) {
       const e = legendEntries[i];
@@ -957,7 +958,7 @@ export default function FrequencyPlot() {
   }
 
   // Переключение всей категории (targets / measurements / corrected)
-  function toggleCategory(cat: "measurement" | "target" | "corrected" | "peq") {
+  function toggleCategory(cat: "measurement" | "target" | "corrected" | "peq" | "fir") {
     const pTab = plotTab();
 
     const indices: number[] = [];
@@ -3108,6 +3109,7 @@ export default function FrequencyPlot() {
 
           // Normalize corrected to target in passband (b82.06)
           let corrOffsetUsed = 0;
+          let firDevForPhase: number[] | null = null;
           if (result.targetMag) {
             const [eL, eH] = passbandRange(band.target.high_pass?.freq_hz, band.target.low_pass?.freq_hz);
             let dSum = 0, dN = 0;
@@ -3140,23 +3142,21 @@ export default function FrequencyPlot() {
             legend.push({ label: corrLabel, color: cf.corrected, dash: false, visible: true, seriesIdx: sIdx, category: "corrected" });
             sIdx++;
 
-            // b141.77: measurement × the exported FIR (realized, un-normalised:
-            // + norm_db − reference level, i.e. the level-free section + PEQ
-            // the file really carries), with the same passband offset as
-            // «Corrected» so the two overlay where they agree. Differences are
-            // what taps/window/route do to the model.
+            // b141.77/78: measurement × the exported FIR = «Corrected» + what the
+            // file does beyond the model (realized − requested, fir::band).
+            // Same level as «Corrected», so the two overlay where they agree.
             const firRes = await firPromise;
             if (gen !== renderGen) return;
-            if (firRes?.fir && firRes.fir.realizedMag.length > 0) {
-              const realized = resampleOnLogGrid(firRes.freq, firRes.fir.realizedMag, result.freq!);
-              const lvl = firRes.fir.normDb - (band.target.reference_level_db ?? 0) + corrOffsetUsed;
+            if (firRes?.fir && firRes.fir.devMag.length > 0) {
+              const dev = interpOnGrid(firRes.freq, firRes.fir.devMag, result.freq!, { logSpace: true, outside: "clamp" }) as number[];
               const nyq = firRes.fir.sampleRate / 2;
-              const firCorr = result.measurement.magnitude.map((m: number, k: number) =>
-                result.freq![k] < nyq && isFinite(m) ? m + realized[k] + lvl : NaN);
+              const firCorr = fullCorrected.map((c: number, k: number) =>
+                result.freq![k] < nyq && isFinite(c) ? c + dev[k] : NaN);
               uSeries.push({ label: "FIR dB", stroke: cf.corrected, width: 1.5, dash: [2, 3], scale: "mag" });
               uData.push(firCorr);
-              legend.push({ label: "FIR", color: cf.corrected, dash: true, visible: true, seriesIdx: sIdx, category: "corrected" });
+              legend.push({ label: "FIR", color: cf.corrected, dash: true, visible: true, seriesIdx: sIdx, category: "fir" });
               sIdx++;
+              firDevForPhase = interpPhaseOnGrid(firRes.freq, firRes.fir.devPhase, result.freq!, { logSpace: true, outside: "clamp" }) as number[];
             }
           }
 
@@ -3174,6 +3174,13 @@ export default function FrequencyPlot() {
             });
             uData.push(wrapPhase(fullCorrectedPhase));
             legend.push({ label: phaseLabel + " \u00B0", color: cf.correctedPhase, dash: true, visible: true, seriesIdx: sIdx, category: "corrected" });
+            sIdx++;
+          }
+          if (fullCorrectedPhase && showPhase && firDevForPhase) {
+            const dv = firDevForPhase;
+            uSeries.push({ label: "FIR °", stroke: cf.correctedPhase, width: 1, dash: [2, 3], scale: "phase" });
+            uData.push(wrapPhase(fullCorrectedPhase.map((p, k) => p + (dv[k] ?? 0))));
+            legend.push({ label: "FIR °", color: cf.correctedPhase, dash: true, visible: true, seriesIdx: sIdx, category: "fir" });
             sIdx++;
           }
 
@@ -3363,6 +3370,11 @@ export default function FrequencyPlot() {
     // every Σ toggle (full N-band DSP per click). evaluateSum snapshots the
     // scalar fields itself and keys measurements by identity.
     const bands: BandState[] = appState.bands;
+    // b141.78: each band's EXPORTED FIR (metadata only, shared cache), started
+    // with the export settings read now — for the Σ «FIR» row.
+    const firPromises = bands.map((b) => b.targetEnabled && b.measurement
+      ? evaluateBandFull(firExportRequest(b, { omitImpulse: true })).catch(() => null)
+      : Promise.resolve(null));
     try {
       const result = await evaluateSum(bands, { sampleRate: exportSampleRate() });
       if (gen !== renderGen) return;
@@ -3471,6 +3483,47 @@ export default function FrequencyPlot() {
             visible: false, seriesIdx: sIdx, category: "corrected",
           });
           sIdx++;
+        }
+
+        // b141.78: «FIR» = each band's corrected + what its exported FIR does
+        // beyond the model; Σ FIR is their coherent sum with the same delays
+        // and polarity as Σ corr — the sum the convolver will really play.
+        const firResults = await Promise.all(firPromises);
+        if (gen !== renderGen) return;
+        const firParts = bands.map((b, i) => {
+          const pb = result.perBandCorrected[i];
+          const fr = firResults[i];
+          if (!pb || !fr?.fir || fr.fir.devMag.length === 0) return null;
+          const dm = interpOnGrid(fr.freq, fr.fir.devMag, freq, { logSpace: true, outside: "clamp" }) as number[];
+          const dp = interpPhaseOnGrid(fr.freq, fr.fir.devPhase, freq, { logSpace: true, outside: "clamp" }) as number[];
+          return {
+            mag: pb.mag.map((v, k) => v + dm[k]),
+            phase: pb.phase.map((v, k) => v + (dp[k] ?? 0)),
+            sign: (b.inverted ? -1 : 1) as 1 | -1,
+            delay: b.alignmentDelay ?? 0,
+          };
+        });
+        for (let i = 0; i < bands.length; i++) {
+          const fp = firParts[i];
+          if (!fp) continue;
+          const cf = bandColorFamily(bands[i].color);
+          uSeries.push({ label: `${bands[i].name} FIR`, stroke: cf.corrected, width: 1.5, dash: [2, 3], scale: "mag" });
+          uData.push(fp.mag);
+          legend.push({ label: `${bands[i].name} FIR`, color: cf.corrected, dash: true, visible: false, seriesIdx: sIdx, category: "fir" });
+          sIdx++;
+        }
+        const firSum = result.correctedCoherent ? coherentSum(freq, firParts) : null;
+        if (firSum) {
+          uSeries.push({ label: "Σ FIR", stroke: SUM_CORRECTED_COLOR, width: 2, dash: [2, 3], scale: "mag" });
+          uData.push(firSum.mag);
+          legend.push({ label: "Σ FIR", color: SUM_CORRECTED_COLOR, dash: true, visible: true, seriesIdx: sIdx, category: "fir" });
+          sIdx++;
+          if (showPhase) {
+            uSeries.push({ label: "Σ FIR °", stroke: SUM_CORRECTED_COLOR, width: 1, dash: [2, 3], scale: "phase" });
+            uData.push(wrapPhase(firSum.phase));
+            legend.push({ label: "Σ FIR °", color: SUM_CORRECTED_COLOR, dash: true, visible: false, seriesIdx: sIdx, category: "fir" });
+            sIdx++;
+          }
         }
       }
 
@@ -4276,9 +4329,11 @@ export default function FrequencyPlot() {
           {(() => {
             const bandNames = () => appState.bands.map(b => b.name);
             const cols = () => [...bandNames(), "\u03A3"];
-            const categories: ("target" | "measurement" | "corrected")[] = ["target", "measurement", "corrected"];
-            const catLabels: Record<string, string> = { target: "TARGETS", measurement: "MEAS", corrected: "CORR+XO" };
-            const catColors: Record<string, string> = { target: SUM_TARGET_COLOR, measurement: SUM_MEAS_COLOR, corrected: SUM_CORRECTED_COLOR };
+            // b141.78: «FIR» row (exported filters) on the SPL tab only.
+            const categories = (): ("target" | "measurement" | "corrected" | "fir")[] =>
+              plotTab() === "ir" ? ["target", "measurement", "corrected"] : ["target", "measurement", "corrected", "fir"];
+            const catLabels: Record<string, string> = { target: "TARGETS", measurement: "MEAS", corrected: "CORR+XO", fir: "FIR" };
+            const catColors: Record<string, string> = { target: SUM_TARGET_COLOR, measurement: SUM_MEAS_COLOR, corrected: SUM_CORRECTED_COLOR, fir: SUM_CORRECTED_COLOR };
             return (
               <table>
                 <thead><tr>
@@ -4308,7 +4363,7 @@ export default function FrequencyPlot() {
                   }}</For>
                 </tr></thead>
                 <tbody>
-                  <For each={categories}>
+                  <For each={categories()}>
                     {(cat) => {
                       const catEnts = () => legendEntries.filter(e => e.category === cat);
                       const allOn = () => { const ce = catEnts(); return ce.length > 0 && ce.every(e => e.visible); };
