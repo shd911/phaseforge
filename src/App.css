@@ -662,6 +662,7 @@ input[type="checkbox"]:focus-visible {
   cursor: pointer;
   text-align: center;
   padding: var(--space-xxs) var(--space-sm);
+  white-space: nowrap;
 
 }
 .sum-vis-table .sum-cell:hover {
@@ -763,14 +764,17 @@ input[type="checkbox"]:focus-visible {
   outline: none;
 }
 .delay-input:focus { border-color: var(--border-focus); }
-/* b141.61: convolver delay under a Σ DELAY field (alignment + WAV shortfall). */
+/* b141.77: WAV shortfall «+X» next to a Σ DELAY field; the slot is reserved
+   (visibility, not display) so the table never changes size. */
 .delay-conv {
+  display: inline-block;
+  min-width: 6ch;
+  margin-left: var(--space-xxs);
   font-size: var(--fs-xs);
   font-family: var(--mono);
   color: var(--warn-amber);
-  text-align: center;
+  text-align: left;
   cursor: help;
-  line-height: 1.1;
 }
 
 .plot-body {

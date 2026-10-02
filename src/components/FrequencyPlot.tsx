@@ -37,7 +37,7 @@ import {
 import { hasActiveSubsonicProtect } from "../lib/types";
 import { evaluateBandFull, evaluateSum, reconstructTargetPhase } from "../lib/band-evaluator";
 import { coherentSum } from "../lib/band-evaluator/sum";
-import { buildCommonGrid, buildFirGrid, interpOnGrid, interpPhaseOnGrid, irTime, type ImpulseIpc } from "../lib/band-evaluator/grid";
+import { buildCommonGrid, buildFirGrid, interpOnGrid, interpPhaseOnGrid, irTime, resampleOnLogGrid, type ImpulseIpc } from "../lib/band-evaluator/grid";
 import { bandRequestKey } from "../lib/band-evaluator/cache";
 import { computeAutoAlign } from "../lib/auto-align";
 import { attachFieldWheel, newWheelAccumulator, wheelSteps } from "../lib/wheel-step";
@@ -2922,6 +2922,15 @@ export default function FrequencyPlot() {
   async function renderBandMode(band: BandState, showPhase: boolean, showMag: boolean, showTarget: boolean) {
     const gen = ++renderGen;
     zoomCenter = 0; // reset before async — will be recalculated from measurement
+    // b141.77: the EXPORTED FIR's realized response, drawn as «FIR» next to the
+    // model «Corrected». Same request as the WAV export (metadata only, shared
+    // cache), started now — in parallel with the main evaluation and with the
+    // export settings read synchronously so the render effect tracks them.
+    const firPromise = band.targetEnabled && band.measurement
+      ? evaluateBandFull(firExportRequest(band, { omitImpulse: true })).catch((e) => {
+          console.warn("[SPL FIR] export FIR failed:", e); return null;
+        })
+      : Promise.resolve(null);
     try {
       // b139.2: migrated to canonical BandEvaluator. Adapter below preserves
       // the legacy { measurement, freq, targetMag, targetPhase } shape so the
@@ -3098,6 +3107,7 @@ export default function FrequencyPlot() {
               );
 
           // Normalize corrected to target in passband (b82.06)
+          let corrOffsetUsed = 0;
           if (result.targetMag) {
             const [eL, eH] = passbandRange(band.target.high_pass?.freq_hz, band.target.low_pass?.freq_hz);
             let dSum = 0, dN = 0;
@@ -3110,6 +3120,7 @@ export default function FrequencyPlot() {
               }
             }
             const corrOffset = dN > 0 ? dSum / dN : 0;
+            corrOffsetUsed = Math.abs(corrOffset) > 0.01 ? corrOffset : 0;
             if (Math.abs(corrOffset) > 0.01) {
               for (let k = 0; k < fullCorrected.length; k++) {
                 if (isFinite(fullCorrected[k])) fullCorrected[k] += corrOffset;
@@ -3128,6 +3139,25 @@ export default function FrequencyPlot() {
             uData.push(fullCorrected);
             legend.push({ label: corrLabel, color: cf.corrected, dash: false, visible: true, seriesIdx: sIdx, category: "corrected" });
             sIdx++;
+
+            // b141.77: measurement × the exported FIR (realized, un-normalised:
+            // + norm_db − reference level, i.e. the level-free section + PEQ
+            // the file really carries), with the same passband offset as
+            // «Corrected» so the two overlay where they agree. Differences are
+            // what taps/window/route do to the model.
+            const firRes = await firPromise;
+            if (gen !== renderGen) return;
+            if (firRes?.fir && firRes.fir.realizedMag.length > 0) {
+              const realized = resampleOnLogGrid(firRes.freq, firRes.fir.realizedMag, result.freq!);
+              const lvl = firRes.fir.normDb - (band.target.reference_level_db ?? 0) + corrOffsetUsed;
+              const nyq = firRes.fir.sampleRate / 2;
+              const firCorr = result.measurement.magnitude.map((m: number, k: number) =>
+                result.freq![k] < nyq && isFinite(m) ? m + realized[k] + lvl : NaN);
+              uSeries.push({ label: "FIR dB", stroke: cf.corrected, width: 1.5, dash: [2, 3], scale: "mag" });
+              uData.push(firCorr);
+              legend.push({ label: "FIR", color: cf.corrected, dash: true, visible: true, seriesIdx: sIdx, category: "corrected" });
+              sIdx++;
+            }
           }
 
           // b139.4c: corrected phase from BandEvaluator (Gaussian/subsonic
@@ -4425,14 +4455,16 @@ export default function FrequencyPlot() {
                                       });
                                     }}
                                   />
-                                  <Show when={(convDelays()[b().id] ?? 0) >= 5e-6}>
-                                    <div
-                                      class="delay-conv"
-                                      title={"Задержка для конвольвера: выравнивание + нехватка ведущих нулей в WAV. " +
-                                        "Хвост фильтра этого бэнда не уместился в половину файла, поэтому " +
-                                        "его WAV начинается раньше остальных на разницу."}
-                                    >конв. {(((b().alignmentDelay ?? 0) + (convDelays()[b().id] ?? 0)) * 1000).toFixed(2)} ms</div>
-                                  </Show>
+                                  {/* b141.77: the WAV shortfall sits in the same cell as
+                                      «+X», in a slot that is always reserved — a line that
+                                      appeared and vanished made the table jump. */}
+                                  <span
+                                    class="delay-conv"
+                                    style={{ visibility: (convDelays()[b().id] ?? 0) >= 5e-6 ? "visible" : "hidden" }}
+                                    title={"Добавьте к задержке в конвольвере: хвост фильтра этого бэнда не уместился " +
+                                      "в половину файла, и его WAV начинается раньше остальных на это время. " +
+                                      `В конвольвер: ${(((b().alignmentDelay ?? 0) + (convDelays()[b().id] ?? 0)) * 1000).toFixed(2)} ms.`}
+                                  >+{((convDelays()[b().id] ?? 0) * 1000).toFixed(2)}</span>
                                   </>
                                 )}
                               </Show>
