@@ -149,6 +149,12 @@
 - **Wrapped-phase interpolation is delay-aware** (b141.49,
   `interpPhaseOnGrid` with `mag`): bulk delay removed before shortest-arc
   interpolation — > 180° per bin above ~10 kHz at 2–3 ms otherwise.
+- **Refinement correction is min-phase on a linear main** (b141.85,
+  `iterative_refine`): the correction (refined − requested) rides with the
+  PEQ Hilbert term, not with the zero-phase main. Zero-phase, it was a
+  symmetric copy of the window-cut min-phase PEQ tails: −50 dB of 25–35 Hz
+  pre-ring 10–200 ms ahead of the peak on a real woofer (+6 dB @ 23 Hz),
+  −97 dB after. Pinned by `tests/refine_no_prering.rs`.
 - **Bilinear digital cascade** (IIR path) has frequency-dependent
   deviation up to ~20° vs analog reference accumulated over 8 biquads.
   REPhase reference comparison gives tighter empirical bound (≤ 2.5° on

@@ -298,10 +298,26 @@ pub(crate) fn iterative_refine(
         } else if recompute_composite {
             let sub = subsonic_mag_fixed.as_ref()
                 .expect("subsonic_mag_fixed must exist in Composite mode");
+            // b141.84: on a linear main the refinement's own correction
+            // (refined − requested) rides with the min-phase PEQ term, not
+            // with the zero-phase main. It mostly restores what the window
+            // cut off causal (min-phase PEQ) tails; a zero-phase copy of it
+            // is symmetric — −50 dB of 25–35 Hz pre-ring 10–200 ms ahead of
+            // the peak on a real woofer band with +6 dB @ 23 Hz (vs −97 dB
+            // without refinement).
+            let peq_eff: Vec<f64>;
+            let peq_term: &[f64] = if config.linear_phase_main {
+                peq_eff = (0..n_bins)
+                    .map(|k| peq_mag_db[k] + refined_db[k] - target_correction_db[k])
+                    .collect();
+                &peq_eff
+            } else {
+                peq_mag_db
+            };
             iter_phase = composite_phase_inner(
                 &refined_db,
                 sub,
-                peq_mag_db,
+                peq_term,
                 n_fft,
                 config.linear_phase_main,
                 config.noise_floor_db,
