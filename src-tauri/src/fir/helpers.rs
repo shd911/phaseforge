@@ -325,6 +325,16 @@ pub(crate) fn iterative_refine(
                 config.max_boost_db,
             );
             debug_assert_eq!(iter_phase.len(), n_bins);
+        } else if use_model_phase {
+            // b141.86: same rule for the mixed per-filter phase (HP min + LP
+            // linear): the correction gets its own Hilbert on top of the
+            // fixed model phase. At the bare model phase it was zero-phase —
+            // −52 dB of LF pre-ring vs −97 dB unrefined.
+            let delta: Vec<f64> = (0..n_bins)
+                .map(|k| refined_db[k] - target_correction_db[k])
+                .collect();
+            let dp = minimum_phase_from_magnitude(&delta, n_fft);
+            iter_phase = phase_rad.iter().zip(&dp).map(|(a, b)| a + b).collect();
         }
         let mut new_spectrum = assemble_complex_spectrum(&refined_db, &iter_phase, n_fft);
         engine.fft_inverse(&mut new_spectrum);

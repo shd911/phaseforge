@@ -154,7 +154,9 @@
   PEQ Hilbert term, not with the zero-phase main. Zero-phase, it was a
   symmetric copy of the window-cut min-phase PEQ tails: −50 dB of 25–35 Hz
   pre-ring 10–200 ms ahead of the peak on a real woofer (+6 dB @ 23 Hz),
-  −97 dB after. Pinned by `tests/refine_no_prering.rs`.
+  −97 dB after. Mixed phase (HP min + LP lin, b141.86): the correction gets
+  its own Hilbert on top of the fixed model phase (−52 → −97 dB). Pinned by
+  `tests/refine_no_prering.rs`.
 - **Bilinear digital cascade** (IIR path) has frequency-dependent
   deviation up to ~20° vs analog reference accumulated over 8 biquads.
   REPhase reference comparison gives tighter empirical bound (≤ 2.5° on

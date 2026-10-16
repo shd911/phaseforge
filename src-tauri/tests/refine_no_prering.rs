@@ -1,4 +1,5 @@
-// b141.85: the iterative refinement must not add pre-ring to a linear-main FIR.
+// b141.85/86: the iterative refinement must not add pre-ring to a linear-main
+// or mixed-phase FIR.
 //
 // Its correction restores mostly what the window cut off the causal tails of
 // the min-phase PEQ; applied zero-phase (with the linear main) it is a
@@ -32,7 +33,7 @@ fn settings(taps: usize, sr: f64, iterations: usize) -> BandFirSettings {
 }
 
 /// Pre-ring of the refined FIR stays within 6 dB of the unrefined one, and
-/// the refinement still pays off in the passband.
+/// the refinement still pays off in the passband magnitude.
 fn assert_refine_is_causal(target: &TargetCurve, peq: &[PeqBand], taps: usize, sr: f64, lab: &str) {
     let r0 = generate_band_fir(target, peq, &settings(taps, sr, 0), false).unwrap();
     let r3 = generate_band_fir(target, peq, &settings(taps, sr, 3), false).unwrap();
@@ -44,7 +45,9 @@ fn assert_refine_is_causal(target: &TargetCurve, peq: &[PeqBand], taps: usize, s
     println!("{lab}: pre-ring 10–200 ms {p0:.1} → {p3:.1} dB; dev mag {:.3} → {:.3} dB, phase {:.2} → {:.2}°",
         d0.0, d3.0, d0.1, d3.1);
     assert!(p3 <= p0 + 6.0, "{lab}: refinement added pre-ring: {p0:.1} → {p3:.1} dB");
-    assert!(d3.0 <= d0.0 && d3.1 <= d0.1, "{lab}: refinement made the passband worse");
+    // Magnitude must improve; phase may move by under 1° (mixed phase: the
+    // correction's own Hilbert at a sharp LF PEQ, 1.5 → 2.2° at 26 Hz).
+    assert!(d3.0 <= d0.0 && d3.1 <= d0.1 + 1.0, "{lab}: refinement made the passband worse");
 }
 
 fn lp(order: u8, f: f64) -> FilterConfig {
@@ -60,6 +63,19 @@ fn refinement_adds_no_pre_ring_synthetic() {
         {"freq_hz": 23.0, "gain_db": 6.0, "q": 2.7, "enabled": true},
         {"freq_hz": 37.0, "gain_db": 1.8, "q": 2.0, "enabled": true}]"#).unwrap();
     assert_refine_is_causal(&target, &peq, 65536, 48_000.0, "synthetic 48k/64K");
+}
+
+/// b141.86: mixed per-filter phase (HP min + LP linear) — the refinement
+/// correction used to ride the fixed model phase zero-phase.
+#[test]
+fn refinement_adds_no_pre_ring_mixed_phase() {
+    let hp = FilterConfig { linear_phase: false, ..lp(4, 15.0) };
+    let target = TargetCurve { reference_level_db: 0.0, tilt_db_per_octave: 0.0, tilt_ref_freq: 1000.0,
+        high_pass: Some(hp), low_pass: Some(lp(2, 250.0)), low_shelf: None, high_shelf: None };
+    let peq: Vec<PeqBand> = serde_json::from_str(r#"[
+        {"freq_hz": 23.0, "gain_db": 6.0, "q": 2.7, "enabled": true},
+        {"freq_hz": 37.0, "gain_db": 1.8, "q": 2.0, "enabled": true}]"#).unwrap();
+    assert_refine_is_causal(&target, &peq, 65536, 48_000.0, "mixed HP min + LP lin 48k/64K");
 }
 
 #[test]
