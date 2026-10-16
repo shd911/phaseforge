@@ -579,9 +579,8 @@ function PeqTab() {
               <label class="fb-label">Диапазон</label>
               <select class="peq-range-select" value={peqRangeMode()} onChange={(e) => setPeqRangeMode(e.currentTarget.value as "auto" | "direct")}><option value="auto">Авто</option><option value="direct">Заданный</option></select>
             </div>
-            {peqRangeMode() === "auto" ? (
-              <div class="fb-row"><label class="fb-label" title="Не ставить PEQ там, где цель на столько dB ниже опорного уровня">Порог dB</label><NumberInput value={peqFloor()} onChange={setPeqFloor} min={0} max={120} step={1} precision={0} /></div>
-            ) : (
+            <div class="fb-row"><label class="fb-label" title="Не ставить PEQ там, где цель на столько dB ниже опорного уровня (в обоих режимах диапазона)">Порог dB</label><NumberInput value={peqFloor()} onChange={setPeqFloor} min={0} max={120} step={1} precision={0} /></div>
+            {peqRangeMode() === "direct" && (
               <div class="fb-row"><label class="fb-label">Hz</label><NumberInput value={peqDirectLow()} onChange={setPeqDirectLow} min={20} max={F_MAX_WORK} step={10} precision={0} /><span style={{ margin: "0 var(--space-xxs)", color: "#8b8b96" }}>–</span><NumberInput value={peqDirectHigh()} onChange={setPeqDirectHigh} min={20} max={F_MAX_WORK} step={10} precision={0} /></div>
             )}
           </div>

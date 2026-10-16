@@ -72,6 +72,19 @@ export function peqRange(): [number, number] {
   return [Math.max(20, lo / 8), Math.min(fMaxForRate(exportSampleRate()), hi * 8)];
 }
 
+/** Narrow [lo, hi] to the span where the target is above `threshold` (dB).
+ *  Leaves the range as is when the target never rises above it. */
+export function trimRangeByFloor(
+  freq: number[], targetMag: number[], lo: number, hi: number, threshold: number,
+): [number, number] {
+  let first = -1, last = -1;
+  for (let i = 0; i < freq.length; i++) {
+    if (targetMag[i] > threshold) { if (first < 0) first = i; last = i; }
+  }
+  if (first < 0) return [lo, hi];
+  return [Math.max(lo, freq[first]), Math.min(hi, freq[last])];
+}
+
 // --- Internal: optimize a specific band ---
 // Disabled PEQ bands are kept in the table as they are; the optimizer re-fits
 // only the remaining enabled slots and does not count the disabled ones.
@@ -118,33 +131,24 @@ async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBa
   let peqHigh: number;
 
   if (rangeMode === "direct") {
-    // Direct mode: user-specified range, ignore floor and crossover
+    // Direct mode: user-specified range, ignore the crossover
     peqLow = Math.min(directLow, directHigh);
     peqHigh = Math.min(Math.max(directLow, directHigh), fMaxForRate(sampleRate));
   } else {
-    // Auto mode: derive from crossover + floor
+    // Auto mode: derive from crossover
     peqLow = isHybrid ? 20 : Math.max(20, fLow / 8);
     // Cap at Nyquist·0.95 of the export rate: a PEQ above Nyquist is not
     // realisable by the biquad it will be exported as.
     peqHigh = fMaxForRate(sampleRate);
-
-    // Trim PEQ range by target floor: don't optimize where target is below threshold
-    if (floorDb > 0) {
-      const refLevel = targetCurve.reference_level_db;
-      const threshold = refLevel - floorDb;
-      for (let i = 0; i < meas.freq.length; i++) {
-        if (targetResp.magnitude[i] > threshold) {
-          peqLow = Math.max(peqLow, meas.freq[i]);
-          break;
-        }
-      }
-      for (let i = meas.freq.length - 1; i >= 0; i--) {
-        if (targetResp.magnitude[i] > threshold) {
-          peqHigh = Math.min(peqHigh, meas.freq[i]);
-          break;
-        }
-      }
-    }
+  }
+  // b141.84: the floor trims BOTH modes — in direct mode it used to be
+  // ignored, and a woofer LR2 @ 250 Hz got two of its six PEQ at 3.9/5.1 kHz,
+  // where the target sits ~95 dB down.
+  if (floorDb > 0) {
+    [peqLow, peqHigh] = trimRangeByFloor(
+      meas.freq, targetResp.magnitude, peqLow, peqHigh,
+      targetCurve.reference_level_db - floorDb,
+    );
   }
   const activeBandBudget = Math.max(1, bandBudget - frozenBands.length);
   const config: PeqConfig = {
