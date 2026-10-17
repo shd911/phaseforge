@@ -28,6 +28,7 @@ export interface PeqParamsSnap {
   gainRegularization: number;
   peqFloor: number;
   peqSmoothFit?: boolean;
+  peqBoostFloor?: number;
   peqRangeMode: PeqRangeMode;
   peqDirectLow: number;
   peqDirectHigh: number;

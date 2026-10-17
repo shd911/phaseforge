@@ -78,6 +78,22 @@ pub struct PeqConfig {
     /// several dB above ~10 kHz. Default keeps old projects working.
     #[serde(default = "default_sample_rate")]
     pub sample_rate: f64,
+    /// b141.92: band centres outside this range may only cut. The frontend
+    /// sets it to where the target is within «Подъём до» dB of its reference:
+    /// a boost under a crossover stopband (+32.6 dB at 13.4 kHz on a band
+    /// whose LR2 2 kHz target is −66 dB there) adds level and IMD for nothing.
+    #[serde(default)]
+    pub boost_range: Option<(f64, f64)>,
+}
+
+impl PeqConfig {
+    /// Largest gain a band centred at `freq_hz` may have.
+    pub fn max_boost_at(&self, freq_hz: f64) -> f64 {
+        match self.boost_range {
+            Some((lo, hi)) if freq_hz < lo || freq_hz > hi => 0.0,
+            _ => self.max_boost_db,
+        }
+    }
 }
 
 pub(crate) fn default_sample_rate() -> f64 {

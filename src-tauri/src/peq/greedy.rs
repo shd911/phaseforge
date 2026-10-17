@@ -46,7 +46,7 @@ pub(crate) fn greedy_fit_adaptive(freq: &[f64], smoothed_error: &[f64], config: 
         // Gain = negative of error (to correct it), clamped to limits
         let mut gain = -peak_val;
         if gain > 0.0 {
-            gain = gain.min(config.max_boost_db);
+            gain = gain.min(config.max_boost_at(freq[peak_idx]));
         } else {
             gain = gain.max(-config.max_cut_db);
         }

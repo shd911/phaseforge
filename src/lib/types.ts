@@ -254,6 +254,8 @@ export interface PeqConfig {
   gain_regularization?: number;
   /** b141.5: sample rate the realized biquads run at (= export sample rate). */
   sample_rate?: number;
+  /** b141.92: band centres outside may only cut (null/absent = no limit). */
+  boost_range?: [number, number] | null;
 }
 
 export interface PeqResult {

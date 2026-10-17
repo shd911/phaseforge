@@ -30,6 +30,9 @@ export const [peqFloor, setPeqFloor] = createSignal(60); // dB below reference �
 // b141.87: «Без отражений» — fit the smoothed measurement (1/48 < 100 Hz,
 // 1/3 above), not the reflection ripple of a long-window export.
 export const [peqSmoothFit, setPeqSmoothFit] = createSignal(true);
+// b141.92: «Подъём до» — PEQ may boost only where the target is within this
+// many dB of its reference; deeper it may only cut (0 = no limit).
+export const [peqBoostFloor, setPeqBoostFloor] = createSignal(30);
 export type PeqRangeMode = "auto" | "direct";
 export const [peqRangeMode, setPeqRangeMode] = createSignal<PeqRangeMode>("auto");
 export const [peqDirectLow, setPeqDirectLow] = createSignal(20);
@@ -83,6 +86,7 @@ interface RangeInputs {
   directLow: number;
   directHigh: number;
   floorDb: number;
+  boostFloorDb: number;
   sampleRate: number;
 }
 
@@ -92,7 +96,7 @@ function snapshotRangeInputs(b: BandState): RangeInputs {
     meas: JSON.parse(JSON.stringify(b.measurement!)),
     target: JSON.parse(JSON.stringify(b.target)),
     mode: peqRangeMode(), directLow: peqDirectLow(), directHigh: peqDirectHigh(),
-    floorDb: peqFloor(), sampleRate: exportSampleRate(),
+    floorDb: peqFloor(), boostFloorDb: peqBoostFloor(), sampleRate: exportSampleRate(),
   };
 }
 
@@ -129,7 +133,12 @@ async function resolveRange(inp: RangeInputs) {
     range = trimRangeByFloor(meas.freq, targetResp.magnitude, range[0], range[1],
       targetCurve.reference_level_db - inp.floorDb);
   }
-  return { targetCurve, targetResp, range };
+  // b141.92: where boosts are allowed — the same trim at «Подъём до».
+  const boostRange: [number, number] | null = inp.boostFloorDb > 0
+    ? trimRangeByFloor(meas.freq, targetResp.magnitude, range[0], range[1],
+      targetCurve.reference_level_db - inp.boostFloorDb)
+    : null;
+  return { targetCurve, targetResp, range, boostRange };
 }
 
 /** The optimizer's range for a band with a measurement (the «Hz» row). */
@@ -156,7 +165,7 @@ async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBa
   const smoothFit = peqSmoothFit(), sampleRate = exportSampleRate();
   const bandBudget = maxBands(), tol = tolerance(), gainReg = gainRegularization();
   const rangeIn = snapshotRangeInputs(b);
-  const { targetResp, range: [peqLow, peqHigh] } = await resolveRange(rangeIn);
+  const { targetResp, range: [peqLow, peqHigh], boostRange } = await resolveRange(rangeIn);
 
   // Disabled bands are kept in the table untouched, but they do NOT play:
   // the plot, the Σ and the FIR all skip them (evaluate.ts filters on
@@ -173,6 +182,7 @@ async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBa
     max_boost_db: isHybrid ? 60.0 : 6.0,
     max_cut_db: isHybrid ? 60.0 : 18.0,
     freq_range: [peqLow, peqHigh],
+    boost_range: boostRange,
     hybrid: isHybrid,
     gain_regularization: gainReg,
     // b141.5 (audit): optimize at the rate the biquads will actually run at.
@@ -366,6 +376,7 @@ registerHistoryHooks(
         gainRegularization: gainRegularization(),
         peqFloor: peqFloor(),
         peqSmoothFit: peqSmoothFit(),
+        peqBoostFloor: peqBoostFloor(),
         peqRangeMode: peqRangeMode(),
         peqDirectLow: peqDirectLow(),
         peqDirectHigh: peqDirectHigh(),
@@ -380,6 +391,7 @@ registerHistoryHooks(
     setGainRegularization(entry.peqParams.gainRegularization);
     setPeqFloor(entry.peqParams.peqFloor);
     setPeqSmoothFit(entry.peqParams.peqSmoothFit ?? true);
+    setPeqBoostFloor(entry.peqParams.peqBoostFloor ?? 30);
     setPeqRangeMode(entry.peqParams.peqRangeMode);
     setPeqDirectLow(entry.peqParams.peqDirectLow);
     setPeqDirectHigh(entry.peqParams.peqDirectHigh);

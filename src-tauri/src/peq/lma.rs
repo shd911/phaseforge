@@ -234,8 +234,8 @@ impl<'a> LmaSolver<'a> {
         let n_bands = params.len() / 3;
         for i in 0..n_bands {
             params[i * 3] = params[i * 3].clamp(self.config.freq_range.0, self.config.freq_range.1);
-            params[i * 3 + 1] = params[i * 3 + 1].clamp(-self.config.max_cut_db, self.config.max_boost_db);
             let freq = params[i * 3];
+            params[i * 3 + 1] = params[i * 3 + 1].clamp(-self.config.max_cut_db, self.config.max_boost_at(freq));
             let q_max = if freq > self.lp_freq {
                 Q_MAX_ABOVE_LP
             } else {
@@ -607,6 +607,7 @@ mod tests {
         let target = vec![80.0_f64; n];
         let weights = vec![1.0_f64; n];
         let config = PeqConfig {
+            boost_range: None,
             max_bands: 20,
             tolerance_db: 1.0,
             peak_bias: 1.5,
@@ -677,6 +678,7 @@ mod tests {
 
         for reg in [0.0, 0.2] {
             let config = PeqConfig {
+                boost_range: None,
                 max_bands: 20,
                 tolerance_db: 1.0,
                 peak_bias: 1.5,

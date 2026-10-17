@@ -262,7 +262,7 @@ pub fn auto_peq_lma(
 
         // Add a new band at worst residual
         let new_fc = freq[worst_idx];
-        let new_gain = (-raw_err).clamp(-config.max_cut_db, config.max_boost_db);
+        let new_gain = (-raw_err).clamp(-config.max_cut_db, config.max_boost_at(new_fc));
         let new_q = if new_fc > lp_freq {
             1.0_f64 // wide filter above LP
         } else {
@@ -478,6 +478,7 @@ pub fn auto_peq_above_lp(
 
     // Configure for above-LP: cuts only (max_boost_db = 0), range from HP up
     let above_config = PeqConfig {
+        boost_range: None,
         max_bands: config.max_bands,
         tolerance_db: config.tolerance_db,
         peak_bias: config.peak_bias,
@@ -530,6 +531,7 @@ mod tests {
         let meas: Vec<f64> = inverse.iter().map(|c| 80.0 - c).collect();
 
         let config = PeqConfig {
+            boost_range: None,
             max_bands: 10,
             tolerance_db: 1.0,
             peak_bias: 1.5,
@@ -569,6 +571,7 @@ mod tests {
         meas[40] = f64::NAN;
         let target = vec![80.0_f64; 100];
         let config = PeqConfig {
+            boost_range: None,
             max_bands: 5, tolerance_db: 1.0, peak_bias: 1.5, max_boost_db: 6.0,
             max_cut_db: 18.0, freq_range: (80.0, 15000.0), smoothing_fraction: None,
             min_band_distance_oct: None, hybrid: false, gain_regularization: 0.0,
@@ -591,6 +594,7 @@ mod tests {
         let target = vec![80.0_f64; freq.len()];
         let weights = vec![1.0_f64; freq.len()];
         let config = PeqConfig {
+            boost_range: None,
             max_bands: 10, tolerance_db: 0.5, peak_bias: 1.5, max_boost_db: 6.0, max_cut_db: 18.0,
             freq_range: (20.0, 20000.0), smoothing_fraction: None, min_band_distance_oct: None,
             hybrid: false, gain_regularization: 0.0, sample_rate: 48000.0,
@@ -640,6 +644,7 @@ mod tests {
         let target = vec![80.0_f64; freq.len()];
         let weights = vec![1.0_f64; freq.len()];
         let config = PeqConfig {
+            boost_range: None,
             max_bands: 3, tolerance_db: 0.5, peak_bias: 1.0, max_boost_db: 6.0, max_cut_db: 18.0,
             freq_range: (20.0, 20000.0), smoothing_fraction: None, min_band_distance_oct: None,
             hybrid: false, gain_regularization: 0.0, sample_rate: 48000.0,
@@ -658,6 +663,7 @@ mod tests {
         let meas: Vec<f64> = freq.iter().map(|&f| if f < 60.0 { 50.0 } else { 80.0 }).collect();
         let target = vec![80.0_f64; freq.len()];
         let config = PeqConfig {
+            boost_range: None,
             max_bands: 5, tolerance_db: 1.0, peak_bias: 1.5, max_boost_db: 6.0, max_cut_db: 18.0,
             freq_range: (500.0, 2000.0), smoothing_fraction: None, min_band_distance_oct: None,
             hybrid: false, gain_regularization: 0.0, sample_rate: 48000.0,
@@ -755,6 +761,7 @@ mod tests {
         let freq = make_log_freq(200, 20.0, 20000.0);
         let mag = vec![80.0; 200];
         let config = PeqConfig {
+            boost_range: None,
             max_bands: 20,
             tolerance_db: 1.0,
             peak_bias: 1.5,
@@ -787,6 +794,7 @@ mod tests {
         }
 
         let config = PeqConfig {
+            boost_range: None,
             max_bands: 20,
             tolerance_db: 1.0,
             peak_bias: 1.5,
@@ -855,6 +863,7 @@ mod tests {
         let meas = vec![80.0, 80.0];
         let target = vec![80.0, 80.0, 80.0];
         let config = PeqConfig {
+            boost_range: None,
             max_bands: 10,
             tolerance_db: 1.0,
             peak_bias: 1.5,
@@ -875,6 +884,7 @@ mod tests {
         let freq = vec![100.0, 200.0, 300.0];
         let mag = vec![80.0; 3];
         let config = PeqConfig {
+            boost_range: None,
             max_bands: 10,
             tolerance_db: 1.0,
             peak_bias: 1.5,
@@ -902,6 +912,7 @@ mod tests {
         }
 
         let config = PeqConfig {
+            boost_range: None,
             max_bands: 20,
             tolerance_db: 2.0,
             peak_bias: 1.5,
@@ -954,6 +965,7 @@ mod tests {
         }
 
         let config = PeqConfig {
+            boost_range: None,
             max_bands: 20,
             tolerance_db: 1.0,
             peak_bias: 1.5,
@@ -1059,6 +1071,7 @@ mod tests {
         }
 
         let config = PeqConfig {
+            boost_range: None,
             max_bands: 20,
             tolerance_db: 1.0,
             peak_bias: 1.5,
@@ -1094,6 +1107,7 @@ mod tests {
         let meas = vec![80.0; 500]; // flat
 
         let config = PeqConfig {
+            boost_range: None,
             max_bands: 20,
             tolerance_db: 1.0,
             peak_bias: 1.5,
@@ -1208,6 +1222,7 @@ mod tests {
         }
 
         let config = PeqConfig {
+            boost_range: None,
             max_bands: 10,
             tolerance_db: 1.0,
             peak_bias: 1.5,
@@ -1260,6 +1275,7 @@ mod tests {
         }
 
         let mk_config = |sr: f64| PeqConfig {
+            boost_range: None,
             max_bands: 6,
             tolerance_db: 0.5,
             peak_bias: 1.5,
@@ -1297,6 +1313,7 @@ mod tests {
         let meas = vec![80.0; 500];
 
         let config = PeqConfig {
+            boost_range: None,
             max_bands: 10,
             tolerance_db: 1.0,
             peak_bias: 1.5,
@@ -1333,6 +1350,7 @@ mod tests {
         }
 
         let config = PeqConfig {
+            boost_range: None,
             max_bands: 10,
             tolerance_db: 1.0,
             peak_bias: 1.5,

@@ -63,6 +63,8 @@ pub struct ProjectFile {
     #[serde(default)]
     pub peq_smooth_fit: Option<bool>,
     #[serde(default)]
+    pub peq_boost_floor: Option<f64>,
+    #[serde(default)]
     pub peq_range_mode: Option<String>,
     #[serde(default)]
     pub peq_direct_low: Option<f64>,

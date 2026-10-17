@@ -66,6 +66,7 @@ import {
   gainRegularization, setGainRegularization,
   peqFloor, setPeqFloor,
   peqSmoothFit, setPeqSmoothFit,
+  peqBoostFloor, setPeqBoostFloor,
   peqRangeMode, setPeqRangeMode,
   peqDirectLow, setPeqDirectLow,
   peqDirectHigh, setPeqDirectHigh,
@@ -600,6 +601,7 @@ function PeqTab() {
               </span>
             </div>
             <div class="fb-row"><label class="fb-label" title="Не ставить PEQ там, где цель на столько dB ниже опорного уровня (в обоих режимах диапазона)">Порог dB</label><NumberInput value={peqFloor()} onChange={setPeqFloor} min={0} max={120} step={1} precision={0} /></div>
+            <div class="fb-row"><label class="fb-label" title="Подъём PEQ только там, где цель не ниже опорного уровня на столько dB; глубже — только подавление (0 — без ограничения)">Подъём до dB</label><NumberInput value={peqBoostFloor()} onChange={setPeqBoostFloor} min={0} max={120} step={1} precision={0} /></div>
             {/* b141.90: one Hz row — the auto range as text (it sat beside the
                 buttons), editable fields in «Заданный». */}
             {peqRangeMode() === "direct" ? (
