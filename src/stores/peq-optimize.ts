@@ -57,23 +57,11 @@ function setBandStats(id: string, stats: { maxErr: number; iters: number } | nul
 }
 
 // --- Helpers ---
-export function crossoverRange(): [number, number] {
-  const b = activeBand();
-  const t = b?.target;
-  const fLow = t?.high_pass?.freq_hz ?? 20;
-  const fHigh = t?.low_pass?.freq_hz ?? F_MAX_WORK;
-  return [fLow, fHigh];
-}
-
 export function formatFreq(hz: number): string {
   if (hz >= 1000) return (hz / 1000).toFixed(1) + "k";
   return Math.round(hz).toString();
 }
 
-export function peqRange(): [number, number] {
-  const [lo, hi] = crossoverRange();
-  return [Math.max(20, lo / 8), Math.min(fMaxForRate(exportSampleRate()), hi * 8)];
-}
 
 /** Narrow [lo, hi] to the span where the target is above `threshold` (dB).
  *  Leaves the range as is when the target never rises above it. */
@@ -86,6 +74,67 @@ export function trimRangeByFloor(
   }
   if (first < 0) return [lo, hi];
   return [Math.max(lo, freq[first]), Math.min(hi, freq[last])];
+}
+
+interface RangeInputs {
+  meas: Measurement;
+  target: BandState["target"];
+  mode: PeqRangeMode;
+  directLow: number;
+  directHigh: number;
+  floorDb: number;
+  sampleRate: number;
+}
+
+/** Plain copies of everything the PEQ range depends on — read before any await. */
+function snapshotRangeInputs(b: BandState): RangeInputs {
+  return {
+    meas: JSON.parse(JSON.stringify(b.measurement!)),
+    target: JSON.parse(JSON.stringify(b.target)),
+    mode: peqRangeMode(), directLow: peqDirectLow(), directHigh: peqDirectHigh(),
+    floorDb: peqFloor(), sampleRate: exportSampleRate(),
+  };
+}
+
+/** The frequency range the optimizer works in — the one rule for the fit and
+ *  for the «Hz» row (b141.91). Auto: 20 Hz – 0.95·Nyquist, trimmed by «Порог
+ *  dB» only (the old fLow/8 cap and the ×8 shown beside the button disagreed
+ *  with each other and with the fit). Direct: the user's range, then the floor. */
+async function resolveRange(inp: RangeInputs) {
+  const { meas } = inp;
+  // adaptive passband for refOffset (the one shared rule)
+  const [refLow, refHigh] = passbandRange(inp.target?.high_pass?.freq_hz, inp.target?.low_pass?.freq_hz);
+  let refOffset = 0, count = 0;
+  for (let i = 0; i < meas.freq.length; i++) {
+    if (meas.freq[i] >= refLow && meas.freq[i] <= refHigh) {
+      refOffset += meas.magnitude[i]; count++;
+    }
+  }
+  refOffset = count > 0 ? refOffset / count : 0;
+  const targetCurve = inp.target;
+  targetCurve.reference_level_db += refOffset;
+  const targetResp = await invoke<{ magnitude: number[]; phase: number[] }>("evaluate_target", {
+    target: targetCurve, freq: meas.freq,
+  });
+  // Cap at Nyquist·0.95 of the export rate: a PEQ above Nyquist is not
+  // realisable by the biquad it will be exported as.
+  const fMax = fMaxForRate(inp.sampleRate);
+  let range: [number, number] = inp.mode === "direct"
+    ? [Math.min(inp.directLow, inp.directHigh), Math.min(Math.max(inp.directLow, inp.directHigh), fMax)]
+    : [20, fMax];
+  // b141.84: the floor trims BOTH modes — in direct mode it used to be
+  // ignored, and a woofer LR2 @ 250 Hz got two of its six PEQ at 3.9/5.1 kHz,
+  // where the target sits ~95 dB down.
+  if (inp.floorDb > 0) {
+    range = trimRangeByFloor(meas.freq, targetResp.magnitude, range[0], range[1],
+      targetCurve.reference_level_db - inp.floorDb);
+  }
+  return { targetCurve, targetResp, range };
+}
+
+/** The optimizer's range for a band with a measurement (the «Hz» row). */
+export async function peqRangeFor(b: BandState): Promise<[number, number]> {
+  return (await resolveRange(snapshotRangeInputs(b))).range;
 }
 
 // --- Internal: optimize a specific band ---
@@ -101,26 +150,13 @@ async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBa
   const exclusionZonesSnap: ExclusionZone[] = JSON.parse(JSON.stringify(b.exclusionZones ?? []));
   const fLow = b.target?.high_pass?.freq_hz ?? 20;
   const fHigh = b.target?.low_pass?.freq_hz ?? F_MAX_REF;
-  // adaptive passband for refOffset (the one shared rule)
-  const [refLow, refHigh] = passbandRange(b.target?.high_pass?.freq_hz, b.target?.low_pass?.freq_hz);
-  let refOffset = 0, count = 0;
-  for (let i = 0; i < meas.freq.length; i++) {
-    if (meas.freq[i] >= refLow && meas.freq[i] <= refHigh) {
-      refOffset += meas.magnitude[i]; count++;
-    }
-  }
-  refOffset = count > 0 ? refOffset / count : 0;
   // b141.67 (audit stage 2 B6): every setting is read BEFORE the first await —
   // a Standard/Hybrid switch during the run used to mix both modes in one fit.
   const isHybrid = exportHybridPhase();
-  const rangeMode = peqRangeMode(), directLow = peqDirectLow(), directHigh = peqDirectHigh();
-  const floorDb = peqFloor(), sampleRate = exportSampleRate(), smoothFit = peqSmoothFit();
+  const smoothFit = peqSmoothFit(), sampleRate = exportSampleRate();
   const bandBudget = maxBands(), tol = tolerance(), gainReg = gainRegularization();
-  const targetCurve = JSON.parse(JSON.stringify(b.target));
-  targetCurve.reference_level_db += refOffset;
-  const targetResp = await invoke<{ magnitude: number[]; phase: number[] }>("evaluate_target", {
-    target: targetCurve, freq: meas.freq,
-  });
+  const rangeIn = snapshotRangeInputs(b);
+  const { targetResp, range: [peqLow, peqHigh] } = await resolveRange(rangeIn);
 
   // Disabled bands are kept in the table untouched, but they do NOT play:
   // the plot, the Σ and the FIR all skip them (evaluate.ts filters on
@@ -129,30 +165,6 @@ async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBa
   // exported filter never contained — +6 dB left over where it reported 0.
   const frozenBands = peqBandsSnap.filter((p) => !p.enabled);
   const measMag = meas.magnitude;
-
-  let peqLow: number;
-  let peqHigh: number;
-
-  if (rangeMode === "direct") {
-    // Direct mode: user-specified range, ignore the crossover
-    peqLow = Math.min(directLow, directHigh);
-    peqHigh = Math.min(Math.max(directLow, directHigh), fMaxForRate(sampleRate));
-  } else {
-    // Auto mode: derive from crossover
-    peqLow = isHybrid ? 20 : Math.max(20, fLow / 8);
-    // Cap at Nyquist·0.95 of the export rate: a PEQ above Nyquist is not
-    // realisable by the biquad it will be exported as.
-    peqHigh = fMaxForRate(sampleRate);
-  }
-  // b141.84: the floor trims BOTH modes — in direct mode it used to be
-  // ignored, and a woofer LR2 @ 250 Hz got two of its six PEQ at 3.9/5.1 kHz,
-  // where the target sits ~95 dB down.
-  if (floorDb > 0) {
-    [peqLow, peqHigh] = trimRangeByFloor(
-      meas.freq, targetResp.magnitude, peqLow, peqHigh,
-      targetCurve.reference_level_db - floorDb,
-    );
-  }
   const activeBandBudget = Math.max(1, bandBudget - frozenBands.length);
   const config: PeqConfig = {
     max_bands: activeBandBudget,

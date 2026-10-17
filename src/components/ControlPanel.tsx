@@ -1,4 +1,4 @@
-import { createSignal, createEffect, on, onCleanup, Show } from "solid-js";
+import { createSignal, createEffect, createResource, on, onCleanup, Show } from "solid-js";
 import type { FilterType, FilterConfig, Measurement, MergeConfig, MergeResult, PeqBand, FirConfig, FirResult, WindowType, PhaseMode } from "../lib/types";
 import NumberInput from "./NumberInput";
 import { MEASUREMENT_COLORS, cloneFilterConfig, F_MAX_WORK } from "../lib/types";
@@ -70,7 +70,7 @@ import {
   peqDirectLow, setPeqDirectLow,
   peqDirectHigh, setPeqDirectHigh,
   computing, peqError, maxErr, iters,
-  peqRange, formatFreq,
+  peqRangeFor, formatFreq,
   handleOptimizePeq, handleClearPeq, peqStale, peqStaleReason,
 } from "../stores/peq-optimize";
 import { showStaleConfirmDialog } from "./StalePeqExportDialog";
@@ -469,6 +469,16 @@ function FilterBlock(props: FilterBlockProps) {
 function PeqTab() {
   const band = () => activeBand();
   const peqBands = () => band()?.peqBands ?? [];
+  // b141.91: the «Hz» row in «Авто» shows the optimizer's own range (the
+  // floor-trimmed one), refetched when the target, floor or rate changes.
+  const [autoPeqRange] = createResource(
+    () => {
+      const b = band();
+      if (!b?.measurement || peqRangeMode() !== "auto") return false;
+      return { b, key: `${JSON.stringify(b.target)}|${peqFloor()}|${exportSampleRate()}|${b.measurement.freq.length}` };
+    },
+    (src) => peqRangeFor(src.b).catch(() => null),
+  );
   const [pendingPeqIdx, setPendingPeqIdx] = createSignal<number | null>(null);
 
   createEffect(() => { peqBands(); setPendingPeqIdx(null); });
@@ -595,7 +605,7 @@ function PeqTab() {
             {peqRangeMode() === "direct" ? (
               <div class="fb-row"><label class="fb-label">Hz</label><NumberInput value={peqDirectLow()} onChange={setPeqDirectLow} min={20} max={F_MAX_WORK} step={10} precision={0} /><span style={{ margin: "0 var(--space-xxs)", color: "#8b8b96" }}>–</span><NumberInput value={peqDirectHigh()} onChange={setPeqDirectHigh} min={20} max={F_MAX_WORK} step={10} precision={0} /></div>
             ) : (
-              <div class="fb-row"><label class="fb-label">Hz</label><span class="align-range-info">{formatFreq(peqRange()[0])}{"\u2013"}{formatFreq(peqRange()[1])}</span></div>
+              <div class="fb-row"><label class="fb-label">Hz</label><span class="align-range-info">{autoPeqRange() ? `${formatFreq(autoPeqRange()![0])}\u2013${formatFreq(autoPeqRange()![1])}` : "—"}</span></div>
             )}
           </div>
           <div class="peq-buttons-row">
