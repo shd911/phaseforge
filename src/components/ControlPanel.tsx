@@ -580,6 +580,15 @@ function PeqTab() {
               <label class="fb-label">Диапазон</label>
               <select class="peq-range-select" value={peqRangeMode()} onChange={(e) => setPeqRangeMode(e.currentTarget.value as "auto" | "direct")}><option value="auto">Авто</option><option value="direct">Заданный</option></select>
             </div>
+            {/* b141.89: own row — beside the buttons it pushed them out of the 280 px panel */}
+            <div class="fb-row">
+              <label class="fb-label">Замер</label>
+              <span class="fb-checkbox" title="Подгонять PEQ по сглаженному замеру (1/48 окт. ниже 100 Hz, 1/3 выше) — не гнаться за мелкими пульсациями от отражений"
+                onClick={() => setPeqSmoothFit(!peqSmoothFit())}>
+                <span class={`fb-check-box ${peqSmoothFit() ? "checked" : ""}`} />
+                <span class="fb-check-label">Без отражений</span>
+              </span>
+            </div>
             <div class="fb-row"><label class="fb-label" title="Не ставить PEQ там, где цель на столько dB ниже опорного уровня (в обоих режимах диапазона)">Порог dB</label><NumberInput value={peqFloor()} onChange={setPeqFloor} min={0} max={120} step={1} precision={0} /></div>
             {peqRangeMode() === "direct" && (
               <div class="fb-row"><label class="fb-label">Hz</label><NumberInput value={peqDirectLow()} onChange={setPeqDirectLow} min={20} max={F_MAX_WORK} step={10} precision={0} /><span style={{ margin: "0 var(--space-xxs)", color: "#8b8b96" }}>–</span><NumberInput value={peqDirectHigh()} onChange={setPeqDirectHigh} min={20} max={F_MAX_WORK} step={10} precision={0} /></div>
@@ -587,11 +596,6 @@ function PeqTab() {
           </div>
           <div class="peq-buttons-row">
             <span class="align-range-info">{formatFreq(peqRange()[0])}{"\u2013"}{formatFreq(peqRange()[1])} Hz</span>
-            <span class="fb-checkbox" title="Подгонять PEQ по сглаженному замеру (1/48 окт. ниже 100 Hz, 1/3 выше) — не гнаться за мелкими пульсациями от отражений"
-              onClick={() => setPeqSmoothFit(!peqSmoothFit())}>
-              <span class={`fb-check-box ${peqSmoothFit() ? "checked" : ""}`} />
-              <span class="fb-check-label">Без отражений</span>
-            </span>
             <button class="tb-btn primary" onClick={handleOptimizePeq} disabled={computing()}>{computing() ? "..." : "Оптимизировать"}</button>
             <Show when={peqBands().length > 0}><button class="tb-btn" onClick={handleClearPeq}>Очистить</button></Show>
           </div>
