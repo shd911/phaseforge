@@ -959,11 +959,17 @@ export default function FrequencyPlot() {
 
   // Переключение всей категории (targets / measurements / corrected)
   function toggleCategory(cat: "measurement" | "target" | "corrected" | "peq" | "fir" | "corrfir") {
+    toggleEntries((e) => e.category === cat);
+  }
+
+  /** Toggle every legend entry matching `pick` together: all on → all off,
+   *  otherwise all on (a category column, or b141.88 a SPL/Phase row). */
+  function toggleEntries(pick: (e: LegendEntry) => boolean) {
     const pTab = plotTab();
 
     const indices: number[] = [];
     for (let i = 0; i < legendEntries.length; i++) {
-      if (legendEntries[i].category === cat) indices.push(i);
+      if (pick(legendEntries[i])) indices.push(i);
     }
     if (indices.length === 0) return;
     const allOn = indices.every(i => legendEntries[i].visible);
@@ -4629,37 +4635,55 @@ export default function FrequencyPlot() {
             const categories: ("target" | "measurement" | "corrected" | "peq" | "fir" | "corrfir")[] =
               ["measurement", "target", "peq", "corrected", "fir", "corrfir"];
             const catLabels: Record<string, string> = { target: "TARGET", measurement: "MEAS", corrected: "CORR", peq: "PEQ", fir: "FIR", corrfir: "CORR FIR" };
-            // b141.83: one line — «NAME dB °» groups side by side. The old
-            // row-per-category table took chart height and left the width empty.
+            // b141.88: a 2-row table — SPL / Phase rows × curve columns,
+            // a visibility checkbox per cell. Three short rows instead of the
+            // b141.83 run-on line; the old one-row-per-curve table (b141.80)
+            // took six rows of chart height.
+            const present = () => categories.filter(c => legendEntries.some(e => e.category === c));
+            const rows: { label: string; dash: boolean }[] = [{ label: "SPL", dash: false }, { label: "Phase", dash: true }];
             return (
-              <div class="band-legend-row">
-                <For each={categories}>
-                  {(cat) => {
-                    const catEnts = () => legendEntries.filter(e => e.category === cat);
-                    const magE = () => catEnts().find(e => !e.dash);
-                    const phE = () => catEnts().find(e => e.dash);
-                    return (
-                      <Show when={catEnts().length > 0}>
-                        <span class="band-legend-group">
-                          <span class="sum-row-header band-legend-name" onClick={() => toggleCategory(cat)}
-                            style={{ opacity: (magE()?.visible || phE()?.visible) ? 1 : 0.4 }}>{catLabels[cat]}</span>
-                          <Show when={magE()}>{(e) => (
-                            <button class={`legend-item ${e().visible ? "" : "legend-off"}`} title="dB" onClick={() => toggleLegendEntry(legendEntries.indexOf(e()))}>
-                              <span class="legend-swatch" style={{ "background-color": e().visible ? e().color : "transparent", "border-color": e().color }} />
-                            </button>
-                          )}</Show>
-                          <Show when={phE()}>{(e) => (
-                            <button class={`legend-item ${e().visible ? "" : "legend-off"}`} title="°" onClick={() => toggleLegendEntry(legendEntries.indexOf(e()))}>
-                              <span class="legend-swatch legend-swatch-dash" style={{ "background-color": "transparent", "border-color": e().color, opacity: e().visible ? 1 : 0.3 }} />
-                            </button>
-                          )}</Show>
-                        </span>
-                      </Show>
-                    );
-                  }}
-                </For>
-                <span class="band-legend-hint">■ dB · ┅ °</span>
-              </div>
+              <table class="band-vis-table">
+                <thead>
+                  <tr>
+                    <th class="sum-corner" />
+                    <For each={present()}>
+                      {(cat) => {
+                        const anyOn = () => legendEntries.some(e => e.category === cat && e.visible);
+                        return <th onClick={() => toggleCategory(cat)} style={{ opacity: anyOn() ? 1 : 0.4 }}>{catLabels[cat]}</th>;
+                      }}
+                    </For>
+                  </tr>
+                </thead>
+                <tbody>
+                  <For each={rows}>
+                    {(row) => {
+                      const inRow = (e: LegendEntry) => !!e.dash === row.dash && categories.includes(e.category as typeof categories[number]);
+                      const anyOn = () => legendEntries.some(e => inRow(e) && e.visible);
+                      return (
+                        <tr>
+                          <td class="sum-row-header" onClick={() => toggleEntries(inRow)} style={{ opacity: anyOn() ? 1 : 0.4 }}>{row.label}</td>
+                          <For each={present()}>
+                            {(cat) => {
+                              const ent = () => legendEntries.find(e => e.category === cat && !!e.dash === row.dash);
+                              return (
+                                <td class={ent() ? "sum-cell" : "sum-cell sum-cell-empty"}>
+                                  <Show when={ent()} fallback={"—"}>{(e) => (
+                                    <button class={`legend-item ${e().visible ? "" : "legend-off"}`}
+                                      title={`${catLabels[cat]} ${row.label}`}
+                                      onClick={() => toggleLegendEntry(legendEntries.indexOf(e()))}>
+                                      <span class="legend-swatch" style={{ "background-color": e().visible ? e().color : "transparent", "border-color": e().color }} />
+                                    </button>
+                                  )}</Show>
+                                </td>
+                              );
+                            }}
+                          </For>
+                        </tr>
+                      );
+                    }}
+                  </For>
+                </tbody>
+              </table>
             );
           })()}
         </div>
