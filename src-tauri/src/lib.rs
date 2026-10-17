@@ -233,12 +233,21 @@ async fn auto_peq_lma(
     hp_freq: f64,
     lp_freq: f64,
     exclusion_zones: Option<Vec<ExclusionZone>>,
+    smooth_fit: Option<bool>,
 ) -> Result<PeqResult, String> {
     let zones = exclusion_zones.unwrap_or_default();
+    let smooth_fit = smooth_fit.unwrap_or(false);
     info!(
-        "auto_peq_lma: {} points, hp={}, lp={}, range={:?}, exclusions={}",
-        freq.len(), hp_freq, lp_freq, config.freq_range, zones.len()
+        "auto_peq_lma: {} points, hp={}, lp={}, range={:?}, exclusions={}, smooth_fit={}",
+        freq.len(), hp_freq, lp_freq, config.freq_range, zones.len(), smooth_fit
     );
+    // b141.87: «Без отражений» — fit the smoothed measurement, not the
+    // reflection ripple of a long-window export.
+    let measurement_mag = if smooth_fit {
+        dsp::reflection_free_smoothing(&freq, &measurement_mag)
+    } else {
+        measurement_mag
+    };
     peq::auto_peq_lma(
         &measurement_mag,
         target_mag.as_deref(),
@@ -460,7 +469,7 @@ pub fn run() {
             .init();
     }
 
-    info!("PhaseForge b141.86 starting...");
+    info!("PhaseForge b141.87 starting...");
     info!("log file: {}", applog::log_path().map(|p| p.display().to_string()).unwrap_or_else(|| "—".into()));
 
     tauri::Builder::default()

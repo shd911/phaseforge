@@ -65,6 +65,7 @@ import {
   maxBands, setMaxBands,
   gainRegularization, setGainRegularization,
   peqFloor, setPeqFloor,
+  peqSmoothFit, setPeqSmoothFit,
   peqRangeMode, setPeqRangeMode,
   peqDirectLow, setPeqDirectLow,
   peqDirectHigh, setPeqDirectHigh,
@@ -586,6 +587,11 @@ function PeqTab() {
           </div>
           <div class="peq-buttons-row">
             <span class="align-range-info">{formatFreq(peqRange()[0])}{"\u2013"}{formatFreq(peqRange()[1])} Hz</span>
+            <span class="fb-checkbox" title="Подгонять PEQ по сглаженному замеру (1/48 окт. ниже 100 Hz, 1/3 выше) — не гнаться за мелкими пульсациями от отражений"
+              onClick={() => setPeqSmoothFit(!peqSmoothFit())}>
+              <span class={`fb-check-box ${peqSmoothFit() ? "checked" : ""}`} />
+              <span class="fb-check-label">Без отражений</span>
+            </span>
             <button class="tb-btn primary" onClick={handleOptimizePeq} disabled={computing()}>{computing() ? "..." : "Оптимизировать"}</button>
             <Show when={peqBands().length > 0}><button class="tb-btn" onClick={handleClearPeq}>Очистить</button></Show>
           </div>

@@ -28,6 +28,30 @@ impl Default for SmoothingConfig {
 /// the systematic bias of arithmetic dB averaging:
 ///   result_dB = 10 * log10(mean(10^(mag_i / 10)))
 pub fn variable_smoothing(freq: &[f64], mag: &[f64], config: &SmoothingConfig) -> Vec<f64> {
+    profile_smoothing(freq, mag, |f| {
+        if config.variable {
+            if f < 100.0 { 1.0 / 48.0 } else if f < 500.0 { 1.0 / 12.0 } else { 1.0 / 3.0 }
+        } else {
+            config.fixed_fraction.unwrap_or(1.0 / 6.0)
+        }
+    })
+}
+
+/// b141.87: the measurement the PEQ fit sees with «Без отражений» on —
+/// 1/48 octave below 100 Hz (room modes are real and correctable), 1/3
+/// above. Ripple from reflections in a long-window REW export (30–70 Hz
+/// spacing at 150–500 Hz on a real mid band) survives the 1/12 of
+/// [`variable_smoothing`]; the fit planted Q 6–8 filters in it (4 narrow
+/// filters raw, 2 at 1/6, 1 at 1/3).
+pub fn reflection_free_smoothing(freq: &[f64], mag: &[f64]) -> Vec<f64> {
+    profile_smoothing(freq, mag, |f| {
+        if f < 100.0 { 1.0 / 48.0 } else { 1.0 / 3.0 }
+    })
+}
+
+/// Fractional-octave smoothing in the power domain with a per-frequency
+/// fraction (`fraction_at(f)` in octaves).
+fn profile_smoothing(freq: &[f64], mag: &[f64], fraction_at: impl Fn(f64) -> f64) -> Vec<f64> {
     let n = freq.len();
     if n == 0 { return vec![]; }
 
@@ -41,18 +65,7 @@ pub fn variable_smoothing(freq: &[f64], mag: &[f64], config: &SmoothingConfig) -
     freq.iter()
         .enumerate()
         .map(|(i, &f)| {
-            let fraction = if config.variable {
-                if f < 100.0 {
-                    1.0 / 48.0
-                } else if f < 500.0 {
-                    1.0 / 12.0
-                } else {
-                    1.0 / 3.0
-                }
-            } else {
-                config.fixed_fraction.unwrap_or(1.0 / 6.0)
-            };
-            let avg_power = smooth_bin_prefix(freq, &prefix, i, fraction);
+            let avg_power = smooth_bin_prefix(freq, &prefix, i, fraction_at(f));
             // Convert back to dB
             if avg_power > 1e-30 { 10.0 * avg_power.log10() } else { -300.0 }
         })

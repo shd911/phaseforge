@@ -30,7 +30,7 @@ import {
 } from "../stores/bands";
 import { MEASUREMENT_COLORS, cloneFilterConfig, migrateDelayConvention } from "../lib/types";
 import type { FilterConfig } from "../lib/types";
-import { tolerance, setTolerance, maxBands, setMaxBands, gainRegularization, setGainRegularization, peqFloor, setPeqFloor, peqRangeMode, setPeqRangeMode, peqDirectLow, setPeqDirectLow, peqDirectHigh, setPeqDirectHigh } from "../stores/peq-optimize";
+import { tolerance, setTolerance, maxBands, setMaxBands, gainRegularization, setGainRegularization, peqFloor, setPeqFloor, peqSmoothFit, setPeqSmoothFit, peqRangeMode, setPeqRangeMode, peqDirectLow, setPeqDirectLow, peqDirectHigh, setPeqDirectHigh } from "../stores/peq-optimize";
 import type { AppState, BandState, PerMeasurementSettings, FloorBounceConfig, MergeSource } from "../stores/bands";
 import type { Measurement, MergeResult } from "../lib/types";
 import { isWindowType, STANDARD_SAMPLE_RATES, STANDARD_TAPS, F_MIN_WORK, F_MAX_WORK } from "../lib/types";
@@ -181,6 +181,7 @@ export interface ProjectFile {
   peq_max_bands?: number;
   peq_gain_regularization?: number;
   peq_floor?: number;
+  peq_smooth_fit?: boolean;
   peq_range_mode?: string;
   peq_direct_low?: number;
   peq_direct_high?: number;
@@ -316,6 +317,7 @@ export function buildProjectData(): ProjectFile {
     peq_max_bands: maxBands(),
     peq_gain_regularization: gainRegularization(),
     peq_floor: peqFloor(),
+    peq_smooth_fit: peqSmoothFit(),
     peq_range_mode: peqRangeMode(),
     peq_direct_low: peqDirectLow(),
     peq_direct_high: peqDirectHigh(),
@@ -562,6 +564,7 @@ export async function restoreState(project: ProjectFile, projDir: string | null)
     setMaxBands(project.peq_max_bands ?? 20);
     setGainRegularization(project.peq_gain_regularization ?? 0.0);
     setPeqFloor(project.peq_floor ?? 60);
+    setPeqSmoothFit(project.peq_smooth_fit ?? true);
     setPeqRangeMode(project.peq_range_mode === "direct" ? "direct" : "auto");
     setPeqDirectLow(project.peq_direct_low ?? 20);
     setPeqDirectHigh(project.peq_direct_high ?? F_MAX_WORK);
@@ -780,6 +783,7 @@ export async function newProject(): Promise<void> {
   setMaxBands(20);
   setGainRegularization(0.0);
   setPeqFloor(60);
+  setPeqSmoothFit(true);
   setPeqRangeMode("auto");
   setPeqDirectLow(20);
   setPeqDirectHigh(F_MAX_WORK);

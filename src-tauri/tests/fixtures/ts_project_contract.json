@@ -179,6 +179,7 @@
  "peq_max_bands": 20,
  "peq_gain_regularization": 0,
  "peq_floor": 60,
+ "peq_smooth_fit": true,
  "peq_range_mode": "auto",
  "peq_direct_low": 20,
  "peq_direct_high": 30000,

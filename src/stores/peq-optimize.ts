@@ -27,6 +27,9 @@ export const [tolerance, setTolerance] = createSignal(1.0);
 export const [maxBands, setMaxBands] = createSignal(20);
 export const [gainRegularization, setGainRegularization] = createSignal(0.0);
 export const [peqFloor, setPeqFloor] = createSignal(60); // dB below reference — don't optimize below this
+// b141.87: «Без отражений» — fit the smoothed measurement (1/48 < 100 Hz,
+// 1/3 above), not the reflection ripple of a long-window export.
+export const [peqSmoothFit, setPeqSmoothFit] = createSignal(true);
 export type PeqRangeMode = "auto" | "direct";
 export const [peqRangeMode, setPeqRangeMode] = createSignal<PeqRangeMode>("auto");
 export const [peqDirectLow, setPeqDirectLow] = createSignal(20);
@@ -111,7 +114,7 @@ async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBa
   // a Standard/Hybrid switch during the run used to mix both modes in one fit.
   const isHybrid = exportHybridPhase();
   const rangeMode = peqRangeMode(), directLow = peqDirectLow(), directHigh = peqDirectHigh();
-  const floorDb = peqFloor(), sampleRate = exportSampleRate();
+  const floorDb = peqFloor(), sampleRate = exportSampleRate(), smoothFit = peqSmoothFit();
   const bandBudget = maxBands(), tol = tolerance(), gainReg = gainRegularization();
   const targetCurve = JSON.parse(JSON.stringify(b.target));
   targetCurve.reference_level_db += refOffset;
@@ -171,6 +174,7 @@ async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBa
     hpFreq: fLow,
     lpFreq: fHigh,
     exclusionZones: exclusionZonesSnap.length > 0 ? exclusionZonesSnap : null,
+    smoothFit,
   });
   return { result, frozenBands };
 }
@@ -349,6 +353,7 @@ registerHistoryHooks(
         maxBands: maxBands(),
         gainRegularization: gainRegularization(),
         peqFloor: peqFloor(),
+        peqSmoothFit: peqSmoothFit(),
         peqRangeMode: peqRangeMode(),
         peqDirectLow: peqDirectLow(),
         peqDirectHigh: peqDirectHigh(),
@@ -362,6 +367,7 @@ registerHistoryHooks(
     setMaxBands(entry.peqParams.maxBands);
     setGainRegularization(entry.peqParams.gainRegularization);
     setPeqFloor(entry.peqParams.peqFloor);
+    setPeqSmoothFit(entry.peqParams.peqSmoothFit ?? true);
     setPeqRangeMode(entry.peqParams.peqRangeMode);
     setPeqDirectLow(entry.peqParams.peqDirectLow);
     setPeqDirectHigh(entry.peqParams.peqDirectHigh);

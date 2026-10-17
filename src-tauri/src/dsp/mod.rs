@@ -10,7 +10,7 @@ mod interpolation;
 mod smoothing;
 
 pub use interpolation::{interpolate_linear_grid, interpolate_log_grid, interp_1d};
-pub use smoothing::{fractional_octave_smooth, variable_smoothing, SmoothingConfig};
+pub use smoothing::{fractional_octave_smooth, reflection_free_smoothing, variable_smoothing, SmoothingConfig};
 mod phase;
 pub use phase::{minimum_phase_from_magnitude, minimum_phase_on_log_grid};
 
