@@ -3005,3 +3005,14 @@ input[type="checkbox"]:focus-visible {
 .band-vis-table .sum-row-header {
   min-width: 0;
 }
+
+/* b141.93: PEQ ring time column */
+.peq-table td.peq-ring {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  text-align: right;
+  white-space: nowrap;
+}
+.peq-table td.peq-ring.peq-ring-warn { color: var(--warn-amber); }
+.peq-table td.peq-ring.peq-ring-bad { color: var(--error, #ef4444); font-weight: 600; }

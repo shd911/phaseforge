@@ -86,7 +86,7 @@ function rejectPeqInput(el: HTMLInputElement, shown: string, hint: string) {
   showToast(hint, "warn");
 }
 import { hasActiveSubsonicProtect } from "../lib/types";
-import { qWarnAt } from "../lib/peq-quality";
+import { qWarnAt, peqRingCost } from "../lib/peq-quality";
 import { openHighQPopup } from "./HighQWarningPopup";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -625,7 +625,7 @@ function PeqTab() {
           <Show when={peqBands().length > 0}>
             <div class="peq-sidebar-table-scroll">
               <table class="peq-table">
-                <thead><tr><th></th><th>Тип</th><th>Hz</th><th>dB</th><th>Q</th><th></th><th></th></tr></thead>
+                <thead><tr><th></th><th>Тип</th><th>Hz</th><th>dB</th><th>Q</th><th title="Время звона фильтра: за сколько мс его резонанс затухает до −60 dB">мс</th><th></th><th></th></tr></thead>
                 <tbody>
                   {peqBands().map((b, i) => {
                     const isPending = pendingPeqIdx() === i;
@@ -661,6 +661,20 @@ function PeqTab() {
                         <td><input class="peq-input" type="number" value={fmtPeqFreq(b.freq_hz)} min={20} max={F_MAX_WORK} step={1} ref={peqWheel("freq_hz")} onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v) && v >= 20 && v <= F_MAX_WORK) { const bd = band(); if (bd) updatePeqBand(bd.id, i, { freq_hz: v }); } else rejectPeqInput(e.currentTarget, fmtPeqFreq(b.freq_hz), `Частота PEQ: 20–${F_MAX_WORK} Hz`); }} /></td>
                         <td><input class={`peq-input ${b.gain_db > 0 ? "peq-boost" : "peq-cut"}`} type="number" value={b.gain_db.toFixed(1)} min={exportHybridPhase() ? -60 : -18} max={exportHybridPhase() ? 60 : 6} step={0.1} ref={peqWheel("gain_db")} onChange={(e) => { const v = parseFloat(e.currentTarget.value); const lim = exportHybridPhase() ? 60 : 18; const hi = exportHybridPhase() ? 60 : 6; if (isNaN(v)) { rejectPeqInput(e.currentTarget, b.gain_db.toFixed(1), `Усиление PEQ: −${lim}…+${hi} dB`); return; } const g = Math.max(-lim, Math.min(hi, v)); if (g !== v) rejectPeqInput(e.currentTarget, g.toFixed(1), `Усиление PEQ: −${lim}…+${hi} dB`); const bd = band(); if (bd) updatePeqBand(bd.id, i, { gain_db: g }); }} /></td>
                         <td><input class="peq-input" type="number" value={b.q.toFixed(2)} min={0.1} max={20} step={0.1} ref={peqWheel("q")} onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v) && v >= 0.1 && v <= 20) { const bd = band(); if (bd) updatePeqBand(bd.id, i, { q: v }); } else rejectPeqInput(e.currentTarget, b.q.toFixed(2), "Q PEQ: 0.1–20"); }} /></td>
+                        {(() => {
+                          // b141.93: time cost of this filter — its ringing to −60 dB.
+                          // Red when the tail to −100 dB is longer than half the file:
+                          // the export then shifts the band's delay.
+                          const rc = () => peqRingCost(b, exportSampleRate());
+                          const halfMs = () => exportTaps() / 2 / exportSampleRate() * 1000;
+                          const cls = () => !b.enabled ? "" : rc().ms100 > halfMs() ? "peq-ring-bad" : rc().ms60 >= 150 ? "peq-ring-warn" : "";
+                          return (
+                            <td class={`peq-ring ${cls()}`}
+                              title={`Звон до −60 dB: ${Math.round(rc().ms60)} мс, до −100 dB: ${Math.round(rc().ms100)} мс. Половина файла: ${Math.round(halfMs())} мс — если хвост длиннее, экспорт сдвинет задержку полосы.`}>
+                              {Math.abs(b.gain_db) < 0.05 ? "" : Math.round(rc().ms60)}
+                            </td>
+                          );
+                        })()}
                         <td>{b.enabled && b.q > qWarnAt(b.freq_hz) ? (
                           <button class="peq-warn-icon" title="" aria-label="Высокая добротность"
                             onClick={(e) => { e.stopPropagation(); openHighQPopup(b, i); }}>⚠</button>
