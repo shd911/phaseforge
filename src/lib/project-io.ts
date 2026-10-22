@@ -26,7 +26,7 @@ import {
   firNbMaxExcess, setFirNbMaxExcess,
   firMaxBoost, setFirMaxBoost,
   firNoiseFloor, setFirNoiseFloor,
-  uniqueBandName, exportBakeInversion, setExportBakeInversion,
+  uniqueBandName,
 } from "../stores/bands";
 import { MEASUREMENT_COLORS, cloneFilterConfig, migrateDelayConvention } from "../lib/types";
 import type { FilterConfig } from "../lib/types";
@@ -177,7 +177,6 @@ export interface ProjectFile {
   export_window: string;
   active_tab: string;
   export_hybrid_phase?: boolean;
-  export_bake_inversion?: boolean;
   peq_tolerance?: number;
   peq_max_bands?: number;
   peq_gain_regularization?: number;
@@ -315,7 +314,6 @@ export function buildProjectData(): ProjectFile {
     export_window: exportWindow(),
     active_tab: activeTab(),
     export_hybrid_phase: exportHybridPhase(),
-    export_bake_inversion: exportBakeInversion(),
     peq_tolerance: tolerance(),
     peq_max_bands: maxBands(),
     peq_gain_regularization: gainRegularization(),
@@ -564,7 +562,6 @@ export async function restoreState(project: ProjectFile, projDir: string | null)
     setExportTaps(STANDARD_TAPS.includes(project.export_taps as number) ? project.export_taps : 65536);
     setExportWindow(isWindowType(project.export_window) ? project.export_window : "Blackman");
     setExportHybridPhase(project.export_hybrid_phase ?? false);
-    setExportBakeInversion(project.export_bake_inversion ?? false);
     setTolerance(project.peq_tolerance ?? 1.0);
     setMaxBands(project.peq_max_bands ?? 20);
     setGainRegularization(project.peq_gain_regularization ?? 0.0);
@@ -776,7 +773,6 @@ export async function newProject(): Promise<void> {
   setExportSampleRate(48000);
   setExportTaps(65536);
   setExportWindow("Blackman");
-  setExportBakeInversion(false);
   // Reset FIR optimization signals to defaults
   setFirIterations(3);
   setFirFreqWeighting(true);

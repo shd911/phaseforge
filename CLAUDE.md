@@ -142,8 +142,11 @@
 - **«Corrected» = measurement + PEQ + `filterSection`** (b141.48): HP/LP,
   tilt, shelves and the ultrasonic LP — the whole level-free section the FIR
   bakes in. One TS builder for band, band IR, Σ and Σ IR.
-- **Host-side settings** (b141.50): per-band level, INV and alignment delay
-  are NOT written to the WAV; the export names INV/delay for the convolver.
+- **Host-side settings** (b141.50): per-band level and alignment delay are
+  NOT written to the WAV; the export names the delay for the convolver.
+  Polarity IS written since b141.100: an inverted band's WAV is negated
+  (`_INV` in the name), the Export tab draws that file (phase +180°) and its
+  INV checkbox is the band's own NOR/INV flag.
 - **«Макс. подъём»** (b141.53) caps target+PEQ once on the cepstral route;
   the IIR route cannot cap biquads and the export warns above the limit.
 - **Wrapped-phase interpolation is delay-aware** (b141.49,

@@ -4,7 +4,7 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { invoke } from "@tauri-apps/api/core";
 import type { Measurement, TargetResponse, FilterType, FilterConfig, PeqBand, WindowType } from "../lib/types";
-import { appState, activeBand, isSum, activeTab, plotTab, setPlotTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, setPeqDragging, updatePeqBand, commitPeqBand, bandsVersion, exportSampleRate, setExportSampleRate, exportTaps, setExportTaps, exportWindow, setExportWindow, exportBakeInversion, setExportBakeInversion, firIterations, firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess, firMaxBoost, firNoiseFloor, exportMetrics, setExportMetrics, plotSnapshots, addPlotSnapshot, clearPlotSnapshots, setAlignmentDelay, setBandSmoothing, beginInteraction, commitInteraction, needAutoFit, setNeedAutoFit } from "../stores/bands";
+import { appState, activeBand, isSum, activeTab, plotTab, setPlotTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, setPeqDragging, updatePeqBand, commitPeqBand, bandsVersion, exportSampleRate, setExportSampleRate, exportTaps, setExportTaps, exportWindow, setExportWindow, toggleBandInverted, firIterations, firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess, firMaxBoost, firNoiseFloor, exportMetrics, setExportMetrics, plotSnapshots, addPlotSnapshot, clearPlotSnapshots, setAlignmentDelay, setBandSmoothing, beginInteraction, commitInteraction, needAutoFit, setNeedAutoFit } from "../stores/bands";
 import type { SmoothingMode, BandState, FreqSnapshot } from "../stores/bands";
 import { computeFloorBounce } from "../lib/floor-bounce";
 import { openCrossoverDialog, type CrossoverDialogData } from "./CrossoverDialog";
@@ -1765,7 +1765,7 @@ export default function FrequencyPlot() {
     // param leaves the preview stale until some other tracked signal fires,
     // while the exported WAV already uses the new values (preview ≠ export).
     if (pTab === "export") {
-      exportSampleRate(); exportTaps(); exportWindow(); exportBakeInversion();
+      exportSampleRate(); exportTaps(); exportWindow();
       firMaxBoost(); firNoiseFloor(); firIterations(); firFreqWeighting();
       firNarrowbandLimit(); firNbSmoothingOct(); firNbMaxExcess();
     }
@@ -1975,9 +1975,9 @@ export default function FrequencyPlot() {
       if (!containerRef) return;
       const rect = containerRef.getBoundingClientRect();
 
-      // Wrap phase for display. b141.99: with «INV в WAV» the file of an
-      // inverted band is negated — show its phase (and the model's) +180°.
-      const fileFlip = exportBakeInversion() && !!band.inverted ? 180 : 0;
+      // Wrap phase for display. b141.100: an inverted band's file is negated
+      // — show its phase (and the model's) +180°.
+      const fileFlip = band.inverted ? 180 : 0;
       const wrappedModelPhase = wrapPhase(fileFlip ? modelPhase.map((v: number) => v + fileFlip) : modelPhase);
       const wrappedFirPhase = wrapPhase(fileFlip ? firResult.realized_phase.map((v: number) => v + fileFlip) : firResult.realized_phase);
 
@@ -4295,12 +4295,13 @@ export default function FrequencyPlot() {
               не применяется
             </span>
           </Show>
-          {/* b141.98: polarity into the WAV instead of the convolver */}
-          <span class="fb-checkbox" style={{ "margin-left": "var(--space-md)" }}
-            title="Записывать инверсию полярности полосы (кнопка INV) прямо в WAV — тогда в конвольвере её задавать не нужно. К имени файла добавляется _INV."
-            onClick={() => setExportBakeInversion(!exportBakeInversion())}>
-            <span class={`fb-check-box ${exportBakeInversion() ? "checked" : ""}`} />
-            <span class="fb-check-label">INV в WAV</span>
+          {/* b141.100: the band's polarity (same flag as its NOR/INV button);
+              the WAV is written with it, the preview shows it. */}
+          <span class="fb-checkbox" style={{ "margin-left": "var(--space-md)", opacity: activeBand() ? 1 : 0.45 }}
+            title="Инверсия полярности полосы (то же, что кнопка NOR/INV у полосы). Записывается в WAV, к имени файла добавляется _INV; фаза на графике сдвигается на 180°, в Σ полоса суммируется инвертированной."
+            onClick={() => { const b = activeBand(); if (b) toggleBandInverted(b.id); }}>
+            <span class={`fb-check-box ${activeBand()?.inverted ? "checked" : ""}`} />
+            <span class="fb-check-label">INV</span>
           </span>
           <div style={{ "margin-left": "auto", display: "flex", "align-items": "center", gap: "var(--space-sm)" }}>
             <Show when={exportWavError()}>

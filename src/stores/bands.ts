@@ -908,9 +908,6 @@ export const [exportSampleRate, setExportSampleRate] = createSignal(48000);
 export const [exportTaps, setExportTaps] = createSignal(65536);
 export const [exportWindow, setExportWindow] = createSignal<WindowType>("Blackman");
 export const [exportHybridPhase, setExportHybridPhase] = createSignal(false);
-// b141.98: write an inverted band's polarity into its WAV (default: leave it
-// to the convolver, HQPlayer parity — b141.50).
-export const [exportBakeInversion, setExportBakeInversion] = createSignal(false);
 
 // FIR optimization settings
 export const [firIterations, setFirIterations] = createSignal(3);
