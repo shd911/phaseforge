@@ -1765,7 +1765,7 @@ export default function FrequencyPlot() {
     // param leaves the preview stale until some other tracked signal fires,
     // while the exported WAV already uses the new values (preview ≠ export).
     if (pTab === "export") {
-      exportSampleRate(); exportTaps(); exportWindow();
+      exportSampleRate(); exportTaps(); exportWindow(); exportBakeInversion();
       firMaxBoost(); firNoiseFloor(); firIterations(); firFreqWeighting();
       firNarrowbandLimit(); firNbSmoothingOct(); firNbMaxExcess();
     }
@@ -1975,9 +1975,11 @@ export default function FrequencyPlot() {
       if (!containerRef) return;
       const rect = containerRef.getBoundingClientRect();
 
-      // Wrap phase for display
-      const wrappedModelPhase = wrapPhase(modelPhase);
-      const wrappedFirPhase = wrapPhase(firResult.realized_phase);
+      // Wrap phase for display. b141.99: with «INV в WAV» the file of an
+      // inverted band is negated — show its phase (and the model's) +180°.
+      const fileFlip = exportBakeInversion() && !!band.inverted ? 180 : 0;
+      const wrappedModelPhase = wrapPhase(fileFlip ? modelPhase.map((v: number) => v + fileFlip) : modelPhase);
+      const wrappedFirPhase = wrapPhase(fileFlip ? firResult.realized_phase.map((v: number) => v + fileFlip) : firResult.realized_phase);
 
       const opts: uPlot.Options = {
         width: Math.max(rect.width, 400), height: Math.max(rect.height, 200),
@@ -2379,20 +2381,25 @@ export default function FrequencyPlot() {
           step: irMeas.step,
         }];
 
+        // b141.99: an inverted band plays with its polarity flipped (in the
+        // convolver or, with «INV в WAV», in the file) — show its target and
+        // corrected impulse/step that way, as the SPL tab shows its phase.
+        // The measurement stays as measured.
+        const flip = (a: number[]) => band!.inverted ? a.map(v => -v) : a;
         const targetBands: IrBandData[] = irEval.ir.target ? [{
           bandName: band!.name,
           bandColor: band!.color,
           timeMs: irEval.ir.target.time.map(t => t * 1000),
-          impulse: irEval.ir.target.impulse,
-          step: irEval.ir.target.step,
+          impulse: flip(irEval.ir.target.impulse),
+          step: flip(irEval.ir.target.step),
         }] : [];
 
         const corrBands: IrBandData[] = irEval.ir.corrected ? [{
           bandName: band!.name,
           bandColor: band!.color,
           timeMs: irEval.ir.corrected.time.map(t => t * 1000),
-          impulse: irEval.ir.corrected.impulse,
-          step: irEval.ir.corrected.step,
+          impulse: flip(irEval.ir.corrected.impulse),
+          step: flip(irEval.ir.corrected.step),
         }] : [];
 
         // Save IR data for snapshot capture
