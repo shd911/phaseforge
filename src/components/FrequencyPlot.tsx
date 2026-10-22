@@ -3059,6 +3059,9 @@ export default function FrequencyPlot() {
 
       // Corrected curve = measurement + PEQ + cross-section (filters + makeup)
       let peqDotsInfo: { seriesIdx: number; dataIndices: Set<number> } | undefined;
+      // b141.96: no PEQ (e.g. right after «Очистить») = no dots. The old
+      // indices survived and were drawn on whatever series took the PEQ slot.
+      activePeqDots = null;
       const hasPeq = band.peqBands && band.peqBands.length > 0;
       const hasFilters = band.targetEnabled && (band.target.high_pass || band.target.low_pass);
       if (result.measurement && (hasPeq || hasFilters)) {
