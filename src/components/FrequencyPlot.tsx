@@ -4,7 +4,7 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { invoke } from "@tauri-apps/api/core";
 import type { Measurement, TargetResponse, FilterType, FilterConfig, PeqBand, WindowType } from "../lib/types";
-import { appState, activeBand, isSum, activeTab, plotTab, setPlotTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, setPeqDragging, updatePeqBand, commitPeqBand, bandsVersion, exportSampleRate, setExportSampleRate, exportTaps, setExportTaps, exportWindow, setExportWindow, firIterations, firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess, firMaxBoost, firNoiseFloor, exportMetrics, setExportMetrics, plotSnapshots, addPlotSnapshot, clearPlotSnapshots, setAlignmentDelay, setBandSmoothing, beginInteraction, commitInteraction, needAutoFit, setNeedAutoFit } from "../stores/bands";
+import { appState, activeBand, isSum, activeTab, plotTab, setPlotTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, setPeqDragging, updatePeqBand, commitPeqBand, bandsVersion, exportSampleRate, setExportSampleRate, exportTaps, setExportTaps, exportWindow, setExportWindow, exportBakeInversion, setExportBakeInversion, firIterations, firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess, firMaxBoost, firNoiseFloor, exportMetrics, setExportMetrics, plotSnapshots, addPlotSnapshot, clearPlotSnapshots, setAlignmentDelay, setBandSmoothing, beginInteraction, commitInteraction, needAutoFit, setNeedAutoFit } from "../stores/bands";
 import type { SmoothingMode, BandState, FreqSnapshot } from "../stores/bands";
 import { computeFloorBounce } from "../lib/floor-bounce";
 import { openCrossoverDialog, type CrossoverDialogData } from "./CrossoverDialog";
@@ -4288,6 +4288,13 @@ export default function FrequencyPlot() {
               не применяется
             </span>
           </Show>
+          {/* b141.98: polarity into the WAV instead of the convolver */}
+          <span class="fb-checkbox" style={{ "margin-left": "var(--space-md)" }}
+            title="Записывать инверсию полярности полосы (кнопка INV) прямо в WAV — тогда в конвольвере её задавать не нужно. К имени файла добавляется _INV."
+            onClick={() => setExportBakeInversion(!exportBakeInversion())}>
+            <span class={`fb-check-box ${exportBakeInversion() ? "checked" : ""}`} />
+            <span class="fb-check-label">INV в WAV</span>
+          </span>
           <div style={{ "margin-left": "auto", display: "flex", "align-items": "center", gap: "var(--space-sm)" }}>
             <Show when={exportWavError()}>
               <span style={{ color: STATUS_BAD, "font-size": "var(--fs-sm)" }}>{exportWavError()}</span>

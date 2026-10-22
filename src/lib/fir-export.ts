@@ -4,7 +4,7 @@ import type { BandState } from "../stores/bands";
 import {
   exportSampleRate, exportTaps, exportWindow,
   firMaxBoost, firNoiseFloor, firIterations, firFreqWeighting,
-  firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess,
+  firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess, exportBakeInversion,
 } from "../stores/bands";
 import { projectDir, sanitize } from "./project-io";
 import { evaluateBandFull } from "./band-evaluator";
@@ -147,15 +147,22 @@ export function boostLimitNote(
     `точно и лимит не применяется. Уменьшите усиление PEQ или полок.`;
 }
 
+/** b141.98: the samples that go into the WAV — negated when the band is
+ *  inverted and «INV в WAV» is on, so the convolver needs no polarity flip. */
+export function wavImpulse(impulse: number[], inverted: boolean, bakeInversion: boolean): number[] {
+  return inverted && bakeInversion ? impulse.map((v) => -v) : impulse;
+}
+
 /** Export active band to WAV. Returns true on success, false on cancel, throws on error.
  *  Stale PEQ is gated by a confirm dialog at higher-level call sites — keep this
  *  function focused on the export pipeline. */
 export async function exportBandWav(b: BandState): Promise<boolean> {
+  const bake = exportBakeInversion() && !!b.inverted;
   const { impulse, delaySamples, route, peakBoostDb } = await generateBandImpulse(b);
   const sr = exportSampleRate();
   // b141.74: the analytic route never applies the window — name it as IIR.
   const winTag = route === "iir" ? "IIR" : exportWindow();
-  const fileName = `${sanitize(driverName(b))}_${sr}_${exportTaps()}_${winTag}.wav`;
+  const fileName = `${sanitize(driverName(b))}_${sr}_${exportTaps()}_${winTag}${bake ? "_INV" : ""}.wav`;
   const dir = projectDir();
   if (dir) await invoke("ensure_dir", { path: `${dir}/export` }).catch(() => {});
   const defPath = dir ? `${dir}/export/${fileName}` : fileName;
@@ -164,10 +171,10 @@ export async function exportBandWav(b: BandState): Promise<boolean> {
     filters: [{ name: "WAV", extensions: ["wav"] }],
   });
   if (!path) return false;
-  await invoke("export_fir_wav", { impulse, sampleRate: sr, path });
+  await invoke("export_fir_wav", { impulse: wavImpulse(impulse, !!b.inverted, bake), sampleRate: sr, path });
   const align = b.alignmentDelay ?? 0;
   const shortfall = convolverDelaySeconds(align, delaySamples, impulse.length, sr) - align;
-  const host = hostSettingsNote(b.inverted, align, driverName(b), shortfall);
+  const host = hostSettingsNote(b.inverted && !bake, align, driverName(b), shortfall);
   const boost = boostLimitNote(route, peakBoostDb, firMaxBoost(), driverName(b));
   const saved = path.split(/[\\/]/).pop() ?? path;
   const msg = [host, boost].filter(Boolean).join(" ");

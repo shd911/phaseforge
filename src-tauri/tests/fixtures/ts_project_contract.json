@@ -175,6 +175,7 @@
  "export_window": "Blackman",
  "active_tab": "measurements",
  "export_hybrid_phase": false,
+ "export_bake_inversion": false,
  "peq_tolerance": 1,
  "peq_max_bands": 20,
  "peq_gain_regularization": 0,
