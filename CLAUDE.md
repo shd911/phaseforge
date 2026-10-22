@@ -334,7 +334,7 @@ git diff --stat
 
 **Что РАБОТАЕТ для большого legacy кода (опыт b140.3.x — 8 итераций до паритета):**
 - **Start from scratch** с минимальным новым pipeline.
-- Физически мотивированные правила (per-band normalize, width-aware excess limiter, target+Hilbert extension), не legacy mimicry.
+- Физически мотивированные правила (per-band normalize, target+Hilbert extension), не legacy mimicry. (Width-aware excess limiter убран в b141.97: опускал полосу целиком из-за горбов вне пассбанда — средний уровень пассбанда уходил на 0.2–1.4 dB ниже цели.)
 - Маленькие шаги: одна категория кривых за один промт (target → corrected → measurement → IR).
 - Single point of truth: extension/normalization логика в одном месте (evaluateBandFull, не в evaluateSum).
 - Honest pipeline: что используется в SUM, то видно на band view (faded для synthesis).

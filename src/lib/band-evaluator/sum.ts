@@ -2,8 +2,8 @@
  * b140.14.3 — Phase 4 slice 4: multi-band SUM aggregator.
  *
  * Carries `evaluateSum` and its four sum-only helpers
- * (`resampleOntoCommon`, `applyGlobalShiftIfWideExcess`, `powerSumDb`,
- * `coherentSum`) out of band-evaluator.ts. The SumEvalResult and
+ * (`resampleOntoCommon`, `powerSumDb`, `coherentSum`;
+ * the b140.3.1.4 wide-excess shift was removed in b141.97) out of band-evaluator.ts. The SumEvalResult and
  * SumEvalOptions interfaces move with them.
  *
  * No cycles: this module imports `evaluateBandFull` and
@@ -15,7 +15,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { untrack } from "solid-js";
 import type { BandState } from "../../stores/bands";
 import type { PeqBand, TargetResponse } from "../types";
-import { alignmentPhaseDeg, F_MAX_REF } from "../types";
+import { alignmentPhaseDeg } from "../types";
 import { buildCommonGrid, buildLogGrid, interpOnGrid, interpPhaseOnGrid, irTime, type ImpulseIpc } from "./grid";
 import { appendNoiseFloorTail, computeExtension, passbandRange } from "./extension";
 import { composeCorrected, evaluateBandFull, reconstructTargetPhase, snapshotBandRequest } from "./evaluate";
@@ -96,76 +96,6 @@ function resampleOntoCommon(
     ? interpPhaseOnGrid(srcFreq, srcPhase, dstFreq, { outside: 0, mag: srcMag }) as number[]
     : null;
   return { mag, phase };
-}
-
-/** b140.3.1.4: global-shift excess control. The passband ± 1 octave zone
- *  is the *control window*: if a wide excess (≥ 1/2 oct) is found there,
- *  shift the entire corrected curve down so that excess collapses to the
- *  threshold. Narrow peaks (≤ 1/8 oct — room modes / natural resonances)
- *  are ignored. Soft transition between 1/8..1/2 oct. Magnitude only —
- *  phase untouched. */
-function applyGlobalShiftIfWideExcess(
-  freq: number[],
-  corrected: number[],
-  target: number[],
-  hpFreqHz: number | null,
-  lpFreqHz: number | null,
-): number[] {
-  const EXCESS_THRESHOLD = 0.1;
-  const NARROW_OCT = 1 / 8;
-  const WIDE_OCT = 1 / 2;
-
-  // An inverted pair (HP ≥ LP) has no passband to control — leave it as is
-  // (the raw HP·1.5..LP·0.7 zone used to be empty there).
-  if (hpFreqHz && lpFreqHz && hpFreqHz >= lpFreqHz) return corrected;
-  const [pbLow, pbHigh] = passbandRange(hpFreqHz, lpFreqHz);
-  const zoneLow = Math.max(20, pbLow / 2);
-  const zoneHigh = Math.min(F_MAX_REF, pbHigh * 2);
-
-  let regionStart = -1;
-  let regionMaxExcess = 0;
-  let maxRequiredShift = 0;
-
-  const finalize = (start: number, end: number, maxEx: number) => {
-    const f0 = freq[start];
-    const f1 = freq[end];
-    const widthOct = f1 > 0 && f0 > 0 ? Math.log2(f1 / f0) : 0;
-    let factor: number;
-    if (widthOct <= NARROW_OCT) factor = 0;
-    else if (widthOct >= WIDE_OCT) factor = 1;
-    else factor = (widthOct - NARROW_OCT) / (WIDE_OCT - NARROW_OCT);
-    if (factor === 0) return;
-    const effectiveExcess = maxEx * factor;
-    const required = effectiveExcess - EXCESS_THRESHOLD;
-    if (required > maxRequiredShift) maxRequiredShift = required;
-  };
-
-  for (let j = 0; j < freq.length; j++) {
-    const inZone = freq[j] >= zoneLow && freq[j] <= zoneHigh;
-    const ex = inZone && isFinite(corrected[j]) && isFinite(target[j])
-      ? corrected[j] - target[j]
-      : 0;
-    const isExcess = inZone && ex > EXCESS_THRESHOLD;
-
-    if (isExcess) {
-      if (regionStart < 0) {
-        regionStart = j;
-        regionMaxExcess = ex;
-      } else if (ex > regionMaxExcess) {
-        regionMaxExcess = ex;
-      }
-    } else if (regionStart >= 0) {
-      finalize(regionStart, j - 1, regionMaxExcess);
-      regionStart = -1;
-      regionMaxExcess = 0;
-    }
-  }
-  if (regionStart >= 0) finalize(regionStart, freq.length - 1, regionMaxExcess);
-
-  if (maxRequiredShift > 0) {
-    return corrected.map(v => isFinite(v) ? v - maxRequiredShift : v);
-  }
-  return corrected;
 }
 
 /** Power sum of magnitudes in dB (no phase). Returns -200 dB for empty bins. */
@@ -433,17 +363,11 @@ async function evaluateSumImpl(
           corrLevelOffsetDb[i] += offset;
         }
       }
-
-      // b140.3.1.4: global shift if a wide excess is detected in the
-      // passband ± 1 octave control zone. Whole curve moves uniformly;
-      // narrow resonances stay intact.
-      const preShift = correctedMag[0];
-      correctedMag = applyGlobalShiftIfWideExcess(
-        freq, correctedMag, pbTarget.mag,
-        bands[i].target.high_pass?.freq_hz ?? null,
-        bands[i].target.low_pass?.freq_hz ?? null,
-      );
-      corrLevelOffsetDb[i] += correctedMag[0] - preShift;
+      // b141.97: the b140.3.1.4 «wide excess» global shift is gone. It
+      // lowered the whole band whenever a 0.2–0.8 oct bump of 1–2 dB sat in
+      // passband ± 1 oct (mostly outside the passband): on a real 4-way the
+      // passband means landed 0.2–1.4 dB below target. The level is the
+      // passband mean only; residual bumps show as they are.
     }
 
     const phaseArr = resampled.phase ?? new Array<number>(freq.length).fill(0);
