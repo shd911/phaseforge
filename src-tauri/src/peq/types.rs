@@ -84,10 +84,23 @@ pub struct PeqConfig {
     /// whose LR2 2 kHz target is −66 dB there) adds level and IMD for nothing.
     #[serde(default)]
     pub boost_range: Option<(f64, f64)>,
+    /// b141.94: the optimizer's filters may ring to −100 dB at most this long
+    /// (ms) — half the export file, past which the WAV export shifts the band's
+    /// delay. Q is capped to fit; manual filters are only flagged («мс»).
+    #[serde(default)]
+    pub max_ring_ms: Option<f64>,
 }
 
 impl PeqConfig {
     /// Largest gain a band centred at `freq_hz` may have.
+    /// `q` capped so the filter's ring stays within `max_ring_ms`.
+    pub fn cap_q_for_ring(&self, freq_hz: f64, gain_db: f64, q: f64, ftype: &PeqFilterType) -> f64 {
+        match self.max_ring_ms {
+            Some(lim) => crate::peq::q_envelope::q_cap_for_ring(freq_hz, gain_db, q, ftype, self.sample_rate, lim),
+            None => q,
+        }
+    }
+
     pub fn max_boost_at(&self, freq_hz: f64) -> f64 {
         match self.boost_range {
             Some((lo, hi)) if freq_hz < lo || freq_hz > hi => 0.0,

@@ -313,6 +313,12 @@ pub fn auto_peq_lma(
         );
     }
 
+    // b141.94: final guard — every returned filter rings within the limit
+    // (shelf conversions and band additions included).
+    for b in &mut bands {
+        b.q = config.cap_q_for_ring(b.freq_hz, b.gain_db, b.q, &b.filter_type);
+    }
+
     Ok(PeqResult {
         bands,
         max_error_db: max_err,
@@ -479,6 +485,7 @@ pub fn auto_peq_above_lp(
     // Configure for above-LP: cuts only (max_boost_db = 0), range from HP up
     let above_config = PeqConfig {
         boost_range: None,
+        max_ring_ms: None,
         max_bands: config.max_bands,
         tolerance_db: config.tolerance_db,
         peak_bias: config.peak_bias,
@@ -532,6 +539,7 @@ mod tests {
 
         let config = PeqConfig {
             boost_range: None,
+            max_ring_ms: None,
             max_bands: 10,
             tolerance_db: 1.0,
             peak_bias: 1.5,
@@ -572,6 +580,7 @@ mod tests {
         let target = vec![80.0_f64; 100];
         let config = PeqConfig {
             boost_range: None,
+            max_ring_ms: None,
             max_bands: 5, tolerance_db: 1.0, peak_bias: 1.5, max_boost_db: 6.0,
             max_cut_db: 18.0, freq_range: (80.0, 15000.0), smoothing_fraction: None,
             min_band_distance_oct: None, hybrid: false, gain_regularization: 0.0,
@@ -595,6 +604,7 @@ mod tests {
         let weights = vec![1.0_f64; freq.len()];
         let config = PeqConfig {
             boost_range: None,
+            max_ring_ms: None,
             max_bands: 10, tolerance_db: 0.5, peak_bias: 1.5, max_boost_db: 6.0, max_cut_db: 18.0,
             freq_range: (20.0, 20000.0), smoothing_fraction: None, min_band_distance_oct: None,
             hybrid: false, gain_regularization: 0.0, sample_rate: 48000.0,
@@ -645,6 +655,7 @@ mod tests {
         let weights = vec![1.0_f64; freq.len()];
         let config = PeqConfig {
             boost_range: None,
+            max_ring_ms: None,
             max_bands: 3, tolerance_db: 0.5, peak_bias: 1.0, max_boost_db: 6.0, max_cut_db: 18.0,
             freq_range: (20.0, 20000.0), smoothing_fraction: None, min_band_distance_oct: None,
             hybrid: false, gain_regularization: 0.0, sample_rate: 48000.0,
@@ -664,6 +675,7 @@ mod tests {
         let target = vec![80.0_f64; freq.len()];
         let config = PeqConfig {
             boost_range: None,
+            max_ring_ms: None,
             max_bands: 5, tolerance_db: 1.0, peak_bias: 1.5, max_boost_db: 6.0, max_cut_db: 18.0,
             freq_range: (500.0, 2000.0), smoothing_fraction: None, min_band_distance_oct: None,
             hybrid: false, gain_regularization: 0.0, sample_rate: 48000.0,
@@ -762,6 +774,7 @@ mod tests {
         let mag = vec![80.0; 200];
         let config = PeqConfig {
             boost_range: None,
+            max_ring_ms: None,
             max_bands: 20,
             tolerance_db: 1.0,
             peak_bias: 1.5,
@@ -795,6 +808,7 @@ mod tests {
 
         let config = PeqConfig {
             boost_range: None,
+            max_ring_ms: None,
             max_bands: 20,
             tolerance_db: 1.0,
             peak_bias: 1.5,
@@ -864,6 +878,7 @@ mod tests {
         let target = vec![80.0, 80.0, 80.0];
         let config = PeqConfig {
             boost_range: None,
+            max_ring_ms: None,
             max_bands: 10,
             tolerance_db: 1.0,
             peak_bias: 1.5,
@@ -885,6 +900,7 @@ mod tests {
         let mag = vec![80.0; 3];
         let config = PeqConfig {
             boost_range: None,
+            max_ring_ms: None,
             max_bands: 10,
             tolerance_db: 1.0,
             peak_bias: 1.5,
@@ -913,6 +929,7 @@ mod tests {
 
         let config = PeqConfig {
             boost_range: None,
+            max_ring_ms: None,
             max_bands: 20,
             tolerance_db: 2.0,
             peak_bias: 1.5,
@@ -966,6 +983,7 @@ mod tests {
 
         let config = PeqConfig {
             boost_range: None,
+            max_ring_ms: None,
             max_bands: 20,
             tolerance_db: 1.0,
             peak_bias: 1.5,
@@ -1072,6 +1090,7 @@ mod tests {
 
         let config = PeqConfig {
             boost_range: None,
+            max_ring_ms: None,
             max_bands: 20,
             tolerance_db: 1.0,
             peak_bias: 1.5,
@@ -1108,6 +1127,7 @@ mod tests {
 
         let config = PeqConfig {
             boost_range: None,
+            max_ring_ms: None,
             max_bands: 20,
             tolerance_db: 1.0,
             peak_bias: 1.5,
@@ -1223,6 +1243,7 @@ mod tests {
 
         let config = PeqConfig {
             boost_range: None,
+            max_ring_ms: None,
             max_bands: 10,
             tolerance_db: 1.0,
             peak_bias: 1.5,
@@ -1276,6 +1297,7 @@ mod tests {
 
         let mk_config = |sr: f64| PeqConfig {
             boost_range: None,
+            max_ring_ms: None,
             max_bands: 6,
             tolerance_db: 0.5,
             peak_bias: 1.5,
@@ -1314,6 +1336,7 @@ mod tests {
 
         let config = PeqConfig {
             boost_range: None,
+            max_ring_ms: None,
             max_bands: 10,
             tolerance_db: 1.0,
             peak_bias: 1.5,
@@ -1351,6 +1374,7 @@ mod tests {
 
         let config = PeqConfig {
             boost_range: None,
+            max_ring_ms: None,
             max_bands: 10,
             tolerance_db: 1.0,
             peak_bias: 1.5,

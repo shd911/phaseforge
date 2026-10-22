@@ -10,6 +10,7 @@ import {
   appState,
   exportHybridPhase,
   exportSampleRate,
+  exportTaps,
   setBandPeqBands,
   clearBandPeqBands,
   setBandPeqOptimizedTarget,
@@ -163,6 +164,8 @@ async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBa
   // a Standard/Hybrid switch during the run used to mix both modes in one fit.
   const isHybrid = exportHybridPhase();
   const smoothFit = peqSmoothFit(), sampleRate = exportSampleRate();
+  // b141.94: no auto filter rings past half the file (the «мс» column's red).
+  const maxRingMs = exportTaps() / 2 / sampleRate * 1000;
   const bandBudget = maxBands(), tol = tolerance(), gainReg = gainRegularization();
   const rangeIn = snapshotRangeInputs(b);
   const { targetResp, range: [peqLow, peqHigh], boostRange } = await resolveRange(rangeIn);
@@ -183,6 +186,7 @@ async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBa
     max_cut_db: isHybrid ? 60.0 : 18.0,
     freq_range: [peqLow, peqHigh],
     boost_range: boostRange,
+    max_ring_ms: maxRingMs,
     hybrid: isHybrid,
     gain_regularization: gainReg,
     // b141.5 (audit): optimize at the rate the biquads will actually run at.

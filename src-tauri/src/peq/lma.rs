@@ -242,6 +242,8 @@ impl<'a> LmaSolver<'a> {
                 crate::peq::q_cap_at(freq)
             };
             params[i * 3 + 2] = params[i * 3 + 2].clamp(Q_MIN, q_max);
+            // b141.94: no filter that rings past half the export file.
+            params[i * 3 + 2] = self.config.cap_q_for_ring(freq, params[i * 3 + 1], params[i * 3 + 2], &PeqFilterType::Peaking);
         }
     }
 
@@ -608,6 +610,7 @@ mod tests {
         let weights = vec![1.0_f64; n];
         let config = PeqConfig {
             boost_range: None,
+            max_ring_ms: None,
             max_bands: 20,
             tolerance_db: 1.0,
             peak_bias: 1.5,
@@ -679,6 +682,7 @@ mod tests {
         for reg in [0.0, 0.2] {
             let config = PeqConfig {
                 boost_range: None,
+                max_ring_ms: None,
                 max_bands: 20,
                 tolerance_db: 1.0,
                 peak_bias: 1.5,

@@ -146,6 +146,7 @@ fn release_readiness_stage4_sum_ir_peq_alignment() {
 
         let cfg = PeqConfig {
             boost_range: None,
+            max_ring_ms: None,
             max_bands: 10,
             tolerance_db: 1.0,
             peak_bias: 1.5,

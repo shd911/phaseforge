@@ -256,6 +256,8 @@ export interface PeqConfig {
   sample_rate?: number;
   /** b141.92: band centres outside may only cut (null/absent = no limit). */
   boost_range?: [number, number] | null;
+  /** b141.94: the optimizer's filters ring to −100 dB within this (ms) — half the export file. */
+  max_ring_ms?: number;
 }
 
 export interface PeqResult {
