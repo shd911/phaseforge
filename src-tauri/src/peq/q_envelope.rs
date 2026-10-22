@@ -29,6 +29,19 @@ pub fn q_warn_at(freq_hz: f64) -> f64 {
     Q_LO - (Q_LO - Q_HI) * t
 }
 
+/// b141.95: what the optimizer may do with Q at a given gain. Boosts stay
+/// wide (Q ≤ 2): a narrow boost fills a dip that is usually position- or
+/// reflection-made and rings for it (+1.9 dB Q8 at 91 Hz on a real woofer:
+/// +43 ms of decay at −40 dB). Narrow filters only cut a peak of 3 dB and
+/// more — a real resonance, where the cut also shortens the ringing (−1.1 dB
+/// Q8 at a 67 Hz mode: −22 ms). Manual filters are not limited.
+pub const Q_MAX_WIDE: f64 = 2.0;
+pub const NARROW_CUT_MIN_DB: f64 = 3.0;
+
+pub fn q_cap_for_gain(gain_db: f64) -> f64 {
+    if gain_db > -NARROW_CUT_MIN_DB { Q_MAX_WIDE } else { f64::INFINITY }
+}
+
 /// b141.94: how long a PEQ filter rings (ms) until its resonance is
 /// `budget_db` below the signal — the Rust twin of `peqRingCost`
 /// (lib/peq-quality.ts, the «мс» column). The filter is 1 + a resonant term

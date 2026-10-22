@@ -51,6 +51,7 @@ pub(crate) fn greedy_fit_adaptive(freq: &[f64], smoothed_error: &[f64], config: 
             gain = gain.max(-config.max_cut_db);
         }
 
+        let q = q.min(crate::peq::q_envelope::q_cap_for_gain(gain));
         let band = PeqBand {
             freq_hz: peak_freq,
             gain_db: gain,

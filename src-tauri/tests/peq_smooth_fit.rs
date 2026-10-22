@@ -45,6 +45,9 @@ fn smooth_fit_drops_ripple_filters_on_real_mid_band() {
     };
     let raw = run(&mag, "raw");
     let smooth = run(&reflection_free_smoothing(&freq, &mag), "smooth");
-    // raw: 142/290/417/690 Hz at Q 5–7 (the project's own fit); smooth: one left
-    assert!(raw >= 3 && smooth <= 1, "smooth fit still plants narrow filters: {smooth} (raw {raw})");
+    // b141.87: raw 142/290/417/690 Hz at Q 5–7 (the project's own fit),
+    // smooth one left. Since b141.95 the Q rules (wide boosts, narrow only for
+    // cuts of 3 dB+) forbid those on both curves — the smooth fit must still
+    // plant none.
+    assert!(smooth <= raw.max(1) && smooth <= 1, "smooth fit plants narrow filters: {smooth} (raw {raw})");
 }

@@ -185,6 +185,7 @@ pub fn auto_peq_lma(
             let cap = q_envelope::q_cap_at(b.freq_hz);
             if b.q > cap { b.q = cap; }
         }
+        b.q = b.q.min(q_envelope::q_cap_for_gain(b.gain_db));
     }
 
     info!("auto_peq_lma: greedy init -> {} bands", bands.len());
@@ -270,7 +271,7 @@ pub fn auto_peq_lma(
                 let c = apply_peq(freq, &bands, config.sample_rate);
                 meas_mag.iter().zip(target.iter()).zip(c.iter()).map(|((m, t), cr)| m + cr - t).collect::<Vec<_>>()
             }, worst_idx).min(q_envelope::q_cap_at(new_fc))
-        };
+        }.min(q_envelope::q_cap_for_gain(new_gain));
 
         bands.push(PeqBand {
             freq_hz: new_fc,
@@ -316,6 +317,9 @@ pub fn auto_peq_lma(
     // b141.94: final guard — every returned filter rings within the limit
     // (shelf conversions and band additions included).
     for b in &mut bands {
+        if b.filter_type == PeqFilterType::Peaking {
+            b.q = b.q.min(q_envelope::q_cap_for_gain(b.gain_db));
+        }
         b.q = config.cap_q_for_ring(b.freq_hz, b.gain_db, b.q, &b.filter_type);
     }
 
@@ -532,8 +536,9 @@ mod tests {
         // Measurement = flat minus the exact response of two close boosts:
         // those two bands ARE the perfect correction (max_error ≈ 0). They
         // sit 0.2 oct apart — inside the polish merge radius 0.333·0.8.
-        let b1 = PeqBand { freq_hz: 900.0, gain_db: 3.0, q: 4.0, enabled: true, filter_type: PeqFilterType::Peaking };
-        let b2 = PeqBand { freq_hz: 1035.0, gain_db: 3.0, q: 4.0, enabled: true, filter_type: PeqFilterType::Peaking };
+        // b141.95: Q2 — an optimizer boost stays wide (it was Q4).
+        let b1 = PeqBand { freq_hz: 900.0, gain_db: 3.0, q: 2.0, enabled: true, filter_type: PeqFilterType::Peaking };
+        let b2 = PeqBand { freq_hz: 1035.0, gain_db: 3.0, q: 2.0, enabled: true, filter_type: PeqFilterType::Peaking };
         let inverse = apply_peq(&freq, &[b1.clone(), b2.clone()], 48000.0);
         let meas: Vec<f64> = inverse.iter().map(|c| 80.0 - c).collect();
 

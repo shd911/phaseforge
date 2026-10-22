@@ -157,6 +157,14 @@
   −97 dB after. Mixed phase (HP min + LP lin, b141.86): the correction gets
   its own Hilbert on top of the fixed model phase (−52 → −97 dB). Pinned by
   `tests/refine_no_prering.rs`.
+- **Optimizer PEQ rules** (b141.92–95, manual filters exempt — only flagged
+  in the «мс» column): boosts only where the target is within «Подъём до»
+  of its reference (`PeqConfig::boost_range`); boosts and cuts shallower than
+  3 dB stay wide, Q ≤ 2 (`q_envelope::q_cap_for_gain`); no filter rings to
+  −100 dB longer than half the export file (`max_ring_ms`, same model as the
+  UI column, `q_envelope::ring_ms` ↔ `peqRingCost`). Narrow LF boosts chased
+  position-made dips and rang (+43 ms of decay at 91 Hz on a real woofer).
+  Pinned by `tests/peq_boost_floor.rs`, `peq_ring_limit.rs`, `peq_q_rules.rs`.
 - **Bilinear digital cascade** (IIR path) has frequency-dependent
   deviation up to ~20° vs analog reference accumulated over 8 biquads.
   REPhase reference comparison gives tighter empirical bound (≤ 2.5° on
