@@ -1,6 +1,6 @@
 import { createStore, reconcile } from "solid-js/store";
 import { createSignal, batch, untrack, type Accessor } from "solid-js";
-import type { Measurement, TargetCurve, MergeConfig, PeqBand, FirResult, WindowType, ExclusionZone, AnalysisResult, PeqOptimizedTarget } from "../lib/types";
+import type { Measurement, TargetCurve, MergeConfig, PeqBand, FirResult, WindowType, ExclusionZone, AnalysisResult, PeqOptimizedTarget, FilterConfig } from "../lib/types";
 import { MEASUREMENT_COLORS, cloneFilterConfig, withCrossoverOf, F_MIN_WORK, F_MAX_WORK } from "../lib/types";
 import {
   pushHistory,
@@ -120,12 +120,89 @@ function equalOctaveCrossovers(n: number, fMin = F_MIN_WORK, fMax = F_MAX_WORK):
 
 const DEFAULT_FILTER = { filter_type: "LinkwitzRiley" as const, order: 4, shape: null, linear_phase: false, q: null };
 
-/** Assign default HP/LP filters to all bands based on equal-octave split.
- *  Only assigns to bands that have NO measurement (pristine bands). */
-function assignDefaultTargets(bands: BandState[]) {
+/** Band positions before an add/remove: id → index, and the band count. */
+type PrevLayout = { n: number; idx: Map<string, number> };
+function captureLayout(): PrevLayout {
+  return { n: state.bands.length, idx: new Map(state.bands.map((b, i) => [b.id, i])) };
+}
+
+/** b141.103 (audit 3.16): a band without a measurement whose crossovers are
+ *  still the equal-octave split of the previous layout (or that has none) —
+ *  safe to re-split. One the user set (LP 3333 Hz) used to be overwritten
+ *  by the new default on every add/remove. */
+function isOnDefaultSplit(b: BandState, prev: PrevLayout | undefined): boolean {
+  const hp = b.target.high_pass, lp = b.target.low_pass;
+  if (!hp && !lp) return true;
+  const i = prev?.idx.get(b.id);
+  if (prev === undefined || i === undefined) return true; // a new band
+  const x = equalOctaveCrossovers(prev.n);
+  const expHp = i > 0 ? x[i - 1] : null;
+  const expLp = i < prev.n - 1 ? x[i] : null;
+  const near = (f: FilterConfig | null, e: number | null) =>
+    e === null ? f === null : (f !== null && Math.abs(f.freq_hz - e) <= 1);
+  return near(hp, expHp) && near(lp, expLp);
+}
+
+type Xo = FilterConfig | null;
+
+/** b141.103 (audit 3.17): fill the internal edges a reorder (or a kept
+ *  user band) left half-open — a band that was first/last sits in the middle
+ *  without its HP/LP, and two full-range bands end up side by side. A
+ *  half-present edge takes the existing side's filter when it fits between
+ *  the two bands' outer crossovers; otherwise the edge goes to their
+ *  geometric middle. Mutates `hp`/`lp`; returns the indices it touched. */
+function repairEdges(hp: Xo[], lp: Xo[]): Set<number> {
+  const touched = new Set<number>();
+  for (let i = 0; i < hp.length - 1; i++) {
+    const l = lp[i], h = hp[i + 1];
+    if (l && h) continue;
+    const lo = hp[i]?.freq_hz ?? F_MIN_WORK;
+    const hi = lp[i + 1]?.freq_hz ?? F_MAX_WORK;
+    const src = l ?? h;
+    if (src && src.freq_hz > lo && src.freq_hz < hi) {
+      if (!l) { lp[i] = cloneFilterConfig(src); touched.add(i); }
+      else { hp[i + 1] = cloneFilterConfig(src); touched.add(i + 1); }
+    } else if (lo < hi) {
+      const f = Math.round(Math.sqrt(lo * hi));
+      const base = src ? cloneFilterConfig(src) : DEFAULT_FILTER;
+      lp[i] = { ...base, freq_hz: f };
+      hp[i + 1] = { ...base, freq_hz: f };
+      touched.add(i); touched.add(i + 1);
+    }
+  }
+  return touched;
+}
+
+/** Assign default HP/LP filters based on equal-octave split — only to bands
+ *  that have NO measurement and still sit on the default split (b141.103).
+ *  An edge next to a band the user configured takes that band's frequency,
+ *  so linked neighbours stay on one crossover. */
+function assignDefaultTargets(bands: BandState[], prev?: PrevLayout) {
   const n = bands.length;
   if (n <= 0) return;
   const xovers = equalOctaveCrossovers(n);
+  const pristine = bands.map((b) => !b.measurement && isOnDefaultSplit(b, prev));
+  const hp: Xo[] = bands.map((b) => cloneFilterConfig(b.target.high_pass ?? null));
+  const lp: Xo[] = bands.map((b) => cloneFilterConfig(b.target.low_pass ?? null));
+  const edge = xovers.map((f, e) => {
+    if (!pristine[e] && lp[e]) return lp[e]!.freq_hz;
+    if (!pristine[e + 1] && hp[e + 1]) return hp[e + 1]!.freq_hz;
+    return f;
+  });
+  for (let i = 0; i < n; i++) {
+    if (!pristine[i]) continue;
+    let hpF = i > 0 ? edge[i - 1] : null;
+    let lpF = i < n - 1 ? edge[i] : null;
+    if (hpF !== null && lpF !== null && hpF >= lpF) {
+      // A neighbour's crossover would invert this band — keep the split.
+      hpF = xovers[i - 1];
+      lpF = xovers[i];
+    }
+    // Only the frequency moves: a type/order/phase the band already has stays.
+    hp[i] = hpF !== null ? { ...(hp[i] ?? DEFAULT_FILTER), freq_hz: hpF } : null;
+    lp[i] = lpF !== null ? { ...(lp[i] ?? DEFAULT_FILTER), freq_hz: lpF } : null;
+  }
+  const repaired = repairEdges(hp, lp);
   for (let i = 0; i < n; i++) {
     // b140.8.2: re-establish positional link to next band regardless of
     // measurement presence. Was previously inside the measurement-skip
@@ -137,15 +214,14 @@ function assignDefaultTargets(bands: BandState[]) {
     if (i === n - 1 && bands[i].linkedToNext) {
       setState("bands", i, "linkedToNext", false);
     }
-    // Skip bands that already have a measurement — user configured them
-    if (bands[i].measurement) continue;
-    const hp = i > 0 ? { ...DEFAULT_FILTER, freq_hz: xovers[i - 1] } : null;
-    const lp = i < n - 1 ? { ...DEFAULT_FILTER, freq_hz: xovers[i] } : null;
+    // Bands with a measurement or crossovers the user set are left alone,
+    // except for an edge the layout change left open.
+    if (!pristine[i] && !repaired.has(i)) continue;
     // Force fresh store nodes by setting null first (prevents shared-node bug)
     setState("bands", i, "target", "high_pass", null);
-    setState("bands", i, "target", "high_pass", hp);
+    setState("bands", i, "target", "high_pass", hp[i]);
     setState("bands", i, "target", "low_pass", null);
-    setState("bands", i, "target", "low_pass", lp);
+    setState("bands", i, "target", "low_pass", lp[i]);
     setState("bands", i, "targetEnabled", true);
   }
 }
@@ -263,6 +339,7 @@ export function isSum(): boolean {
 
 export function addBand() {
   pushHistory("Add band");
+  const prev = captureLayout();
   const num = state.nextBandNum;
   const band = createBand(num);
   batch(() => {
@@ -270,7 +347,7 @@ export function addBand() {
     setState("nextBandNum", num + 1);
     setState("activeBandId", band.id);
   });
-  assignDefaultTargets(state.bands as BandState[]);
+  assignDefaultTargets(state.bands as BandState[], prev);
   markDirty();
 }
 
@@ -310,6 +387,7 @@ export function removeBand(id: string) {
   if (idx < 0) return;
   pushHistory("Remove band");
   parkHeavy(state.bands[idx]);
+  const prev = captureLayout();
   batch(() => {
     // b140.8.2: linkedToNext describes positional coupling — after the
     // filter() removes the deleted band, prev's link transfers to the new
@@ -327,7 +405,7 @@ export function removeBand(id: string) {
   });
   // Очищаем снэпшоты удалённой полосы
   setFreqSnapshots(id, []);
-  assignDefaultTargets(state.bands as BandState[]);
+  assignDefaultTargets(state.bands as BandState[], prev);
   pruneParked();
   markDirty();
 }
@@ -391,7 +469,18 @@ export function moveBand(fromIdx: number, toIdx: number) {
     if (i === n - 1 && bands[i].target.low_pass) {
       bands[i].target = { ...bands[i].target, low_pass: null };
     }
+  }
 
+  // b141.103 (audit 3.17): rebuild the internal edges the move broke.
+  {
+    const hp = bands.map((b) => b.target.high_pass);
+    const lp = bands.map((b) => b.target.low_pass);
+    for (const i of repairEdges(hp, lp)) {
+      bands[i].target = { ...bands[i].target, high_pass: hp[i], low_pass: lp[i] };
+    }
+  }
+
+  for (let i = 0; i < n; i++) {
     // Rebuild linked-connections: auto-link where LP[i] freq ≈ HP[i+1] freq (±1%)
     bands[i].linkedToNext = false;
     if (i < n - 1) {
