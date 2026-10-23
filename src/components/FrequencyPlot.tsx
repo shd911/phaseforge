@@ -2908,7 +2908,7 @@ export default function FrequencyPlot() {
             if (!u.series[si].show) continue;
             const v = u.data[si]?.[idx];
             if (v == null || !isFinite(v as number) || (v as number) <= -190) continue;
-            const stroke = (u.series[si] as any).stroke;
+            const stroke = (uSeries[si] as any)?.stroke; // the option (uPlot turns its own into a function)
             vals.push({
               label: String(u.series[si].label ?? ""),
               color: typeof stroke === "string" && stroke !== "transparent" ? stroke : "#ccc",
