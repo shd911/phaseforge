@@ -237,6 +237,18 @@ pub fn generate_band_fir(
     s: &BandFirSettings,
     omit_impulse: bool,
 ) -> Result<BandFirResult, AppError> {
+    generate_band_fir_routed(target_curve, peq, s, omit_impulse, None)
+}
+
+/// [`generate_band_fir`] with the route optionally forced — for tests that
+/// compare the two realisations of the same request.
+pub(crate) fn generate_band_fir_routed(
+    target_curve: &TargetCurve,
+    peq: &[PeqBand],
+    s: &BandFirSettings,
+    omit_impulse: bool,
+    force_route: Option<Route>,
+) -> Result<BandFirResult, AppError> {
     let hp = target_curve.high_pass.as_ref();
     let lp = target_curve.low_pass.as_ref();
     let sr = s.sample_rate;
@@ -256,14 +268,30 @@ pub fn generate_band_fir(
     // b140.5: explicit noise-floor tail up to Nyquist (the frontend's
     // appendNoiseFloorTail) — Rust's boundary clamp would otherwise hold the
     // last value flat across the remaining linear bins.
+    // b141.101 (audit 2026-10-23 1.2): on a minimum-phase main the tail
+    // continues the magnitude by its log-log slope instead. A −150 dB step at
+    // 0.95·Nyquist is a deep notch to the Hilbert transform: an LR4 2 kHz HP
+    // at 44.1 kHz lagged the IIR route by 7° at 2 kHz, 42° at 10 kHz and 91°
+    // at 15 kHz — a phase the plot never showed (the plot's min-phase terms
+    // also continue by slope, `minimum_phase_on_log_grid`). The linear-phase
+    // main keeps the floor tail: no Hilbert of it, it is the band limit there.
     let nyq = sr / 2.0;
     let f_hi = *freq.last().expect("non-empty grid");
     if f_hi < nyq * 0.999 {
         let f_end = nyq * 0.999;
+        let n = freq.len();
+        let continue_slope = config.phase_mode == PhaseMode::Composite && !config.linear_phase_main;
+        let (m_hi, slope) = if continue_slope && n >= 2 {
+            let doct = (freq[n - 1] / freq[n - 2]).log2();
+            (mag[n - 1], if doct > 0.0 { (mag[n - 1] - mag[n - 2]) / doct } else { 0.0 })
+        } else {
+            (s.noise_floor_db, 0.0)
+        };
         for i in 1..=NOISE_TAIL_POINTS {
             let t = i as f64 / NOISE_TAIL_POINTS as f64;
-            freq.push(f_hi * (f_end / f_hi).powf(t));
-            mag.push(s.noise_floor_db);
+            let f = f_hi * (f_end / f_hi).powf(t);
+            freq.push(f);
+            mag.push(m_hi + slope * (f / f_hi).log2());
             phase.push(0.0);
         }
     }
@@ -278,7 +306,7 @@ pub fn generate_band_fir(
     let combined: Vec<f64> = phase.iter().zip(&peq_phase).map(|(a, b)| a + b).collect();
     let peak_boost_db = mag.iter().zip(&peq_mag).map(|(a, b)| a + b).fold(f64::NEG_INFINITY, f64::max);
 
-    let (mut fir, route) = match route_for_target(target_curve, &config) {
+    let (mut fir, route) = match force_route.unwrap_or_else(|| route_for_target(target_curve, &config)) {
         Route::Iir => (generate_min_phase_fir_iir(&IirPathInput {
             freq: &freq, hp, lp,
             low_shelf: target_curve.low_shelf.as_ref(),
@@ -456,6 +484,30 @@ mod tests {
             lp: Some(&lr4(30_000.0)), low_shelf: None, high_shelf: Some(&hs), peq: &[pk(24_500.0)],
             config: &cfg }).unwrap();
         assert!(r.impulse.iter().all(|v| v.is_finite()));
+    }
+
+    /// b141.101 (audit 2026-10-23 1.2): the cepstral min-phase route must
+    /// realise an LR4 HP with the phase of the IIR route. The −150 dB noise
+    /// tail from 0.95·Nyquist was a step whose Hilbert transform lagged the
+    /// phase: −7° @ 2 kHz, −42° @ 10 kHz, −89.5° @ 15 kHz at 44.1 kHz.
+    #[test]
+    fn cepstral_min_phase_matches_iir_up_to_nyquist() {
+        let lr4 = FilterConfig { filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: 2000.0,
+            shape: None, linear_phase: false, q: None, subsonic_protect: None };
+        let c = curve(Some(lr4), None);
+        let mut s = settings(44_100.0);
+        s.taps = 65_536;
+        let cep = generate_band_fir_routed(&c, &[], &s, true, Some(Route::Cepstral)).unwrap();
+        let iir = generate_band_fir_routed(&c, &[], &s, true, Some(Route::Iir)).unwrap();
+        let wrap = |d: f64| ((d + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
+        let mut worst: f64 = 0.0;
+        for f in [1000.0, 2000.0, 5000.0, 10_000.0, 15_000.0, 19_000.0] {
+            let i = cep.freq.iter().position(|&x| x >= f).unwrap();
+            let d = wrap(cep.fir.realized_phase[i] - iir.fir.realized_phase[i]);
+            eprintln!("{f:>6} Hz: cepstral − IIR = {d:+.2}°");
+            worst = worst.max(d.abs());
+        }
+        assert!(worst < 1.0, "worst phase gap {worst:.2}°");
     }
 
     #[test]
