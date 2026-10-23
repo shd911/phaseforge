@@ -239,17 +239,34 @@ pub async fn save_project(path: String, project: ProjectFile) -> Result<(), Stri
 /// Atomic file write: tmp in the same directory + fsync + rename, so a crash,
 /// kill or ENOSPC mid-write never leaves a truncated `.pfproj` in place of
 /// the previous good one (2026-09-05 audit).
+///
+/// b141.102 (audit 2026-10-23 2.4): the temporary name is unique per call
+/// (pid + process-wide counter, created with `create_new`). A fixed
+/// `<name>.tmp` let two concurrent saves to one path truncate / rename each
+/// other's temp file — a false «write error» on one of them.
 pub(crate) fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
     let file_name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "file".into());
-    let tmp = path.with_file_name(format!("{file_name}.tmp"));
-    {
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
+    let pid = std::process::id();
+    let (tmp, mut f) = loop {
+        let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+        let tmp = path.with_file_name(format!("{file_name}.{pid}-{seq}.tmp"));
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp) {
+            Ok(f) => break (tmp, f),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    };
+    let written = f.write_all(bytes).and_then(|_| f.sync_all());
+    drop(f);
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
     }
     if let Err(e) = std::fs::rename(&tmp, path) {
         let _ = std::fs::remove_file(&tmp);
@@ -506,6 +523,34 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("phaseforge-{label}-{pid}-{n}"));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// Audit 2026-10-23 2.4: concurrent atomic writes to ONE path all
+    /// succeed (a shared fixed `.tmp` failed 40/40), the result is one whole
+    /// payload and no temporary file is left behind.
+    #[test]
+    fn concurrent_atomic_writes_to_one_path_all_succeed() {
+        let dir = make_scratch_dir("atomic-race");
+        let path = dir.join("proj.pfproj");
+        let handles: Vec<_> = (0..8).map(|t| {
+            let path = path.clone();
+            std::thread::spawn(move || {
+                let payload = format!("{t}:").repeat(20_000);
+                (0..20).map(|_| write_atomic(&path, payload.as_bytes()).is_ok()).all(|ok| ok)
+            })
+        }).collect();
+        for h in handles {
+            assert!(h.join().unwrap(), "a concurrent save reported a write error");
+        }
+        let body = std::fs::read_to_string(&path).unwrap();
+        let first = body.split(':').next().unwrap().to_string();
+        assert_eq!(body, format!("{first}:").repeat(20_000), "torn file");
+        let leftovers: Vec<_> = std::fs::read_dir(&dir).unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "temporary files left: {leftovers:?}");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
