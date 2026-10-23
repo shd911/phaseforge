@@ -77,8 +77,11 @@ impl RotatingLog {
 impl Write for RotatingLog {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         if self.len > 0 && self.len + buf.len() as u64 > self.max {
-            // A failed rotation must not stop logging: keep appending.
-            let _ = self.rotate();
+            // A failed rotation (the old file held open elsewhere) must not
+            // stop logging: keep appending and retry after another `max`.
+            if self.rotate().is_err() {
+                self.len = 0;
+            }
         }
         let n = self.file.write(buf)?;
         self.len += n as u64;

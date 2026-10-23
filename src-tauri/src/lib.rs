@@ -265,6 +265,8 @@ async fn auto_peq_lma(
     exclusion_zones: Option<Vec<ExclusionZone>>,
     smooth_fit: Option<bool>,
 ) -> Result<PeqResult, String> {
+    // The smoothing below indexes both arrays before peq's own length check.
+    check_lengths("auto_peq_lma", &[("freq", freq.len()), ("measurement_mag", measurement_mag.len())])?;
     let zones = exclusion_zones.unwrap_or_default();
     let smooth_fit = smooth_fit.unwrap_or(false);
     info!(
