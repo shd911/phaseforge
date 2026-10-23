@@ -48,6 +48,7 @@ export function firExportRequest(
 
 async function generateBandImpulse(b: BandState): Promise<{
   impulse: number[]; delaySamples: number; route: "iir" | "cepstral"; peakBoostDb: number;
+  warnings: string[];
 }> {
   // b139.3: route through canonical BandEvaluator. The b138.4 isLin
   // demotion (Gaussian linear + subsonic → MinimumPhase) lives inside the
@@ -61,6 +62,7 @@ async function generateBandImpulse(b: BandState): Promise<{
     delaySamples: result.fir.wavDelaySamples,
     route: result.fir.route,
     peakBoostDb: result.fir.peakBoostDb,
+    warnings: result.fir.warnings,
   };
 }
 
@@ -159,7 +161,7 @@ export function wavImpulse(impulse: number[], inverted: boolean): number[] {
  *  function focused on the export pipeline. */
 export async function exportBandWav(b: BandState): Promise<boolean> {
   const inv = !!b.inverted;
-  const { impulse, delaySamples, route, peakBoostDb } = await generateBandImpulse(b);
+  const { impulse, delaySamples, route, peakBoostDb, warnings } = await generateBandImpulse(b);
   const sr = exportSampleRate();
   // b141.74: the analytic route never applies the window — name it as IIR.
   const winTag = route === "iir" ? "IIR" : exportWindow();
@@ -178,7 +180,9 @@ export async function exportBandWav(b: BandState): Promise<boolean> {
   const host = hostSettingsNote(false, align, driverName(b), shortfall);
   const boost = boostLimitNote(route, peakBoostDb, firMaxBoost(), driverName(b));
   const saved = path.split(/[\\/]/).pop() ?? path;
-  const msg = [host, boost].filter(Boolean).join(" ");
+  // b141.101: sections the FIR could not realise (at/above 0.49·sr).
+  const fit = warnings.length ? `Бэнд «${driverName(b)}»: ${warnings.join(" ")}` : null;
+  const msg = [host, boost, fit].filter(Boolean).join(" ");
   // A note carries the number to type into the convolver — it stays until
   // clicked. Without one, a short confirmation (there was none at all).
   if (msg) showToast(`Сохранено: ${saved}. ${msg}`, "warn", 0);

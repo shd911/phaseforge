@@ -23,7 +23,7 @@ use crate::peq::{apply_peq_complex, PeqBand};
 use crate::target::{self, FilterConfig, FilterType, TargetCurve};
 
 use super::cepstral::generate_model_fir_with_sections;
-use super::dispatch::{route_for, Route};
+use super::dispatch::{route_for_target, Route};
 use super::iir_path::{generate_min_phase_fir_iir, IirPathInput};
 use super::types::{FirConfig, FirModelResult, PhaseMode, WindowType};
 
@@ -68,6 +68,43 @@ pub struct BandFirResult {
     /// the measurement through the exported file.
     pub dev_mag: Vec<f64>,
     pub dev_phase: Vec<f64>,
+    /// b141.101: what the FIR could not realise as asked (user-facing,
+    /// Russian) — shown with the export. Empty when everything fit.
+    #[serde(default)]
+    pub warnings: Vec<String>,
+}
+
+/// b141.101 (audit 2026-10-23 1.1/1.4): sections at or above
+/// SECTION_MAX_FRACTION·sr. PEQ there is dropped on both routes (its RBJ
+/// biquad is unstable on the IIR route and only an aliased mirror on the
+/// cepstral one); crossovers and shelves there take the cepstral route,
+/// which realises their in-band part — say so either way.
+fn nyquist_warnings(target_curve: &TargetCurve, peq: &[PeqBand], sr: f64) -> Vec<String> {
+    let lim = super::SECTION_MAX_FRACTION * sr;
+    let ok = |f: f64| super::section_realisable(f, sr);
+    let mut out = Vec::new();
+    for (f, what) in [(target_curve.high_pass.as_ref(), "ФВЧ"), (target_curve.low_pass.as_ref(), "ФНЧ")] {
+        if let Some(f) = f.filter(|f| !ok(f.freq_hz)) {
+            out.push(format!(
+                "{what} {:.0} Гц не ниже предела {:.0} Гц для частоты экспорта {:.0} Гц — \
+                 в FIR только его спад ниже Найквиста.", f.freq_hz, lim, sr));
+        }
+    }
+    for (s, what) in [(target_curve.low_shelf.as_ref(), "Нижняя полка"), (target_curve.high_shelf.as_ref(), "Верхняя полка")] {
+        if let Some(s) = s.filter(|s| !ok(s.freq_hz)) {
+            out.push(format!(
+                "{what} {:.0} Гц не ниже предела {:.0} Гц для частоты экспорта {:.0} Гц — \
+                 в FIR только её часть ниже Найквиста.", s.freq_hz, lim, sr));
+        }
+    }
+    let dropped: Vec<String> = peq.iter().filter(|p| !ok(p.freq_hz))
+        .map(|p| format!("{:.0} Гц", p.freq_hz)).collect();
+    if !dropped.is_empty() {
+        out.push(format!(
+            "PEQ {} не ниже предела {:.0} Гц для частоты экспорта {:.0} Гц — не включено в FIR.",
+            dropped.join(", "), lim, sr));
+    }
+    out
 }
 
 fn is_gaussian_min_phase(f: Option<&FilterConfig>) -> bool {
@@ -202,8 +239,11 @@ pub fn generate_band_fir(
 ) -> Result<BandFirResult, AppError> {
     let hp = target_curve.high_pass.as_ref();
     let lp = target_curve.low_pass.as_ref();
-    let enabled: Vec<PeqBand> = peq.iter().filter(|p| p.enabled).cloned().collect();
     let sr = s.sample_rate;
+    let all_enabled: Vec<PeqBand> = peq.iter().filter(|p| p.enabled).cloned().collect();
+    let warnings = nyquist_warnings(target_curve, &all_enabled, sr);
+    let enabled: Vec<PeqBand> = all_enabled.into_iter()
+        .filter(|p| super::section_realisable(p.freq_hz, sr)).collect();
 
     let config = band_fir_config(target_curve, s);
     let freq_raw = fir_grid(sr);
@@ -238,7 +278,7 @@ pub fn generate_band_fir(
     let combined: Vec<f64> = phase.iter().zip(&peq_phase).map(|(a, b)| a + b).collect();
     let peak_boost_db = mag.iter().zip(&peq_mag).map(|(a, b)| a + b).fold(f64::NEG_INFINITY, f64::max);
 
-    let (mut fir, route) = match route_for(hp, lp, target_curve.tilt_db_per_octave, &config) {
+    let (mut fir, route) = match route_for_target(target_curve, &config) {
         Route::Iir => (generate_min_phase_fir_iir(&IirPathInput {
             freq: &freq, hp, lp,
             low_shelf: target_curve.low_shelf.as_ref(),
@@ -259,7 +299,7 @@ pub fn generate_band_fir(
     }).collect();
     let dev_phase: Vec<f64> = (0..freq.len()).map(|i| wrap(fir.realized_phase[i] - combined[i])).collect();
     if omit_impulse { fir.impulse = Vec::new(); }
-    Ok(BandFirResult { fir, route, peak_boost_db, freq, dev_mag, dev_phase })
+    Ok(BandFirResult { fir, route, peak_boost_db, freq, dev_mag, dev_phase, warnings })
 }
 
 /// Test / harness entry: [`generate_band_fir`] driven by a `FirConfig` (its
@@ -366,6 +406,56 @@ mod tests {
         let r = generate_band_fir(&c, &[], &s, false).unwrap();
         assert_eq!(r.route, BandFirRoute::Cepstral);
         assert!(r.fir.impulse.iter().all(|v| v.is_finite()));
+    }
+
+    /// b141.101 (audit 2026-10-23 1.1/2.1/1.4): 48 kHz export, PEQ 24.5 kHz
+    /// and a high shelf at 26 kHz on an LR4 band that otherwise takes the
+    /// IIR route — the poles of both RBJ sections sat outside the unit
+    /// circle (8488 NaN samples). Now: finite impulse, warnings, no error;
+    /// an LP above Nyquist no longer fails the export.
+    #[test]
+    fn sections_above_nyquist_give_a_finite_fir_with_warnings() {
+        let lr4 = |fc: f64| FilterConfig { filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: fc,
+            shape: None, linear_phase: false, q: None, subsonic_protect: None };
+        let s = settings(48_000.0);
+        let pk = |f: f64| PeqBand { freq_hz: f, gain_db: 6.0, q: 2.0, enabled: true,
+            filter_type: crate::peq::PeqFilterType::Peaking };
+        let finite = |r: &BandFirResult| r.fir.impulse.iter().chain(&r.fir.realized_mag)
+            .chain(&r.fir.realized_phase).all(|v| v.is_finite());
+
+        // PEQ 24.5 kHz alone: still the IIR route, the PEQ is dropped.
+        let c = curve(Some(lr4(2000.0)), None);
+        let r = generate_band_fir(&c, &[pk(24_500.0), pk(5000.0)], &s, false).unwrap();
+        assert_eq!(r.route, BandFirRoute::Iir);
+        assert!(finite(&r) && r.fir.norm_db > -100.0, "norm_db {}", r.fir.norm_db);
+        assert_eq!(r.warnings.len(), 1, "{:?}", r.warnings);
+        assert!(r.warnings[0].contains("24500"));
+        // The 5 kHz PEQ is still realised (+6 dB at its centre, relative).
+        let at = |f: f64| { let i = r.freq.iter().position(|&x| x >= f).unwrap(); r.fir.realized_mag[i] };
+        assert!((at(5000.0) - at(15_000.0) - 6.0).abs() < 0.5, "{} {}", at(5000.0), at(15_000.0));
+
+        // High shelf 26 kHz: cepstral route (the analog shelf below Nyquist).
+        let mut c = curve(Some(lr4(2000.0)), None);
+        c.high_shelf = Some(crate::target::ShelfConfig { freq_hz: 26_000.0, gain_db: 6.0, q: 0.707 });
+        let r = generate_band_fir(&c, &[pk(24_500.0)], &s, false).unwrap();
+        assert_eq!(r.route, BandFirRoute::Cepstral);
+        assert!(finite(&r));
+        assert_eq!(r.warnings.len(), 2, "{:?}", r.warnings);
+
+        // LP above Nyquist: no «fc out of range».
+        let c = curve(Some(lr4(2000.0)), Some(lr4(30_000.0)));
+        let r = generate_band_fir(&c, &[], &s, false).unwrap();
+        assert_eq!(r.route, BandFirRoute::Cepstral);
+        assert!(finite(&r) && r.warnings.len() == 1 && r.warnings[0].contains("ФНЧ"));
+
+        // The IIR generator itself skips such sections instead of NaN.
+        let cfg = band_fir_config(&curve(Some(lr4(2000.0)), None), &s);
+        let freq = fir_grid(48_000.0);
+        let hs = crate::target::ShelfConfig { freq_hz: 26_000.0, gain_db: 6.0, q: 0.707 };
+        let r = generate_min_phase_fir_iir(&IirPathInput { freq: &freq, hp: Some(&lr4(2000.0)),
+            lp: Some(&lr4(30_000.0)), low_shelf: None, high_shelf: Some(&hs), peq: &[pk(24_500.0)],
+            config: &cfg }).unwrap();
+        assert!(r.impulse.iter().all(|v| v.is_finite()));
     }
 
     #[test]

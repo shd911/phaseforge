@@ -358,23 +358,30 @@ pub fn generate_min_phase_fir_iir(input: &IirPathInput) -> Result<FirModelResult
     }
 
     // 1. Build cascade: HP filter → LP filter → enabled PEQ biquads.
+    // b141.101 (audit 2026-10-23 1.1/1.4): a section at or above
+    // SECTION_MAX_FRACTION·sr has no stable biquad — it is skipped, never an
+    // error and never NaN. `generate_band_fir` routes such crossovers and
+    // shelves to the cepstral path and drops such PEQ (with a warning)
+    // before they get here; this guards the other callers.
+    let ok = |f: f64| crate::fir::section_realisable(f, sr);
     let mut biquads: Vec<DigitalBiquad> = Vec::new();
-    if let Some(hp) = input.hp {
-        biquads.extend(build_filter_cascade(hp, false, sr)
-            .map_err(|m| AppError::Config { message: m })?);
-    }
-    if let Some(lp) = input.lp {
-        biquads.extend(build_filter_cascade(lp, true, sr)
+    for (f, is_lp) in [(input.hp, false), (input.lp, true)] {
+        let Some(f) = f else { continue };
+        if !ok(f.freq_hz) {
+            info!("[IIR PATH] skipped {} fc={} Hz: not realisable at sr={}", if is_lp { "LP" } else { "HP" }, f.freq_hz, sr);
+            continue;
+        }
+        biquads.extend(build_filter_cascade(f, is_lp, sr)
             .map_err(|m| AppError::Config { message: m })?);
     }
     // b141.17: target shelves realise as the same RBJ sections the PEQ uses.
-    if let Some(ls) = input.low_shelf {
+    if let Some(ls) = input.low_shelf.filter(|s| ok(s.freq_hz)) {
         biquads.push(build_peq_biquad(&shelf_as_peq(ls, PeqFilterType::LowShelf), sr));
     }
-    if let Some(hs) = input.high_shelf {
+    if let Some(hs) = input.high_shelf.filter(|s| ok(s.freq_hz)) {
         biquads.push(build_peq_biquad(&shelf_as_peq(hs, PeqFilterType::HighShelf), sr));
     }
-    for band in input.peq.iter().filter(|p| p.enabled) {
+    for band in input.peq.iter().filter(|p| p.enabled && ok(p.freq_hz)) {
         biquads.push(build_peq_biquad(band, sr));
     }
 

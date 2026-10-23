@@ -16,7 +16,7 @@
 //! foundation; the trait can land in a later promt without changing
 //! any downstream behaviour.
 
-use crate::target::{FilterConfig, FilterType};
+use crate::target::{FilterConfig, FilterType, TargetCurve};
 use super::types::FirConfig;
 
 /// Which FIR pipeline should be invoked for a given band configuration.
@@ -63,7 +63,27 @@ pub fn route_for(
     if fir_config.subsonic_cutoff_hz.is_some() { return Route::Cepstral; }
     if !is_iir_realizable(hp) { return Route::Cepstral; }
     if !is_iir_realizable(lp) { return Route::Cepstral; }
+    // b141.101 (audit 2026-10-23 1.4): a crossover at or above
+    // SECTION_MAX_FRACTION·sr has no digital biquad (the IIR route failed the
+    // whole export with «fc out of range»). The cepstral route realises what
+    // the plot draws below Nyquist — the filter's in-band rolloff.
+    let sr = fir_config.sample_rate;
+    if [hp, lp].into_iter().flatten().any(|f| !super::section_realisable(f.freq_hz, sr)) {
+        return Route::Cepstral;
+    }
     Route::Iir
+}
+
+/// [`route_for`] for a whole target: a shelf at or above
+/// SECTION_MAX_FRACTION·sr also leaves the IIR route (its RBJ biquad is
+/// unstable there, b141.101 audit 2026-10-23 1.1); the cepstral route
+/// realises the analog shelf the plot draws.
+pub fn route_for_target(target: &TargetCurve, fir_config: &FirConfig) -> Route {
+    let sr = fir_config.sample_rate;
+    let shelf_out = [target.low_shelf.as_ref(), target.high_shelf.as_ref()].into_iter().flatten()
+        .any(|s| !super::section_realisable(s.freq_hz, sr));
+    if shelf_out { return Route::Cepstral; }
+    route_for(target.high_pass.as_ref(), target.low_pass.as_ref(), target.tilt_db_per_octave, fir_config)
 }
 
 /// Single-filter realisability check for the IIR cascade.
@@ -156,6 +176,23 @@ mod tests {
         assert_eq!(route_for(Some(&flt(FilterType::Gaussian)), None, 0.0, &c), Route::Cepstral);
         assert_eq!(route_for(None, Some(&flt(FilterType::Bessel)), 0.0, &c), Route::Cepstral);
         assert_eq!(route_for(Some(&flt(FilterType::LinkwitzRiley)), Some(&flt(FilterType::Gaussian)), 0.0, &c), Route::Cepstral);
+    }
+
+    /// b141.101: a crossover or shelf at/above 0.49·sr leaves the IIR route.
+    #[test]
+    fn section_above_the_limit_forces_cepstral() {
+        let c = cfg(false, None); // 48 kHz
+        let mut lp = flt(FilterType::LinkwitzRiley);
+        lp.freq_hz = 30_000.0;
+        assert_eq!(route_for(None, Some(&lp), 0.0, &c), Route::Cepstral);
+        lp.freq_hz = 23_000.0;
+        assert_eq!(route_for(None, Some(&lp), 0.0, &c), Route::Iir);
+        let mut t = TargetCurve { reference_level_db: 0.0, tilt_db_per_octave: 0.0, tilt_ref_freq: 1000.0,
+            high_pass: Some(flt(FilterType::LinkwitzRiley)), low_pass: None, low_shelf: None,
+            high_shelf: Some(crate::target::ShelfConfig { freq_hz: 26_000.0, gain_db: 6.0, q: 0.707 }) };
+        assert_eq!(route_for_target(&t, &c), Route::Cepstral);
+        t.high_shelf.as_mut().unwrap().freq_hz = 10_000.0;
+        assert_eq!(route_for_target(&t, &c), Route::Iir);
     }
 
     /// b141.17 (audit): a non-zero target tilt cannot be expressed by the

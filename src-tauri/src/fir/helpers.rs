@@ -49,6 +49,9 @@ pub(crate) fn digital_section(
     for (f, is_lp) in [(hp, false), (lp, true)] {
         let Some(f) = f else { continue };
         if !realisable(f) { continue; }
+        // b141.101: same bound as the route — above it the filter stays in
+        // the Hilbert residual (its in-band rolloff, as the plot draws it).
+        if !crate::fir::section_realisable(f.freq_hz, sample_rate) { continue; }
         let Ok(bs) = build_filter_cascade(f, is_lp, sample_rate) else { continue };
         biquads.extend(bs);
         parts.push((f, is_lp));
