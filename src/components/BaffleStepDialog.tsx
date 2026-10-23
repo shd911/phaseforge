@@ -268,6 +268,10 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
             )}
           </Show>
 
+          {/* b141.105 (§5.19): the chart used to vanish without a word. */}
+          <Show when={!isValid()}>
+            <div class="merge-error">Динамик должен находиться внутри панели — график и «Применить» недоступны.</div>
+          </Show>
           <Show when={error()}>
             <div class="merge-error">{error()}</div>
           </Show>

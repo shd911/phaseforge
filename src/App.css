@@ -2467,8 +2467,7 @@ input[type="checkbox"]:focus-visible {
   font-weight: 500;
   color: var(--text-muted);
   font-size: var(--fs-sm);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
+  /* b141.105 (§5.12): no uppercase — it turned «Гц/дБ/мс» into «ГЦ/ДБ/МС». */
   /* b141.4.1: tight horizontal padding so the 7-column row fits the 280px
      right panel (was --space-xs ×2 ×7 = 56px of padding → last column clipped). */
   padding: var(--space-xxs) var(--space-xxs);
@@ -2525,6 +2524,19 @@ input[type="checkbox"]:focus-visible {
   border-color: var(--accent);
   outline: none;
 }
+/* b141.105 (audit 2026-10-23 §5.16): with the «мс» and ⚠ columns the PEQ row
+   measured ≈270 px against ≈257 px inside the 280 px panel (section margin,
+   border and padding) — a horizontal scrollbar or the «×» past the edge.
+   40 px fields with 2 px padding still fit «20000» / «-18.0» / «12.50» in
+   11 px mono; the type select and the icon buttons lose their slack: ≈242 px. */
+.peq-table .peq-input {
+  width: 40px;
+  padding: 1px 2px;
+}
+.peq-table .peq-type-select { width: 32px; }
+.peq-table .peq-warn-icon { margin-left: 0; padding: 0 2px; }
+.peq-table .peq-remove { padding: 0 2px; }
+.range-dash { margin: 0 var(--space-xxs); color: var(--text-secondary); }
 .peq-input.peq-boost {
   color: var(--warning);
 }
