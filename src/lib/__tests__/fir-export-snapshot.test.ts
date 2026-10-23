@@ -21,7 +21,7 @@ vi.mock("../band-evaluator", () => ({
   evaluateBandFull: vi.fn(async (req: any) => {
     firReq = req;
     duringFir?.();
-    return { fir: { impulse: new Array(req.fir.taps).fill(0), wavDelaySamples: req.fir.taps / 2, route: "cepstral", peakBoostDb: 0 } };
+    return { fir: { impulse: new Array(req.fir.taps).fill(0), wavDelaySamples: req.fir.taps / 2, route: "cepstral", peakBoostDb: 0, warnings: [] } };
   }),
 }));
 
