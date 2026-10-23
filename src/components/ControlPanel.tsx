@@ -59,7 +59,10 @@ import {
 } from "../stores/bands";
 import { isGaussianMinPhase, gaussianFilterMagDb, CORRECTED_COLOR, PEQ_COLOR, STATUS_BAD } from "../lib/plot-helpers";
 import { evaluateBandFull } from "../lib/band-evaluator";
-import { orderToSlope, slopeToOrder, availableSlopes } from "../lib/slope";
+import {
+  orderToSlope, slopeToOrder, availableSlopes,
+  FILTER_TYPE_ORDER, FILTER_TYPE_LABEL, CUSTOM_Q_MIN, CUSTOM_Q_MAX, GAUSS_M_MIN, GAUSS_M_MAX, CUSTOM_Q_HINT,
+} from "../lib/slope";
 import {
   tolerance, setTolerance,
   maxBands, setMaxBands,
@@ -94,7 +97,6 @@ import { projectDir, projectName, copyMeasurementToProject, copyMergeFilesToProj
 import { handleImportMeasurement, handleMergeComplete } from "../lib/measurement-actions";
 import MergeDialog from "./MergeDialog";
 
-const FILTER_TYPES: FilterType[] = ["Butterworth", "Bessel", "LinkwitzRiley", "Gaussian", "Custom"];
 
 // Remember last filter config per band so toggle off→on restores settings
 const lastHP = new Map<string, import("../lib/types").FilterConfig>();
@@ -363,7 +365,7 @@ function FilterBlock(props: FilterBlockProps) {
                 }
               }}
             >
-              {FILTER_TYPES.map((t) => <option value={t}>{t}</option>)}
+              {FILTER_TYPE_ORDER.map((t) => <option value={t}>{FILTER_TYPE_LABEL[t]}</option>)}
             </select>
           </div>
           <div class="fb-row">
@@ -402,7 +404,7 @@ function FilterBlock(props: FilterBlockProps) {
               <NumberInput
                 value={c()!.shape ?? 1.0}
                 onChange={(v) => props.onChange(withOverride({ shape: v }))}
-                min={0.5} max={10} step={0.1}
+                min={GAUSS_M_MIN} max={GAUSS_M_MAX} step={0.1}
               />
             </div>
           </Show>
@@ -412,7 +414,7 @@ function FilterBlock(props: FilterBlockProps) {
               <NumberInput
                 value={c()!.q ?? 0.707}
                 onChange={(v) => props.onChange(withOverride({ q: v }))}
-                min={0.1} max={5.0} step={0.01}
+                min={CUSTOM_Q_MIN} max={CUSTOM_Q_MAX} step={0.01}
               />
             </div>
           </Show>
@@ -426,7 +428,7 @@ function FilterBlock(props: FilterBlockProps) {
           </div>
         </div>
         <Show when={isCustom()}>
-          <div class="fb-hint">0.50=LR · 0.58=Bsl · 0.71=BW</div>
+          <div class="fb-hint">{CUSTOM_Q_HINT}</div>
         </Show>
         <Show when={props.isHighPass && isGaussian()}>
           <div class="subsonic-protect-row">

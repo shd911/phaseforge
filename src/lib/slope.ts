@@ -27,6 +27,27 @@ export function slopeToOrder(filterType: string, slope: number): number {
   }
 }
 
+// b141.105 (audit 2026-10-23 §5.7): the filter block and the Crossover window
+// showed the same filter with different type names, Q limits (0.1–5 vs
+// 0.1–20) and hints, and the window did not clamp M or Q at all.
+export const FILTER_TYPE_ORDER = ["LinkwitzRiley", "Butterworth", "Bessel", "Gaussian", "Custom"] as const;
+export const FILTER_TYPE_LABEL: Record<string, string> = {
+  LinkwitzRiley: "Linkwitz-Riley",
+  Butterworth: "Butterworth",
+  Bessel: "Bessel",
+  Gaussian: "Gaussian",
+  Custom: "Произвольный Q",
+};
+/** Q of a «Произвольный Q» section. */
+export const CUSTOM_Q_MIN = 0.1;
+export const CUSTOM_Q_MAX = 5;
+/** Gaussian M coefficient. */
+export const GAUSS_M_MIN = 0.5;
+export const GAUSS_M_MAX = 10;
+export const CUSTOM_Q_HINT = "0.5 = LR · 0.577 = Bessel · 0.707 = BW · > 0.707 — резонанс";
+
+export const clampNum = (v: number, min: number, max: number): number => Math.min(max, Math.max(min, v));
+
 export function availableSlopes(filterType: string): number[] {
   switch (filterType) {
     case "LinkwitzRiley": return LR_SLOPES;
