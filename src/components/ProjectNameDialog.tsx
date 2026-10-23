@@ -31,11 +31,12 @@ export default function ProjectNameDialog() {
         onEnter={handleCreate} onEscape={handleCancel}>
           <div class="pn-title" id="pn-dlg-title">{isSaveAs() ? "Сохранить как" : "Новый проект"}</div>
 
-          <label class="pn-label">Название проекта</label>
+          <label class="pn-label" for="pn-name">Название проекта</label>
           <input
             ref={(el) => {
               requestAnimationFrame(() => el.focus());
             }}
+            id="pn-name"
             class="pn-input"
             type="text"
             placeholder="Мой проект"
@@ -44,11 +45,11 @@ export default function ProjectNameDialog() {
           />
 
           <Show when={!isSaveAs()}>
-            <label class="pn-label">Количество бэндов</label>
-            <div class="pn-band-count">
-              <button class="pn-bc-btn" onClick={decBands} disabled={bandCount() <= 1}>−</button>
+            <label class="pn-label" id="pn-band-count">Количество полос</label>
+            <div class="pn-band-count" role="group" aria-labelledby="pn-band-count">
+              <button class="pn-bc-btn" onClick={decBands} disabled={bandCount() <= 1} aria-label="Меньше полос">−</button>
               <span class="pn-bc-value">{bandCount()}</span>
-              <button class="pn-bc-btn" onClick={incBands} disabled={bandCount() >= 8}>+</button>
+              <button class="pn-bc-btn" onClick={incBands} disabled={bandCount() >= 8} aria-label="Больше полос">+</button>
             </div>
           </Show>
 

@@ -1,5 +1,6 @@
 import { createSignal, Show, For } from "solid-js";
 import Modal from "./Modal";
+import { pluralRu } from "../lib/plural";
 import { ask } from "@tauri-apps/plugin-dialog";
 import {
   snapshotsList,
@@ -69,7 +70,7 @@ export default function VersionsDialog() {
     setStatusMsg(null);
     try {
       const n = await rebuildSnapshotIndex();
-      setStatusMsg(`Индекс перестроен: найдено ${n} версий.`);
+      setStatusMsg(`Индекс перестроен: ${pluralRu(n, "найдена", "найдено", "найдено")} ${n} ${pluralRu(n, "версия", "версии", "версий")}.`);
     } catch (e) {
       setStatusMsg(`Перестроить не удалось: ${e}`);
     } finally {
@@ -199,7 +200,7 @@ export default function VersionsDialog() {
                   {(s) => (
                     <div style={{ padding: "8px 12px", "border-bottom": "1px solid #333", display: "flex", "align-items": "center", gap: "8px" }}>
                       <div style={{ flex: 1, "min-width": 0 }}>
-                        <div style={{ "font-size": "12px", color: "#888" }}>
+                        <div style={{ "font-size": "12px", color: "var(--text-secondary)" }}>
                           {formatTs(s.ts)} · {s.app_version || "—"}
                         </div>
                         <div
@@ -208,7 +209,7 @@ export default function VersionsDialog() {
                             "overflow": "hidden",
                             "text-overflow": "ellipsis",
                             "font-style": s.description ? "normal" : "italic",
-                            "color": s.description ? undefined : "#888",
+                            "color": s.description ? undefined : "var(--text-secondary)",
                           }}
                           title={s.description || "Описание не сохранилось при перестроении индекса"}
                         >
@@ -225,6 +226,7 @@ export default function VersionsDialog() {
                         class="dlg-btn"
                         onClick={() => handleDelete(s)}
                         disabled={busy()}
+                        aria-label="Удалить версию"
                         title="Удалить эту версию (файл будет удалён с диска)"
                       >×</button>
                     </div>

@@ -25,7 +25,7 @@ export default function HighQWarningPopup() {
           dialogStyle={{ "min-width": "420px", "max-width": "520px" }} titleId="highq-dlg-title" onEscape={close}>
             <div class="pn-title" id="highq-dlg-title">Высокая добротность</div>
             <div class="pn-label" style={{ "margin-bottom": "8px" }}>
-              Бэнд {ctx().index + 1}: {Math.round(ctx().band.freq_hz)} Hz
+              Фильтр PEQ {ctx().index + 1}: {Math.round(ctx().band.freq_hz)} Гц
             </div>
             <div class="pn-label" style={{ "margin-bottom": "4px" }}>
               Q = {ctx().band.q.toFixed(2)}

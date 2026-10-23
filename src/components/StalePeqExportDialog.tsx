@@ -43,8 +43,8 @@ export default function StalePeqExportDialog() {
               <For each={p().bandNames}>{(n) => <li>{n}</li>}</For>
             </ul>
             <div class="pn-label" style={{ "margin-bottom": "16px", color: "#aaa" }}>
-              Target изменён после последней оптимизации. Экспорт даст коррекцию,
-              не соответствующую текущему target.
+              Цель изменена после последней оптимизации. Экспорт даст коррекцию,
+              не соответствующую текущей цели.
             </div>
             <div class="pn-buttons">
               <button class="dlg-btn" onClick={() => resolveAndClose(false)}>Отмена</button>

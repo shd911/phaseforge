@@ -10,13 +10,23 @@
   --bg-hover: #34343e;
 
   --text-primary: #d4d4d8;
-  --text-secondary: #8b8b96;
-  --text-muted: #8b8b9d; /* b141.11: ~4.5:1 на тёмном фоне (WCAG AA) */ /* b141.4: was #5a5a66 (~2.3:1, below WCAG); lifted to ~3:1 */
+  /* b141.105 (audit 2026-10-23 §5.11): text must read ≥ 4.5:1 on every
+     surface it sits on, hover (#34343e) included — #8b8b96 gave 3.65–4.45.
+     secondary #a8a8b4: 5.23 (hover) … 7.0 (primary); muted #9d9daa: 4.59
+     (hover), 5.01 (surface), 5.60 (secondary), 6.19 (primary). */
+  --text-secondary: #a8a8b4;
+  --text-muted: #9d9daa;
   --text-on-accent: #fff; /* b141.4: text/icons on accent or danger fills */
 
   --accent: #4a90d9;
   --accent-hover: #5da3e8;
   --accent-dim: #3a6fa0;
+  /* b141.105 (§5.10): fills that carry white text. White on --accent was
+     3.34:1 (hover 2.67:1); on these 5.34:1 / 4.89:1. --accent itself stays
+     for text, borders and marks on the dark background. */
+  --accent-fill: #2f6db0;
+  --accent-fill-hover: #3573b8;
+  --danger-fill: #b83a3a; /* white 5.67:1 (--danger: 4.18:1) */
 
   --border: #3a3a48;
   --border-focus: #4a90d9;
@@ -188,11 +198,11 @@ body {
   border-color: var(--accent);
 }
 .tb-btn.primary {
-  background: var(--accent);
+  background: var(--accent-fill);
   color: #fff;
   border-color: var(--accent);
 }
-.tb-btn.primary:hover { background: var(--accent-hover); }
+.tb-btn.primary:hover { background: var(--accent-fill-hover); }
 .tb-btn-xs {
   font-size: var(--fs-xxs);
   padding: var(--btn-pad-xs);
@@ -691,6 +701,8 @@ input[type="checkbox"]:focus-visible {
   text-align: center;
   color: #fff;
 }
+/* b141.105 (§5.12): units inside an uppercased header stay as written. */
+.sum-row-header span { text-transform: none; }
 /* Row header (category name) */
 .sum-vis-table .sum-row-header {
   text-align: left;
@@ -1114,7 +1126,7 @@ input[type="checkbox"]:focus-visible {
 .fb-check-box {
   width: 12px;
   height: 12px;
-  border: 1.5px solid var(--text-secondary, #8b8b96);
+  border: 1.5px solid var(--text-secondary);
   border-radius: 2px;
   display: inline-block;
   position: relative;
@@ -1437,7 +1449,7 @@ input[type="checkbox"]:focus-visible {
 
 }
 .export-sidebar-empty {
-  color: #666;
+  color: var(--text-muted);
   font-size: var(--fs-sm);
   padding: var(--space-lg) var(--space-xs);
 
@@ -1451,7 +1463,7 @@ input[type="checkbox"]:focus-visible {
 }
 .export-section-title {
   font-size: var(--fs-xs);
-  color: #8b8b96;
+  color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-bottom: var(--space-xs);
@@ -1465,7 +1477,7 @@ input[type="checkbox"]:focus-visible {
   padding: 1px 0;
 }
 .export-metric-label {
-  color: #8b8b96;
+  color: var(--text-secondary);
 }
 .export-metric-value {
   font-weight: 500;
@@ -2029,15 +2041,15 @@ input[type="checkbox"]:focus-visible {
 .dlg-btn:hover { background: var(--bg-input); }
 .dlg-btn:disabled { opacity: 0.4; cursor: default; }
 .dlg-btn-primary {
-  background: var(--accent);
+  background: var(--accent-fill);
   border-color: var(--accent);
   color: #fff;
   font-weight: 600;
 }
-.dlg-btn-primary:hover { background: var(--accent-hover); }
+.dlg-btn-primary:hover { background: var(--accent-fill-hover); }
 .dlg-btn-primary:disabled { opacity: 0.4; cursor: default; }
 .dlg-btn-danger {
-  background: var(--danger);
+  background: var(--danger-fill);
   border-color: var(--danger);
   color: #fff;
   font-weight: 600;
@@ -2122,7 +2134,7 @@ input[type="checkbox"]:focus-visible {
   font-size: 12px;
 }
 .subsonic-protect-row .hint {
-  color: #888;
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -2978,7 +2990,7 @@ input[type="checkbox"]:focus-visible {
 .peq-auto-section .peq-grid { display: grid; grid-template-columns: 1fr; gap: 2px; }
 .peq-auto-section .peq-buttons-row { display: flex; align-items: center; gap: 4px; margin-top: 4px; }
 .peq-auto-section .peq-sidebar-header { margin-bottom: 4px; }
-.fb-hint { font-size: var(--fs-xs); color: var(--text-secondary); padding: 2px 0 0; text-align: center; opacity: 0.7; }
+.fb-hint { font-size: var(--fs-xs); color: var(--text-secondary); padding: 2px 0 0; text-align: center; } /* b141.105: opacity 0.7 gave 3.10:1 */
 
 /* b141.4: SUM-view hint (replaces the editing panel in read-only Sum mode) */
 .sum-hint {

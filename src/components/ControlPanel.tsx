@@ -177,7 +177,7 @@ function FiltersTab() {
               onClick={() => { const id = bandId(); if (id) toggleBandTarget(id); }}
               aria-pressed={enabled()}
               title="Включить/выключить цель для этой полосы"
-            >{enabled() ? "ON" : "OFF"}</button>
+            >{enabled() ? "Вкл" : "Выкл"}</button>
           </div>
           <div class="fb-row">
             <label class="fb-label" for="cp-preset">Пресет</label>
@@ -339,7 +339,7 @@ function FilterBlock(props: FilterBlockProps) {
           onClick={props.onToggle}
           aria-pressed={c() != null}
           aria-label={`${props.title}: ${c() ? "выключить" : "включить"}`}
-        >{c() ? "ON" : "OFF"}</button>
+        >{c() ? "Вкл" : "Выкл"}</button>
       </div>
       <Show when={c()}>
         <div class="fb-grid">

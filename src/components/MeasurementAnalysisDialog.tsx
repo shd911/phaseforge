@@ -1,5 +1,6 @@
 import { createSignal, Show, For } from "solid-js";
 import Modal from "./Modal";
+import { pluralRu } from "../lib/plural";
 import type { AnalysisFinding, AnalysisRecommendation, AnalysisResult } from "../lib/types";
 import { applyRecommendation } from "../lib/analysis-actions";
 import { setBandAnalysisDismissed } from "../stores/bands";
@@ -101,8 +102,9 @@ export default function MeasurementAnalysisDialog() {
                   Выберите рекомендации, которые применить. Можно по одной или сразу все.
                 </div>
                 <div style={{ "margin-bottom": "12px", color: "#aaa", "font-size": "12px" }}>
-                  Найдено: {counts().warn} предупреждений, {counts().info} заметок
-                  {counts().err > 0 ? `, ${counts().err} ошибок` : ""}
+                  Найдено: {counts().warn} {pluralRu(counts().warn, "предупреждение", "предупреждения", "предупреждений")},{" "}
+                  {counts().info} {pluralRu(counts().info, "заметка", "заметки", "заметок")}
+                  {counts().err > 0 ? `, ${counts().err} ${pluralRu(counts().err, "ошибка", "ошибки", "ошибок")}` : ""}
                 </div>
 
                 <div style={{ "max-height": "420px", "overflow-y": "auto", "border-top": "1px solid #333" }}>

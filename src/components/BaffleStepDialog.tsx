@@ -48,7 +48,7 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
       series: [
         {},
         {
-          label: "dB",
+          label: "дБ",
           stroke: "#4A9EFF",
           width: 1.5,
           scale: "db",
@@ -60,7 +60,7 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
       },
       axes: [
         {
-          stroke: "#8b8b96",
+          stroke: "#a8a8b4",
           grid: { stroke: "rgba(255,255,255,0.06)" },
           ticks: { stroke: "rgba(255,255,255,0.12)" },
           ...(freqAxisTicks as Partial<uPlot.Axis>),
@@ -68,7 +68,7 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
         },
         {
           scale: "db",
-          stroke: "#8b8b96",
+          stroke: "#a8a8b4",
           grid: { stroke: "rgba(255,255,255,0.06)" },
           ticks: { stroke: "rgba(255,255,255,0.12)" },
           values: (_u: uPlot, vals: number[]) =>
