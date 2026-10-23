@@ -3,7 +3,7 @@ import { createStore } from "solid-js/store";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { invoke } from "@tauri-apps/api/core";
-import type { Measurement, TargetResponse, FilterType, FilterConfig, PeqBand, WindowType } from "../lib/types";
+import type { Measurement, TargetResponse, FilterType, PeqBand, WindowType } from "../lib/types";
 import { appState, activeBand, isSum, activeTab, plotTab, setPlotTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, setPeqDragging, updatePeqBand, commitPeqBand, bandsVersion, exportSampleRate, setExportSampleRate, exportTaps, setExportTaps, exportWindow, setExportWindow, toggleBandInverted, firIterations, firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess, firMaxBoost, firNoiseFloor, exportMetrics, setExportMetrics, plotSnapshots, addPlotSnapshot, clearPlotSnapshots, setAlignmentDelay, setBandSmoothing, beginInteraction, commitInteraction, needAutoFit, setNeedAutoFit } from "../stores/bands";
 import type { SmoothingMode, BandState, FreqSnapshot } from "../stores/bands";
 import { computeFloorBounce } from "../lib/floor-bounce";
@@ -15,7 +15,7 @@ import { exportBandWav, firExportRequest, convolverDelaySeconds } from "../lib/f
 import { showToast } from "../lib/toast";
 import { alignmentPhaseDeg, STANDARD_SAMPLE_RATES, STANDARD_TAPS, F_MIN_WORK, F_MAX_WORK, F_MAX_REF } from "../lib/types";
 import { preRingZoneMs } from "../lib/pre-ring";
-import { analyzePreRing, ringZone } from "../lib/export-metrics";
+import { analyzePreRing, ringZone, exportPhaseLabel } from "../lib/export-metrics";
 import ExportMetricsBar from "./ExportMetricsBar";
 import { passbandRange } from "../lib/band-evaluator/extension";
 import { peqStale } from "../stores/peq-optimize";
@@ -40,7 +40,7 @@ import { coherentSum } from "../lib/band-evaluator/sum";
 import { buildCommonGrid, buildFirGrid, interpOnGrid, interpPhaseOnGrid, irTime, resampleOnLogGrid, type ImpulseIpc } from "../lib/band-evaluator/grid";
 import { bandRequestKey } from "../lib/band-evaluator/cache";
 import { computeAutoAlign } from "../lib/auto-align";
-import { polarityPhase, polarityAmplitude, sumGroupDelayMs } from "../lib/plot-display";
+import { polarityPhase, polarityAmplitude, sumGroupDelayMs, fitExportMagRange } from "../lib/plot-display";
 import { attachFieldWheel, newWheelAccumulator, wheelSteps } from "../lib/wheel-step";
 
 
@@ -179,6 +179,10 @@ export default function FrequencyPlot() {
 
   // PEQ dot markers — mutable, updated during drag
   let activePeqDots: { seriesIdx: number; dataIndices: Set<number> } | null = null;
+  /** b141.104 (audit 4.25): the band whose SPL chart is on screen (null for
+   *  Σ and the other tabs). The PEQ fast path edits that chart in place, so
+   *  it must never run for another band. */
+  let chartBandId: string | null = null;
 
   // IR/Step mutable Y scale (like curMagMin/Max for freq)
   let irCurYMin = -120;
@@ -284,25 +288,31 @@ export default function FrequencyPlot() {
   const lastGdData: { freq: number[]; gdMs: number[] } = { freq: [], gdMs: [] };
   // Export snapshot data (FIR curve)
   const lastExportData: { freq: number[]; mag: number[]; phase: (number | null)[] } = { freq: [], mag: [], phase: [] };
+  // b141.104 (audit 4.5/4.22): the band the last*Data above belong to, per
+  // tab. Null while a render for another band is still computing — SNAP
+  // then takes nothing instead of the previous band's curves.
+  let lastFreqBandId: string | null = null;
+  let lastIrBandId: string | null = null;
+  let lastGdBandId: string | null = null;
+  let lastExportBandId: string | null = null;
+  let exportRenderGen = 0;
 
   function takeFreqSnapshot() {
     const band = activeBand();
-    if (!band || !chart) return;
-    // Determine visible categories from chart series (source of truth)
+    if (!band || !chart || lastFreqBandId !== band.id) return;
+    // b141.104 (audit 4.14): visible categories from the legend's own
+    // categories. Classifying series labels by substring put «FIR dB»,
+    // «FIR °» and «PEQ dB» into «Meas» — a hidden measurement got captured.
+    // PEQ / FIR / CORR FIR curves have no snapshot slot.
     let corrMagVis = false, corrPhVis = false;
     let tgtMagVis = false, tgtPhVis = false;
     let measMagVis = false, measPhVis = false;
-    for (let i = 1; i < chart.series.length; i++) {
-      const s = chart.series[i] as any;
-      if (!s.show) continue;
-      const lbl = typeof s.label === "string" ? s.label : "";
-      if (lbl.startsWith("Snap ")) continue;
-      // Detect phase by scale or label suffix "°"
-      const isPhase = s.scale === "phase" || lbl.includes("\u00B0");
-      // Detect category: corrected/target by keyword, everything else = measurement
-      if (lbl.includes("orrect") || lbl.includes("orr")) { if (isPhase) corrPhVis = true; else corrMagVis = true; }
-      else if (lbl.includes("arget") || lbl.includes("tgt")) { if (isPhase) tgtPhVis = true; else tgtMagVis = true; }
-      else { if (isPhase) measPhVis = true; else measMagVis = true; }
+    for (const e of legendEntries) {
+      if (!e.visible) continue;
+      const isPhase = isPhaseEntry(e);
+      if (e.category === "corrected") { if (isPhase) corrPhVis = true; else corrMagVis = true; }
+      else if (e.category === "target") { if (isPhase) tgtPhVis = true; else tgtMagVis = true; }
+      else if (e.category === "measurement") { if (isPhase) measPhVis = true; else measMagVis = true; }
     }
     // Capture ALL visible categories (not just highest-priority)
     const categories = [
@@ -350,6 +360,7 @@ export default function FrequencyPlot() {
     const color = FREQ_SNAP_COLORS[groupIdx % FREQ_SNAP_COLORS.length];
     const label = `Snap ${groupIdx + 1}`;
     if (tab === "ir") {
+      if (lastIrBandId !== band.id) return;
       // Use bandVisMap as source of truth for visibility (not chart.series.show — avoids async race)
       const isVis = (lbl: string) => bandVisMap.get(lbl) !== false;
       // Capture ALL visible categories (not just highest-priority)
@@ -379,9 +390,9 @@ export default function FrequencyPlot() {
           step: hasSt ? [...cat.data.step] : undefined,
         });
       }
-    } else if (tab === "gd" && lastGdData.freq.length > 0) {
+    } else if (tab === "gd" && lastGdBandId === band.id && lastGdData.freq.length > 0 && lastGdData.gdMs.length > 0) {
       addPlotSnapshot(band.id, { label, color, tab: "gd", freq: [...lastGdData.freq], gdMs: [...lastGdData.gdMs] });
-    } else if (tab === "export" && lastExportData.freq.length > 0) {
+    } else if (tab === "export" && lastExportBandId === band.id && lastExportData.freq.length > 0) {
       const hasMag = showExpFir() && lastExportData.mag.length > 0;
       const hasPh = showExpFirPh() && lastExportData.phase.length > 0;
       if (!hasMag && !hasPh) return;
@@ -392,7 +403,15 @@ export default function FrequencyPlot() {
       });
     }
     // Trigger re-render to show snapshot on chart (preserve scales)
-    irToggleRedraw();
+    redrawSnapshotTab(tab);
+  }
+
+  /** b141.104 (audit 4.17): SNAP/CLR show at once on every tab — the redraw
+   *  used to exist for IR only, GD and Export waited for the next rebuild. */
+  function redrawSnapshotTab(tab: string) {
+    if (tab === "ir") irToggleRedraw();
+    else if (tab === "gd") gdToggleRedraw();
+    else if (tab === "export") exportRedraw();
   }
 
   function clearSnapshots() {
@@ -402,7 +421,7 @@ export default function FrequencyPlot() {
     if (tab === "freq") { clearFreqSnapshots(); return; }
     clearPlotSnapshots(band.id, tab);
     // Trigger re-render to remove snapshot curves from chart (preserve scales)
-    irToggleRedraw();
+    redrawSnapshotTab(tab);
   }
   const [legendEntries, setLegendEntries] = createStore<LegendEntry[]>([]);
   const [showLegend, setShowLegend] = createSignal(false);
@@ -485,6 +504,13 @@ export default function FrequencyPlot() {
    *  Labels are stable across bands: "Measurement", "Target", "PEQ Corrected", etc. */
   function catKey(e: LegendEntry): string {
     return e.label;
+  }
+
+  /** b141.104 (audit 4.13/4.14): a phase curve's legend entry — every phase
+   *  label ends in «°». The dash style is NOT the criterion: «Meas (ext)» /
+   *  «Corr (ext)» are dashed magnitude curves. */
+  function isPhaseEntry(e: LegendEntry): boolean {
+    return e.label.endsWith("\u00B0");
   }
 
   // Crossover drag state
@@ -1654,7 +1680,7 @@ export default function FrequencyPlot() {
   }
   async function peqFastUpdateNow(band: BandState) {
     const gen = ++peqFastGen;
-    if (!chart || !band.peqBands?.length) return;
+    if (!chart || !band.peqBands?.length || band.id !== chartBandId) return;
     const peqSi = chart.series.findIndex(s => s.label === "PEQ dB");
     if (peqSi < 0) return;
     const freq = chart.data[0];
@@ -1773,8 +1799,11 @@ export default function FrequencyPlot() {
 
     if (debounceTimer) clearTimeout(debounceTimer);
 
-    // During PEQ drag: skip full rebuild, use fast in-place update
-    if (dragging && chart && pTab === "freq" && !sumMode && band) {
+    // During PEQ drag: skip full rebuild, use fast in-place update — only
+    // on the chart of the band being edited. b141.104 (audit 4.25): within
+    // 400 ms of a wheel step a band switch drew the new band's PEQ into the
+    // old band's chart; it now falls through to the (debounced) rebuild.
+    if (dragging && chart && pTab === "freq" && !sumMode && band && band.id === chartBandId) {
       peqFastUpdate(band);
       return;
     }
@@ -1815,6 +1844,7 @@ export default function FrequencyPlot() {
     // On other tabs: destroy immediately
     if (pTab !== "freq") {
       try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
+      chartBandId = null;
     }
 
     if (pTab === "ir" || pTab === "gd") {
@@ -1851,12 +1881,21 @@ export default function FrequencyPlot() {
   // ----------------------------------------------------------------
   // Export tab: Model vs FIR realization
   // ----------------------------------------------------------------
-  async function renderExportTab(band: BandState | null) {
+  async function renderExportTab(band: BandState | null, renderOpts?: { keepY?: boolean }) {
     const gen = ++renderGen;
-    if (!band || !band.target) {
+    const myExport = ++exportRenderGen;
+    // b141.104 (audit 4.5): until this band's FIR is in, there is nothing a
+    // SNAP may take — it used to save the previous band's FIR.
+    lastExportBandId = null;
+    // Nothing to show: no chart, no metrics, no FIR route of another band.
+    const clearExport = () => {
       try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
-      setShowLegend(false); setExportComputing(false); setExportFirRoute(null);
-      setCursorFreq("—"); setCursorSPL("—"); setCursorPhase("—");
+      setShowLegend(false); setExportFirRoute(null); setExportMetrics(null);
+      setCursorFreq("—"); setCursorSPL("—"); setCursorPhase("—"); setCursorValues([]);
+    };
+    if (!band || !band.target) {
+      clearExport();
+      setExportComputing(false);
       return;
     }
 
@@ -1877,7 +1916,7 @@ export default function FrequencyPlot() {
       const evalRes = await evaluateBandFull(firExportRequest(band));
       if (gen !== renderGen) return;
       if (!evalRes.fir || !evalRes.targetMag) {
-        setExportComputing(false); setExportFirRoute(null);
+        clearExport();
         return;
       }
       setExportFirRoute(evalRes.fir.route);
@@ -1896,16 +1935,10 @@ export default function FrequencyPlot() {
       };
       const target = band.target;
 
-      // Status label reflects the user's linear-phase choice + subsonic state.
-      const isUserLin = (f: FilterConfig | null | undefined) =>
-        !f || f.linear_phase === true;
-      const linearMain = isUserLin(target.high_pass) && isUserLin(target.low_pass);
-      const hasSubsonic = hasActiveSubsonicProtect(target.high_pass);
-      const phaseLabel =
-        linearMain && hasSubsonic ? "Linear-Phase + Subsonic"
-        : linearMain ? "Linear-Phase"
-        : hasSubsonic ? "Min-Phase + Subsonic"
-        : "Min-Phase";
+      // Status label reflects the user's linear-phase choice + subsonic state
+      // (b141.104, audit 4.23: HP min + LP lin reads «Mixed-Phase»).
+      const phaseLabel = exportPhaseLabel(
+        target.high_pass, target.low_pass, hasActiveSubsonicProtect(target.high_pass));
       // Normalize model mag (combined = target+peq, shifted by FIR norm)
       const normModelMag = targetMag.map((v: number, i: number) => (v + (peqMagArr[i] ?? 0)) - firResult.norm_db);
 
@@ -2009,11 +2042,13 @@ export default function FrequencyPlot() {
         hooks: {
           setCursor: [(u: uPlot) => {
             const idx = u.cursor.idx;
-            if (idx == null || idx < 0 || idx >= u.data[0].length) { setCursorFreq("—"); setCursorSPL("—"); return; }
+            if (idx == null || idx < 0 || idx >= u.data[0].length) { setCursorFreq("—"); setCursorSPL("—"); setCursorValues([]); return; }
             const f = u.data[0][idx];
             setCursorFreq(f != null ? fmtFreq(f) : "—");
-            const m = u.data[1]?.[idx]; const r = u.data[2]?.[idx];
-            const mp = u.data[3]?.[idx]; const rp = u.data[4]?.[idx];
+            // b141.104 (audit 4.20): hidden curves are not read out.
+            const at = (k: number) => (u.series[k]?.show === false ? null : u.data[k]?.[idx]);
+            const m = at(1); const r = at(2);
+            const mp = at(3); const rp = at(4);
             const vals: { label: string; color: string; value: string }[] = [];
             if (m != null) vals.push({ label: "Model", color: expClr.model, value: (m as number).toFixed(1) + " dB" });
             if (r != null) vals.push({ label: "FIR", color: expClr.fir, value: (r as number).toFixed(1) + " dB" });
@@ -2024,27 +2059,25 @@ export default function FrequencyPlot() {
           }],
         },
       };
-      // Compute Y fit range from data
-      let expMin = Infinity, expMax = -Infinity;
-      for (const arr of [normModelMag, firResult.realized_mag]) {
-        for (const v of arr) { if (v > -190 && isFinite(v)) { if (v < expMin) expMin = v; if (v > expMax) expMax = v; } }
-      }
-      if (isFinite(expMin)) {
-        const expPad = Math.max(2, (expMax - expMin) * 0.1);
-        // Only auto-fit if not already zoomed (persistedMagMin is from freq tab zoom)
-        if (persistedMagMin == null) {
-          curMagMin = expMin - expPad;
-          curMagMax = expMax + expPad;
-        }
+      // Compute Y fit range from the visible data. Only auto-fit if not
+      // already zoomed (persistedMagMin is from freq tab zoom) and not a
+      // redraw that keeps the view (SNAP/CLR).
+      const expFit = fitExportMagRange([
+        { values: normModelMag, visible: untrack(showExpModel) },
+        { values: firResult.realized_mag, visible: untrack(showExpFir) },
+      ]);
+      if (expFit && persistedMagMin == null && !renderOpts?.keepY) {
+        curMagMin = expFit.min;
+        curMagMax = expFit.max;
       }
       if (!isSum()) setShowLegend(false);
       // Save FIR data for snapshot capture
       lastExportData.freq = [...freq]; lastExportData.mag = [...firResult.realized_mag]; lastExportData.phase = [...wrappedFirPhase];
+      lastExportBandId = band.id;
       // Export snapshots
       const expData: (number | null)[][] = [freq, normModelMag, firResult.realized_mag, wrappedModelPhase, wrappedFirPhase];
       {
-        const b = activeBand();
-        const snaps = b ? plotSnapshots(b.id, "export") : [];
+        const snaps = untrack(() => plotSnapshots(band.id, "export"));
         const interpSnap = (srcFreq: number[], srcData: number[]) =>
           interpOnGrid(srcFreq, srcData, freq, { outside: "nan" }) as number[];
         // b141.9: wrapped phase — shortest-arc interp (no bogus mid-wrap bins).
@@ -2070,11 +2103,24 @@ export default function FrequencyPlot() {
         if (!showExpModelPh()) chart.setSeries(3, { show: false });
         if (!showExpFirPh()) chart.setSeries(4, { show: false });
       } catch (e) { console.error(e); }
-      setExportComputing(false);
     } catch (e) {
       console.error("Export tab render failed:", e);
-      setExportComputing(false);
+    } finally {
+      // b141.104 (audit 4.4): every exit clears the «Расчёт FIR…» overlay —
+      // a render overtaken by another tab (gen check above) used to leave it
+      // up for good. A newer Export render owns the flag, so only the latest
+      // one clears it.
+      if (myExport === exportRenderGen) setExportComputing(false);
     }
+  }
+
+  /** b141.104 (audit 4.17): redraw the Export chart in place (SNAP/CLR) —
+   *  the FIR comes from the evaluator cache, the view is kept. */
+  function exportRedraw() {
+    if (plotTab() !== "export") return;
+    const xs = chart?.scales["x"];
+    if (xs?.min != null && xs?.max != null && xs.min > 0) { persistedXMin = xs.min; persistedXMax = xs.max; }
+    void renderExportTab(activeBand(), { keepY: true });
   }
 
   // ----------------------------------------------------------------
@@ -2095,6 +2141,7 @@ export default function FrequencyPlot() {
 
   async function renderTimeTab(mode: "ir" | "gd", sumMode: boolean, band: BandState | null) {
     const gen = ++renderGen;
+    if (mode === "ir") lastIrBandId = null; else lastGdBandId = null;
     // Snapshot toggle state — untrack to prevent main effect re-trigger on toggle
     const irCfg = untrack(() => ({
       db: irDbMode(),
@@ -2260,6 +2307,7 @@ export default function FrequencyPlot() {
           lastGdData.gdMs = [];
         }
 
+        lastGdBandId = !sumMode && band ? band.id : null;
         renderGdChart(measGd.freqOut, measGd.gdMs, targetGdMs, corrGdMs, gdClr, gdCfg);
         return;
       }
@@ -2450,6 +2498,7 @@ export default function FrequencyPlot() {
           [measBands, null, targetBands, null, corrBands, null,
            band ? preRingZoneMs([band] as BandState[]) : null, irCfg];
         lastIrChart = { key: irDataKey(mode, sumMode, band), args: bandArgs };
+        lastIrBandId = band!.id;
         renderIrStepChart(...bandArgs);
       }
     } catch (e) {
@@ -2964,6 +3013,7 @@ export default function FrequencyPlot() {
   // ----------------------------------------------------------------
   async function renderBandMode(band: BandState, showPhase: boolean, showMag: boolean, showTarget: boolean) {
     const gen = ++renderGen;
+    lastFreqBandId = null; // b141.104 (4.22): no SNAP until this band's chart is up
     zoomCenter = 0; // reset before async — will be recalculated from measurement
     // b141.77: the EXPORTED FIR's realized response, drawn as «FIR» next to the
     // model «Corrected». Same request as the WAV export (metadata only, shared
@@ -3421,6 +3471,8 @@ export default function FrequencyPlot() {
       if (gen !== renderGen) return;
       requestAnimationFrame(() => {
         if (gen !== renderGen || !containerRef) return;
+        lastFreqBandId = band.id;
+        chartBandId = band.id;
         renderChart({
           freq: result.freq!,
           uSeries,
@@ -3440,6 +3492,8 @@ export default function FrequencyPlot() {
     // b140.3.1.6: PEQ dots are band-mode-only — clear before rendering SUM.
     activePeqDots = null;
     const gen = ++renderGen;
+    lastFreqBandId = null;
+    chartBandId = null;
     zoomCenter = 0;
     // 2026-09-05 audit: no JSON clone here — it minted fresh measurement
     // objects on every render, so the identity-keyed eval cache missed on
@@ -4373,7 +4427,8 @@ export default function FrequencyPlot() {
                 <td class="sum-cell">
                   <button class={`legend-item ${showExpModel() ? "" : "legend-off"}`}
                     onClick={() => { const v = !showExpModel(); setShowExpModel(v); safeToggleSeries(1, v); }}>
-                    <span class="legend-swatch legend-swatch-dash" style={{ "border-color": exportColors().model }} />
+                    {/* b141.104 (audit 4.15): «Model dB» is drawn solid. */}
+                    <span class="legend-swatch" style={{ "background-color": exportColors().model, "border-color": exportColors().model }} />
                   </button>
                 </td>
                 <td class="sum-cell">
@@ -4741,7 +4796,7 @@ export default function FrequencyPlot() {
       <div class="plot-body">
         <div class="plot-center">
           <div ref={containerRef} class="frequency-plot" />
-          <Show when={exportComputing()}>
+          <Show when={exportComputing() && plotTab() === "export"}>
             <div class="plot-computing-overlay">
               <span class="plot-computing-text">Расчёт FIR…</span>
             </div>

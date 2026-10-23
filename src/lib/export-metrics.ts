@@ -120,3 +120,20 @@ export function analyzePreRing(
     floorDb,
   };
 }
+
+/** b141.104 (audit 4.23): the phase mode named on the Export metrics bar,
+ *  from the user's linear-phase choices. HP min + LP lin (or the reverse)
+ *  is «Mixed-Phase» — it used to read «Min-Phase». A missing filter does not
+ *  vote; no HP/LP at all keeps the old «Linear-Phase». */
+export function exportPhaseLabel(
+  hp: FilterConfig | null | undefined,
+  lp: FilterConfig | null | undefined,
+  hasSubsonic: boolean,
+): string {
+  const present = [hp, lp].filter((f): f is FilterConfig => !!f);
+  const lin = present.filter((f) => f.linear_phase === true).length;
+  const base = lin === present.length ? "Linear-Phase"
+    : lin === 0 ? "Min-Phase"
+    : "Mixed-Phase";
+  return hasSubsonic ? `${base} + Subsonic` : base;
+}
