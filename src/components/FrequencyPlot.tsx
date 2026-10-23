@@ -40,7 +40,7 @@ import { coherentSum } from "../lib/band-evaluator/sum";
 import { buildCommonGrid, buildFirGrid, interpOnGrid, interpPhaseOnGrid, irTime, resampleOnLogGrid, type ImpulseIpc } from "../lib/band-evaluator/grid";
 import { bandRequestKey } from "../lib/band-evaluator/cache";
 import { computeAutoAlign } from "../lib/auto-align";
-import { polarityPhase, polarityAmplitude, sumGroupDelayMs, fitExportMagRange, peqHandleDb, peqGainAfterDrag } from "../lib/plot-display";
+import { polarityPhase, polarityAmplitude, sumGroupDelayMs, fitMagRange, fitExportMagRange, peqHandleDb, peqGainAfterDrag, type FitSeries } from "../lib/plot-display";
 import { attachFieldWheel, newWheelAccumulator, wheelSteps } from "../lib/wheel-step";
 
 
@@ -158,8 +158,6 @@ export default function FrequencyPlot() {
     }
   }
 
-  let fitMagMin = -100;
-  let fitMagMax = 100;
   // Mutable Y-scale state — updated by buttons, used by range function
   let curMagMin = -100;
   let curMagMax = 100;
@@ -194,31 +192,47 @@ export default function FrequencyPlot() {
   let gdUserYMin: number | null = null;
   let gdUserYMax: number | null = null;
 
-  // Zoom history for undo (right-click)
-  const zoomStack: { xMin: number; xMax: number; magMin: number; magMax: number; phaseMin: number; phaseMax: number }[] = [];
+  // Zoom history for undo (right-click). b141.104 (audit 4.11): one stack
+  // per tab — a shared one restored the ms range of IR on the log-Hz SPL
+  // axis (empty chart). Each entry holds the tab's own Y scale.
+  type ZoomEntry = { xMin: number; xMax: number; yMin: number; yMax: number; phaseMin: number; phaseMax: number };
+  const zoomStacks: Record<string, ZoomEntry[]> = {};
+  const zoomStack = (): ZoomEntry[] => (zoomStacks[plotTab()] ??= []);
+  const yScaleKey = (tab: string) => (tab === "freq" || tab === "export") ? "mag" : "y";
   function pushZoom() {
     if (!chart) return;
+    const tab = plotTab();
     const xs = chart.scales["x"];
-    if (xs?.min != null && xs?.max != null) {
-      zoomStack.push({ xMin: xs.min, xMax: xs.max, magMin: curMagMin, magMax: curMagMax, phaseMin: curPhaseMin, phaseMax: curPhaseMax });
-      if (zoomStack.length > 20) zoomStack.shift();
+    const ys = chart.scales[yScaleKey(tab)];
+    if (xs?.min != null && xs?.max != null && ys?.min != null && ys?.max != null) {
+      const st = zoomStack();
+      st.push({ xMin: xs.min, xMax: xs.max, yMin: ys.min, yMax: ys.max, phaseMin: curPhaseMin, phaseMax: curPhaseMax });
+      if (st.length > 20) st.shift();
     }
   }
   function popZoom() {
-    if (!chart || zoomStack.length === 0) return;
-    const prev = zoomStack.pop()!;
-    curMagMin = prev.magMin;
-    curMagMax = prev.magMax;
-    curPhaseMin = prev.phaseMin;
-    curPhaseMax = prev.phaseMax;
+    const st = zoomStack();
+    if (!chart || st.length === 0) return;
+    const prev = st.pop()!;
     const pTab = plotTab();
+    if (pTab === "freq" || pTab === "export") {
+      curMagMin = prev.yMin;
+      curMagMax = prev.yMax;
+      curPhaseMin = prev.phaseMin;
+      curPhaseMax = prev.phaseMax;
+      chart.setScale("x", { min: prev.xMin, max: prev.xMax });
+      chart.setScale("mag", { min: curMagMin, max: curMagMax });
+      chart.setScale("phase", { min: curPhaseMin, max: curPhaseMax });
+      return;
+    }
     if (pTab === "ir") {
       irCurXMin = prev.xMin;
       irCurXMax = prev.xMax;
+      irCurYMin = prev.yMin;
+      irCurYMax = prev.yMax;
     }
     chart.setScale("x", { min: prev.xMin, max: prev.xMax });
-    chart.setScale("mag", { min: curMagMin, max: curMagMax });
-    chart.setScale("phase", { min: curPhaseMin, max: curPhaseMax });
+    chart.setScale("y", { min: prev.yMin, max: prev.yMax });
   }
 
   // Zoom box state (Ctrl+drag)
@@ -530,13 +544,13 @@ export default function FrequencyPlot() {
     if (pTab === "freq" || pTab === "export") {
       // Anchor 0 dB at 20% from top — zoom expands/contracts below
       const totalRange = (s.max - s.min) * factor;
-      if (totalRange < 0.01 || totalRange > 500) { zoomStack.pop(); return; }
+      if (totalRange < 0.01 || totalRange > 500) { zoomStack().pop(); return; }
       newMax = 0 + totalRange * 0.2;
       newMin = 0 - totalRange * 0.8;
     } else {
       const center = (s.min + s.max) / 2;
       const half = ((s.max - s.min) / 2) * factor;
-      if (half * 2 < 0.01 || half * 2 > 500) { zoomStack.pop(); return; }
+      if (half * 2 < 0.01 || half * 2 > 500) { zoomStack().pop(); return; }
       newMin = center - half;
       newMax = center + half;
     }
@@ -564,11 +578,11 @@ export default function FrequencyPlot() {
     if (!chart) return;
     pushZoom();
     const s = chart.scales["x"];
-    if (!s || s.min == null || s.max == null) { zoomStack.pop(); return; }
+    if (!s || s.min == null || s.max == null) { zoomStack().pop(); return; }
     const pTab = plotTab();
     if (pTab === "freq" || pTab === "gd" || pTab === "export") {
       // Log scale zoom
-      if (s.min <= 0) { zoomStack.pop(); return; }
+      if (s.min <= 0) { zoomStack().pop(); return; }
       const logMin = Math.log10(s.min);
       const logMax = Math.log10(s.max);
       const logCenter = (logMin + logMax) / 2;
@@ -609,8 +623,16 @@ export default function FrequencyPlot() {
     const pTab = plotTab();
     pushZoom();
     if (pTab === "freq" || pTab === "export") {
-      curMagMin = fitMagMin;
-      curMagMax = fitMagMax;
+      // b141.104 (audit 4.12/4.18): fit the curves on THIS chart that are
+      // visible now — Export used the range last computed on SPL, and SPL
+      // the one from its last rebuild (hidden curves included).
+      const ser: FitSeries[] = [];
+      for (let si = 1; si < chart.series.length; si++) {
+        const sr = chart.series[si] as any;
+        ser.push({ values: (chart.data[si] ?? []) as (number | null)[], visible: sr.show !== false && sr.scale === "mag" });
+      }
+      const r = pTab === "export" ? fitExportMagRange(ser) : fitMagRange(ser);
+      if (r) { curMagMin = r.min; curMagMax = r.max; }
       chart.setScale("mag", { min: curMagMin, max: curMagMax });
       curPhaseMin = -190;
       curPhaseMax = 190;
@@ -669,7 +691,7 @@ export default function FrequencyPlot() {
     pushZoom();
     const center = (curPhaseMin + curPhaseMax) / 2;
     const half = ((curPhaseMax - curPhaseMin) / 2) * factor;
-    if (half * 2 < 10 || half * 2 > 720) { zoomStack.pop(); return; }
+    if (half * 2 < 10 || half * 2 > 720) { zoomStack().pop(); return; }
     curPhaseMin = center - half;
     curPhaseMax = center + half;
     chart.setScale("phase", { min: curPhaseMin, max: curPhaseMax });
@@ -736,16 +758,19 @@ export default function FrequencyPlot() {
     const y2 = Math.max(zoomBoxStartY, y);
 
     // Min size threshold (10px)
-    if (x2 - x1 < 10 || y2 - y1 < 10) { zoomStack.pop(); return; }
+    if (x2 - x1 < 10 || y2 - y1 < 10) { zoomStack().pop(); return; }
 
     // Convert pixel positions to data values via uPlot
+    // b141.104: the tab's own Y scale — IR/Step and GD have no "mag" scale
+    // and a linear (ms) X axis on IR may be negative.
+    const pTab = plotTab();
+    const yKey = yScaleKey(pTab);
     const fMin = chart.posToVal(x1, "x");
     const fMax = chart.posToVal(x2, "x");
-    const magMax2 = chart.posToVal(y1, "mag");
-    const magMin2 = chart.posToVal(y2, "mag");
+    const magMax2 = chart.posToVal(y1, yKey);
+    const magMin2 = chart.posToVal(y2, yKey);
 
-    if (isFinite(fMin) && isFinite(fMax) && fMin > 0 && fMax > fMin) {
-      const pTab = plotTab();
+    if (isFinite(fMin) && isFinite(fMax) && (pTab === "ir" || fMin > 0) && fMax > fMin) {
       if (pTab === "ir") {
         irCurXMin = fMin;
         irCurXMax = fMax;
@@ -753,9 +778,9 @@ export default function FrequencyPlot() {
       chart.setScale("x", { min: fMin, max: fMax });
     }
     if (isFinite(magMin2) && isFinite(magMax2) && magMax2 > magMin2) {
-      curMagMin = magMin2;
-      curMagMax = magMax2;
-      chart.setScale("mag", { min: curMagMin, max: curMagMax });
+      if (yKey === "mag") { curMagMin = magMin2; curMagMax = magMax2; }
+      else if (pTab === "ir") { irCurYMin = magMin2; irCurYMax = magMax2; }
+      chart.setScale(yKey, { min: magMin2, max: magMax2 });
     }
   }
 
@@ -846,8 +871,10 @@ export default function FrequencyPlot() {
           || e.label === colName + " tgt IR" || e.label === colName + " tgt Step"
           || (e.label.startsWith(colName + " corr+XO") && e.label.endsWith(" IR")) || (e.label.startsWith(colName + " corr+XO") && e.label.endsWith(" Step"))) matching.push(i);
       } else {
+        // b141.104 (audit 4.21): the band's target phase and FIR curve too.
         if (e.label === colName || e.label === colName + " \u00B0"
-          || e.label === colName + " tgt"
+          || e.label === colName + " tgt" || e.label === colName + " tgt \u00B0"
+          || e.label === colName + " FIR"
           || e.label.startsWith(colName + " corr+XO") || e.label === colName + " corr+XO \u00B0") matching.push(i);
       }
     }
@@ -1119,30 +1146,6 @@ export default function FrequencyPlot() {
 
     if (input.uData.length !== input.uSeries.length) return;
 
-    // Mag range — только из mag серий, исключаем значения < -200
-    let magMin = Infinity;
-    let magMax = -Infinity;
-    for (let i = 1; i < input.uSeries.length; i++) {
-      if ((input.uSeries[i] as any).scale !== "mag") continue;
-      const d = input.uData[i];
-      for (let j = 0; j < d.length; j++) {
-        const v = d[j];
-        if (v == null) continue;
-        if (v > -200 && v < magMin) magMin = v;
-        if (v > -200 && v > magMax) magMax = v;
-      }
-    }
-    if (!isFinite(magMin)) { magMin = -100; magMax = 100; }
-
-    // Fit range: 0 dB at 20% from top, bottom from data minimum
-    fitMagMin = Math.floor(magMin / 5) * 5; // round down to nearest 5 dB
-    const fitRange = Math.max(20, 0 - fitMagMin); // range below 0
-    fitMagMax = fitRange * 0.25; // 0 sits at 80% from bottom = 20% from top
-    fitMagMin = 0 - fitRange;
-    if (fitMagMax - fitMagMin < 20) { fitMagMax = 5; fitMagMin = -15; }
-    curMagMin = savedMagMin ?? fitMagMin;
-    curMagMax = savedMagMax ?? fitMagMax;
-
     const yLabel = input.hasMeasurements ? "dBr" : "dB";
 
     const axes: uPlot.Axis[] = [
@@ -1218,6 +1221,20 @@ export default function FrequencyPlot() {
       }
     }
 
+    // Fit range (mag series only, values ≤ −200 dB ignored): 0 dB at 20 %
+    // from the top, bottom from the data minimum. b141.104 (audit 4.18): over
+    // the VISIBLE curves (applied just above) and with the top raised to the
+    // highest point — Σ with hidden band targets fitted −150…+37, and a +8 dB
+    // hump was cut at +5.
+    const fitSeries: FitSeries[] = [];
+    for (let i = 1; i < input.uSeries.length; i++) {
+      const sr = input.uSeries[i] as any;
+      fitSeries.push({ values: input.uData[i] ?? [], visible: sr.show !== false && sr.scale === "mag" });
+    }
+    const fit = fitMagRange(fitSeries);
+    curMagMin = savedMagMin ?? fit.min;
+    curMagMax = savedMagMax ?? fit.max;
+
     const allSeries = input.uSeries;
 
     const opts: uPlot.Options = {
@@ -1266,7 +1283,7 @@ export default function FrequencyPlot() {
               if (v == null || !isFinite(v)) continue;
               const isMag = orig.scale === "mag";
               const isPhase = orig.scale === "phase";
-              const unit = isMag ? " dBr" : isPhase ? "°" : "";
+              const unit = isMag ? " " + yLabel : isPhase ? "°" : ""; // b141.104 (4.15): dB without measurements
               const formatted = v.toFixed(1) + unit;
               const color = orig.stroke ?? "#ccc";
               const label = orig.label ?? `s${si}`;
@@ -2881,20 +2898,25 @@ export default function FrequencyPlot() {
         }] : [],
         setCursor: [(u: uPlot) => {
           const idx = u.cursor.idx;
-          if (idx == null || idx < 0 || idx >= u.data[0].length) { setCursorFreq("—"); setCursorSPL("—"); return; }
-          setCursorFreq(u.data[0][idx]?.toFixed(2) + " ms");
-          // Show first visible IR/Step values
-          const vals: string[] = [];
+          if (idx == null || idx < 0 || idx >= u.data[0].length) { setCursorFreq("—"); setCursorSPL("—"); setCursorValues([]); return; }
+          const t = u.data[0][idx];
+          setCursorFreq(t != null ? (t as number).toFixed(2) + " ms" : "—");
+          // b141.104 (audit 4.15): per-curve values in their colours, like
+          // the other tabs — they used to land under «SPL:» with «Phase: —».
+          const vals: { label: string; color: string; value: string }[] = [];
           for (let si = 1; si < u.series.length; si++) {
             if (!u.series[si].show) continue;
             const v = u.data[si]?.[idx];
-            if (v == null || (v as number) <= -190) continue;
-            const lbl = u.series[si].label ?? "";
-            if (isDb) vals.push(`${lbl}: ${(v as number).toFixed(0)} dB`);
-            else vals.push(`${lbl}: ${(v as number).toFixed(1)}%`);
-            if (vals.length >= 4) break; // limit readout clutter
+            if (v == null || !isFinite(v as number) || (v as number) <= -190) continue;
+            const stroke = (u.series[si] as any).stroke;
+            vals.push({
+              label: String(u.series[si].label ?? ""),
+              color: typeof stroke === "string" && stroke !== "transparent" ? stroke : "#ccc",
+              value: isDb ? `${(v as number).toFixed(0)} dB` : `${(v as number).toFixed(1)}%`,
+            });
           }
-          setCursorSPL(vals.length > 0 ? vals.join("  ") : "—");
+          setCursorValues(vals);
+          setCursorSPL("—");
         }],
       },
     };
@@ -2958,8 +2980,10 @@ export default function FrequencyPlot() {
       }
     }
 
+    // b141.104 (audit 4.19): initial range from the visible curves only.
     let yMin = Infinity, yMax = -Infinity;
     for (let s = 1; s < uDataArr.length; s++) {
+      if ((uSeries[s] as any).show === false) continue;
       for (const v of uDataArr[s]) { if (isFinite(v)) { if (v < yMin) yMin = v; if (v > yMax) yMax = v; } }
     }
     const pad = Math.max(0.5, (yMax - yMin) * 0.1);
@@ -2992,13 +3016,15 @@ export default function FrequencyPlot() {
       hooks: {
         setCursor: [(u: uPlot) => {
           const idx = u.cursor.idx;
-          if (idx == null || idx < 0 || idx >= u.data[0].length) { setCursorFreq("—"); setCursorSPL("—"); return; }
+          if (idx == null || idx < 0 || idx >= u.data[0].length) { setCursorFreq("—"); setCursorSPL("—"); setCursorValues([]); return; }
           const f = u.data[0][idx];
           setCursorFreq(f != null ? fmtFreq(f) : "—");
+          // b141.104 (audit 4.20): hidden curves are not read out.
+          const at = (k: number) => (u.series[k]?.show === false ? null : u.data[k]?.[idx]);
           const vals: { label: string; color: string; value: string }[] = [];
-          const m = u.data[1]?.[idx]; if (m != null && isFinite(m as number)) vals.push({ label: "Meas", color: clr.meas, value: (m as number).toFixed(2) + " ms" });
-          const t = u.data[2]?.[idx]; if (t != null && isFinite(t as number)) vals.push({ label: "Target", color: clr.target, value: (t as number).toFixed(2) + " ms" });
-          const c = u.data[3]?.[idx]; if (c != null && isFinite(c as number)) vals.push({ label: "Corr", color: clr.corr, value: (c as number).toFixed(2) + " ms" });
+          const m = at(1); if (m != null && isFinite(m as number)) vals.push({ label: "Meas", color: clr.meas, value: (m as number).toFixed(2) + " ms" });
+          const t = at(2); if (t != null && isFinite(t as number)) vals.push({ label: "Target", color: clr.target, value: (t as number).toFixed(2) + " ms" });
+          const c = at(3); if (c != null && isFinite(c as number)) vals.push({ label: "Corr", color: clr.corr, value: (c as number).toFixed(2) + " ms" });
           setCursorValues(vals);
           setCursorSPL(vals.length > 0 ? vals.map(v => v.value).join(" / ") : "—");
         }],
@@ -3360,19 +3386,24 @@ export default function FrequencyPlot() {
 
       // --- Snapshot overlays (per-band) ---
       const snaps = freqSnapshots(band.id);
+      // b141.104 (audit 4.24): a snapshot ends where its own grid ends (a
+      // gap, as on GD/Export) — it was continued by a flat line of its edge
+      // value.
+      const gapOutside = (a: (number | null)[]): (number | null)[] =>
+        a.map((v) => (v == null || Number.isNaN(v) ? null : v));
       for (const snap of snaps) {
         const interpolateArr = (srcArr: (number | null)[]): (number | null)[] => {
           if (snap.freq.length === result.freq!.length && snap.freq[0] === result.freq![0]) {
             return srcArr;
           }
-          return interpOnGrid(snap.freq, srcArr, result.freq!, { outside: "clamp" });
+          return gapOutside(interpOnGrid(snap.freq, srcArr, result.freq!, { outside: "nan" }));
         };
         // b141.9: wrapped phase — shortest-arc interp (null gaps still propagate).
         const interpolatePhaseArr = (srcArr: (number | null)[]): (number | null)[] => {
           if (snap.freq.length === result.freq!.length && snap.freq[0] === result.freq![0]) {
             return srcArr;
           }
-          return interpPhaseOnGrid(snap.freq, srcArr, result.freq!, { outside: "clamp" });
+          return gapOutside(interpPhaseOnGrid(snap.freq, srcArr, result.freq!, { outside: "nan" }));
         };
 
         const snapMag = snap.mag.length > 0 ? interpolateArr(snap.mag as (number | null)[]) as number[] : null;
@@ -4052,7 +4083,7 @@ export default function FrequencyPlot() {
       <div class="cursor-readout">
         <div class="readout-curves-area">
           <span class="readout-item">
-            <span class="readout-label">Freq:</span>
+            <span class="readout-label">{plotTab() === "ir" ? "Time:" : "Freq:"}</span>
             <span class="readout-value">{cursorFreq()}</span>
           </span>
           {/* Per-curve values at cursor — colored by curve */}
@@ -4109,7 +4140,11 @@ export default function FrequencyPlot() {
         {/* IR/Step dB/Lin toggle */}
         <Show when={plotTab() === "ir"}>
           <span class="readout-sep" />
-          <button class={`tb-btn tb-btn-xs ${irDbMode() ? "active" : ""}`} onClick={() => { setIrDbMode(!irDbMode()); irToggleRedraw(); }}>{irDbMode() ? "dB" : "Lin"}</button>
+          <button class={`tb-btn tb-btn-xs ${irDbMode() ? "active" : ""}`} onClick={() => {
+            // b141.104 (audit 4.16): the Y scale belongs to the mode (% vs dB) —
+            // refit for the new one; the zoom history is in the old unit.
+            setIrDbMode(!irDbMode()); zoomStacks["ir"] = []; irToggleRedrawAutoY();
+          }}>{irDbMode() ? "dB" : "Lin"}</button>
         </Show>
 
         {/* Compact controls for active band (b126) — replaces bottom panel */}
@@ -4762,7 +4797,10 @@ export default function FrequencyPlot() {
             // b141.83 run-on line; the old one-row-per-curve table (b141.80)
             // took six rows of chart height.
             const present = () => categories.filter(c => legendEntries.some(e => e.category === c));
-            const rows: { label: string; dash: boolean }[] = [{ label: "SPL", dash: false }, { label: "Phase", dash: true }];
+            // b141.104 (audit 4.13): rows by scale (a phase label ends in «°»),
+            // not by dash — «Meas (ext)» / «Corr (ext)» are dashed SPL curves
+            // and were switched by the Phase row.
+            const rows: { label: string; phase: boolean }[] = [{ label: "SPL", phase: false }, { label: "Phase", phase: true }];
             return (
               <table class="band-vis-table">
                 <thead>
@@ -4779,14 +4817,14 @@ export default function FrequencyPlot() {
                 <tbody>
                   <For each={rows}>
                     {(row) => {
-                      const inRow = (e: LegendEntry) => !!e.dash === row.dash && categories.includes(e.category as typeof categories[number]);
+                      const inRow = (e: LegendEntry) => isPhaseEntry(e) === row.phase && categories.includes(e.category as typeof categories[number]);
                       const anyOn = () => legendEntries.some(e => inRow(e) && e.visible);
                       return (
                         <tr>
                           <td class="sum-row-header" onClick={() => toggleEntries(inRow)} style={{ opacity: anyOn() ? 1 : 0.4 }}>{row.label}</td>
                           <For each={present()}>
                             {(cat) => {
-                              const ent = () => legendEntries.find(e => e.category === cat && !!e.dash === row.dash);
+                              const ent = () => legendEntries.find(e => e.category === cat && isPhaseEntry(e) === row.phase);
                               return (
                                 <td class={ent() ? "sum-cell" : "sum-cell sum-cell-empty"}>
                                   <Show when={ent()} fallback={"—"}>{(e) => (
