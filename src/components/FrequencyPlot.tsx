@@ -3,7 +3,7 @@ import { createStore } from "solid-js/store";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { invoke } from "@tauri-apps/api/core";
-import type { Measurement, TargetResponse, FilterType, FilterConfig, PeqBand, WindowType } from "../lib/types";
+import type { Measurement, TargetResponse, FilterType, PeqBand, WindowType } from "../lib/types";
 import { appState, activeBand, isSum, activeTab, plotTab, setPlotTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, setPeqDragging, updatePeqBand, commitPeqBand, bandsVersion, exportSampleRate, setExportSampleRate, exportTaps, setExportTaps, exportWindow, setExportWindow, toggleBandInverted, firIterations, firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess, firMaxBoost, firNoiseFloor, exportMetrics, setExportMetrics, plotSnapshots, addPlotSnapshot, clearPlotSnapshots, setAlignmentDelay, setBandSmoothing, beginInteraction, commitInteraction, needAutoFit, setNeedAutoFit } from "../stores/bands";
 import type { SmoothingMode, BandState, FreqSnapshot } from "../stores/bands";
 import { computeFloorBounce } from "../lib/floor-bounce";
@@ -15,7 +15,7 @@ import { exportBandWav, firExportRequest, convolverDelaySeconds } from "../lib/f
 import { showToast } from "../lib/toast";
 import { alignmentPhaseDeg, STANDARD_SAMPLE_RATES, STANDARD_TAPS, F_MIN_WORK, F_MAX_WORK, F_MAX_REF } from "../lib/types";
 import { preRingZoneMs } from "../lib/pre-ring";
-import { analyzePreRing, ringZone } from "../lib/export-metrics";
+import { analyzePreRing, ringZone, exportPhaseLabel } from "../lib/export-metrics";
 import ExportMetricsBar from "./ExportMetricsBar";
 import { passbandRange } from "../lib/band-evaluator/extension";
 import { peqStale } from "../stores/peq-optimize";
@@ -40,6 +40,7 @@ import { coherentSum } from "../lib/band-evaluator/sum";
 import { buildCommonGrid, buildFirGrid, interpOnGrid, interpPhaseOnGrid, irTime, resampleOnLogGrid, type ImpulseIpc } from "../lib/band-evaluator/grid";
 import { bandRequestKey } from "../lib/band-evaluator/cache";
 import { computeAutoAlign } from "../lib/auto-align";
+import { polarityPhase, polarityAmplitude, sumGroupDelayMs, fitMagRange, fitExportMagRange, peqHandleDb, peqGainAfterDrag, type FitSeries } from "../lib/plot-display";
 import { attachFieldWheel, newWheelAccumulator, wheelSteps } from "../lib/wheel-step";
 
 
@@ -157,8 +158,6 @@ export default function FrequencyPlot() {
     }
   }
 
-  let fitMagMin = -100;
-  let fitMagMax = 100;
   // Mutable Y-scale state — updated by buttons, used by range function
   let curMagMin = -100;
   let curMagMax = 100;
@@ -178,6 +177,10 @@ export default function FrequencyPlot() {
 
   // PEQ dot markers — mutable, updated during drag
   let activePeqDots: { seriesIdx: number; dataIndices: Set<number> } | null = null;
+  /** b141.104 (audit 4.25): the band whose SPL chart is on screen (null for
+   *  Σ and the other tabs). The PEQ fast path edits that chart in place, so
+   *  it must never run for another band. */
+  let chartBandId: string | null = null;
 
   // IR/Step mutable Y scale (like curMagMin/Max for freq)
   let irCurYMin = -120;
@@ -189,31 +192,47 @@ export default function FrequencyPlot() {
   let gdUserYMin: number | null = null;
   let gdUserYMax: number | null = null;
 
-  // Zoom history for undo (right-click)
-  const zoomStack: { xMin: number; xMax: number; magMin: number; magMax: number; phaseMin: number; phaseMax: number }[] = [];
+  // Zoom history for undo (right-click). b141.104 (audit 4.11): one stack
+  // per tab — a shared one restored the ms range of IR on the log-Hz SPL
+  // axis (empty chart). Each entry holds the tab's own Y scale.
+  type ZoomEntry = { xMin: number; xMax: number; yMin: number; yMax: number; phaseMin: number; phaseMax: number };
+  const zoomStacks: Record<string, ZoomEntry[]> = {};
+  const zoomStack = (): ZoomEntry[] => (zoomStacks[plotTab()] ??= []);
+  const yScaleKey = (tab: string) => (tab === "freq" || tab === "export") ? "mag" : "y";
   function pushZoom() {
     if (!chart) return;
+    const tab = plotTab();
     const xs = chart.scales["x"];
-    if (xs?.min != null && xs?.max != null) {
-      zoomStack.push({ xMin: xs.min, xMax: xs.max, magMin: curMagMin, magMax: curMagMax, phaseMin: curPhaseMin, phaseMax: curPhaseMax });
-      if (zoomStack.length > 20) zoomStack.shift();
+    const ys = chart.scales[yScaleKey(tab)];
+    if (xs?.min != null && xs?.max != null && ys?.min != null && ys?.max != null) {
+      const st = zoomStack();
+      st.push({ xMin: xs.min, xMax: xs.max, yMin: ys.min, yMax: ys.max, phaseMin: curPhaseMin, phaseMax: curPhaseMax });
+      if (st.length > 20) st.shift();
     }
   }
   function popZoom() {
-    if (!chart || zoomStack.length === 0) return;
-    const prev = zoomStack.pop()!;
-    curMagMin = prev.magMin;
-    curMagMax = prev.magMax;
-    curPhaseMin = prev.phaseMin;
-    curPhaseMax = prev.phaseMax;
+    const st = zoomStack();
+    if (!chart || st.length === 0) return;
+    const prev = st.pop()!;
     const pTab = plotTab();
+    if (pTab === "freq" || pTab === "export") {
+      curMagMin = prev.yMin;
+      curMagMax = prev.yMax;
+      curPhaseMin = prev.phaseMin;
+      curPhaseMax = prev.phaseMax;
+      chart.setScale("x", { min: prev.xMin, max: prev.xMax });
+      chart.setScale("mag", { min: curMagMin, max: curMagMax });
+      chart.setScale("phase", { min: curPhaseMin, max: curPhaseMax });
+      return;
+    }
     if (pTab === "ir") {
       irCurXMin = prev.xMin;
       irCurXMax = prev.xMax;
+      irCurYMin = prev.yMin;
+      irCurYMax = prev.yMax;
     }
     chart.setScale("x", { min: prev.xMin, max: prev.xMax });
-    chart.setScale("mag", { min: curMagMin, max: curMagMax });
-    chart.setScale("phase", { min: curPhaseMin, max: curPhaseMax });
+    chart.setScale("y", { min: prev.yMin, max: prev.yMax });
   }
 
   // Zoom box state (Ctrl+drag)
@@ -283,25 +302,31 @@ export default function FrequencyPlot() {
   const lastGdData: { freq: number[]; gdMs: number[] } = { freq: [], gdMs: [] };
   // Export snapshot data (FIR curve)
   const lastExportData: { freq: number[]; mag: number[]; phase: (number | null)[] } = { freq: [], mag: [], phase: [] };
+  // b141.104 (audit 4.5/4.22): the band the last*Data above belong to, per
+  // tab. Null while a render for another band is still computing — SNAP
+  // then takes nothing instead of the previous band's curves.
+  let lastFreqBandId: string | null = null;
+  let lastIrBandId: string | null = null;
+  let lastGdBandId: string | null = null;
+  let lastExportBandId: string | null = null;
+  let exportRenderGen = 0;
 
   function takeFreqSnapshot() {
     const band = activeBand();
-    if (!band || !chart) return;
-    // Determine visible categories from chart series (source of truth)
+    if (!band || !chart || lastFreqBandId !== band.id) return;
+    // b141.104 (audit 4.14): visible categories from the legend's own
+    // categories. Classifying series labels by substring put «FIR dB»,
+    // «FIR °» and «PEQ dB» into «Meas» — a hidden measurement got captured.
+    // PEQ / FIR / CORR FIR curves have no snapshot slot.
     let corrMagVis = false, corrPhVis = false;
     let tgtMagVis = false, tgtPhVis = false;
     let measMagVis = false, measPhVis = false;
-    for (let i = 1; i < chart.series.length; i++) {
-      const s = chart.series[i] as any;
-      if (!s.show) continue;
-      const lbl = typeof s.label === "string" ? s.label : "";
-      if (lbl.startsWith("Snap ")) continue;
-      // Detect phase by scale or label suffix "°"
-      const isPhase = s.scale === "phase" || lbl.includes("\u00B0");
-      // Detect category: corrected/target by keyword, everything else = measurement
-      if (lbl.includes("orrect") || lbl.includes("orr")) { if (isPhase) corrPhVis = true; else corrMagVis = true; }
-      else if (lbl.includes("arget") || lbl.includes("tgt")) { if (isPhase) tgtPhVis = true; else tgtMagVis = true; }
-      else { if (isPhase) measPhVis = true; else measMagVis = true; }
+    for (const e of legendEntries) {
+      if (!e.visible) continue;
+      const isPhase = isPhaseEntry(e);
+      if (e.category === "corrected") { if (isPhase) corrPhVis = true; else corrMagVis = true; }
+      else if (e.category === "target") { if (isPhase) tgtPhVis = true; else tgtMagVis = true; }
+      else if (e.category === "measurement") { if (isPhase) measPhVis = true; else measMagVis = true; }
     }
     // Capture ALL visible categories (not just highest-priority)
     const categories = [
@@ -349,6 +374,7 @@ export default function FrequencyPlot() {
     const color = FREQ_SNAP_COLORS[groupIdx % FREQ_SNAP_COLORS.length];
     const label = `Snap ${groupIdx + 1}`;
     if (tab === "ir") {
+      if (lastIrBandId !== band.id) return;
       // Use bandVisMap as source of truth for visibility (not chart.series.show — avoids async race)
       const isVis = (lbl: string) => bandVisMap.get(lbl) !== false;
       // Capture ALL visible categories (not just highest-priority)
@@ -378,9 +404,9 @@ export default function FrequencyPlot() {
           step: hasSt ? [...cat.data.step] : undefined,
         });
       }
-    } else if (tab === "gd" && lastGdData.freq.length > 0) {
+    } else if (tab === "gd" && lastGdBandId === band.id && lastGdData.freq.length > 0 && lastGdData.gdMs.length > 0) {
       addPlotSnapshot(band.id, { label, color, tab: "gd", freq: [...lastGdData.freq], gdMs: [...lastGdData.gdMs] });
-    } else if (tab === "export" && lastExportData.freq.length > 0) {
+    } else if (tab === "export" && lastExportBandId === band.id && lastExportData.freq.length > 0) {
       const hasMag = showExpFir() && lastExportData.mag.length > 0;
       const hasPh = showExpFirPh() && lastExportData.phase.length > 0;
       if (!hasMag && !hasPh) return;
@@ -391,7 +417,15 @@ export default function FrequencyPlot() {
       });
     }
     // Trigger re-render to show snapshot on chart (preserve scales)
-    irToggleRedraw();
+    redrawSnapshotTab(tab);
+  }
+
+  /** b141.104 (audit 4.17): SNAP/CLR show at once on every tab — the redraw
+   *  used to exist for IR only, GD and Export waited for the next rebuild. */
+  function redrawSnapshotTab(tab: string) {
+    if (tab === "ir") irToggleRedraw();
+    else if (tab === "gd") gdToggleRedraw();
+    else if (tab === "export") exportRedraw();
   }
 
   function clearSnapshots() {
@@ -401,7 +435,7 @@ export default function FrequencyPlot() {
     if (tab === "freq") { clearFreqSnapshots(); return; }
     clearPlotSnapshots(band.id, tab);
     // Trigger re-render to remove snapshot curves from chart (preserve scales)
-    irToggleRedraw();
+    redrawSnapshotTab(tab);
   }
   const [legendEntries, setLegendEntries] = createStore<LegendEntry[]>([]);
   const [showLegend, setShowLegend] = createSignal(false);
@@ -486,6 +520,13 @@ export default function FrequencyPlot() {
     return e.label;
   }
 
+  /** b141.104 (audit 4.13/4.14): a phase curve's legend entry — every phase
+   *  label ends in «°». The dash style is NOT the criterion: «Meas (ext)» /
+   *  «Corr (ext)» are dashed magnitude curves. */
+  function isPhaseEntry(e: LegendEntry): boolean {
+    return e.label.endsWith("\u00B0");
+  }
+
   // Crossover drag state
   const [hoveredXo, setHoveredXo] = createSignal<number | null>(null); // index in crossovers array
   const [draggingXo, setDraggingXo] = createSignal<number | null>(null);
@@ -503,13 +544,13 @@ export default function FrequencyPlot() {
     if (pTab === "freq" || pTab === "export") {
       // Anchor 0 dB at 20% from top — zoom expands/contracts below
       const totalRange = (s.max - s.min) * factor;
-      if (totalRange < 0.01 || totalRange > 500) { zoomStack.pop(); return; }
+      if (totalRange < 0.01 || totalRange > 500) { zoomStack().pop(); return; }
       newMax = 0 + totalRange * 0.2;
       newMin = 0 - totalRange * 0.8;
     } else {
       const center = (s.min + s.max) / 2;
       const half = ((s.max - s.min) / 2) * factor;
-      if (half * 2 < 0.01 || half * 2 > 500) { zoomStack.pop(); return; }
+      if (half * 2 < 0.01 || half * 2 > 500) { zoomStack().pop(); return; }
       newMin = center - half;
       newMax = center + half;
     }
@@ -537,11 +578,11 @@ export default function FrequencyPlot() {
     if (!chart) return;
     pushZoom();
     const s = chart.scales["x"];
-    if (!s || s.min == null || s.max == null) { zoomStack.pop(); return; }
+    if (!s || s.min == null || s.max == null) { zoomStack().pop(); return; }
     const pTab = plotTab();
     if (pTab === "freq" || pTab === "gd" || pTab === "export") {
       // Log scale zoom
-      if (s.min <= 0) { zoomStack.pop(); return; }
+      if (s.min <= 0) { zoomStack().pop(); return; }
       const logMin = Math.log10(s.min);
       const logMax = Math.log10(s.max);
       const logCenter = (logMin + logMax) / 2;
@@ -582,8 +623,16 @@ export default function FrequencyPlot() {
     const pTab = plotTab();
     pushZoom();
     if (pTab === "freq" || pTab === "export") {
-      curMagMin = fitMagMin;
-      curMagMax = fitMagMax;
+      // b141.104 (audit 4.12/4.18): fit the curves on THIS chart that are
+      // visible now — Export used the range last computed on SPL, and SPL
+      // the one from its last rebuild (hidden curves included).
+      const ser: FitSeries[] = [];
+      for (let si = 1; si < chart.series.length; si++) {
+        const sr = chart.series[si] as any;
+        ser.push({ values: (chart.data[si] ?? []) as (number | null)[], visible: sr.show !== false && sr.scale === "mag" });
+      }
+      const r = pTab === "export" ? fitExportMagRange(ser) : fitMagRange(ser);
+      if (r) { curMagMin = r.min; curMagMax = r.max; }
       chart.setScale("mag", { min: curMagMin, max: curMagMax });
       curPhaseMin = -190;
       curPhaseMax = 190;
@@ -642,7 +691,7 @@ export default function FrequencyPlot() {
     pushZoom();
     const center = (curPhaseMin + curPhaseMax) / 2;
     const half = ((curPhaseMax - curPhaseMin) / 2) * factor;
-    if (half * 2 < 10 || half * 2 > 720) { zoomStack.pop(); return; }
+    if (half * 2 < 10 || half * 2 > 720) { zoomStack().pop(); return; }
     curPhaseMin = center - half;
     curPhaseMax = center + half;
     chart.setScale("phase", { min: curPhaseMin, max: curPhaseMax });
@@ -709,16 +758,19 @@ export default function FrequencyPlot() {
     const y2 = Math.max(zoomBoxStartY, y);
 
     // Min size threshold (10px)
-    if (x2 - x1 < 10 || y2 - y1 < 10) { zoomStack.pop(); return; }
+    if (x2 - x1 < 10 || y2 - y1 < 10) { zoomStack().pop(); return; }
 
     // Convert pixel positions to data values via uPlot
+    // b141.104: the tab's own Y scale — IR/Step and GD have no "mag" scale
+    // and a linear (ms) X axis on IR may be negative.
+    const pTab = plotTab();
+    const yKey = yScaleKey(pTab);
     const fMin = chart.posToVal(x1, "x");
     const fMax = chart.posToVal(x2, "x");
-    const magMax2 = chart.posToVal(y1, "mag");
-    const magMin2 = chart.posToVal(y2, "mag");
+    const magMax2 = chart.posToVal(y1, yKey);
+    const magMin2 = chart.posToVal(y2, yKey);
 
-    if (isFinite(fMin) && isFinite(fMax) && fMin > 0 && fMax > fMin) {
-      const pTab = plotTab();
+    if (isFinite(fMin) && isFinite(fMax) && (pTab === "ir" || fMin > 0) && fMax > fMin) {
       if (pTab === "ir") {
         irCurXMin = fMin;
         irCurXMax = fMax;
@@ -726,9 +778,9 @@ export default function FrequencyPlot() {
       chart.setScale("x", { min: fMin, max: fMax });
     }
     if (isFinite(magMin2) && isFinite(magMax2) && magMax2 > magMin2) {
-      curMagMin = magMin2;
-      curMagMax = magMax2;
-      chart.setScale("mag", { min: curMagMin, max: curMagMax });
+      if (yKey === "mag") { curMagMin = magMin2; curMagMax = magMax2; }
+      else if (pTab === "ir") { irCurYMin = magMin2; irCurYMax = magMax2; }
+      chart.setScale(yKey, { min: magMin2, max: magMax2 });
     }
   }
 
@@ -819,8 +871,10 @@ export default function FrequencyPlot() {
           || e.label === colName + " tgt IR" || e.label === colName + " tgt Step"
           || (e.label.startsWith(colName + " corr+XO") && e.label.endsWith(" IR")) || (e.label.startsWith(colName + " corr+XO") && e.label.endsWith(" Step"))) matching.push(i);
       } else {
+        // b141.104 (audit 4.21): the band's target phase and FIR curve too.
         if (e.label === colName || e.label === colName + " \u00B0"
-          || e.label === colName + " tgt"
+          || e.label === colName + " tgt" || e.label === colName + " tgt \u00B0"
+          || e.label === colName + " FIR"
           || e.label.startsWith(colName + " corr+XO") || e.label === colName + " corr+XO \u00B0") matching.push(i);
       }
     }
@@ -1092,30 +1146,6 @@ export default function FrequencyPlot() {
 
     if (input.uData.length !== input.uSeries.length) return;
 
-    // Mag range — только из mag серий, исключаем значения < -200
-    let magMin = Infinity;
-    let magMax = -Infinity;
-    for (let i = 1; i < input.uSeries.length; i++) {
-      if ((input.uSeries[i] as any).scale !== "mag") continue;
-      const d = input.uData[i];
-      for (let j = 0; j < d.length; j++) {
-        const v = d[j];
-        if (v == null) continue;
-        if (v > -200 && v < magMin) magMin = v;
-        if (v > -200 && v > magMax) magMax = v;
-      }
-    }
-    if (!isFinite(magMin)) { magMin = -100; magMax = 100; }
-
-    // Fit range: 0 dB at 20% from top, bottom from data minimum
-    fitMagMin = Math.floor(magMin / 5) * 5; // round down to nearest 5 dB
-    const fitRange = Math.max(20, 0 - fitMagMin); // range below 0
-    fitMagMax = fitRange * 0.25; // 0 sits at 80% from bottom = 20% from top
-    fitMagMin = 0 - fitRange;
-    if (fitMagMax - fitMagMin < 20) { fitMagMax = 5; fitMagMin = -15; }
-    curMagMin = savedMagMin ?? fitMagMin;
-    curMagMax = savedMagMax ?? fitMagMax;
-
     const yLabel = input.hasMeasurements ? "dBr" : "dB";
 
     const axes: uPlot.Axis[] = [
@@ -1191,6 +1221,20 @@ export default function FrequencyPlot() {
       }
     }
 
+    // Fit range (mag series only, values ≤ −200 dB ignored): 0 dB at 20 %
+    // from the top, bottom from the data minimum. b141.104 (audit 4.18): over
+    // the VISIBLE curves (applied just above) and with the top raised to the
+    // highest point — Σ with hidden band targets fitted −150…+37, and a +8 dB
+    // hump was cut at +5.
+    const fitSeries: FitSeries[] = [];
+    for (let i = 1; i < input.uSeries.length; i++) {
+      const sr = input.uSeries[i] as any;
+      fitSeries.push({ values: input.uData[i] ?? [], visible: sr.show !== false && sr.scale === "mag" });
+    }
+    const fit = fitMagRange(fitSeries);
+    curMagMin = savedMagMin ?? fit.min;
+    curMagMax = savedMagMax ?? fit.max;
+
     const allSeries = input.uSeries;
 
     const opts: uPlot.Options = {
@@ -1239,7 +1283,7 @@ export default function FrequencyPlot() {
               if (v == null || !isFinite(v)) continue;
               const isMag = orig.scale === "mag";
               const isPhase = orig.scale === "phase";
-              const unit = isMag ? " dBr" : isPhase ? "°" : "";
+              const unit = isMag ? " " + yLabel : isPhase ? "°" : ""; // b141.104 (4.15): dB without measurements
               const formatted = v.toFixed(1) + unit;
               const color = orig.stroke ?? "#ccc";
               const label = orig.label ?? `s${si}`;
@@ -1318,9 +1362,9 @@ export default function FrequencyPlot() {
             const plotBottom = plotTop + u.bbox.height;
             const dpr = devicePixelRatio || 1;
 
-            // PEQ series Y lookup (for the draggable dot handle position).
+            // The draggable handle sits on the filter's OWN curve (b141.104,
+            // audit 4.6) — drawn only while the PEQ curve is on the chart.
             const peqSi = u.series.findIndex((s) => s.label === "PEQ dB");
-            const xData = u.data[0] as number[] | undefined;
             const dragging = peqDragging();
 
             for (let i = 0; i < bd.peqBands.length; i++) {
@@ -1343,15 +1387,7 @@ export default function FrequencyPlot() {
               // users can SEE that PEQ points are grabbable (was an invisible
               // hit-zone). Mirrors the crossover-marker style below.
               let cy: number | null = null;
-              if (peqSi >= 0 && xData && xData.length) {
-                let di = 0, dBest = Infinity;
-                for (let k = 0; k < xData.length; k++) {
-                  const dd = Math.abs(xData[k] - pb.freq_hz);
-                  if (dd < dBest) { dBest = dd; di = k; }
-                }
-                const yv = (u.data[peqSi] as (number | null)[] | undefined)?.[di];
-                if (yv != null && isFinite(yv)) cy = u.valToPos(yv, "mag", true);
-              }
+              if (peqSi >= 0) cy = u.valToPos(peqHandleDb(pb), "mag", true);
               if (cy != null && cy >= plotTop && cy <= plotBottom) {
                 const r = (isSel ? 5 : 3.5) * dpr;
                 ctx.setLineDash([]);
@@ -1450,30 +1486,21 @@ export default function FrequencyPlot() {
             if (si >= u.series.length || !(u.series[si] as any).show) return;
             const ctx = u.ctx;
             const dpr = devicePixelRatio || 1;
-            const xData = u.data[0];
-            const yData = u.data[si];
             // High-Q markers (b137): bands whose Q exceeds qWarnAt(freq) get
-            // a yellow stroke. Match dots to bands by freq proximity since
-            // dataIndices is keyed by grid bin, not band index.
+            // a yellow stroke. b141.104 (audit 4.6): one dot per enabled
+            // filter at (its freq, its own level) — no longer the nearest
+            // bin of the summed PEQ curve, where neighbours pulled it off.
             const bd = activeBand();
             const peqBands = bd?.peqBands ?? [];
             const highQ = highQIndices(peqBands);
             ctx.save();
-            for (const idx of dots.dataIndices) {
-              const xVal = xData[idx];
-              const yVal = yData[idx];
-              if (xVal == null || yVal == null) continue;
-              const cx = u.valToPos(xVal, "x", true);
-              const cy = u.valToPos(yVal, "mag", true);
+            for (let bandIdx = 0; bandIdx < peqBands.length; bandIdx++) {
+              const pb = peqBands[bandIdx];
+              if (!pb.enabled) continue;
+              const cx = u.valToPos(pb.freq_hz, "x", true);
+              const cy = u.valToPos(peqHandleDb(pb), "mag", true);
               if (!isFinite(cx) || !isFinite(cy)) continue;
-              let bandIdx = -1;
-              let bestDist = Infinity;
-              for (let k = 0; k < peqBands.length; k++) {
-                if (!peqBands[k].enabled) continue;
-                const d = Math.abs(peqBands[k].freq_hz - (xVal as number));
-                if (d < bestDist) { bestDist = d; bandIdx = k; }
-              }
-              const isHighQ = bandIdx >= 0 && highQ.has(bandIdx);
+              const isHighQ = highQ.has(bandIdx);
               const r = 4 * dpr;
               ctx.beginPath();
               ctx.arc(cx, cy, r, 0, 2 * Math.PI);
@@ -1653,7 +1680,7 @@ export default function FrequencyPlot() {
   }
   async function peqFastUpdateNow(band: BandState) {
     const gen = ++peqFastGen;
-    if (!chart || !band.peqBands?.length) return;
+    if (!chart || !band.peqBands?.length || band.id !== chartBandId) return;
     const peqSi = chart.series.findIndex(s => s.label === "PEQ dB");
     if (peqSi < 0) return;
     const freq = chart.data[0];
@@ -1772,8 +1799,11 @@ export default function FrequencyPlot() {
 
     if (debounceTimer) clearTimeout(debounceTimer);
 
-    // During PEQ drag: skip full rebuild, use fast in-place update
-    if (dragging && chart && pTab === "freq" && !sumMode && band) {
+    // During PEQ drag: skip full rebuild, use fast in-place update — only
+    // on the chart of the band being edited. b141.104 (audit 4.25): within
+    // 400 ms of a wheel step a band switch drew the new band's PEQ into the
+    // old band's chart; it now falls through to the (debounced) rebuild.
+    if (dragging && chart && pTab === "freq" && !sumMode && band && band.id === chartBandId) {
       peqFastUpdate(band);
       return;
     }
@@ -1814,6 +1844,7 @@ export default function FrequencyPlot() {
     // On other tabs: destroy immediately
     if (pTab !== "freq") {
       try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
+      chartBandId = null;
     }
 
     if (pTab === "ir" || pTab === "gd") {
@@ -1850,12 +1881,21 @@ export default function FrequencyPlot() {
   // ----------------------------------------------------------------
   // Export tab: Model vs FIR realization
   // ----------------------------------------------------------------
-  async function renderExportTab(band: BandState | null) {
+  async function renderExportTab(band: BandState | null, renderOpts?: { keepY?: boolean }) {
     const gen = ++renderGen;
-    if (!band || !band.target) {
+    const myExport = ++exportRenderGen;
+    // b141.104 (audit 4.5): until this band's FIR is in, there is nothing a
+    // SNAP may take — it used to save the previous band's FIR.
+    lastExportBandId = null;
+    // Nothing to show: no chart, no metrics, no FIR route of another band.
+    const clearExport = () => {
       try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
-      setShowLegend(false); setExportComputing(false); setExportFirRoute(null);
-      setCursorFreq("—"); setCursorSPL("—"); setCursorPhase("—");
+      setShowLegend(false); setExportFirRoute(null); setExportMetrics(null);
+      setCursorFreq("—"); setCursorSPL("—"); setCursorPhase("—"); setCursorValues([]);
+    };
+    if (!band || !band.target) {
+      clearExport();
+      setExportComputing(false);
       return;
     }
 
@@ -1876,7 +1916,7 @@ export default function FrequencyPlot() {
       const evalRes = await evaluateBandFull(firExportRequest(band));
       if (gen !== renderGen) return;
       if (!evalRes.fir || !evalRes.targetMag) {
-        setExportComputing(false); setExportFirRoute(null);
+        clearExport();
         return;
       }
       setExportFirRoute(evalRes.fir.route);
@@ -1895,16 +1935,10 @@ export default function FrequencyPlot() {
       };
       const target = band.target;
 
-      // Status label reflects the user's linear-phase choice + subsonic state.
-      const isUserLin = (f: FilterConfig | null | undefined) =>
-        !f || f.linear_phase === true;
-      const linearMain = isUserLin(target.high_pass) && isUserLin(target.low_pass);
-      const hasSubsonic = hasActiveSubsonicProtect(target.high_pass);
-      const phaseLabel =
-        linearMain && hasSubsonic ? "Linear-Phase + Subsonic"
-        : linearMain ? "Linear-Phase"
-        : hasSubsonic ? "Min-Phase + Subsonic"
-        : "Min-Phase";
+      // Status label reflects the user's linear-phase choice + subsonic state
+      // (b141.104, audit 4.23: HP min + LP lin reads «Mixed-Phase»).
+      const phaseLabel = exportPhaseLabel(
+        target.high_pass, target.low_pass, hasActiveSubsonicProtect(target.high_pass));
       // Normalize model mag (combined = target+peq, shifted by FIR norm)
       const normModelMag = targetMag.map((v: number, i: number) => (v + (peqMagArr[i] ?? 0)) - firResult.norm_db);
 
@@ -1977,9 +2011,8 @@ export default function FrequencyPlot() {
 
       // Wrap phase for display. b141.100: an inverted band's file is negated
       // — show its phase (and the model's) +180°.
-      const fileFlip = band.inverted ? 180 : 0;
-      const wrappedModelPhase = wrapPhase(fileFlip ? modelPhase.map((v: number) => v + fileFlip) : modelPhase);
-      const wrappedFirPhase = wrapPhase(fileFlip ? firResult.realized_phase.map((v: number) => v + fileFlip) : firResult.realized_phase);
+      const wrappedModelPhase = wrapPhase(polarityPhase(modelPhase as number[], !!band.inverted));
+      const wrappedFirPhase = wrapPhase(polarityPhase(firResult.realized_phase, !!band.inverted));
 
       const opts: uPlot.Options = {
         width: Math.max(rect.width, 400), height: Math.max(rect.height, 200),
@@ -2009,11 +2042,13 @@ export default function FrequencyPlot() {
         hooks: {
           setCursor: [(u: uPlot) => {
             const idx = u.cursor.idx;
-            if (idx == null || idx < 0 || idx >= u.data[0].length) { setCursorFreq("—"); setCursorSPL("—"); return; }
+            if (idx == null || idx < 0 || idx >= u.data[0].length) { setCursorFreq("—"); setCursorSPL("—"); setCursorValues([]); return; }
             const f = u.data[0][idx];
             setCursorFreq(f != null ? fmtFreq(f) : "—");
-            const m = u.data[1]?.[idx]; const r = u.data[2]?.[idx];
-            const mp = u.data[3]?.[idx]; const rp = u.data[4]?.[idx];
+            // b141.104 (audit 4.20): hidden curves are not read out.
+            const at = (k: number) => (u.series[k]?.show === false ? null : u.data[k]?.[idx]);
+            const m = at(1); const r = at(2);
+            const mp = at(3); const rp = at(4);
             const vals: { label: string; color: string; value: string }[] = [];
             if (m != null) vals.push({ label: "Model", color: expClr.model, value: (m as number).toFixed(1) + " dB" });
             if (r != null) vals.push({ label: "FIR", color: expClr.fir, value: (r as number).toFixed(1) + " dB" });
@@ -2024,27 +2059,25 @@ export default function FrequencyPlot() {
           }],
         },
       };
-      // Compute Y fit range from data
-      let expMin = Infinity, expMax = -Infinity;
-      for (const arr of [normModelMag, firResult.realized_mag]) {
-        for (const v of arr) { if (v > -190 && isFinite(v)) { if (v < expMin) expMin = v; if (v > expMax) expMax = v; } }
-      }
-      if (isFinite(expMin)) {
-        const expPad = Math.max(2, (expMax - expMin) * 0.1);
-        // Only auto-fit if not already zoomed (persistedMagMin is from freq tab zoom)
-        if (persistedMagMin == null) {
-          curMagMin = expMin - expPad;
-          curMagMax = expMax + expPad;
-        }
+      // Compute Y fit range from the visible data. Only auto-fit if not
+      // already zoomed (persistedMagMin is from freq tab zoom) and not a
+      // redraw that keeps the view (SNAP/CLR).
+      const expFit = fitExportMagRange([
+        { values: normModelMag, visible: untrack(showExpModel) },
+        { values: firResult.realized_mag, visible: untrack(showExpFir) },
+      ]);
+      if (expFit && persistedMagMin == null && !renderOpts?.keepY) {
+        curMagMin = expFit.min;
+        curMagMax = expFit.max;
       }
       if (!isSum()) setShowLegend(false);
       // Save FIR data for snapshot capture
       lastExportData.freq = [...freq]; lastExportData.mag = [...firResult.realized_mag]; lastExportData.phase = [...wrappedFirPhase];
+      lastExportBandId = band.id;
       // Export snapshots
       const expData: (number | null)[][] = [freq, normModelMag, firResult.realized_mag, wrappedModelPhase, wrappedFirPhase];
       {
-        const b = activeBand();
-        const snaps = b ? plotSnapshots(b.id, "export") : [];
+        const snaps = untrack(() => plotSnapshots(band.id, "export"));
         const interpSnap = (srcFreq: number[], srcData: number[]) =>
           interpOnGrid(srcFreq, srcData, freq, { outside: "nan" }) as number[];
         // b141.9: wrapped phase — shortest-arc interp (no bogus mid-wrap bins).
@@ -2070,11 +2103,24 @@ export default function FrequencyPlot() {
         if (!showExpModelPh()) chart.setSeries(3, { show: false });
         if (!showExpFirPh()) chart.setSeries(4, { show: false });
       } catch (e) { console.error(e); }
-      setExportComputing(false);
     } catch (e) {
       console.error("Export tab render failed:", e);
-      setExportComputing(false);
+    } finally {
+      // b141.104 (audit 4.4): every exit clears the «Расчёт FIR…» overlay —
+      // a render overtaken by another tab (gen check above) used to leave it
+      // up for good. A newer Export render owns the flag, so only the latest
+      // one clears it.
+      if (myExport === exportRenderGen) setExportComputing(false);
     }
+  }
+
+  /** b141.104 (audit 4.17): redraw the Export chart in place (SNAP/CLR) —
+   *  the FIR comes from the evaluator cache, the view is kept. */
+  function exportRedraw() {
+    if (plotTab() !== "export") return;
+    const xs = chart?.scales["x"];
+    if (xs?.min != null && xs?.max != null && xs.min > 0) { persistedXMin = xs.min; persistedXMax = xs.max; }
+    void renderExportTab(activeBand(), { keepY: true });
   }
 
   // ----------------------------------------------------------------
@@ -2095,6 +2141,7 @@ export default function FrequencyPlot() {
 
   async function renderTimeTab(mode: "ir" | "gd", sumMode: boolean, band: BandState | null) {
     const gen = ++renderGen;
+    if (mode === "ir") lastIrBandId = null; else lastGdBandId = null;
     // Snapshot toggle state — untrack to prevent main effect re-trigger on toggle
     const irCfg = untrack(() => ({
       db: irDbMode(),
@@ -2112,6 +2159,23 @@ export default function FrequencyPlot() {
       : allWithPhase;
     // All bands for per-band curves (including excluded from sum)
     const allBands = allWithPhase;
+    // b141.104 (audit 4.3/4.10): what feeds the Σ target / corrected on
+    // IR/Step and GD — every band the legend keeps in the sum, as on SPL.
+    // A band without measurement phase still has a target; it enters the Σ
+    // target alone (its measurement cannot be summed coherently, so Σ meas
+    // and Σ corrected leave it out instead of summing it at zero phase).
+    const sumBands: BandState[] = sumMode
+      ? untrack(() => appState.bands
+          .filter((b) => !excluded.has(b.name))
+          .map((b) => (!b.measurement || (b.measurement.phase && b.measurement.phase.length > 0)
+            ? b
+            : { ...b, measurement: null } as BandState)))
+      : [];
+    // Polarity / alignment delay of each Σ band, read before any await.
+    const sumMeta = untrack(() => sumBands.map((b) => ({
+      sign: (b.inverted ? -1 : 1) as 1 | -1,
+      delay: typeof b.alignmentDelay === "number" ? b.alignmentDelay : 0,
+    })));
 
     // Read alignment delays synchronously as plain array (store proxy safe)
     // untrack: prevent creating tracking dependency on .alignmentDelay
@@ -2139,37 +2203,35 @@ export default function FrequencyPlot() {
         const b = bands[0];
         const freq = [...b.measurement!.freq];
         const phase = [...b.measurement!.phase!];
-        const magnitude = [...b.measurement!.magnitude];
 
-        // Unwrap phase for GD computation (prevents spikes at ±180° boundaries)
-        let gdFreq = freq;
-        let gdPhase: number[];
-        if (sumMode && bands.length > 1) {
+        let measGd: { freqOut: number[]; gdMs: number[] };
+        if (sumMode) {
           // b141.65 (audit stage 2 B1): each band is resampled onto ONE common
           // grid first (fence outside its own range, delay-aware phase). The
           // sum ran index-wise over bands[0]'s grid although the grids differ
           // (user_4way: 1011 pts from 20 Hz vs 484 pts from 1220 Hz) — GD at
           // 500 Hz −0.97 ms instead of 0.007, Σ at 8 kHz 74 dB instead of 90.
-          gdFreq = buildCommonGrid(bands as BandState[]);
-          // b141.72: the shared coherent sum (sum.ts), not a fourth copy of it.
-          const sum = coherentSum(gdFreq, bands.map((sb) => {
-            const m = sb.measurement!;
-            return {
-              mag: interpOnGrid(m.freq, m.magnitude, gdFreq, { outside: -200 }) as number[],
-              phase: interpPhaseOnGrid(m.freq, m.phase!, gdFreq, { outside: 0, mag: m.magnitude }) as number[],
-              sign: (sb.inverted ? -1 : 1) as 1 | -1,
-              delay: irDelayByName[sb.name] ?? 0,
-            };
-          }));
-          const unwrapped = unwrapDegrees(sum!.phase);
-          gdPhase = unwrapped;
+          // b141.104 (audit 4.7): GD of the complex sum itself, with the
+          // alignment delays analytic — unwrapping the summed phase on 512
+          // points aliased at HF (3 ms → > 10 % off above 12.3 kHz).
+          const gdFreq = buildCommonGrid(bands as BandState[]);
+          measGd = {
+            freqOut: gdFreq,
+            gdMs: sumGroupDelayMs(gdFreq, bands.map((sb) => {
+              const m = sb.measurement!;
+              return {
+                mag: interpOnGrid(m.freq, m.magnitude, gdFreq, { outside: -200 }) as number[],
+                phase: interpPhaseOnGrid(m.freq, m.phase!, gdFreq, { outside: 0, mag: m.magnitude }) as number[],
+                sign: (sb.inverted ? -1 : 1) as 1 | -1,
+                delay: irDelayByName[sb.name] ?? 0,
+              };
+            })),
+          };
         } else {
-          // Band mode: unwrap phase before GD computation
-          gdPhase = unwrapDegrees(phase);
+          // Band mode: unwrap phase before GD computation (prevents spikes
+          // at ±180° boundaries)
+          measGd = computeGroupDelay(freq, unwrapDegrees(phase));
         }
-
-        // Measurement GD
-        const measGd = computeGroupDelay(gdFreq, gdPhase);
         if (gen !== renderGen) return;
 
         // b139.4b: target / corrected GD share BandEvaluator's
@@ -2185,20 +2247,24 @@ export default function FrequencyPlot() {
         if (sumMode) {
           // b141.12: Σ target / corrected GD from evaluateSum's coherent
           // phases (call is served from the b141.7 cache — same params as
-          // the SPL render). Phases come wrapped (atan2) — unwrap before
-          // differentiating, then resample onto the measurement GD grid so
-          // all series share one x-axis.
-          const sumRes = await evaluateSum(allBands as BandState[], { sampleRate: exportSampleRate() })
-            .catch((e) => { console.error("[GD] sum eval failed:", e); return null; });
+          // the SPL render), resampled onto the measurement GD grid so all
+          // series share one x-axis.
+          const sumRes = sumBands.length > 0
+            ? await evaluateSum(sumBands, { sampleRate: exportSampleRate() })
+              .catch((e) => { console.error("[GD] sum eval failed:", e); return null; })
+            : null;
           if (gen !== renderGen) return;
           if (sumRes) {
-            const toGd = (ph: number[] | null): number[] | null => {
-              if (!ph) return null;
-              const gd = computeGroupDelay(sumRes.freq, unwrapDegrees(ph));
-              return interpOnGrid(gd.freqOut, gd.gdMs, measGd.freqOut, { outside: "nan" }) as number[];
+            // b141.104 (audit 4.7): from the per-band parts (polarity and
+            // alignment delay applied analytically), not the wrapped Σ phase.
+            const toGd = (per: Array<{ mag: number[]; phase: number[] } | null>): number[] | null => {
+              const parts = per.map((p, i) => (p ? { ...p, ...sumMeta[i] } : null));
+              if (!parts.some((p) => p)) return null;
+              const gd = sumGroupDelayMs(sumRes.freq, parts);
+              return interpOnGrid(sumRes.freq, gd, measGd.freqOut, { outside: "nan" }) as number[];
             };
-            targetGdMs = toGd(sumRes.sumTargetPhase);
-            corrGdMs = toGd(sumRes.sumCorrectedPhase);
+            if (sumRes.sumTargetMag) targetGdMs = toGd(sumRes.perBandTarget);
+            if (sumRes.sumCorrectedPhase) corrGdMs = toGd(sumRes.perBandCorrected);
           }
         } else {
           // Target GD (band mode). b141.13: phases are WRAPPED (±180 from
@@ -2240,6 +2306,7 @@ export default function FrequencyPlot() {
           lastGdData.gdMs = [];
         }
 
+        lastGdBandId = !sumMode && band ? band.id : null;
         renderGdChart(measGd.freqOut, measGd.gdMs, targetGdMs, corrGdMs, gdClr, gdCfg);
         return;
       }
@@ -2295,11 +2362,17 @@ export default function FrequencyPlot() {
         for (const { sb, res } of perBand) {
           if (!res?.ir) continue;
           const delay = irDelayByName[sb.name] ?? 0;
-          const wrap = (c: { time: number[]; impulse: number[]; step: number[] }): IrBandData =>
-            ({ bandName: sb.name, bandColor: sb.color, ...shiftIr(c, delay) });
-          if (res.ir.measurement) measBands.push(wrap(res.ir.measurement));
-          if (res.ir.target) targetBands.push(wrap(res.ir.target));
-          if (res.ir.corrected) corrBands.push(wrap(res.ir.corrected));
+          const wrap = (c: { time: number[]; impulse: number[]; step: number[] }, played: boolean): IrBandData => {
+            const sh = shiftIr(c, delay);
+            // b141.104 (audit 4.2): target / corrected as the band plays —
+            // with its polarity, as in Σ and on the band's own IR tab.
+            const inv = played && !!sb.inverted;
+            return { bandName: sb.name, bandColor: sb.color, timeMs: sh.timeMs,
+              impulse: polarityAmplitude(sh.impulse, inv), step: polarityAmplitude(sh.step, inv) };
+          };
+          if (res.ir.measurement) measBands.push(wrap(res.ir.measurement, false));
+          if (res.ir.target) targetBands.push(wrap(res.ir.target, true));
+          if (res.ir.corrected) corrBands.push(wrap(res.ir.corrected, true));
         }
 
         // Σ target IR — populated by evaluateSum below (single source of truth).
@@ -2310,8 +2383,11 @@ export default function FrequencyPlot() {
 
         // Σ IR/Step from evaluateSum's unified frequency-domain coherent sum.
         try {
-          const sumResult = await evaluateSum(allBands as BandState[], { includeIr: true, sampleRate: exportSampleRate() });
-          if (gen === renderGen && sumResult.ir) {
+          // b141.104 (audit 4.3): the legend's exclusions reach the Σ curves.
+          const sumResult = sumBands.length > 0
+            ? await evaluateSum(sumBands, { includeIr: true, sampleRate: exportSampleRate() })
+            : null;
+          if (gen === renderGen && sumResult?.ir) {
             if (sumResult.ir.measurement) {
               measSum = {
                 timeMs: sumResult.ir.measurement.time.map(t => t * 1000),
@@ -2385,7 +2461,7 @@ export default function FrequencyPlot() {
         // convolver or, with «INV в WAV», in the file) — show its target and
         // corrected impulse/step that way, as the SPL tab shows its phase.
         // The measurement stays as measured.
-        const flip = (a: number[]) => band!.inverted ? a.map(v => -v) : a;
+        const flip = (a: number[]) => polarityAmplitude(a, !!band!.inverted);
         const targetBands: IrBandData[] = irEval.ir.target ? [{
           bandName: band!.name,
           bandColor: band!.color,
@@ -2421,6 +2497,7 @@ export default function FrequencyPlot() {
           [measBands, null, targetBands, null, corrBands, null,
            band ? preRingZoneMs([band] as BandState[]) : null, irCfg];
         lastIrChart = { key: irDataKey(mode, sumMode, band), args: bandArgs };
+        lastIrBandId = band!.id;
         renderIrStepChart(...bandArgs);
       }
     } catch (e) {
@@ -2672,6 +2749,25 @@ export default function FrequencyPlot() {
       }
     }
 
+    // b141.104 (audit 4.8): the pre-ringing zone hangs off the peak of the
+    // curve that rings — corrected, else target (a visible one first) — not
+    // off the first measurement, whose peak can sit elsewhere.
+    const zonePeakMs = (() => {
+      const vis = (lbl: string) => irLegend.find((e) => e.label === lbl)?.visible !== false;
+      const cands: { lbl: string; c: { timeMs: number[]; impulse: number[] } | null | undefined }[] = inSum
+        ? [{ lbl: "Σ corrected IR", c: corrSum }, { lbl: "Σ target IR", c: targetSum }]
+        : [{ lbl: "Corrected IR", c: corrBands[0] }, { lbl: "Target IR", c: targetBands[0] }];
+      const pick = cands.find((k) => k.c && k.c.impulse.length > 0 && vis(k.lbl))
+        ?? cands.find((k) => k.c && k.c.impulse.length > 0);
+      if (!pick?.c) return peakTimeMs;
+      let pk = 0, pv = -1;
+      for (let i = 0; i < pick.c.impulse.length; i++) {
+        const a = Math.abs(pick.c.impulse[i]);
+        if (a > pv) { pv = a; pk = i; }
+      }
+      return pick.c.timeMs[pk] ?? peakTimeMs;
+    })();
+
     // Y range — only from visible series and visible X window (±30ms around peak)
     let yMin = Infinity, yMax = -Infinity;
     const xData = uDataArr[0];
@@ -2737,8 +2833,8 @@ export default function FrequencyPlot() {
           const plotLeft = u.bbox.left;
           const plotTop = u.bbox.top;
           const plotHeight = u.bbox.height;
-          const peakX = u.valToPos(peakTimeMs, "x", true);
-          const maskStartX = u.valToPos(peakTimeMs - maskingMs, "x", true);
+          const peakX = u.valToPos(zonePeakMs, "x", true);
+          const maskStartX = u.valToPos(zonePeakMs - maskingMs, "x", true);
           const clampedMaskStart = Math.max(maskStartX, plotLeft);
 
           ctx.save();
@@ -2801,20 +2897,25 @@ export default function FrequencyPlot() {
         }] : [],
         setCursor: [(u: uPlot) => {
           const idx = u.cursor.idx;
-          if (idx == null || idx < 0 || idx >= u.data[0].length) { setCursorFreq("—"); setCursorSPL("—"); return; }
-          setCursorFreq(u.data[0][idx]?.toFixed(2) + " ms");
-          // Show first visible IR/Step values
-          const vals: string[] = [];
+          if (idx == null || idx < 0 || idx >= u.data[0].length) { setCursorFreq("—"); setCursorSPL("—"); setCursorValues([]); return; }
+          const t = u.data[0][idx];
+          setCursorFreq(t != null ? (t as number).toFixed(2) + " ms" : "—");
+          // b141.104 (audit 4.15): per-curve values in their colours, like
+          // the other tabs — they used to land under «SPL:» with «Phase: —».
+          const vals: { label: string; color: string; value: string }[] = [];
           for (let si = 1; si < u.series.length; si++) {
             if (!u.series[si].show) continue;
             const v = u.data[si]?.[idx];
-            if (v == null || (v as number) <= -190) continue;
-            const lbl = u.series[si].label ?? "";
-            if (isDb) vals.push(`${lbl}: ${(v as number).toFixed(0)} dB`);
-            else vals.push(`${lbl}: ${(v as number).toFixed(1)}%`);
-            if (vals.length >= 4) break; // limit readout clutter
+            if (v == null || !isFinite(v as number) || (v as number) <= -190) continue;
+            const stroke = (uSeries[si] as any)?.stroke; // the option (uPlot turns its own into a function)
+            vals.push({
+              label: String(u.series[si].label ?? ""),
+              color: typeof stroke === "string" && stroke !== "transparent" ? stroke : "#ccc",
+              value: isDb ? `${(v as number).toFixed(0)} dB` : `${(v as number).toFixed(1)}%`,
+            });
           }
-          setCursorSPL(vals.length > 0 ? vals.join("  ") : "—");
+          setCursorValues(vals);
+          setCursorSPL("—");
         }],
       },
     };
@@ -2878,8 +2979,10 @@ export default function FrequencyPlot() {
       }
     }
 
+    // b141.104 (audit 4.19): initial range from the visible curves only.
     let yMin = Infinity, yMax = -Infinity;
     for (let s = 1; s < uDataArr.length; s++) {
+      if ((uSeries[s] as any).show === false) continue;
       for (const v of uDataArr[s]) { if (isFinite(v)) { if (v < yMin) yMin = v; if (v > yMax) yMax = v; } }
     }
     const pad = Math.max(0.5, (yMax - yMin) * 0.1);
@@ -2912,13 +3015,15 @@ export default function FrequencyPlot() {
       hooks: {
         setCursor: [(u: uPlot) => {
           const idx = u.cursor.idx;
-          if (idx == null || idx < 0 || idx >= u.data[0].length) { setCursorFreq("—"); setCursorSPL("—"); return; }
+          if (idx == null || idx < 0 || idx >= u.data[0].length) { setCursorFreq("—"); setCursorSPL("—"); setCursorValues([]); return; }
           const f = u.data[0][idx];
           setCursorFreq(f != null ? fmtFreq(f) : "—");
+          // b141.104 (audit 4.20): hidden curves are not read out.
+          const at = (k: number) => (u.series[k]?.show === false ? null : u.data[k]?.[idx]);
           const vals: { label: string; color: string; value: string }[] = [];
-          const m = u.data[1]?.[idx]; if (m != null && isFinite(m as number)) vals.push({ label: "Meas", color: clr.meas, value: (m as number).toFixed(2) + " ms" });
-          const t = u.data[2]?.[idx]; if (t != null && isFinite(t as number)) vals.push({ label: "Target", color: clr.target, value: (t as number).toFixed(2) + " ms" });
-          const c = u.data[3]?.[idx]; if (c != null && isFinite(c as number)) vals.push({ label: "Corr", color: clr.corr, value: (c as number).toFixed(2) + " ms" });
+          const m = at(1); if (m != null && isFinite(m as number)) vals.push({ label: "Meas", color: clr.meas, value: (m as number).toFixed(2) + " ms" });
+          const t = at(2); if (t != null && isFinite(t as number)) vals.push({ label: "Target", color: clr.target, value: (t as number).toFixed(2) + " ms" });
+          const c = at(3); if (c != null && isFinite(c as number)) vals.push({ label: "Corr", color: clr.corr, value: (c as number).toFixed(2) + " ms" });
           setCursorValues(vals);
           setCursorSPL(vals.length > 0 ? vals.map(v => v.value).join(" / ") : "—");
         }],
@@ -2935,6 +3040,7 @@ export default function FrequencyPlot() {
   // ----------------------------------------------------------------
   async function renderBandMode(band: BandState, showPhase: boolean, showMag: boolean, showTarget: boolean) {
     const gen = ++renderGen;
+    lastFreqBandId = null; // b141.104 (4.22): no SNAP until this band's chart is up
     zoomCenter = 0; // reset before async — will be recalculated from measurement
     // b141.77: the EXPORTED FIR's realized response, drawn as «FIR» next to the
     // model «Corrected». Same request as the WAV export (metadata only, shared
@@ -3055,9 +3161,9 @@ export default function FrequencyPlot() {
       }
 
       if (showTarget && result.targetPhase && result.targetPhase.length > 0 && showPhase) {
-        const phase = band.inverted
-          ? result.targetPhase.map((v) => v + 180)
-          : result.targetPhase;
+        // b141.104 (audit 4.1): every phase curve of the band goes through
+        // the one polarity rule — Corrected°, FIR°, Corr FIR° below too.
+        const phase = polarityPhase(result.targetPhase, !!band.inverted);
         uSeries.push({ label: "Target \u00B0", stroke: cf.targetPhase, width: 1, dash: [4, 4], scale: "phase" });
         uData.push(wrapPhase(phase));
         legend.push({ label: "Target \u00B0", color: cf.targetPhase, dash: true, visible: true, seriesIdx: sIdx, category: "target" });
@@ -3201,7 +3307,9 @@ export default function FrequencyPlot() {
 
           // b139.4c: corrected phase from BandEvaluator (Gaussian/subsonic
           // reconstruction is unified with target \u2014 bug fix for SPL tab).
-          const fullCorrectedPhase: number[] | null = evalRes.correctedPhase ?? null;
+          const fullCorrectedPhase: number[] | null = evalRes.correctedPhase
+            ? polarityPhase(evalRes.correctedPhase, !!band.inverted)
+            : null;
           if (fullCorrectedPhase && showPhase) {
             const phaseLabel = isHybrid ? "Corrected + XO" : "Corrected";
             uSeries.push({
@@ -3224,7 +3332,7 @@ export default function FrequencyPlot() {
           }
           if (showPhase && fileForPhase) {
             uSeries.push({ label: "FIR °", stroke: cf.targetPhase, width: 1, dash: [4, 4], scale: "phase" });
-            uData.push(wrapPhase(fileForPhase));
+            uData.push(wrapPhase(polarityPhase(fileForPhase, !!band.inverted)));
             legend.push({ label: "FIR °", color: cf.targetPhase, dash: true, visible: true, seriesIdx: sIdx, category: "fir" });
             sIdx++;
           }
@@ -3241,7 +3349,7 @@ export default function FrequencyPlot() {
         if (result.targetMag) {
           lastCorrData.freq = result.freq!;
           lastCorrData.mag = [...result.targetMag];
-          lastCorrData.phase = result.targetPhase ? wrapPhase(result.targetPhase) : [];
+          lastCorrData.phase = result.targetPhase ? wrapPhase(polarityPhase(result.targetPhase, !!band.inverted)) : [];
         } else if (result.measurement) {
           lastCorrData.freq = [...result.measurement.freq];
           lastCorrData.mag = [...result.measurement.magnitude];
@@ -3262,7 +3370,7 @@ export default function FrequencyPlot() {
       if (result.targetMag) {
         lastTargetData.freq = result.freq!;
         lastTargetData.mag = [...result.targetMag];
-        lastTargetData.phase = result.targetPhase ? wrapPhase(result.targetPhase) : [];
+        lastTargetData.phase = result.targetPhase ? wrapPhase(polarityPhase(result.targetPhase, !!band.inverted)) : [];
       } else {
         lastTargetData.freq = []; lastTargetData.mag = []; lastTargetData.phase = [];
       }
@@ -3277,19 +3385,24 @@ export default function FrequencyPlot() {
 
       // --- Snapshot overlays (per-band) ---
       const snaps = freqSnapshots(band.id);
+      // b141.104 (audit 4.24): a snapshot ends where its own grid ends (a
+      // gap, as on GD/Export) — it was continued by a flat line of its edge
+      // value.
+      const gapOutside = (a: (number | null)[]): (number | null)[] =>
+        a.map((v) => (v == null || Number.isNaN(v) ? null : v));
       for (const snap of snaps) {
         const interpolateArr = (srcArr: (number | null)[]): (number | null)[] => {
           if (snap.freq.length === result.freq!.length && snap.freq[0] === result.freq![0]) {
             return srcArr;
           }
-          return interpOnGrid(snap.freq, srcArr, result.freq!, { outside: "clamp" });
+          return gapOutside(interpOnGrid(snap.freq, srcArr, result.freq!, { outside: "nan" }));
         };
         // b141.9: wrapped phase — shortest-arc interp (null gaps still propagate).
         const interpolatePhaseArr = (srcArr: (number | null)[]): (number | null)[] => {
           if (snap.freq.length === result.freq!.length && snap.freq[0] === result.freq![0]) {
             return srcArr;
           }
-          return interpPhaseOnGrid(snap.freq, srcArr, result.freq!, { outside: "clamp" });
+          return gapOutside(interpPhaseOnGrid(snap.freq, srcArr, result.freq!, { outside: "nan" }));
         };
 
         const snapMag = snap.mag.length > 0 ? interpolateArr(snap.mag as (number | null)[]) as number[] : null;
@@ -3390,6 +3503,8 @@ export default function FrequencyPlot() {
       if (gen !== renderGen) return;
       requestAnimationFrame(() => {
         if (gen !== renderGen || !containerRef) return;
+        lastFreqBandId = band.id;
+        chartBandId = band.id;
         renderChart({
           freq: result.freq!,
           uSeries,
@@ -3409,6 +3524,8 @@ export default function FrequencyPlot() {
     // b140.3.1.6: PEQ dots are band-mode-only — clear before rendering SUM.
     activePeqDots = null;
     const gen = ++renderGen;
+    lastFreqBandId = null;
+    chartBandId = null;
     zoomCenter = 0;
     // 2026-09-05 audit: no JSON clone here — it minted fresh measurement
     // objects on every render, so the identity-keyed eval cache missed on
@@ -3452,7 +3569,8 @@ export default function FrequencyPlot() {
               label: `${bands[i].name} tgt °`, stroke: cf.targetPhase,
               width: 1, dash: [4, 4], scale: "phase",
             });
-            uData.push(wrapPhase(pb.phase));
+            // b141.104 (audit 4.2): the band as it enters Σ — with its polarity.
+            uData.push(wrapPhase(polarityPhase(pb.phase, !!bands[i].inverted)));
             legend.push({
               label: `${bands[i].name} tgt °`, color: cf.targetPhase, dash: true,
               visible: false, seriesIdx: sIdx, category: "target",
@@ -3760,6 +3878,11 @@ export default function FrequencyPlot() {
   let peqDragMoved = false; // true if mouse actually moved during drag
   let peqDragStartX = 0; // b141.4: mousedown position for the drag dead-zone
   let peqDragStartY = 0;
+  // b141.104 (audit 4.6): the filter and the cursor (in data units) at
+  // mousedown. The drag moves the filter by the cursor's travel from there,
+  // so grabbing a few px off the handle no longer makes it jump, and a
+  // shelf (handle at half its gain) keeps its gain.
+  let peqDragStart: { freq: number; gain: number; type: PeqBand["filter_type"]; curFreq: number; curDb: number } | null = null;
   let peqDragTimeout: ReturnType<typeof setTimeout> | null = null;
 
   // b141.4: shared PEQ-dot hit-test (closest enabled dot within radius, or -1).
@@ -3769,8 +3892,6 @@ export default function FrequencyPlot() {
     if (!chart || !bd?.peqBands?.length) return -1;
     const peqSeries = chart.series.findIndex((s) => s.label === "PEQ dB");
     if (peqSeries < 0) return -1;
-    const xData = chart.data[0];
-    if (!xData?.length) return -1;
     const hitRadius = 12; // px
     let bestDist = Infinity;
     let bestIdx = -1;
@@ -3778,14 +3899,8 @@ export default function FrequencyPlot() {
       const pb = bd.peqBands[i];
       if (!pb.enabled) continue;
       const cx = chart.valToPos(pb.freq_hz, "x");
-      let dataIdx = 0, dBest = Infinity;
-      for (let k = 0; k < xData.length; k++) {
-        const dd = Math.abs(xData[k] - pb.freq_hz);
-        if (dd < dBest) { dBest = dd; dataIdx = k; }
-      }
-      const yVal = chart.data[peqSeries][dataIdx];
-      if (yVal == null) continue;
-      const cy = chart.valToPos(yVal, "mag");
+      // b141.104 (audit 4.6): the handle, as drawn — the filter's own level.
+      const cy = chart.valToPos(peqHandleDb(pb), "mag");
       const dist = Math.hypot(mx - cx, my - cy);
       if (dist < hitRadius && dist < bestDist) { bestDist = dist; bestIdx = i; }
     }
@@ -3822,6 +3937,11 @@ export default function FrequencyPlot() {
       peqDragMoved = false;
       peqDragStartX = mx;
       peqDragStartY = my;
+      const pb = bd.peqBands[bestIdx];
+      peqDragStart = {
+        freq: pb.freq_hz, gain: pb.gain_db, type: pb.filter_type,
+        curFreq: chart.posToVal(mx, "x"), curDb: chart.posToVal(my, "mag"),
+      };
       setSelectedPeqIdx(bestIdx);
       window.addEventListener("mousemove", handlePeqDragMove);
       window.addEventListener("mouseup", handlePeqDragUp);
@@ -3845,14 +3965,17 @@ export default function FrequencyPlot() {
       if (chart.over) chart.over.style.cursor = "grabbing";
     }
 
-    let freq = chart.posToVal(mx, "x");
-    if (!isFinite(freq)) return;
+    const st = peqDragStart;
+    if (!st) return;
+    const curFreq = chart.posToVal(mx, "x");
+    const curDb = chart.posToVal(my, "mag");
+    if (!isFinite(curFreq) || !isFinite(curDb) || !(st.curFreq > 0) || !isFinite(st.curDb)) return;
+    // Frequency follows the cursor's travel on the log axis.
+    let freq = st.freq * (curFreq / st.curFreq);
     freq = Math.max(F_MIN_WORK, Math.min(F_MAX_WORK, freq));
-
-    let gain = chart.posToVal(my, "mag");
-    if (!isFinite(gain)) return;
-    // PEQ curve is 0 dB baseline, so the Y value IS the gain
-    gain = Math.max(-24, Math.min(24, gain));
+    // Gain: the handle (the filter's own level on the 0 dB PEQ baseline)
+    // follows the cursor's vertical travel.
+    const gain = peqGainAfterDrag(st.gain, curDb - st.curDb, st.type);
 
     updatePeqBand(peqDragBandId, peqDragIdx, {
       freq_hz: Math.round(freq),
@@ -3885,6 +4008,7 @@ export default function FrequencyPlot() {
     peqDragActive = false;
     peqDragIdx = -1;
     peqDragMoved = false;
+    peqDragStart = null;
     if (chart?.over) chart.over.style.cursor = "grab"; // still over the dot post-release
 
   }
@@ -3958,7 +4082,7 @@ export default function FrequencyPlot() {
       <div class="cursor-readout">
         <div class="readout-curves-area">
           <span class="readout-item">
-            <span class="readout-label">Freq:</span>
+            <span class="readout-label">{plotTab() === "ir" ? "Time:" : "Freq:"}</span>
             <span class="readout-value">{cursorFreq()}</span>
           </span>
           {/* Per-curve values at cursor — colored by curve */}
@@ -4015,7 +4139,11 @@ export default function FrequencyPlot() {
         {/* IR/Step dB/Lin toggle */}
         <Show when={plotTab() === "ir"}>
           <span class="readout-sep" />
-          <button class={`tb-btn tb-btn-xs ${irDbMode() ? "active" : ""}`} onClick={() => { setIrDbMode(!irDbMode()); irToggleRedraw(); }}>{irDbMode() ? "dB" : "Lin"}</button>
+          <button class={`tb-btn tb-btn-xs ${irDbMode() ? "active" : ""}`} onClick={() => {
+            // b141.104 (audit 4.16): the Y scale belongs to the mode (% vs dB) —
+            // refit for the new one; the zoom history is in the old unit.
+            setIrDbMode(!irDbMode()); zoomStacks["ir"] = []; irToggleRedrawAutoY();
+          }}>{irDbMode() ? "dB" : "Lin"}</button>
         </Show>
 
         {/* Compact controls for active band (b126) — replaces bottom panel */}
@@ -4166,7 +4294,16 @@ export default function FrequencyPlot() {
                   </For>
                   <tr>
                     {(() => {
-                      const zone = () => preRingZoneMs(appState.bands as BandState[]);
+                      // b141.104 (audit 4.8): the zone the chart draws — this
+                      // band's own linear-phase crossovers, and only when a
+                      // target / corrected impulse is there to ring. The
+                      // whole project's zone kept the button live on a
+                      // min-phase band that drew nothing.
+                      const zone = () => {
+                        const b = activeBand();
+                        if (!b || !legendEntries.some((e) => e.category === "target" || e.category === "corrected")) return null;
+                        return preRingZoneMs([b] as BandState[]);
+                      };
                       const zoneTitle = () => zone() != null
                         ? `Зона предзвона: ${zone()!.toFixed(2)} ms — 2 периода нижнего linear-phase кроссовера`
                         : "Нет linear-phase кроссоверов — предзвон не ожидается";
@@ -4341,7 +4478,8 @@ export default function FrequencyPlot() {
                 <td class="sum-cell">
                   <button class={`legend-item ${showExpModel() ? "" : "legend-off"}`}
                     onClick={() => { const v = !showExpModel(); setShowExpModel(v); safeToggleSeries(1, v); }}>
-                    <span class="legend-swatch legend-swatch-dash" style={{ "border-color": exportColors().model }} />
+                    {/* b141.104 (audit 4.15): «Model dB» is drawn solid. */}
+                    <span class="legend-swatch" style={{ "background-color": exportColors().model, "border-color": exportColors().model }} />
                   </button>
                 </td>
                 <td class="sum-cell">
@@ -4658,7 +4796,10 @@ export default function FrequencyPlot() {
             // b141.83 run-on line; the old one-row-per-curve table (b141.80)
             // took six rows of chart height.
             const present = () => categories.filter(c => legendEntries.some(e => e.category === c));
-            const rows: { label: string; dash: boolean }[] = [{ label: "SPL", dash: false }, { label: "Phase", dash: true }];
+            // b141.104 (audit 4.13): rows by scale (a phase label ends in «°»),
+            // not by dash — «Meas (ext)» / «Corr (ext)» are dashed SPL curves
+            // and were switched by the Phase row.
+            const rows: { label: string; phase: boolean }[] = [{ label: "SPL", phase: false }, { label: "Phase", phase: true }];
             return (
               <table class="band-vis-table">
                 <thead>
@@ -4675,14 +4816,14 @@ export default function FrequencyPlot() {
                 <tbody>
                   <For each={rows}>
                     {(row) => {
-                      const inRow = (e: LegendEntry) => !!e.dash === row.dash && categories.includes(e.category as typeof categories[number]);
+                      const inRow = (e: LegendEntry) => isPhaseEntry(e) === row.phase && categories.includes(e.category as typeof categories[number]);
                       const anyOn = () => legendEntries.some(e => inRow(e) && e.visible);
                       return (
                         <tr>
                           <td class="sum-row-header" onClick={() => toggleEntries(inRow)} style={{ opacity: anyOn() ? 1 : 0.4 }}>{row.label}</td>
                           <For each={present()}>
                             {(cat) => {
-                              const ent = () => legendEntries.find(e => e.category === cat && !!e.dash === row.dash);
+                              const ent = () => legendEntries.find(e => e.category === cat && isPhaseEntry(e) === row.phase);
                               return (
                                 <td class={ent() ? "sum-cell" : "sum-cell sum-cell-empty"}>
                                   <Show when={ent()} fallback={"—"}>{(e) => (
@@ -4709,7 +4850,7 @@ export default function FrequencyPlot() {
       <div class="plot-body">
         <div class="plot-center">
           <div ref={containerRef} class="frequency-plot" />
-          <Show when={exportComputing()}>
+          <Show when={exportComputing() && plotTab() === "export"}>
             <div class="plot-computing-overlay">
               <span class="plot-computing-text">Расчёт FIR…</span>
             </div>

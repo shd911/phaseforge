@@ -476,6 +476,7 @@ async function evaluateSumImpl(
       }
 
       if (!band.measurement) return out;
+      const meas = band.measurement;
 
       // Measurement on irFreq: extension via target shape when target is on,
       // else fence outside native range.
@@ -483,15 +484,15 @@ async function evaluateSumImpl(
       let extMeasPhase: number[] | null = null;
       if (tgtMagOnIr) {
         const ext = await computeExtension(
-          band.measurement.freq, band.measurement.magnitude,
-          band.measurement.phase ?? null, irFreq, tgtMagOnIr, sumSr,
+          meas.freq, meas.magnitude,
+          meas.phase ?? null, irFreq, tgtMagOnIr, sumSr,
         );
         extMeasMag = ext.mag;
         extMeasPhase = ext.phase;
       } else {
         const r = resampleOntoCommon(
-          band.measurement.freq, band.measurement.magnitude,
-          band.measurement.phase ?? null, irFreq,
+          meas.freq, meas.magnitude,
+          meas.phase ?? null, irFreq,
         );
         extMeasMag = r?.mag ?? null;
         extMeasPhase = r?.phase ?? null;
