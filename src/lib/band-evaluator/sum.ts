@@ -315,7 +315,12 @@ async function evaluateSumImpl(
 
   for (let i = 0; i < bands.length; i++) {
     const r = perBandResults[i];
-    if (!r.correctedMag) {
+    // b141.103 (audit 3.5): a band with its target off is not in Σ
+    // Corrected. It has no level to normalise to (Σ Target leaves it out
+    // too) and no FIR is exported for it — summed at the measurement's raw
+    // level (85 dB) beside bands brought to their targets, it dominated the
+    // Σ. Σ IR already left it out; both views now agree.
+    if (!r.correctedMag || !bands[i].targetEnabled) {
       perBandCorrected.push(null);
       correctedDataForSum.push(null);
       continue;

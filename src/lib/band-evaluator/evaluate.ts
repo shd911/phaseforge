@@ -204,7 +204,12 @@ export async function composeCorrected(
   const mag = measMag.map((m, i) => m + (peq?.mag[i] ?? 0) + (section?.mag[i] ?? 0) + lvl);
   if (!measPhase) return { mag, phase: null };
   const base = measPhase.map((p, i) => p + (peq?.phase[i] ?? 0) + (section?.phase[i] ?? 0));
-  const phase = await reconstructTargetPhase(freq, base, band.target.high_pass, band.target.low_pass, sampleRate);
+  // b141.103 (audit 3.15): with the target off there is no filter section,
+  // so no Gaussian/subsonic Hilbert term either — the phase of a filter
+  // missing from the magnitude.
+  const phase = band.targetEnabled
+    ? await reconstructTargetPhase(freq, base, band.target.high_pass, band.target.low_pass, sampleRate)
+    : base;
   return { mag, phase };
 }
 
@@ -238,6 +243,14 @@ export async function filterSection(
     console.warn("[filterSection] compute_cross_section failed:", e);
     return null;
   }
+}
+
+/** Same grid, bin for bin. */
+export function sameGridValues(a: number[], b: number[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
 
 async function applyMeasurementSmoothing(m: Measurement, mode: string | null | undefined): Promise<Measurement> {
@@ -299,9 +312,14 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
 
   // 1. Measurement (with smoothing).
   let measurement: Measurement | null = null;
+  // b141.103 (audit 3.8): smoothing is an SPL display aid. The IR/Step
+  // views (band and Σ) and the FIR use the raw measurement — the band IR
+  // used to follow the on-screen smoothing while Σ IR did not.
+  let irMeasurement: Measurement | null = null;
   if (band.measurement) {
     const raw: Measurement = JSON.parse(JSON.stringify(band.measurement));
     measurement = await applyMeasurementSmoothing(raw, band.settings?.smoothing);
+    irMeasurement = raw;
   }
 
   // 2 + 3. Pick freq grid + evaluate target. The standalone branch returns
@@ -355,20 +373,24 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
   //     index-wise with peq/cross-section evaluated on `freq`, and the
   //     result envelope declares `result.freq = req.freq`.
   if (req.freq && req.freq.length > 0 && measurement) {
-    const mf = measurement.freq;
-    const sameGrid = mf.length === freq.length
-      && mf[0] === freq[0] && mf[mf.length - 1] === freq[freq.length - 1];
-    if (!sameGrid) {
-      measurement = {
-        ...measurement,
+    // b141.103 (audit 3.23): every bin, not length + endpoints — two grids
+    // can share both and differ inside.
+    const toGrid = (m: Measurement): Measurement => {
+      const mf = m.freq;
+      if (sameGridValues(mf, freq)) return m;
+      return {
+        ...m,
         freq: [...freq],
-        magnitude: resampleOnLogGrid(mf, measurement.magnitude, freq),
+        magnitude: resampleOnLogGrid(mf, m.magnitude, freq),
         // b141.9: measurement phase is wrapped (±180) — shortest-arc interp.
-        phase: measurement.phase
-          ? interpPhaseOnGrid(mf, measurement.phase, freq, { logSpace: true, outside: "clamp", mag: measurement.magnitude }) as number[]
+        phase: m.phase
+          ? interpPhaseOnGrid(mf, m.phase, freq, { logSpace: true, outside: "clamp", mag: m.magnitude }) as number[]
           : null,
       };
-    }
+    };
+    const smoothed = measurement !== irMeasurement;
+    measurement = toGrid(measurement);
+    irMeasurement = smoothed && irMeasurement ? toGrid(irMeasurement) : measurement;
   }
 
   // 4. PEQ contribution (mag + phase). PEQ phase is always min-phase
@@ -495,6 +517,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
   let ir: BandEvalResult["ir"];
   if (req.includeIr) {
     ir = {};
+    const measurement = irMeasurement;
     // b141.38 (external audit): the IR grid ran to the MEASUREMENT Nyquist
     // while PEQ biquads are evaluated at the export rate. With a 96 kHz
     // measurement and a 48 kHz export, a biquad above its own Nyquist is

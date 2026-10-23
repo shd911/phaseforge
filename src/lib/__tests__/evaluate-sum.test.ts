@@ -356,13 +356,14 @@ describe("evaluateSum (b140.3.1.1) — per-band corrected normalize", () => {
     expect(mag[i1k]).toBeCloseTo(0, 1);
   });
 
-  it("targetEnabled=false → no offset applied", async () => {
+  it("targetEnabled=false → band left out of Σ Corrected (b141.103, audit 3.5)", async () => {
+    // No target → no level to normalise to and no FIR: not summed at its raw
+    // measurement level beside bands brought to their targets (Σ IR already
+    // left it out).
     const a = bandWithMag("a", -3, { targetEnabled: false });
     const result = await evaluateSum([a]);
-    const mag = result.perBandCorrected[0]!.mag;
-    // No target → no offset → corrected stays at measurement level (-3 dB).
-    const idx = mag.length / 2 | 0;
-    expect(mag[idx]).toBeCloseTo(-3, 2);
+    expect(result.perBandCorrected[0]).toBeNull();
+    expect(result.sumCorrectedMag).toBeNull();
   });
 
   it("offset < 0.01 dB → not applied", async () => {
@@ -506,14 +507,15 @@ describe("evaluateSum (b140.3.1.5) — extension via target + Hilbert", () => {
     expect(phase[i100]).toBeCloseTo(10, 1);
   });
 
-  it("no extensionTargetMag (targetEnabled=false) → fence -200 dB outside native", async () => {
+  it("targetEnabled=false → only the bands with a target make Σ Corrected (b141.103)", async () => {
     const a = flatBand("a");
     const b = partialFlatBand("b", 1000, 20000);
     b.targetEnabled = false;
-    const result = await evaluateSum([a, b]);
-    const mag = result.perBandCorrected[1]!.mag;
-    const i100 = result.freq.findIndex(v => v >= 100);
-    expect(mag[i100]).toBeLessThan(-150);
+    const both = await evaluateSum([a, b]);
+    const alone = await evaluateSum([flatBand("a")]);
+    expect(both.perBandCorrected[1]).toBeNull();
+    const i = both.freq.findIndex(v => v >= 2000);
+    expect(both.sumCorrectedMag![i]).toBeCloseTo(alone.sumCorrectedMag![i], 6);
   });
 
   it("phase=null in measurement → power-sum fallback (no Hilbert call)", async () => {

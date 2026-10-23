@@ -87,7 +87,7 @@ export function autoRefLevel(
  *  dstFreq outside the source range, fill magnitude from the target
  *  shape (with a boundary mag offset) and phase from Hilbert
  *  reconstruction (with separate low/high boundary phase offsets).
- *  Inside native, values are linearly interpolated from src; outside,
+ *  Inside native, values are interpolated from src (log f); outside,
  *  they follow target+offset / Hilbert+offset for smooth continuation. */
 export async function computeExtension(
   srcFreq: number[],
@@ -117,8 +117,12 @@ export async function computeExtension(
       const mid = (lo + hi) >> 1;
       if (srcFreq[mid] <= f) lo = mid; else hi = mid;
     }
-    const dt = srcFreq[hi] - srcFreq[lo];
-    const frac = dt > 0 ? (f - srcFreq[lo]) / dt : 0;
+    // b141.103 (audit 3.24): log-frequency interpolation, like every other
+    // magnitude resampler here (≤ 0.01 dB on real grids, but consistent).
+    const a = srcFreq[lo], b = srcFreq[hi];
+    const frac = b > a
+      ? (a > 0 ? Math.log(f / a) / Math.log(b / a) : (f - a) / (b - a))
+      : 0;
     nativeMag[k] = srcMag[lo] + frac * (srcMag[hi] - srcMag[lo]);
   }
   if (nativePhase && srcPhase) {
