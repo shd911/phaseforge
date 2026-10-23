@@ -1,6 +1,7 @@
 # PhaseForge — Project Rules
 
-> **Last reviewed:** 2026-10-01 (b141.46–58: functional audit, docs/audit-2026-10-01.md).
+> **Last reviewed:** 2026-10-23 (b141.101–105: full audit, 113 findings fixed, docs/audit-2026-10-23.md).
+> Before that 2026-10-01 (b141.46–58: functional audit, docs/audit-2026-10-01.md).
 > Before that 2026-09-16 (b141.35–36: export sets to 384 kHz / 1024K taps,
 > Win dropdown disabled on the analytical route). Before that 2026-09-05 (audit b141.26–31: min-phase at true Nyquist, cache snapshot keys, taps/project validation, dead-code −545 LOC; open items in docs/audit-2026-09-05.md).
 > Файл актуализируется в конце каждой длинной сессии. Перед началом новой
@@ -202,6 +203,26 @@
   20 kHz; negligible for LF shelves and at ≥ 88.2 kHz. A single biquad cannot
   match the analog curve; making the plot digital would need the export rate
   in every `evaluate_target` call. Do not "fix" one side pointwise.
+
+## State & history conventions (b141.103–105, audit 2026-10-23)
+- **Undo covers band content only** (target, PEQ, measurement, crossovers,
+  order, smoothing). Export/FIR/optimizer settings are project settings, not
+  history: undo never rolls them back. Every such signal is a
+  `settingSignal()` (stores/bands.ts) — its setter marks the project dirty on
+  a real change. New global setting → `settingSignal`, never `createSignal`.
+- **Dirty vs save:** `doSave` clears the flag only if `dirtyGeneration()` did
+  not move during the write.
+- **Band IR/Step, Σ IR and the FIR use the RAW measurement**; screen
+  smoothing applies to SPL only.
+- **Measurement copies into the project** go through Rust
+  `copy_into_project_unique` (same-named files from different folders get
+  `_2`, `_3`…). Paths: split on both «/» and «\\» (`pathBaseName`).
+- **Measurement delay estimate without a sample rate** assumes the smallest
+  standard rate ≥ 2·f_last (≥ 48 kHz) — the parsed file never carries one.
+- **Modals:** every dialog renders through `components/Modal.tsx`; the stack
+  in `lib/dialog-keys.ts` lets Escape/backdrop close only the top one and
+  turns app hotkeys off while any modal is open. NumberInput fires onChange
+  only on a real value change.
 
 ## Debugging Rules
 - **NEVER guess at root cause.** Always add diagnostic logging first, get user's console output, then fix based on evidence.
