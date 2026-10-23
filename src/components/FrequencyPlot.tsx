@@ -2247,9 +2247,8 @@ export default function FrequencyPlot() {
         if (sumMode) {
           // b141.12: Σ target / corrected GD from evaluateSum's coherent
           // phases (call is served from the b141.7 cache — same params as
-          // the SPL render). Phases come wrapped (atan2) — unwrap before
-          // differentiating, then resample onto the measurement GD grid so
-          // all series share one x-axis.
+          // the SPL render), resampled onto the measurement GD grid so all
+          // series share one x-axis.
           const sumRes = sumBands.length > 0
             ? await evaluateSum(sumBands, { sampleRate: exportSampleRate() })
               .catch((e) => { console.error("[GD] sum eval failed:", e); return null; })
