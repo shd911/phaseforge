@@ -34,7 +34,7 @@ describe("boostLimitNote (b141.53)", () => {
     expect(boostLimitNote("iir", 23.9, 24, "Sub")).toBeNull();
   });
   it("warns on the IIR route above the limit", () => {
-    expect(boostLimitNote("iir", 30, 24, "Sub")).toMatch(/30\.0 dB выше лимита 24\.0 dB/);
+    expect(boostLimitNote("iir", 30, 24, "Sub")).toMatch(/30\.0 дБ выше лимита 24\.0 дБ/);
   });
 });
 

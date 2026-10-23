@@ -4392,7 +4392,7 @@ export default function FrequencyPlot() {
             disabled={windowIsInert()}
             style={{ opacity: windowIsInert() ? 0.45 : 1 }}
             title={windowIsInert()
-              ? "Окно не применяется: бэнд считается аналитическим каскадом (мин-фаза без subsonic и без гауссов). Импульс получается прогоном дельты через биквады, обрыва нет — сглаживать нечего. Окно влияет на линейной фазе, на гауссах/Бесселе, при subsonic и на измеренных таргетах."
+              ? "Окно не применяется: полоса считается аналитическим каскадом (мин-фаза без subsonic и без гауссов). Импульс получается прогоном дельты через биквады, обрыва нет — сглаживать нечего. Окно влияет на линейной фазе, на гауссах/Бесселе, при subsonic и на измеренных таргетах."
               : "Оконная функция. Заметна при коротких Taps и на резких переходах таргета: агрессивное окно укорачивает предзвон, но увеличивает отклонение от таргета."}
           >
             <optgroup label="Basic">
@@ -4448,7 +4448,7 @@ export default function FrequencyPlot() {
               class="tb-btn primary"
               disabled={exportingWav() || !activeBand()}
               onClick={handleExportWav}
-              title={!activeBand() ? "Выберите бэнд для экспорта" : "Экспортировать FIR в WAV"}
+              title={!activeBand() ? "Выберите полосу для экспорта" : "Экспортировать FIR в WAV"}
             >
               {exportingWav() ? "Экспорт…" : "Экспорт WAV"}
             </button>
@@ -4707,7 +4707,7 @@ export default function FrequencyPlot() {
                                   <span
                                     class="delay-conv"
                                     style={{ visibility: (convDelays()[b().id] ?? 0) >= 5e-6 ? "visible" : "hidden" }}
-                                    title={"Добавьте к задержке в конвольвере: хвост фильтра этого бэнда не уместился " +
+                                    title={"Добавьте к задержке в конвольвере: хвост фильтра этой полосы не уместился " +
                                       "в половину файла, и его WAV начинается раньше остальных на это время. " +
                                       `В конвольвер: ${(((b().alignmentDelay ?? 0) + (convDelays()[b().id] ?? 0)) * 1000).toFixed(2)} ms.`}
                                   >+{((convDelays()[b().id] ?? 0) * 1000).toFixed(2)}</span>
@@ -4731,8 +4731,8 @@ export default function FrequencyPlot() {
                             <button
                               class="auto-align-btn"
                               title={allPeqReady()
-                                ? "Автоматически подобрать задержки бэндов"
-                                : "Нужна PEQ-оптимизация всех бэндов кроссовера"}
+                                ? "Автоматически подобрать задержки полос"
+                                : "Нужна PEQ-оптимизация всех полос кроссовера"}
                               disabled={!allPeqReady() || autoAligning()}
                               aria-busy={autoAligning()}
                               onClick={async () => {

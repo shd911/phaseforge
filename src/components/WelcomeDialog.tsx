@@ -1,7 +1,7 @@
 import { createSignal, Show, For, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import Modal from "./Modal";
-import { currentProjectPath, newProject, loadProject, loadProjectFromPath } from "../lib/project-io";
+import { currentProjectPath, newProject, loadProject, loadProjectFromPath, pathBaseName } from "../lib/project-io";
 
 interface RecentProject {
   path: string;
@@ -15,8 +15,7 @@ export default function WelcomeDialog() {
     try {
       const paths = await invoke<string[]>("load_recent_projects");
       const projects: RecentProject[] = paths.map((p) => {
-        const parts = p.split("/");
-        const filename = parts.pop() ?? "project.pfproj";
+        const filename = pathBaseName(p) || "project.pfproj";
         return { path: p, name: filename.replace(/\.pfproj$/, "") };
       });
       setRecentProjects(projects);

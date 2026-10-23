@@ -92,7 +92,7 @@ export default function FileMenu() {
   }
 
   const shortPath = (path: string) => {
-    const parts = path.split("/");
+    const parts = path.split(/[\\/]/);
     if (parts.length <= 3) return path;
     return ".../" + parts.slice(-2).join("/");
   };

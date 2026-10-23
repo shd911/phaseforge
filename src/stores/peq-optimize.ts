@@ -409,12 +409,12 @@ export async function handleOptimizeAll() {
     if (failures.length > 0) {
       setPeqError(failures.join("; "));
       showToast(
-        `Оптимизировано бэндов: ${results.length} из ${settled.length}. Не удалось: ${failures.join("; ")}`,
+        `Оптимизировано полос: ${results.length} из ${settled.length}. Не удалось: ${failures.join("; ")}`,
         "warn", 12000,
       );
     } else {
       showToast(
-        `Оптимизировано бэндов: ${results.length} · макс. ошибка ${Math.max(...results.map(r => r.maxErr)).toFixed(2)} dB`,
+        `Оптимизировано полос: ${results.length} · макс. ошибка ${Math.max(...results.map(r => r.maxErr)).toFixed(2)} дБ`,
       );
     }
   } catch (e) {

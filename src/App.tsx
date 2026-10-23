@@ -22,6 +22,7 @@ import {
   projectName,
   projectDir,
   confirmIfDirty,
+  pathBaseName,
 } from "./lib/project-io";
 import { anyModalOpen } from "./lib/dialog-keys";
 import { undo, redo, canUndo, canRedo, lastUndoLabel, lastRedoLabel } from "./stores/history";
@@ -106,7 +107,7 @@ function App() {
     const pName = projectName();
     const path = currentProjectPath();
     const dirty = isDirty();
-    const name = pName ?? (path ? path.split("/").pop() : "Без названия");
+    const name = pName ?? (path ? pathBaseName(path) : "Без названия");
     document.title = `PhaseForge — ${name}${dirty ? " •" : ""}`;
   });
 
@@ -156,7 +157,7 @@ function App() {
         >↷</button>
         <span class="top-project-name" title={currentProjectPath() ?? "Без названия"}>
           {projectName() ?? (currentProjectPath()
-            ? currentProjectPath()!.split("/").pop()
+            ? pathBaseName(currentProjectPath()!)
             : "Без названия")}
         </span>
         <Show when={isDirty()}>

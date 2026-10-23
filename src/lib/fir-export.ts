@@ -87,11 +87,11 @@ export function offCenterWavWarning(
   // 64 samples ≈ 1.3 ms @ 48k — below that the desync is inaudible.
   if (delaySamples >= half - 64) return null;
   const offsetSamples = half - delaySamples;
-  return `Внимание: бэнд «${bandName}» экспортирован с задержкой ` +
+  return `Внимание: полоса «${bandName}» экспортирована с задержкой ` +
     `${delaySamples} отсчётов вместо ${half} — хвост фильтра не уместился в ` +
     `половину файла. В конвольвере он заиграет на ${offsetSamples} отсчётов ` +
     `раньше остальных: увеличьте число тапов или скомпенсируйте разницу ` +
-    `задержкой в конвольвере (в WAV задержка бэнда не запекается).`;
+    `задержкой в конвольвере (в WAV задержка полосы не запекается).`;
 }
 
 /** b141.61: the delay to type into the convolver for a band (seconds) — its
@@ -131,7 +131,7 @@ export function hostSettingsNote(
   if (parts.length === 0) return null;
   // «задержка» and «инверсия» are both feminine.
   const what = parts.length > 1 ? "Они не записаны" : "Она не записана";
-  return `Бэнд «${bandName}»: в конвольвере задайте ${parts.join(" и ")}. ` +
+  return `Полоса «${bandName}»: в конвольвере задайте ${parts.join(" и ")}. ` +
     `${what} в WAV — иначе сумма будет не такой, как на графике Σ.`;
 }
 
@@ -142,8 +142,8 @@ export function boostLimitNote(
   route: "iir" | "cepstral", peakBoostDb: number, maxBoostDb: number, bandName: string,
 ): string | null {
   if (route !== "iir" || !(peakBoostDb > maxBoostDb + 0.05)) return null;
-  return `Бэнд «${bandName}»: подъём ${peakBoostDb.toFixed(1)} dB выше лимита ` +
-    `${maxBoostDb.toFixed(1)} dB — на аналитическом пути фильтр строится биквадами ` +
+  return `Полоса «${bandName}»: подъём ${peakBoostDb.toFixed(1)} дБ выше лимита ` +
+    `${maxBoostDb.toFixed(1)} дБ — на аналитическом пути фильтр строится биквадами ` +
     `точно и лимит не применяется. Уменьшите усиление PEQ или полок.`;
 }
 
