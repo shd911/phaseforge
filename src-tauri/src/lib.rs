@@ -390,9 +390,13 @@ async fn compute_target_hilbert_phase(
     freq: Vec<f64>,
     high_pass: Option<target::FilterConfig>,
     low_pass: Option<target::FilterConfig>,
+    tilt_db_per_octave: Option<f64>,
+    tilt_ref_freq: Option<f64>,
     sample_rate: f64,
 ) -> Result<Vec<f64>, String> {
-    fir::band::target_hilbert_phase(&freq, high_pass.as_ref(), low_pass.as_ref(), sample_rate)
+    // b141.101: the tilt's min-phase term on a min-phase main (audit 1.3).
+    let tilt = tilt_db_per_octave.map(|t| (t, tilt_ref_freq.unwrap_or(1000.0)));
+    fir::band::target_hilbert_phase(&freq, high_pass.as_ref(), low_pass.as_ref(), tilt, sample_rate)
 }
 
 /// b141.64: callers that need only the FIR's metadata (the Σ convolver delay)

@@ -157,14 +157,32 @@ fn interp_log_clamp(src_f: &[f64], src_v: &[f64], dst_f: &[f64]) -> Vec<f64> {
     }).collect()
 }
 
+/// True when the band's FIR main is minimum-phase: Composite with
+/// `linear_phase_main = false` in [`band_fir_config`] — at least one
+/// crossover and every crossover min-phase (an absent one counts as linear,
+/// a min/linear pair is MixedPhase).
+pub fn min_phase_main(hp: Option<&FilterConfig>, lp: Option<&FilterConfig>) -> bool {
+    let present: Vec<&FilterConfig> = [hp, lp].into_iter().flatten().collect();
+    !present.is_empty() && present.iter().all(|f| !f.linear_phase)
+}
+
 /// The minimum-phase terms the analytic target phase lacks (degrees on
 /// `freq`): a min-phase Gaussian HP (with its subsonic), the subsonic of a
-/// linear-phase Gaussian HP, a min-phase Gaussian LP. Mirrors the frontend's
-/// former `reconstructTargetPhase` term by term.
+/// linear-phase Gaussian HP, a min-phase Gaussian LP, and (b141.101) the
+/// tilt on a minimum-phase main. Mirrors the frontend's former
+/// `reconstructTargetPhase` term by term.
+///
+/// b141.101 (audit 2026-10-23 1.3): the cepstral FIR realises a tilt on a
+/// min-phase main through the Hilbert transform of its magnitude (−14.4° at
+/// 1 kHz for −1 dB/oct), while `target::evaluate` gives a tilt zero phase —
+/// the plot and Σ missed ~15° at a crossover when not every band had the
+/// same tilt. On a linear or mixed main the FIR's tilt is zero-phase, and so
+/// is this term.
 pub fn target_hilbert_phase(
     freq: &[f64],
     hp: Option<&FilterConfig>,
     lp: Option<&FilterConfig>,
+    tilt: Option<(f64, f64)>,
     sample_rate: f64,
 ) -> Result<Vec<f64>, String> {
     let mut terms: Vec<Vec<f64>> = Vec::new();
@@ -189,6 +207,12 @@ pub fn target_hilbert_phase(
     if is_gaussian_min_phase(lp) {
         let grid = g();
         add(gaussian_db(&grid, lp.expect("checked"), true), &grid)?;
+    }
+    if let Some((db_oct, f_ref)) = tilt {
+        if db_oct != 0.0 && f_ref > 0.0 && min_phase_main(hp, lp) {
+            let grid = g();
+            add(grid.iter().map(|&f| db_oct * (f / f_ref).log2()).collect(), &grid)?;
+        }
     }
     let mut out = vec![0.0; freq.len()];
     for t in &terms { for (o, v) in out.iter_mut().zip(t) { *o += v; } }
@@ -260,7 +284,8 @@ pub(crate) fn generate_band_fir_routed(
     let config = band_fir_config(target_curve, s);
     let freq_raw = fir_grid(sr);
     let resp = target::evaluate(target_curve, &freq_raw);
-    let hil = target_hilbert_phase(&freq_raw, hp, lp, sr).map_err(|e| AppError::Dsp { message: e })?;
+    let tilt = Some((target_curve.tilt_db_per_octave, target_curve.tilt_ref_freq));
+    let hil = target_hilbert_phase(&freq_raw, hp, lp, tilt, sr).map_err(|e| AppError::Dsp { message: e })?;
     let mut freq = freq_raw.clone();
     let mut mag = resp.magnitude;
     let mut phase: Vec<f64> = resp.phase.iter().zip(&hil).map(|(p, h)| p + h).collect();
@@ -508,6 +533,37 @@ mod tests {
             worst = worst.max(d.abs());
         }
         assert!(worst < 1.0, "worst phase gap {worst:.2}°");
+    }
+
+    /// b141.101 (audit 2026-10-23 1.3): the plot's tilt phase is the FIR's.
+    /// −1 dB/oct on an LR4 band, cepstral route: what the tilt adds to the
+    /// FIR's deviation from the request phase (analytic + Hilbert terms, the
+    /// phase the plot draws) — dev(tilt) − dev(no tilt), which cancels the
+    /// LR sections' bilinear deviation. It was the whole tilt phase on a
+    /// min-phase main (−14.5° at 1 kHz); a linear main keeps a zero-phase
+    /// tilt on both sides.
+    #[test]
+    fn tilt_phase_of_the_plot_is_the_fir_phase() {
+        let lr4 = |fc: f64, lin: bool| FilterConfig { filter_type: FilterType::LinkwitzRiley, order: 4,
+            freq_hz: fc, shape: None, linear_phase: lin, q: None, subsonic_protect: None };
+        let mut s = settings(48_000.0);
+        s.taps = 65_536;
+        for lin in [false, true] {
+            let mut c = curve(Some(lr4(200.0, lin)), Some(lr4(5000.0, lin)));
+            let r0 = generate_band_fir_routed(&c, &[], &s, true, Some(Route::Cepstral)).unwrap();
+            c.tilt_db_per_octave = -1.0;
+            let r = generate_band_fir(&c, &[], &s, true).unwrap();
+            assert_eq!(r.route, BandFirRoute::Cepstral);
+            let terms = target_hilbert_phase(&r.freq, c.high_pass.as_ref(), c.low_pass.as_ref(),
+                Some((-1.0, 1000.0)), 48_000.0).unwrap();
+            for f in [100.0, 300.0, 1000.0, 3000.0, 8000.0] {
+                let i = r.freq.iter().position(|&x| x >= f).unwrap();
+                let d = r.dev_phase[i] - r0.dev_phase[i];
+                eprintln!("lin={lin} {f:>6} Hz: tilt term {:+.2}°, its FIR deviation {d:+.2}°", terms[i]);
+                if lin { assert!(terms[i].abs() < 1e-9); } else { assert!(terms[i] < -10.0, "{}", terms[i]); }
+                assert!(d.abs() < 1.0, "tilt deviation {d:.2}° at {f} Hz");
+            }
+        }
     }
 
     #[test]
