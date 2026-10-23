@@ -49,6 +49,9 @@ pub(crate) fn digital_section(
     for (f, is_lp) in [(hp, false), (lp, true)] {
         let Some(f) = f else { continue };
         if !realisable(f) { continue; }
+        // b141.101: same bound as the route — above it the filter stays in
+        // the Hilbert residual (its in-band rolloff, as the plot draws it).
+        if !crate::fir::section_realisable(f.freq_hz, sample_rate) { continue; }
         let Ok(bs) = build_filter_cascade(f, is_lp, sample_rate) else { continue };
         biquads.extend(bs);
         parts.push((f, is_lp));
@@ -590,7 +593,8 @@ pub(crate) fn composite_phase_inner(
         .map(|k| {
             let b = total_mag_db[k] - subsonic_mag_db[k] - peq_mag_db[k];
             match section {
-                Some(s) => (b - s.db[k]).clamp(noise_floor_db, max_boost_db.max(0.0)),
+                // b141.101: max/min — clamp panics when floor > ceiling.
+                Some(s) => (b - s.db[k]).max(noise_floor_db).min(max_boost_db.max(0.0)),
                 None => b.max(noise_floor_db),
             }
         })

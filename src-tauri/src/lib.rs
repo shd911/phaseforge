@@ -20,7 +20,6 @@ use dsp::impulse::ImpulseResult;
 use dsp::baffle::{BaffleConfig, BaffleStepPreview};
 use dsp::merge::{MergeConfig, MergeResult};
 use io::Measurement;
-use fir::{FirConfig, FirModelResult};
 use peq::{ExclusionZone, PeqBand, PeqConfig, PeqResult};
 use target::{TargetCurve, TargetResponse};
 use tauri::{Emitter, Manager, WindowEvent};
@@ -251,8 +250,8 @@ async fn preview_baffle_step(config: BaffleConfig) -> Result<BaffleStepPreview, 
 // ---------------------------------------------------------------------------
 
 // b141.2: removed dead Tauri commands `auto_peq`, `auto_peq_above_lp` (frontend
-// uses only `auto_peq_lma`). The underlying peq::auto_peq / auto_peq_above_lp
-// remain for the peq module's own tests.
+// uses only `auto_peq_lma`). peq::auto_peq remains for the peq module's own
+// tests; peq::auto_peq_above_lp was removed in b141.101.
 
 #[tauri::command]
 async fn auto_peq_lma(
@@ -372,34 +371,12 @@ async fn compute_cross_section(
 // ---------------------------------------------------------------------------
 
 // b141.2: removed dead Tauri commands `generate_fir`, `generate_hybrid_fir`,
-// `recommend_fir_taps` — the frontend never invoked them (production FIR routes
-// through generate_model_fir / generate_model_fir_iir). The underlying
+// `recommend_fir_taps` — the frontend never invoked them. b141.101 (audit
+// 2026-10-23 2.18): `generate_model_fir` / `generate_model_fir_iir` too — the
+// frontend has gone through `generate_band_fir` since b141.70. The underlying
 // fir::generate_fir / generate_hybrid_fir live on under cfg(test) as the
 // golden-snapshot baseline. b141.69: compute_peq_response (no caller since
 // the frozen-PEQ bake went in b141.46) and fir::recommend_taps removed.
-
-#[tauri::command]
-async fn generate_model_fir(
-    freq: Vec<f64>,
-    target_mag: Vec<f64>,
-    peq_mag: Vec<f64>,
-    model_phase: Vec<f64>,
-    config: FirConfig,
-    high_pass: Option<target::FilterConfig>,
-    low_pass: Option<target::FilterConfig>,
-    omit_impulse: Option<bool>,
-) -> Result<FirModelResult, String> {
-    info!(
-        "generate_model_fir: {} points, taps={}, sr={}, phase_mode={:?}, peq_points={}",
-        freq.len(), config.taps, config.sample_rate, config.phase_mode, peq_mag.len()
-    );
-    fir::generate_model_fir_with_sections(
-        &freq, &target_mag, &peq_mag, &model_phase, &config,
-        high_pass.as_ref(), low_pass.as_ref(),
-    )
-    .map(|r| strip_impulse(r, omit_impulse))
-    .map_err(|e| e.to_string())
-}
 
 /// b141.70: the whole band → FIR request in Rust (`fir::band`) — the same
 /// function the release-readiness and golden tests drive.
@@ -422,57 +399,14 @@ async fn compute_target_hilbert_phase(
     freq: Vec<f64>,
     high_pass: Option<target::FilterConfig>,
     low_pass: Option<target::FilterConfig>,
+    tilt_db_per_octave: Option<f64>,
+    tilt_ref_freq: Option<f64>,
     sample_rate: f64,
 ) -> Result<Vec<f64>, String> {
-    fir::band::target_hilbert_phase(&freq, high_pass.as_ref(), low_pass.as_ref(), sample_rate)
+    // b141.101: the tilt's min-phase term on a min-phase main (audit 1.3).
+    let tilt = tilt_db_per_octave.map(|t| (t, tilt_ref_freq.unwrap_or(1000.0)));
+    fir::band::target_hilbert_phase(&freq, high_pass.as_ref(), low_pass.as_ref(), tilt, sample_rate)
 }
-
-/// b141.64: callers that need only the FIR's metadata (the Σ convolver delay)
-/// skip the impulse — 5.9 MB of JSON at 262144 taps, 24 MB at 1024K.
-fn strip_impulse(mut r: FirModelResult, omit: Option<bool>) -> FirModelResult {
-    if omit == Some(true) { r.impulse = Vec::new(); }
-    r
-}
-
-/// b140.7: IIR-cascade min-phase FIR pipeline. Produces an analytical
-/// time-domain impulse for non-Gaussian crossovers (LR / Butterworth /
-/// Custom HP+LP and PEQ biquads), bypassing the cepstral path that
-/// caused REW-visible phase mismatch on min-phase exports. TS routes
-/// here only when the configuration is IIR-realisable; otherwise it
-/// keeps calling the original `generate_model_fir` above.
-#[tauri::command]
-async fn generate_model_fir_iir(
-    freq: Vec<f64>,
-    hp: Option<target::FilterConfig>,
-    lp: Option<target::FilterConfig>,
-    // b141.17 (audit): shelves belong to the corrected target and must reach
-    // the cascade; dropping them shipped a WAV without the shelf the plot drew.
-    low_shelf: Option<target::ShelfConfig>,
-    high_shelf: Option<target::ShelfConfig>,
-    peq: Vec<peq::PeqBand>,
-    config: FirConfig,
-    omit_impulse: Option<bool>,
-) -> Result<FirModelResult, String> {
-    info!(
-        "generate_model_fir_iir: {} log points, taps={}, sr={}, hp={:?} lp={:?} peq_bands={}",
-        freq.len(), config.taps, config.sample_rate,
-        hp.as_ref().map(|h| (&h.filter_type, h.order, h.freq_hz)),
-        lp.as_ref().map(|l| (&l.filter_type, l.order, l.freq_hz)),
-        peq.iter().filter(|p| p.enabled).count(),
-    );
-    fir::iir_path::generate_min_phase_fir_iir(&fir::iir_path::IirPathInput {
-        freq: &freq,
-        hp: hp.as_ref(),
-        lp: lp.as_ref(),
-        low_shelf: low_shelf.as_ref(),
-        high_shelf: high_shelf.as_ref(),
-        peq: &peq,
-        config: &config,
-    })
-    .map(|r| strip_impulse(r, omit_impulse))
-    .map_err(|e| e.to_string())
-}
-
 
 #[tauri::command]
 async fn export_fir_wav(impulse: Vec<f64>, sample_rate: f64, path: String) -> Result<(), String> {
@@ -567,10 +501,8 @@ pub fn run() {
             auto_peq_lma,
             compute_peq_complex,
             compute_cross_section,
-            generate_model_fir,
             generate_band_fir,
             compute_target_hilbert_phase,
-            generate_model_fir_iir,
             export_fir_wav,
             project::save_project,
             project::load_project,

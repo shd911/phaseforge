@@ -136,6 +136,9 @@ export interface BandEvalResult {
      *  asked for. The cepstral route clips it at «max boost»; the IIR route
      *  cannot clip a biquad, so the export warns when it exceeds the limit. */
     peakBoostDb: number;
+    /** b141.101: what the FIR could not realise as asked (a crossover, shelf
+     *  or PEQ at/above 0.49·sr) — user-facing text, shown with the export. */
+    warnings: string[];
   };
   /** b139.4c: structured IR for the SPL/IR/Step views. Each sub-field is
    *  populated only when the underlying response exists; `time` is
@@ -153,21 +156,41 @@ export interface BandEvalResult {
 // addGaussianMinPhase (since deleted from band-evaluation.ts) with one
 // callable that works on any (freq, basePhase) pair regardless of caller.
 // ---------------------------------------------------------------------------
+/** b141.101: the target fields the minimum-phase terms depend on. */
+export interface HilbertTermsTarget {
+  high_pass?: FilterConfig | null;
+  low_pass?: FilterConfig | null;
+  tilt_db_per_octave?: number;
+  tilt_ref_freq?: number;
+}
+
+/** b141.101 (audit 2026-10-23 1.3): the FIR main is minimum-phase — every
+ *  present crossover min-phase, at least one present (`fir::band::min_phase_main`).
+ *  Only there does the FIR give the tilt a (Hilbert) phase. */
+function minPhaseMain(hp: FilterConfig | null | undefined, lp: FilterConfig | null | undefined): boolean {
+  const present = [hp, lp].filter((f): f is FilterConfig => !!f);
+  return present.length > 0 && present.every((f) => f.linear_phase !== true);
+}
+
 export async function reconstructTargetPhase(
   freq: number[],
   basePhase: number[],
-  hp: FilterConfig | null | undefined,
-  lp: FilterConfig | null | undefined,
+  target: HilbertTermsTarget,
   sampleRate: number = 48000,
 ): Promise<number[]> {
   // b141.70 (audit stage 2 A6): the Gaussian / subsonic minimum-phase terms
   // come from Rust (`fir::band::target_hilbert_phase`) — the same function
   // the exported FIR uses, on the FIR grid with the FIR floor (b141.52).
   // The TS copy of the term selection and magnitudes is gone.
-  const needs = isGaussianMinPhase(hp) || isGaussianMinPhase(lp) || hasActiveSubsonicProtect(hp);
+  // b141.101: plus the tilt's term on a min-phase main.
+  const hp = target.high_pass, lp = target.low_pass;
+  const tilt = target.tilt_db_per_octave ?? 0;
+  const needs = isGaussianMinPhase(hp) || isGaussianMinPhase(lp) || hasActiveSubsonicProtect(hp)
+    || (tilt !== 0 && minPhaseMain(hp, lp));
   if (!needs) return [...basePhase];
   const terms = await invoke<number[]>("compute_target_hilbert_phase", {
-    freq, highPass: hp ?? null, lowPass: lp ?? null, sampleRate,
+    freq, highPass: hp ?? null, lowPass: lp ?? null,
+    tiltDbPerOctave: tilt, tiltRefFreq: target.tilt_ref_freq ?? 1000, sampleRate,
   });
   return basePhase.map((v, i) => v + (terms[i] ?? 0));
 }
@@ -205,10 +228,10 @@ export async function composeCorrected(
   if (!measPhase) return { mag, phase: null };
   const base = measPhase.map((p, i) => p + (peq?.phase[i] ?? 0) + (section?.phase[i] ?? 0));
   // b141.103 (audit 3.15): with the target off there is no filter section,
-  // so no Gaussian/subsonic Hilbert term either — the phase of a filter
+  // so no Gaussian/subsonic/tilt Hilbert term either — the phase of a filter
   // missing from the magnitude.
   const phase = band.targetEnabled
-    ? await reconstructTargetPhase(freq, base, band.target.high_pass, band.target.low_pass, sampleRate)
+    ? await reconstructTargetPhase(freq, base, band.target, sampleRate)
     : base;
   return { mag, phase };
 }
@@ -344,7 +367,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
     if (band.targetEnabled) {
       const response = await invoke<TargetResponse>("evaluate_target", { target: targetCurve, freq });
       targetMag = response.magnitude;
-      targetPhase = await reconstructTargetPhase(freq, response.phase, band.target.high_pass, band.target.low_pass, evalSr);
+      targetPhase = await reconstructTargetPhase(freq, response.phase, band.target, evalSr);
     }
   } else if (measurement) {
     freq = measurement.freq;
@@ -352,7 +375,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
       const curveWithRef = { ...targetCurve, reference_level_db: targetCurve.reference_level_db + refLevel };
       const response = await invoke<TargetResponse>("evaluate_target", { target: curveWithRef, freq });
       targetMag = response.magnitude;
-      targetPhase = await reconstructTargetPhase(freq, response.phase, band.target.high_pass, band.target.low_pass, evalSr);
+      targetPhase = await reconstructTargetPhase(freq, response.phase, band.target, evalSr);
     }
   } else {
     // Standalone: one round-trip returns the grid + the response.
@@ -363,7 +386,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
     freq = standaloneFreq;
     if (band.targetEnabled) {
       targetMag = response.magnitude;
-      targetPhase = await reconstructTargetPhase(freq, response.phase, band.target.high_pass, band.target.low_pass, evalSr);
+      targetPhase = await reconstructTargetPhase(freq, response.phase, band.target, evalSr);
     }
   }
 
@@ -477,7 +500,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
       taps: number; sample_rate: number; norm_db: number; causality: number;
       wav_delay_samples: number; ultrasonic_lp_hz?: number | null;
       route: "iir" | "cepstral"; peak_boost_db: number; freq: number[];
-      dev_mag: number[]; dev_phase: number[];
+      dev_mag: number[]; dev_phase: number[]; warnings?: string[];
     }>("generate_band_fir", {
       target: targetCurve,
       peq: enabledPeq,
@@ -506,6 +529,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
       route: result.route,
       ultrasonicLpHz: result.ultrasonic_lp_hz ?? null,
       peakBoostDb: result.peak_boost_db,
+      warnings: result.warnings ?? [],
       // b141.78: realized − requested, on the caller's grid (see fir::band).
       devMag: interpOnGrid(result.freq, result.dev_mag, freq, { logSpace: true, outside: "clamp" }) as number[],
       devPhase: interpPhaseOnGrid(result.freq, result.dev_phase, freq, { logSpace: true, outside: "clamp" }) as number[],
@@ -565,7 +589,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
           target: irTargetCurve, freq: irFreqRaw,
         });
         const irTargetPhaseRaw = await reconstructTargetPhase(
-          irFreqRaw, irTargetResp.phase, band.target.high_pass, band.target.low_pass, evalSr,
+          irFreqRaw, irTargetResp.phase, band.target, evalSr,
         );
         // b140.5: extend up to Nyquist with noise-floor tail to neutralise the
         // Rust constant-clamp on linear FFT bins above irFMax.

@@ -23,7 +23,7 @@ use crate::peq::{apply_peq_complex, PeqBand};
 use crate::target::{self, FilterConfig, FilterType, TargetCurve};
 
 use super::cepstral::generate_model_fir_with_sections;
-use super::dispatch::{route_for, Route};
+use super::dispatch::{route_for_target, Route};
 use super::iir_path::{generate_min_phase_fir_iir, IirPathInput};
 use super::types::{FirConfig, FirModelResult, PhaseMode, WindowType};
 
@@ -58,7 +58,8 @@ pub struct BandFirResult {
     #[serde(flatten)]
     pub fir: FirModelResult,
     pub route: BandFirRoute,
-    /// Peak of target + PEQ (dB) the FIR was asked for (b141.53).
+    /// Peak of target + PEQ (dB) the FIR was asked for (b141.53), relative
+    /// to the target's own level (b141.101) — what «Макс. подъём» limits.
     pub peak_boost_db: f64,
     /// The FIR grid the realized curves are on (5 Hz – Nyquist, with tail).
     pub freq: Vec<f64>,
@@ -68,6 +69,43 @@ pub struct BandFirResult {
     /// the measurement through the exported file.
     pub dev_mag: Vec<f64>,
     pub dev_phase: Vec<f64>,
+    /// b141.101: what the FIR could not realise as asked (user-facing,
+    /// Russian) — shown with the export. Empty when everything fit.
+    #[serde(default)]
+    pub warnings: Vec<String>,
+}
+
+/// b141.101 (audit 2026-10-23 1.1/1.4): sections at or above
+/// SECTION_MAX_FRACTION·sr. PEQ there is dropped on both routes (its RBJ
+/// biquad is unstable on the IIR route and only an aliased mirror on the
+/// cepstral one); crossovers and shelves there take the cepstral route,
+/// which realises their in-band part — say so either way.
+fn nyquist_warnings(target_curve: &TargetCurve, peq: &[PeqBand], sr: f64) -> Vec<String> {
+    let lim = super::SECTION_MAX_FRACTION * sr;
+    let ok = |f: f64| super::section_realisable(f, sr);
+    let mut out = Vec::new();
+    for (f, what) in [(target_curve.high_pass.as_ref(), "ФВЧ"), (target_curve.low_pass.as_ref(), "ФНЧ")] {
+        if let Some(f) = f.filter(|f| !ok(f.freq_hz)) {
+            out.push(format!(
+                "{what} {:.0} Гц не ниже предела {:.0} Гц для частоты экспорта {:.0} Гц — \
+                 в FIR только его спад ниже Найквиста.", f.freq_hz, lim, sr));
+        }
+    }
+    for (s, what) in [(target_curve.low_shelf.as_ref(), "Нижняя полка"), (target_curve.high_shelf.as_ref(), "Верхняя полка")] {
+        if let Some(s) = s.filter(|s| !ok(s.freq_hz)) {
+            out.push(format!(
+                "{what} {:.0} Гц не ниже предела {:.0} Гц для частоты экспорта {:.0} Гц — \
+                 в FIR только её часть ниже Найквиста.", s.freq_hz, lim, sr));
+        }
+    }
+    let dropped: Vec<String> = peq.iter().filter(|p| !ok(p.freq_hz))
+        .map(|p| format!("{:.0} Гц", p.freq_hz)).collect();
+    if !dropped.is_empty() {
+        out.push(format!(
+            "PEQ {} не ниже предела {:.0} Гц для частоты экспорта {:.0} Гц — не включено в FIR.",
+            dropped.join(", "), lim, sr));
+    }
+    out
 }
 
 fn is_gaussian_min_phase(f: Option<&FilterConfig>) -> bool {
@@ -120,14 +158,32 @@ fn interp_log_clamp(src_f: &[f64], src_v: &[f64], dst_f: &[f64]) -> Vec<f64> {
     }).collect()
 }
 
+/// True when the band's FIR main is minimum-phase: Composite with
+/// `linear_phase_main = false` in [`band_fir_config`] — at least one
+/// crossover and every crossover min-phase (an absent one counts as linear,
+/// a min/linear pair is MixedPhase).
+pub fn min_phase_main(hp: Option<&FilterConfig>, lp: Option<&FilterConfig>) -> bool {
+    let present: Vec<&FilterConfig> = [hp, lp].into_iter().flatten().collect();
+    !present.is_empty() && present.iter().all(|f| !f.linear_phase)
+}
+
 /// The minimum-phase terms the analytic target phase lacks (degrees on
 /// `freq`): a min-phase Gaussian HP (with its subsonic), the subsonic of a
-/// linear-phase Gaussian HP, a min-phase Gaussian LP. Mirrors the frontend's
-/// former `reconstructTargetPhase` term by term.
+/// linear-phase Gaussian HP, a min-phase Gaussian LP, and (b141.101) the
+/// tilt on a minimum-phase main. Mirrors the frontend's former
+/// `reconstructTargetPhase` term by term.
+///
+/// b141.101 (audit 2026-10-23 1.3): the cepstral FIR realises a tilt on a
+/// min-phase main through the Hilbert transform of its magnitude (−14.4° at
+/// 1 kHz for −1 dB/oct), while `target::evaluate` gives a tilt zero phase —
+/// the plot and Σ missed ~15° at a crossover when not every band had the
+/// same tilt. On a linear or mixed main the FIR's tilt is zero-phase, and so
+/// is this term.
 pub fn target_hilbert_phase(
     freq: &[f64],
     hp: Option<&FilterConfig>,
     lp: Option<&FilterConfig>,
+    tilt: Option<(f64, f64)>,
     sample_rate: f64,
 ) -> Result<Vec<f64>, String> {
     let mut terms: Vec<Vec<f64>> = Vec::new();
@@ -152,6 +208,12 @@ pub fn target_hilbert_phase(
     if is_gaussian_min_phase(lp) {
         let grid = g();
         add(gaussian_db(&grid, lp.expect("checked"), true), &grid)?;
+    }
+    if let Some((db_oct, f_ref)) = tilt {
+        if db_oct != 0.0 && f_ref > 0.0 && min_phase_main(hp, lp) {
+            let grid = g();
+            add(grid.iter().map(|&f| db_oct * (f / f_ref).log2()).collect(), &grid)?;
+        }
     }
     let mut out = vec![0.0; freq.len()];
     for t in &terms { for (o, v) in out.iter_mut().zip(t) { *o += v; } }
@@ -200,15 +262,40 @@ pub fn generate_band_fir(
     s: &BandFirSettings,
     omit_impulse: bool,
 ) -> Result<BandFirResult, AppError> {
+    generate_band_fir_routed(target_curve, peq, s, omit_impulse, None)
+}
+
+/// [`generate_band_fir`] with the route optionally forced — for tests that
+/// compare the two realisations of the same request.
+pub(crate) fn generate_band_fir_routed(
+    target_curve: &TargetCurve,
+    peq: &[PeqBand],
+    s: &BandFirSettings,
+    omit_impulse: bool,
+    force_route: Option<Route>,
+) -> Result<BandFirResult, AppError> {
     let hp = target_curve.high_pass.as_ref();
     let lp = target_curve.low_pass.as_ref();
-    let enabled: Vec<PeqBand> = peq.iter().filter(|p| p.enabled).cloned().collect();
     let sr = s.sample_rate;
+    let all_enabled: Vec<PeqBand> = peq.iter().filter(|p| p.enabled).cloned().collect();
+    let warnings = nyquist_warnings(target_curve, &all_enabled, sr);
+    let enabled: Vec<PeqBand> = all_enabled.into_iter()
+        .filter(|p| super::section_realisable(p.freq_hz, sr)).collect();
 
     let config = band_fir_config(target_curve, s);
     let freq_raw = fir_grid(sr);
-    let resp = target::evaluate(target_curve, &freq_raw);
-    let hil = target_hilbert_phase(&freq_raw, hp, lp, sr).map_err(|e| AppError::Dsp { message: e })?;
+    // b141.101 (audit 2026-10-23 1.8): the FIR is built level-free. The
+    // target's «Уровень» is a scalar the WAV normalisation removes anyway,
+    // but inside the request it moved «Макс. подъём», the noise floor and
+    // peak_boost_db with it: level 0/+10/+20 → realised PEQ boost
+    // 5.73/5.73/3.73 dB at a 24 dB limit, a false «26 dB above the limit»
+    // on the IIR route at +20, a −40 dB stopband for a −60 floor at −20.
+    let level_db = target_curve.reference_level_db;
+    let mut level_free = target_curve.clone();
+    level_free.reference_level_db = 0.0;
+    let resp = target::evaluate(&level_free, &freq_raw);
+    let tilt = Some((target_curve.tilt_db_per_octave, target_curve.tilt_ref_freq));
+    let hil = target_hilbert_phase(&freq_raw, hp, lp, tilt, sr).map_err(|e| AppError::Dsp { message: e })?;
     let mut freq = freq_raw.clone();
     let mut mag = resp.magnitude;
     let mut phase: Vec<f64> = resp.phase.iter().zip(&hil).map(|(p, h)| p + h).collect();
@@ -216,14 +303,30 @@ pub fn generate_band_fir(
     // b140.5: explicit noise-floor tail up to Nyquist (the frontend's
     // appendNoiseFloorTail) — Rust's boundary clamp would otherwise hold the
     // last value flat across the remaining linear bins.
+    // b141.101 (audit 2026-10-23 1.2): on a minimum-phase main the tail
+    // continues the magnitude by its log-log slope instead. A −150 dB step at
+    // 0.95·Nyquist is a deep notch to the Hilbert transform: an LR4 2 kHz HP
+    // at 44.1 kHz lagged the IIR route by 7° at 2 kHz, 42° at 10 kHz and 91°
+    // at 15 kHz — a phase the plot never showed (the plot's min-phase terms
+    // also continue by slope, `minimum_phase_on_log_grid`). The linear-phase
+    // main keeps the floor tail: no Hilbert of it, it is the band limit there.
     let nyq = sr / 2.0;
     let f_hi = *freq.last().expect("non-empty grid");
     if f_hi < nyq * 0.999 {
         let f_end = nyq * 0.999;
+        let n = freq.len();
+        let continue_slope = config.phase_mode == PhaseMode::Composite && !config.linear_phase_main;
+        let (m_hi, slope) = if continue_slope && n >= 2 {
+            let doct = (freq[n - 1] / freq[n - 2]).log2();
+            (mag[n - 1], if doct > 0.0 { (mag[n - 1] - mag[n - 2]) / doct } else { 0.0 })
+        } else {
+            (s.noise_floor_db, 0.0)
+        };
         for i in 1..=NOISE_TAIL_POINTS {
             let t = i as f64 / NOISE_TAIL_POINTS as f64;
-            freq.push(f_hi * (f_end / f_hi).powf(t));
-            mag.push(s.noise_floor_db);
+            let f = f_hi * (f_end / f_hi).powf(t);
+            freq.push(f);
+            mag.push(m_hi + slope * (f / f_hi).log2());
             phase.push(0.0);
         }
     }
@@ -238,7 +341,7 @@ pub fn generate_band_fir(
     let combined: Vec<f64> = phase.iter().zip(&peq_phase).map(|(a, b)| a + b).collect();
     let peak_boost_db = mag.iter().zip(&peq_mag).map(|(a, b)| a + b).fold(f64::NEG_INFINITY, f64::max);
 
-    let (mut fir, route) = match route_for(hp, lp, target_curve.tilt_db_per_octave, &config) {
+    let (mut fir, route) = match force_route.unwrap_or_else(|| route_for_target(target_curve, &config)) {
         Route::Iir => (generate_min_phase_fir_iir(&IirPathInput {
             freq: &freq, hp, lp,
             low_shelf: target_curve.low_shelf.as_ref(),
@@ -258,8 +361,13 @@ pub fn generate_band_fir(
         fir.realized_mag[i] + fir.norm_db - req
     }).collect();
     let dev_phase: Vec<f64> = (0..freq.len()).map(|i| wrap(fir.realized_phase[i] - combined[i])).collect();
+    // The contract of norm_db stays «realized_mag + norm_db = the requested
+    // response», level included (the Export tab compares it with the target
+    // it evaluates with the level). The IIR route never saw the level, so its
+    // Export comparison and dev_mag were off by it before.
+    fir.norm_db += level_db;
     if omit_impulse { fir.impulse = Vec::new(); }
-    Ok(BandFirResult { fir, route, peak_boost_db, freq, dev_mag, dev_phase })
+    Ok(BandFirResult { fir, route, peak_boost_db, freq, dev_mag, dev_phase, warnings })
 }
 
 /// Test / harness entry: [`generate_band_fir`] driven by a `FirConfig` (its
@@ -348,6 +456,167 @@ mod tests {
         assert_eq!(r.route, BandFirRoute::Cepstral);
         for (f, m) in r.freq.iter().zip(&r.fir.realized_mag) {
             if *f >= 20.0 && *f <= 20_000.0 { assert!(m.abs() < 0.1, "{m:.3} dB at {f:.0} Hz"); }
+        }
+    }
+
+    /// b141.101 (audit 2026-10-23 2.2): a noise floor above the boost limit
+    /// panicked in f64::clamp on the cepstral min-phase route with a digital
+    /// section (here: LR4 + tilt), hanging the IPC promise.
+    #[test]
+    fn noise_floor_above_boost_does_not_panic() {
+        let lr4 = FilterConfig { filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: 2000.0,
+            shape: None, linear_phase: false, q: None, subsonic_protect: None };
+        let mut c = curve(Some(lr4), None);
+        c.tilt_db_per_octave = -0.5;
+        let mut s = settings(48_000.0);
+        s.max_boost_db = 6.0;
+        s.noise_floor_db = 10.0;
+        let r = generate_band_fir(&c, &[], &s, false).unwrap();
+        assert_eq!(r.route, BandFirRoute::Cepstral);
+        assert!(r.fir.impulse.iter().all(|v| v.is_finite()));
+    }
+
+    /// b141.101 (audit 2026-10-23 1.1/2.1/1.4): 48 kHz export, PEQ 24.5 kHz
+    /// and a high shelf at 26 kHz on an LR4 band that otherwise takes the
+    /// IIR route — the poles of both RBJ sections sat outside the unit
+    /// circle (8488 NaN samples). Now: finite impulse, warnings, no error;
+    /// an LP above Nyquist no longer fails the export.
+    #[test]
+    fn sections_above_nyquist_give_a_finite_fir_with_warnings() {
+        let lr4 = |fc: f64| FilterConfig { filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: fc,
+            shape: None, linear_phase: false, q: None, subsonic_protect: None };
+        let s = settings(48_000.0);
+        let pk = |f: f64| PeqBand { freq_hz: f, gain_db: 6.0, q: 2.0, enabled: true,
+            filter_type: crate::peq::PeqFilterType::Peaking };
+        let finite = |r: &BandFirResult| r.fir.impulse.iter().chain(&r.fir.realized_mag)
+            .chain(&r.fir.realized_phase).all(|v| v.is_finite());
+
+        // PEQ 24.5 kHz alone: still the IIR route, the PEQ is dropped.
+        let c = curve(Some(lr4(2000.0)), None);
+        let r = generate_band_fir(&c, &[pk(24_500.0), pk(5000.0)], &s, false).unwrap();
+        assert_eq!(r.route, BandFirRoute::Iir);
+        assert!(finite(&r) && r.fir.norm_db > -100.0, "norm_db {}", r.fir.norm_db);
+        assert_eq!(r.warnings.len(), 1, "{:?}", r.warnings);
+        assert!(r.warnings[0].contains("24500"));
+        // The 5 kHz PEQ is still realised (+6 dB at its centre, relative).
+        let at = |f: f64| { let i = r.freq.iter().position(|&x| x >= f).unwrap(); r.fir.realized_mag[i] };
+        assert!((at(5000.0) - at(15_000.0) - 6.0).abs() < 0.5, "{} {}", at(5000.0), at(15_000.0));
+
+        // High shelf 26 kHz: cepstral route (the analog shelf below Nyquist).
+        let mut c = curve(Some(lr4(2000.0)), None);
+        c.high_shelf = Some(crate::target::ShelfConfig { freq_hz: 26_000.0, gain_db: 6.0, q: 0.707 });
+        let r = generate_band_fir(&c, &[pk(24_500.0)], &s, false).unwrap();
+        assert_eq!(r.route, BandFirRoute::Cepstral);
+        assert!(finite(&r));
+        assert_eq!(r.warnings.len(), 2, "{:?}", r.warnings);
+
+        // LP above Nyquist: no «fc out of range».
+        let c = curve(Some(lr4(2000.0)), Some(lr4(30_000.0)));
+        let r = generate_band_fir(&c, &[], &s, false).unwrap();
+        assert_eq!(r.route, BandFirRoute::Cepstral);
+        assert!(finite(&r) && r.warnings.len() == 1 && r.warnings[0].contains("ФНЧ"));
+
+        // The IIR generator itself skips such sections instead of NaN.
+        let cfg = band_fir_config(&curve(Some(lr4(2000.0)), None), &s);
+        let freq = fir_grid(48_000.0);
+        let hs = crate::target::ShelfConfig { freq_hz: 26_000.0, gain_db: 6.0, q: 0.707 };
+        let r = generate_min_phase_fir_iir(&IirPathInput { freq: &freq, hp: Some(&lr4(2000.0)),
+            lp: Some(&lr4(30_000.0)), low_shelf: None, high_shelf: Some(&hs), peq: &[pk(24_500.0)],
+            config: &cfg }).unwrap();
+        assert!(r.impulse.iter().all(|v| v.is_finite()));
+    }
+
+    /// b141.101 (audit 2026-10-23 1.2): the cepstral min-phase route must
+    /// realise an LR4 HP with the phase of the IIR route. The −150 dB noise
+    /// tail from 0.95·Nyquist was a step whose Hilbert transform lagged the
+    /// phase: −7° @ 2 kHz, −42° @ 10 kHz, −89.5° @ 15 kHz at 44.1 kHz.
+    #[test]
+    fn cepstral_min_phase_matches_iir_up_to_nyquist() {
+        let lr4 = FilterConfig { filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: 2000.0,
+            shape: None, linear_phase: false, q: None, subsonic_protect: None };
+        let c = curve(Some(lr4), None);
+        let mut s = settings(44_100.0);
+        s.taps = 65_536;
+        let cep = generate_band_fir_routed(&c, &[], &s, true, Some(Route::Cepstral)).unwrap();
+        let iir = generate_band_fir_routed(&c, &[], &s, true, Some(Route::Iir)).unwrap();
+        let wrap = |d: f64| ((d + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
+        let mut worst: f64 = 0.0;
+        for f in [1000.0, 2000.0, 5000.0, 10_000.0, 15_000.0, 19_000.0] {
+            let i = cep.freq.iter().position(|&x| x >= f).unwrap();
+            let d = wrap(cep.fir.realized_phase[i] - iir.fir.realized_phase[i]);
+            eprintln!("{f:>6} Hz: cepstral − IIR = {d:+.2}°");
+            worst = worst.max(d.abs());
+        }
+        assert!(worst < 1.0, "worst phase gap {worst:.2}°");
+    }
+
+    /// b141.101 (audit 2026-10-23 1.3): the plot's tilt phase is the FIR's.
+    /// −1 dB/oct on an LR4 band, cepstral route: what the tilt adds to the
+    /// FIR's deviation from the request phase (analytic + Hilbert terms, the
+    /// phase the plot draws) — dev(tilt) − dev(no tilt), which cancels the
+    /// LR sections' bilinear deviation. It was the whole tilt phase on a
+    /// min-phase main (−14.5° at 1 kHz); a linear main keeps a zero-phase
+    /// tilt on both sides.
+    #[test]
+    fn tilt_phase_of_the_plot_is_the_fir_phase() {
+        let lr4 = |fc: f64, lin: bool| FilterConfig { filter_type: FilterType::LinkwitzRiley, order: 4,
+            freq_hz: fc, shape: None, linear_phase: lin, q: None, subsonic_protect: None };
+        let mut s = settings(48_000.0);
+        s.taps = 65_536;
+        for lin in [false, true] {
+            let mut c = curve(Some(lr4(200.0, lin)), Some(lr4(5000.0, lin)));
+            let r0 = generate_band_fir_routed(&c, &[], &s, true, Some(Route::Cepstral)).unwrap();
+            c.tilt_db_per_octave = -1.0;
+            let r = generate_band_fir(&c, &[], &s, true).unwrap();
+            assert_eq!(r.route, BandFirRoute::Cepstral);
+            let terms = target_hilbert_phase(&r.freq, c.high_pass.as_ref(), c.low_pass.as_ref(),
+                Some((-1.0, 1000.0)), 48_000.0).unwrap();
+            for f in [100.0, 300.0, 1000.0, 3000.0, 8000.0] {
+                let i = r.freq.iter().position(|&x| x >= f).unwrap();
+                let d = r.dev_phase[i] - r0.dev_phase[i];
+                eprintln!("lin={lin} {f:>6} Hz: tilt term {:+.2}°, its FIR deviation {d:+.2}°", terms[i]);
+                if lin { assert!(terms[i].abs() < 1e-9); } else { assert!(terms[i] < -10.0, "{}", terms[i]); }
+                assert!(d.abs() < 1.0, "tilt deviation {d:.2}° at {f} Hz");
+            }
+        }
+    }
+
+    /// b141.101 (audit 2026-10-23 1.8): the target's level does not change
+    /// the FIR. 48k/64K, LR4 80/3k, PEQ +6 dB @ 200 Hz Q1: on the cepstral
+    /// route (linear-phase) the realised boost was 5.73/5.73/3.73 dB at
+    /// level 0/+10/+20 (24 dB limit) and 2.73 dB at +3 with a 6 dB limit; on
+    /// the IIR route +20 read as a «26 dB» boost.
+    #[test]
+    fn target_level_does_not_shape_the_fir() {
+        let lr4 = |fc: f64, lin: bool| FilterConfig { filter_type: FilterType::LinkwitzRiley, order: 4,
+            freq_hz: fc, shape: None, linear_phase: lin, q: None, subsonic_protect: None };
+        let peq = [PeqBand { freq_hz: 200.0, gain_db: 6.0, q: 1.0, enabled: true,
+            filter_type: crate::peq::PeqFilterType::Peaking }];
+        let mut s = settings(48_000.0);
+        s.taps = 65_536;
+        for (lin, limit) in [(true, 24.0), (true, 6.0), (false, 24.0)] {
+            s.max_boost_db = limit;
+            let run = |level: f64| {
+                let mut c = curve(Some(lr4(80.0, lin)), Some(lr4(3000.0, lin)));
+                c.reference_level_db = level;
+                generate_band_fir(&c, &peq, &s, true).unwrap()
+            };
+            let r0 = run(0.0);
+            let at = |r: &BandFirResult, f: f64| { let i = r.freq.iter().position(|&x| x >= f).unwrap(); r.fir.realized_mag[i] };
+            let boost0 = at(&r0, 200.0) - at(&r0, 1000.0);
+            eprintln!("lin={lin} limit={limit}: boost {boost0:.2} dB, peak_boost {:.2}", r0.peak_boost_db);
+            assert!(boost0 > 5.0, "boost {boost0:.2} dB");
+            for level in [3.0, 10.0, 20.0, -20.0] {
+                let r = run(level);
+                let worst = r.fir.realized_mag.iter().zip(&r0.fir.realized_mag)
+                    .zip(&r.freq).filter(|(_, &f)| (20.0..=20_000.0).contains(&f))
+                    .map(|((a, b), _)| (a - b).abs()).fold(0.0_f64, f64::max);
+                assert!(worst < 1e-6, "level {level}: realised response moved by {worst:.4} dB");
+                assert!((r.peak_boost_db - r0.peak_boost_db).abs() < 1e-9, "peak_boost {}", r.peak_boost_db);
+                assert!((r.fir.norm_db - r0.fir.norm_db - level).abs() < 1e-6, "norm_db carries the level");
+                let dev = r.dev_mag.iter().zip(&r0.dev_mag).map(|(a, b)| (a - b).abs()).fold(0.0_f64, f64::max);
+                assert!(dev < 1e-6, "dev_mag moved by {dev}");
+            }
         }
     }
 

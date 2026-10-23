@@ -275,7 +275,7 @@ async function evaluateSumImpl(
             target, freq,
           });
           const phase = await reconstructTargetPhase(
-            freq, response.phase, band.target.high_pass, band.target.low_pass, sumSr,
+            freq, response.phase, band.target, sumSr,
           );
           return { response, phase };
         },
@@ -469,7 +469,7 @@ async function evaluateSumImpl(
           target, freq: irFreq,
         });
         const tPhase = await reconstructTargetPhase(
-          irFreq, resp.phase, band.target.high_pass, band.target.low_pass, sumSr,
+          irFreq, resp.phase, band.target, sumSr,
         );
         tgtMagOnIr = resp.magnitude;
         out.tgt = { magnitude: resp.magnitude, phase: tPhase, delay, sign };

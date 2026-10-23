@@ -295,7 +295,36 @@ pub(crate) fn validate_project(project: &ProjectFile) -> Result<(), String> {
     if !(8_000..=768_000).contains(&sr) {
         return Err(format!("export_sample_rate={sr} is out of range (8000..768000)"));
     }
+    // b141.101 (audit 2026-10-23 2.2): a noise floor above the boost limit
+    // is not a pair the FIR can honour (it used to panic in f64::clamp).
+    for (name, v) in [("fir_max_boost_db", project.fir_max_boost_db), ("fir_noise_floor_db", project.fir_noise_floor_db)] {
+        if let Some(v) = v {
+            if !v.is_finite() { return Err(format!("{name}={v} is not a finite number")); }
+        }
+    }
+    if let (Some(boost), Some(floor)) = (project.fir_max_boost_db, project.fir_noise_floor_db) {
+        if floor > boost {
+            return Err(format!("fir_noise_floor_db={floor} is above fir_max_boost_db={boost}"));
+        }
+    }
     for band in &project.bands {
+        // b141.101 (audit 2026-10-23 2.17): PEQ bands are hand-editable in
+        // the .pfproj — gain_db 1e300 on a min-phase band gave 32768 NaN
+        // samples without an error. The bounds are generous (far outside
+        // what the UI produces); they reject garbage, not unusual settings.
+        for (i, p) in band.peq_bands.iter().enumerate() {
+            let ok = p.freq_hz.is_finite() && p.gain_db.is_finite() && p.q.is_finite()
+                && (1.0..=200_000.0).contains(&p.freq_hz)
+                && p.gain_db.abs() <= 100.0
+                && (0.01..=100.0).contains(&p.q);
+            if !ok {
+                return Err(format!(
+                    "band '{}': PEQ #{} is out of range (freq {} Hz, gain {} dB, Q {}; \
+                     expected 1..200000 Hz, |gain| <= 100 dB, Q 0.01..100)",
+                    band.name, i + 1, p.freq_hz, p.gain_db, p.q
+                ));
+            }
+        }
         // b141.46 (audit 2026-10-01 L2): order 0 silently fell through to
         // Bessel-8 (and to "no filter" for the others). The UI offers 1..=8.
         for f in [&band.target.high_pass, &band.target.low_pass].into_iter().flatten() {
@@ -741,6 +770,32 @@ mod tests {
         assert!(err.contains("order"), "{err}");
         let ok: ProjectFile = serde_json::from_str(&src.replace("\"order\":0", "\"order\":4")).unwrap();
         assert!(validate_project(&ok).is_ok());
+    }
+
+    /// b141.101 (audit 2026-10-23 2.2, 2.17): garbage PEQ and an inverted
+    /// floor/boost pair are rejected instead of reaching the DSP.
+    #[test]
+    fn validate_project_rejects_bad_peq_and_floor_above_boost() {
+        let band = |peq: &str| format!(r#"{{"id":"b1","name":"W","measurement":null,"settings":null,
+            "target":{{"reference_level_db":80.0,"tilt_db_per_octave":0.0,"tilt_ref_freq":1000.0,
+            "high_pass":null,"low_pass":null,"low_shelf":null,"high_shelf":null}},
+            "target_enabled":true,"peq_bands":[{peq}]}}"#);
+        let proj = |band: String, extra: &str| format!(r#"{{"version": 2, "app_name": "PhaseForge",
+            "bands": [{band}], "active_band_id": "b1", "show_phase": true, "show_mag": true,
+            "show_target": true, "next_band_num": 2, "export_taps": 65536{extra}}}"#);
+        let ok = r#"{"freq_hz":100.0,"gain_db":-3.0,"q":2.0}"#;
+        let p: ProjectFile = serde_json::from_str(&proj(band(ok), "")).unwrap();
+        assert!(validate_project(&p).is_ok());
+        for bad in [r#"{"freq_hz":100.0,"gain_db":1e300,"q":2.0}"#,
+                    r#"{"freq_hz":0.0,"gain_db":3.0,"q":2.0}"#,
+                    r#"{"freq_hz":100.0,"gain_db":3.0,"q":0.0}"#] {
+            let p: ProjectFile = serde_json::from_str(&proj(band(bad), "")).unwrap();
+            let err = validate_project(&p).unwrap_err();
+            assert!(err.contains("PEQ #1"), "{err}");
+        }
+        let extra = r#", "fir_max_boost_db": 6.0, "fir_noise_floor_db": 10.0"#;
+        let p: ProjectFile = serde_json::from_str(&proj(band(ok), extra)).unwrap();
+        assert!(validate_project(&p).unwrap_err().contains("fir_noise_floor_db"));
     }
 
     #[test]

@@ -245,7 +245,10 @@ impl<'a> LmaSolver<'a> {
             let q_max = q_max.min(crate::peq::q_envelope::q_cap_for_gain(params[i * 3 + 1]));
             params[i * 3 + 2] = params[i * 3 + 2].clamp(Q_MIN, q_max);
             // b141.94: no filter that rings past half the export file.
-            params[i * 3 + 2] = self.config.cap_q_for_ring(freq, params[i * 3 + 1], params[i * 3 + 2], &PeqFilterType::Peaking);
+            // b141.101: Q stays ≥ Q_MIN; when no Q fits, the gain gives way.
+            let (g, q) = self.config.fit_ring(freq, params[i * 3 + 1], params[i * 3 + 2], &PeqFilterType::Peaking);
+            params[i * 3 + 1] = g;
+            params[i * 3 + 2] = q;
         }
     }
 
@@ -322,6 +325,17 @@ impl<'a> LmaSolver<'a> {
         let params = Self::bands_to_params(bands);
         let correction = apply_peq(self.freq, bands, self.config.sample_rate);
         self.residuals_from_correction(&params, &correction).iter().map(|r| r * r).sum()
+    }
+
+    /// b141.101: outside `boost_range` the shelf lifts the response no more
+    /// than the peaking band it would replace (0.1 dB slack), on the whole
+    /// grid — not only at its centre. True when no boost range is set.
+    pub(crate) fn shelf_within_boost_range(&self, peaking: &PeqBand, shelf: &PeqBand) -> bool {
+        let Some((lo, hi)) = self.config.boost_range else { return true };
+        let sr = self.config.sample_rate;
+        self.freq.iter().filter(|&&f| f < lo || f > hi).all(|&f| {
+            peq_band_mag_db(f, shelf, sr) <= peq_band_mag_db(f, peaking, sr).max(0.0) + 0.1
+        })
     }
 
     /// Compute Jacobian via numerical finite differences (parallelized with rayon).
@@ -579,6 +593,14 @@ pub(crate) fn try_promote_to_shelves(bands: &mut [PeqBand], solver: &LmaSolver) 
         trial[idx].filter_type = shelf.clone();
         // Shelf with lower Q for broader effect
         trial[idx].q = (trial[idx].q * 0.7).max(Q_MIN);
+        // b141.101 (audit 2026-10-23 1.10): «Подъём до» holds for shelves
+        // too. A boosting shelf keeps its gain to DC / Nyquist; checking only
+        // its centre let a LowShelf 196 Hz +7.1 dB lift 100 Hz by 6.2 dB
+        // where the target is −76 dB. Outside the boost range the shelf may
+        // not lift more than the peaking band it replaces.
+        if trial[idx].gain_db > 0.0 && !solver.shelf_within_boost_range(&bands[idx], &trial[idx]) {
+            continue;
+        }
         if solver.cost_of_bands(&trial) < baseline {
             info!("try_promote_to_shelves: band[{}] at {:.0} Hz -> {:?}", idx, bands[idx].freq_hz, shelf);
             bands[idx].filter_type = shelf;

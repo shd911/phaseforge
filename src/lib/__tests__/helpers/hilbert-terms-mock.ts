@@ -7,7 +7,10 @@ import { gaussianFilterMagDb, isGaussianMinPhase, subsonicMagDb } from "../../pl
 import { buildLogGrid, interpOnGrid } from "../../band-evaluator/grid";
 
 export function hilbertTermsMock(
-  args: { freq: number[]; highPass: FilterConfig | null; lowPass: FilterConfig | null; sampleRate: number },
+  args: {
+    freq: number[]; highPass: FilterConfig | null; lowPass: FilterConfig | null; sampleRate: number;
+    tiltDbPerOctave?: number; tiltRefFreq?: number;
+  },
   minPhase: (freq: number[], magnitude: number[]) => number[],
 ): number[] {
   const { freq, highPass: hp, lowPass: lp, sampleRate } = args;
@@ -26,5 +29,12 @@ export function hilbertTermsMock(
     add(subsonicMagDb(g, hp!.freq_hz / 8));
   }
   if (isGaussianMinPhase(lp)) add(gaussianFilterMagDb(g, lp!, true));
+  // b141.101: the tilt on a min-phase main (fir::band::target_hilbert_phase).
+  const tilt = args.tiltDbPerOctave ?? 0;
+  const present = [hp, lp].filter((f): f is FilterConfig => !!f);
+  if (tilt !== 0 && present.length > 0 && present.every((f) => f.linear_phase !== true)) {
+    const ref = args.tiltRefFreq ?? 1000;
+    add(g.map((f) => tilt * Math.log2(f / ref)));
+  }
   return freq.map((_, i) => terms.reduce((a, t) => a + t[i], 0));
 }

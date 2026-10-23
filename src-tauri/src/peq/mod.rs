@@ -4,9 +4,10 @@
 // simultaneous optimization of all band parameters [freq, gain, Q].
 //
 // Pipeline:
-//   1. Compute target:
-//      - Standard: 3-zone composite (service curve outside filters, flat in-band)
-//      - Hybrid:   flat at avg measurement level for ALL frequencies
+//   1. Compute target (flat line for ALL frequencies; the crossover, tilt and
+//      shelves are applied by the FIR afterwards):
+//      - Standard: flat at the max of the Target Curve between HP and LP
+//      - Hybrid:   flat at the average measurement level between HP and LP
 //   2. Compute weights:
 //      - Standard: ERB-inspired frequency weights with null suppression
 //      - Hybrid:   uniform weights (1.0) with null suppression only
@@ -38,14 +39,15 @@ use crate::error::AppError;
 
 /// Unified PEQ optimizer using Levenberg-Marquardt Algorithm.
 ///
-/// Handles in-band and above-LP correction in a single pass.
-/// When `target_mag` is Some, builds a 3-zone composite target:
-///   - Below HP: 1/1-octave smoothed measurement (service curve)
-///   - HP..LP:   FLAT at max SPL of Target Curve (straight line, no tilt)
-///   - Above LP: smoothed measurement with peaks clamped to that flat level
-/// Cosine blends at HP and LP boundaries (1 octave each).
-/// The tilt/shelves from Target Curve are handled later by FIR.
-/// If `target_mag` is None, uses compute_unified_target() fallback.
+/// Handles in-band and above-LP correction in a single pass, against a flat
+/// target for all frequencies (b141.101: the old «3-zone composite» with a
+/// service curve below HP / above LP is long gone):
+///   - Standard (`target_mag` Some): flat at the max of the Target Curve in
+///     HP..LP;
+///   - Hybrid, or no `target_mag`: flat at the average measurement in HP..LP.
+/// The crossover, tilt and shelves of the Target Curve are applied by the FIR.
+/// Boosts are limited by `max_boost_at` («Подъём до», b141.92), Q by the
+/// envelope and the ring limit (b141.94/95/101).
 pub fn auto_peq_lma(
     meas_mag: &[f64],
     target_mag: Option<&[f64]>,
@@ -70,6 +72,18 @@ pub fn auto_peq_lma(
         .all(|v| v.is_finite());
     if !finite {
         return Err(AppError::Dsp { message: "auto_peq_lma: input contains NaN/Inf".into() });
+    }
+    // b141.101: the gain bounds feed f64::clamp (lma.rs) — an inverted pair
+    // panics there and hangs the IPC promise.
+    if !(config.max_boost_db >= 0.0 && config.max_cut_db >= 0.0
+        && config.max_boost_db.is_finite() && config.max_cut_db.is_finite())
+    {
+        return Err(AppError::Config {
+            message: format!(
+                "auto_peq_lma: invalid gain limits: boost {}, cut {}",
+                config.max_boost_db, config.max_cut_db
+            ),
+        });
     }
     if config.freq_range.0 >= config.freq_range.1 {
         return Err(AppError::Config {
@@ -299,7 +313,23 @@ pub fn auto_peq_lma(
         &mut bands, &solver, lp_freq, merge_dist,
     );
 
-    // Compute final max error
+    // b141.94: final guard — every returned filter rings within the limit
+    // (shelf conversions and band additions included). b141.101 (audit
+    // 2026-10-23 1.7): a guarantee — Q ≥ Q_MIN, the gain gives way when no Q
+    // fits (polish_bands lifts Q back to Q_MIN after the solver's cap).
+    for b in &mut bands {
+        if b.filter_type == PeqFilterType::Peaking {
+            b.q = b.q.min(q_envelope::q_cap_for_gain(b.gain_db));
+        }
+        let (g, q) = config.fit_ring(b.freq_hz, b.gain_db, b.q, &b.filter_type);
+        b.gain_db = g;
+        b.q = q;
+    }
+    bands.retain(|b| b.gain_db.abs() >= LMA_MIN_GAIN_DB);
+
+    // Compute final max error — b141.101 (audit 2026-10-23 1.9): on the
+    // filters actually returned, after the guard (the toast read 16.17 dB
+    // where the returned set gave 8.23).
     let correction = apply_peq(freq, &bands, config.sample_rate);
     let max_err = compute_max_error_in_range(freq, meas_mag, target, &correction, config.freq_range);
 
@@ -312,15 +342,6 @@ pub fn auto_peq_lma(
             "  band[{}]: freq={:.0} Hz, gain={:.1} dB, Q={:.2}",
             i, b.freq_hz, b.gain_db, b.q
         );
-    }
-
-    // b141.94: final guard — every returned filter rings within the limit
-    // (shelf conversions and band additions included).
-    for b in &mut bands {
-        if b.filter_type == PeqFilterType::Peaking {
-            b.q = b.q.min(q_envelope::q_cap_for_gain(b.gain_db));
-        }
-        b.q = config.cap_q_for_ring(b.freq_hz, b.gain_db, b.q, &b.filter_type);
     }
 
     Ok(PeqResult {
@@ -440,70 +461,6 @@ pub fn compute_median_in_range(freq: &[f64], mag: &[f64], f_low: f64, f_high: f6
     } else {
         values[mid]
     })
-}
-
-// ---------------------------------------------------------------------------
-// Public API: Above-LP Peak Reduction (Algorithm 2)
-// ---------------------------------------------------------------------------
-
-/// Auto-PEQ above LP frequency: cut peaks above LP down to median in-band level.
-/// Backward-compatible wrapper: delegates to unified LMA optimizer with cuts-only config.
-pub fn auto_peq_above_lp(
-    meas_mag: &[f64],
-    freq: &[f64],
-    config: &PeqConfig,
-    lp_freq: f64,
-    hp_freq: f64,
-) -> Result<PeqResult, AppError> {
-    info!("auto_peq_above_lp: delegating to auto_peq_lma");
-
-    let n = freq.len();
-    if n == 0 || meas_mag.len() != n {
-        return Err(AppError::Dsp {
-            message: format!(
-                "auto_peq_above_lp: length mismatch: freq={}, meas={}",
-                n, meas_mag.len()
-            ),
-        });
-    }
-
-    // Compute flat target at median level above LP
-    let ref_level = compute_median_in_range(freq, meas_mag, hp_freq, lp_freq).ok_or_else(
-        || AppError::Dsp {
-            message: "auto_peq_above_lp: no data in HP-LP range for median".into(),
-        },
-    )?;
-
-    let f_max = freq.last().copied().unwrap_or(crate::dsp::F_MAX_WORK).min(crate::dsp::F_MAX_WORK);
-
-    // Target: flat at ref_level above LP, smoothed measurement below
-    let smooth_cfg = SmoothingConfig {
-        variable: false,
-        fixed_fraction: Some(1.0 / 6.0),
-    };
-    let smoothed = variable_smoothing(freq, meas_mag, &smooth_cfg);
-    let target: Vec<f64> = (0..n)
-        .map(|i| if freq[i] > lp_freq { ref_level } else { smoothed[i] })
-        .collect();
-
-    // Configure for above-LP: cuts only (max_boost_db = 0), range from HP up
-    let above_config = PeqConfig {
-        boost_range: None,
-        max_ring_ms: None,
-        max_bands: config.max_bands,
-        tolerance_db: config.tolerance_db,
-        peak_bias: config.peak_bias,
-        max_boost_db: 0.0, // Cuts only
-        max_cut_db: config.max_cut_db,
-        freq_range: (lp_freq * 0.85, f_max), // start slightly below LP for wide filter overlap
-        smoothing_fraction: Some(1.0 / 3.0), // 1/3 octave smoothing for above-LP
-        min_band_distance_oct: config.min_band_distance_oct,
-        hybrid: false,
-        gain_regularization: config.gain_regularization,
-        sample_rate: config.sample_rate,
-    };
-
-    auto_peq_lma(meas_mag, Some(&target), freq, &above_config, hp_freq, lp_freq, &[])
 }
 
 // ---------------------------------------------------------------------------
@@ -1078,80 +1035,6 @@ mod tests {
         let mag = vec![1.0, 2.0, 3.0];
         let result = compute_median_in_range(&freq, &mag, 500.0, 1000.0);
         assert_eq!(result, None);
-    }
-
-    #[test]
-    fn test_auto_peq_above_lp_cuts_only() {
-        let freq = make_log_freq(500, 20.0, 20000.0);
-        let mut meas = vec![80.0; 500];
-
-        // Add peaks above 3000 Hz
-        for (i, &f) in freq.iter().enumerate() {
-            if f > 3000.0 {
-                let p = 8.0 * (-(((f / 5000.0).log2()) * 3.0).powi(2)).exp();
-                meas[i] = 80.0 + p;
-            }
-        }
-
-        let config = PeqConfig {
-            boost_range: None,
-            max_ring_ms: None,
-            max_bands: 20,
-            tolerance_db: 1.0,
-            peak_bias: 1.5,
-            max_boost_db: 6.0,
-            max_cut_db: 18.0,
-            freq_range: (80.0, 15000.0), // will be overridden
-            smoothing_fraction: None,
-            min_band_distance_oct: None,
-            hybrid: false,
-            gain_regularization: 0.0,
-            sample_rate: 48000.0,
-        };
-        let result = auto_peq_above_lp(&meas, &freq, &config, 3000.0, 80.0).unwrap();
-
-        // All bands should have negative gain (cuts only)
-        for b in &result.bands {
-            assert!(
-                b.gain_db <= 0.0,
-                "Above-LP bands should be cuts only, got {} dB at {} Hz",
-                b.gain_db, b.freq_hz
-            );
-        }
-        // Should have at least 1 band for the peak
-        assert!(
-            !result.bands.is_empty(),
-            "Should produce at least 1 band for peak above LP"
-        );
-    }
-
-    #[test]
-    fn test_auto_peq_above_lp_flat_no_bands() {
-        let freq = make_log_freq(500, 20.0, 20000.0);
-        let meas = vec![80.0; 500]; // flat
-
-        let config = PeqConfig {
-            boost_range: None,
-            max_ring_ms: None,
-            max_bands: 20,
-            tolerance_db: 1.0,
-            peak_bias: 1.5,
-            max_boost_db: 6.0,
-            max_cut_db: 18.0,
-            freq_range: (80.0, 15000.0),
-            smoothing_fraction: None,
-            min_band_distance_oct: None,
-            hybrid: false,
-            gain_regularization: 0.0,
-            sample_rate: 48000.0,
-        };
-        let result = auto_peq_above_lp(&meas, &freq, &config, 3000.0, 80.0).unwrap();
-
-        assert!(
-            result.bands.is_empty(),
-            "Flat measurement should produce 0 bands above LP, got {}",
-            result.bands.len()
-        );
     }
 
     // ------- LMA-specific tests -------

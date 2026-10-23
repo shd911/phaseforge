@@ -120,8 +120,11 @@ pub fn generate_model_fir_with_sections(
                 freq, &resid_log, None, n_bins, config.sample_rate,
             );
             extend_below_grid(&lin_freq, &mut resid_lin, freq, &resid_log);
+            // b141.101 (audit 2026-10-23 2.2): max/min, not f64::clamp — a
+            // noise floor above the boost limit made clamp panic and the IPC
+            // promise hang. The ceiling wins, as in the branch below.
             resid_lin.iter().zip(&s.db)
-                .map(|(&r, &d)| (d + r.clamp(config.noise_floor_db, config.max_boost_db.max(0.0)))
+                .map(|(&r, &d)| (d + r.max(config.noise_floor_db).min(config.max_boost_db.max(0.0)))
                     .max(-600.0).min(config.max_boost_db))
                 .collect()
         }
