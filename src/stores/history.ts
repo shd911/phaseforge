@@ -25,6 +25,10 @@ export interface LightBand {
   color: string;
   exclusionZones: ExclusionZone[];
   peqOptimizedTarget: PeqOptimizedTarget | null;
+  /** b141.103 (audit 3.9): measurement smoothing is band content — the
+   *  «Сглаживание» recommendation pushed an entry that restored nothing.
+   *  null = the band had no measurement settings. */
+  smoothing?: string | null;
 }
 
 export interface HistoryEntry {
@@ -50,6 +54,13 @@ let _captureFn: ((label: string) => HistoryEntry) | null = null;
 let _applyFn: ((entry: HistoryEntry) => void) | null = null;
 
 const [version, setVersion] = createSignal(0);
+/** b141.103 (audit 3.10): bumped whenever the state jumps outside the normal
+ *  edit flow (undo, redo, history cleared by open/new). An async operation
+ *  that pushed its entry before an await compares it after: a result landing
+ *  after an undo used to sit on top of the restored state with no entry of
+ *  its own, and the next undo rolled back two steps. */
+let _epoch = 0;
+export function historyEpoch(): number { return _epoch; }
 
 export function registerHistoryHooks(
   capture: (label: string) => HistoryEntry,
@@ -76,6 +87,26 @@ export function pushHistory(label: string): void {
   if (undoStack.length > MAX_HISTORY) undoStack.shift();
   redoStack.length = 0;
   bump();
+}
+
+/** One undo step for a compound action: the pre-state is pushed once and
+ *  the pushHistory calls of the setters inside are absorbed. Inside a
+ *  begin/commitInteraction buffer it just runs `fn` (the buffer is the step). */
+export function historyGroup(label: string, fn: () => void): void {
+  if (_activeBuffer) { fn(); return; }
+  pushHistory(label);
+  const prev = _suppressed;
+  _suppressed = true;
+  try { fn(); } finally { _suppressed = prev; }
+}
+
+/** Band ids referenced by any undo/redo entry (or the open drag buffer). */
+export function historyBandIds(): Set<string> {
+  const ids = new Set<string>();
+  for (const e of [...undoStack, ...redoStack, ...(_activeBuffer ? [_activeBuffer] : [])]) {
+    for (const b of e.bands) ids.add(b.id);
+  }
+  return ids;
 }
 
 /** Capture pre-state into a buffer. Subsequent calls are no-ops until
@@ -106,6 +137,7 @@ export function undo(): void {
   redoStack.push(current);
   if (redoStack.length > MAX_HISTORY) redoStack.shift();
   const prev = undoStack.pop()!;
+  _epoch++;
   _suppressed = true;
   try { _applyFn(prev); } finally { _suppressed = false; }
   _coalesceLabel = ""; _coalesceTs = 0;
@@ -119,6 +151,7 @@ export function redo(): void {
   undoStack.push(current);
   if (undoStack.length > MAX_HISTORY) undoStack.shift();
   const next = redoStack.pop()!;
+  _epoch++;
   _suppressed = true;
   try { _applyFn(next); } finally { _suppressed = false; }
   _coalesceLabel = ""; _coalesceTs = 0;
@@ -126,6 +159,7 @@ export function redo(): void {
 }
 
 export function clearHistory(): void {
+  _epoch++;
   undoStack.length = 0;
   redoStack.length = 0;
   _activeBuffer = null;

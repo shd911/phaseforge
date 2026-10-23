@@ -7,6 +7,7 @@ import {
   beginInteraction,
   commitInteraction,
   registerHistoryHooks,
+  historyBandIds,
   type HistoryEntry,
   type LightBand,
 } from "./history";
@@ -241,6 +242,10 @@ export function resetAppState(newState: AppState) {
   }
   setState(reconcile(newState));
   clearAllFreqSnapshots();
+  // b141.103 (audit 3.11): IR/GD/Export snapshots belong to the old project's
+  // bands too. (3.20) So do parked heavy parts — history is cleared after.
+  clearAllPlotSnapshots();
+  parkedHeavy.clear();
 }
 
 export function activeBand(): BandState | null {
@@ -278,19 +283,33 @@ export function addBand() {
 const parkedHeavy = new Map<string, Pick<BandState,
   "measurement" | "measurementFile" | "settings" | "firResult" | "crossNormDb">>();
 
+function parkHeavy(b: BandState) {
+  parkedHeavy.set(b.id, {
+    measurement: b.measurement, measurementFile: b.measurementFile,
+    settings: b.settings ? JSON.parse(JSON.stringify(b.settings)) : null,
+    firResult: b.firResult, crossNormDb: b.crossNormDb,
+  });
+}
+
+/** b141.103 (audit 3.20): drop parked parts no history entry can bring back
+ *  (the map only grew — every removed band's measurement stayed in memory). */
+function pruneParked() {
+  if (parkedHeavy.size === 0) return;
+  const live = historyBandIds();
+  for (const id of [...parkedHeavy.keys()]) {
+    if (!live.has(id) && bandIndex(id) < 0) parkedHeavy.delete(id);
+  }
+}
+
+/** Test hook: how many removed bands are parked. */
+export function _parkedCount(): number { return parkedHeavy.size; }
+
 export function removeBand(id: string) {
   if (state.bands.length <= 1) return; // нельзя удалить последнюю полосу
   const idx = bandIndex(id);
   if (idx < 0) return;
   pushHistory("Remove band");
-  {
-    const b = state.bands[idx];
-    parkedHeavy.set(id, {
-      measurement: b.measurement, measurementFile: b.measurementFile,
-      settings: b.settings ? JSON.parse(JSON.stringify(b.settings)) : null,
-      firResult: b.firResult, crossNormDb: b.crossNormDb,
-    });
-  }
+  parkHeavy(state.bands[idx]);
   batch(() => {
     // b140.8.2: linkedToNext describes positional coupling — after the
     // filter() removes the deleted band, prev's link transfers to the new
@@ -309,6 +328,7 @@ export function removeBand(id: string) {
   // Очищаем снэпшоты удалённой полосы
   setFreqSnapshots(id, []);
   assignDefaultTargets(state.bands as BandState[]);
+  pruneParked();
   markDirty();
 }
 
@@ -400,6 +420,11 @@ export function setBandMeasurement(bandId: string, m: Measurement) {
   if (idx < 0) return;
   batch(() => {
     setState("bands", idx, "measurement", m);
+    // b141.103 (audit 3.18): the project file belonged to the previous
+    // measurement — cleared until the new one is copied in (a failed copy
+    // used to leave the band pointing at the old file; on save the pending
+    // copy now retries from source_path).
+    setState("bands", idx, "measurementFile", null);
     setState("bands", idx, "settings", defaultSettings());
   });
   markDirty();
@@ -434,6 +459,9 @@ export function setBandMeasurementFile(bandId: string, filename: string | null) 
 export function setBandSmoothing(bandId: string, mode: SmoothingMode) {
   const idx = bandIndex(bandId);
   if (idx < 0 || !state.bands[idx].settings) return;
+  if (state.bands[idx].settings!.smoothing === mode) return;
+  // b141.103 (audit 3.9): smoothing is in the history entry — record it.
+  pushHistory("Smoothing");
   setState("bands", idx, "settings", "smoothing", mode);
   markDirty();
 }
@@ -967,6 +995,10 @@ export function clearAllFreqSnapshots() {
   _setFreqSnapMap(new Map());
 }
 
+export function clearAllPlotSnapshots() {
+  _setPlotSnapMap(new Map());
+}
+
 // Generic plot snapshots for IR/Step, GD, Export tabs
 export interface PlotSnapshot {
   label: string;
@@ -1051,6 +1083,7 @@ export function _captureBandsLight(label: string): HistoryEntry {
     peqOptimizedTarget: b.peqOptimizedTarget
       ? JSON.parse(JSON.stringify(b.peqOptimizedTarget))
       : null,
+    smoothing: b.settings?.smoothing ?? null,
   }));
   return {
     bands: lightBands,
@@ -1064,6 +1097,11 @@ export function _captureBandsLight(label: string): HistoryEntry {
 export function _applyBandsLight(entry: HistoryEntry): void {
   batch(() => {
     const currentById = new Map(state.bands.map((b) => [b.id, b]));
+    // b141.103 (audit 3.6): a band this entry does not hold (undo of «Add
+    // band») keeps its heavy parts parked — redo used to bring it back
+    // without its measurement.
+    const keep = new Set(entry.bands.map((lb) => lb.id));
+    for (const b of state.bands) if (!keep.has(b.id)) parkHeavy(b);
     const newBands: BandState[] = entry.bands.map((lb) => {
       const cur = currentById.get(lb.id) ?? parkedHeavy.get(lb.id);
       const target = JSON.parse(JSON.stringify(lb.target)) as TargetCurve;
@@ -1100,8 +1138,15 @@ export function _applyBandsLight(entry: HistoryEntry): void {
       showTarget: state.showTarget,
       nextBandNum: entry.nextBandNum,
     }));
+    entry.bands.forEach((lb, i) => {
+      if (lb.smoothing && isSmoothingMode(lb.smoothing) && state.bands[i].settings
+        && state.bands[i].settings!.smoothing !== lb.smoothing) {
+        setState("bands", i, "settings", "smoothing", lb.smoothing);
+      }
+    });
     markDirty();
   });
+  pruneParked();
 }
 
 registerHistoryHooks(_captureBandsLight, _applyBandsLight);

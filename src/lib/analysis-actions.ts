@@ -1,12 +1,18 @@
 import { addExclusionZone, setBandSmoothing, type SmoothingMode } from "../stores/bands";
 import { setPeqDirectLow, setPeqDirectHigh, setPeqRangeMode } from "../stores/peq-optimize";
-import { pushHistory } from "../stores/history";
+import { historyGroup } from "../stores/history";
 import type { AnalysisRecommendation } from "./types";
 
 const SMOOTHING_VALUES: SmoothingMode[] = ["off", "1/3", "1/6", "1/12", "1/24", "var"];
 
 export function applyRecommendation(bandId: string, rec: AnalysisRecommendation, findingId: string): void {
-  pushHistory(`Apply recommendation: ${findingId}`);
+  // One undo step per recommendation: the setters' own history pushes
+  // (smoothing, exclusion zone) are absorbed. The optimizer range is a
+  // project setting and is not undone (b141.103, audit 3.1).
+  historyGroup(`Apply recommendation: ${findingId}`, () => applyAction(bandId, rec));
+}
+
+function applyAction(bandId: string, rec: AnalysisRecommendation): void {
   const a = rec.action;
   switch (a.type) {
     case "SetOptLowerBound":

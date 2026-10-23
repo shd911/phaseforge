@@ -4,7 +4,7 @@
 import { createSignal, batch } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import type { PeqBand, PeqConfig, PeqResult, FilterConfig, ExclusionZone, PeqOptimizedTarget, Measurement } from "../lib/types";
-import { cloneFilterConfig, F_MAX_WORK, F_MAX_REF, fMaxForRate } from "../lib/types";
+import { cloneFilterConfig, measurementKey, F_MAX_WORK, F_MAX_REF, fMaxForRate } from "../lib/types";
 import {
   activeBand,
   appState,
@@ -18,7 +18,7 @@ import {
   settingSignal,
 } from "./bands";
 import type { BandState } from "./bands";
-import { pushHistory } from "./history";
+import { pushHistory, historyEpoch } from "./history";
 import { passbandRange } from "../lib/band-evaluator/extension";
 import { showToast } from "../lib/toast";
 
@@ -79,6 +79,9 @@ export function trimRangeByFloor(
   return [Math.max(lo, freq[first]), Math.min(hi, freq[last])];
 }
 
+/** The optimizer range is empty — reported per band, the others still run. */
+export class PeqRangeError extends Error {}
+
 interface RangeInputs {
   meas: Measurement;
   target: BandState["target"];
@@ -130,8 +133,18 @@ async function resolveRange(inp: RangeInputs) {
   // ignored, and a woofer LR2 @ 250 Hz got two of its six PEQ at 3.9/5.1 kHz,
   // where the target sits ~95 dB down.
   if (inp.floorDb > 0) {
+    const requested = range;
     range = trimRangeByFloor(meas.freq, targetResp.magnitude, range[0], range[1],
       targetCurve.reference_level_db - inp.floorDb);
+    // b141.103 (audit 3.4): the target is above the floor only OUTSIDE the
+    // requested range — the trim crosses over ([1500, 690]) and Rust rejects
+    // it. Nothing in the range is worth correcting: say so.
+    if (!(range[0] < range[1])) {
+      throw new PeqRangeError(
+        `в диапазоне ${Math.round(requested[0])}–${Math.round(requested[1])} Hz цель ниже порога ` +
+        `«Порог dB» (${inp.floorDb} dB) — расширьте диапазон или уменьшите порог`,
+      );
+    }
   }
   // b141.92: where boosts are allowed — the same trim at «Подъём до».
   const boostRange: [number, number] | null = inp.boostFloorDb > 0
@@ -176,7 +189,15 @@ async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBa
   // exported filter never contained — +6 dB left over where it reported 0.
   const frozenBands = peqBandsSnap.filter((p) => !p.enabled);
   const measMag = meas.magnitude;
-  const activeBandBudget = Math.max(1, bandBudget - frozenBands.length);
+  // b141.103 (audit 3.19): `max(1, …)` let disabled filters that already fill
+  // «Макс. полос» get one more — maxBands + 1 in the table.
+  const activeBandBudget = bandBudget - frozenBands.length;
+  if (activeBandBudget < 1) {
+    throw new Error(
+      `лимит «Макс. полос» (${bandBudget}) занят выключенными фильтрами (${frozenBands.length}) — ` +
+      `увеличьте лимит или удалите выключенные`,
+    );
+  }
   const config: PeqConfig = {
     max_bands: activeBandBudget,
     tolerance_db: tol,
@@ -223,6 +244,7 @@ export function captureOptimizedTarget(b: BandState): PeqOptimizedTarget {
     // b141.22 (audit): the rate the biquads were fitted at — see PeqOptimizedTarget.
     sample_rate: exportSampleRate(),
     shaping: currentShaping(b),
+    ...(b.measurement ? { measurement_key: measurementKey(b.measurement)! } : {}),
   };
 }
 
@@ -246,6 +268,10 @@ export function peqStaleReason(b: BandState): string | null {
     return "наклон или полки цели изменены";
   }
   if (!exclusionZonesEquals(b.exclusionZones, snap.exclusion_zones)) return "зоны исключения изменены";
+  // b141.103 (audit 3.18): fitted to another measurement.
+  if (snap.measurement_key !== undefined && measurementKey(b.measurement) !== snap.measurement_key) {
+    return "замер заменён";
+  }
   // b141.22: a fit made at another export rate no longer describes the biquads
   // that will ship. Snapshots from before b141.22 carry no rate — "unknown".
   if (snap.sample_rate !== undefined && snap.sample_rate !== exportSampleRate()) {
@@ -286,11 +312,18 @@ export function peqStale(b: BandState): boolean {
   return peqStaleReason(b) !== null;
 }
 
+/** b141.103 (audit 3.10): Undo (or an open / new project) during a run —
+ *  the result would land on the restored state with no history entry. */
+function droppedAfterUndo() {
+  showToast("Результат оптимизации отброшен: во время расчёта была отмена или смена проекта.", "info");
+}
+
 // --- Main actions ---
 export async function handleOptimizePeq() {
   const b = activeBand();
   if (!b || !b.measurement || computing()) return;
   pushHistory("Optimize PEQ");
+  const epoch = historyEpoch();
   // Snapshot the target the optimizer is about to consume — concurrent edits
   // during the await must not poison the staleness check.
   const optimizedTarget = captureOptimizedTarget(b);
@@ -298,6 +331,7 @@ export async function handleOptimizePeq() {
   setPeqError(null);
   try {
     const { result, frozenBands } = await optimizeBand(b);
+    if (historyEpoch() !== epoch) { droppedAfterUndo(); return; }
     setBandPeqBands(b.id, mergeBands(frozenBands, result.bands));
     setBandPeqOptimizedTarget(b.id, optimizedTarget);
     setBandStats(b.id, { maxErr: result.max_error_db, iters: result.iterations });
@@ -319,6 +353,7 @@ export async function handleOptimizeAll() {
   const eligible = bands.filter((b) => b.measurement);
   if (eligible.length === 0 || computing()) return;
   pushHistory("Optimize all");
+  const epoch = historyEpoch();
   setComputing(true);
   setPeqError(null);
   try {
@@ -327,17 +362,29 @@ export async function handleOptimizeAll() {
     //    cannot retroactively make the post-optimize state look "fresh".
     // b141.67 (audit stage 2 P6): bands are independent — fit them in
     // parallel (async commands run on the multi-thread runtime).
-    const results = await Promise.all(eligible.map(async (b) => {
+    // b141.103 (audit 3.4): allSettled — one band whose fit fails (an empty
+    // range after the floor trim, a Rust error) no longer throws away the
+    // results of every other band.
+    const settled = await Promise.allSettled(eligible.map(async (b) => {
+      const name = b.name;
       const target = captureOptimizedTarget(b);
-      const { result, frozenBands } = await optimizeBand(b);
-      return {
-        id: b.id,
-        peqBands: mergeBands(frozenBands, result.bands),
-        maxErr: result.max_error_db,
-        iters: result.iterations,
-        target,
-      };
+      try {
+        const { result, frozenBands } = await optimizeBand(b);
+        return {
+          id: b.id,
+          peqBands: mergeBands(frozenBands, result.bands),
+          maxErr: result.max_error_db,
+          iters: result.iterations,
+          target,
+        };
+      } catch (e) {
+        throw new Error(`«${name}»: ${e instanceof Error ? e.message : String(e)}`);
+      }
     }));
+    if (historyEpoch() !== epoch) { droppedAfterUndo(); return; }
+    const results = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+    const failures = settled.flatMap((r) =>
+      r.status === "rejected" ? [r.reason instanceof Error ? r.reason.message : String(r.reason)] : []);
     // 2. Apply all at once → single reactive update
     batch(() => {
       for (const r of results) {
@@ -347,9 +394,17 @@ export async function handleOptimizeAll() {
       for (const r of results) setBandStats(r.id, { maxErr: r.maxErr, iters: r.iters });
       setSelectedPeqIdx(null);
     });
-    showToast(
-      `Оптимизировано бэндов: ${results.length} · макс. ошибка ${Math.max(...results.map(r => r.maxErr)).toFixed(2)} dB`,
-    );
+    if (failures.length > 0) {
+      setPeqError(failures.join("; "));
+      showToast(
+        `Оптимизировано бэндов: ${results.length} из ${settled.length}. Не удалось: ${failures.join("; ")}`,
+        "warn", 12000,
+      );
+    } else {
+      showToast(
+        `Оптимизировано бэндов: ${results.length} · макс. ошибка ${Math.max(...results.map(r => r.maxErr)).toFixed(2)} dB`,
+      );
+    }
   } catch (e) {
     setPeqError(String(e));
     showToast(`Ошибка оптимизации: ${String(e)}`, "warn");

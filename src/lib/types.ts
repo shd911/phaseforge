@@ -212,6 +212,33 @@ export interface PeqOptimizedTarget {
     low_shelf: ShelfConfig | null;
     high_shelf: ShelfConfig | null;
   };
+  /** b141.103 (audit 3.18): fingerprint of the measurement magnitude the PEQ
+   *  was fitted to (`measurementKey`). A new measurement in the band makes
+   *  the fit stale. Optional: older snapshots lack it (not stale). */
+  measurement_key?: string;
+}
+
+/** Content fingerprint of a measurement's magnitude (what the optimizer
+ *  fits) — stable across project reloads, unlike object identity. */
+// Memoised by the data arrays, not the measurement object: a store write of a
+// new measurement merges into the old object (same identity), the arrays are
+// replaced.
+const _measKeys = new WeakMap<object, { freq: object; key: string }>();
+export function measurementKey(m: { freq: number[]; magnitude: number[] } | null | undefined): string | null {
+  if (!m || !m.magnitude || !m.freq) return null;
+  const hit = _measKeys.get(m.magnitude);
+  if (hit && hit.freq === m.freq) return hit.key;
+  let h = 0x811c9dc5;
+  const mix = (v: number) => {
+    const q = Math.round(v * 1e4);
+    h ^= q & 0xffff; h = Math.imul(h, 0x01000193);
+    h ^= (q >>> 16) & 0xffff; h = Math.imul(h, 0x01000193);
+  };
+  const n = Math.min(m.freq.length, m.magnitude.length);
+  for (let i = 0; i < n; i++) { mix(m.freq[i]); mix(m.magnitude[i]); }
+  const key = `${n}:${(h >>> 0).toString(16)}`;
+  _measKeys.set(m.magnitude, { freq: m.freq, key });
+  return key;
 }
 
 // Measurement analysis (b135). Mirrors Rust src-tauri/src/analysis/mod.rs.
