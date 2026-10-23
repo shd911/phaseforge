@@ -10,6 +10,9 @@ interface NumberInputProps {
   unit?: string;
   precision?: number;
   freqMode?: boolean; // adaptive step for frequency values
+  /** Accessible name of the text field (b141.105: labels were not tied to fields). */
+  label?: string;
+  id?: string;
 }
 
 /**
@@ -46,10 +49,15 @@ export default function NumberInput(props: NumberInputProps) {
     return props.step;
   };
 
-  // Push value to DOM + notify parent
+  // Push value to DOM + notify parent. b141.105: only a REAL change reaches
+  // the parent — every blur/Enter/Escape used to call onChange with the same
+  // value: the project went «изменён», an empty undo step appeared, the band
+  // re-evaluated, and an HP/LP edit switched a disabled target back on.
   const push = (v: number) => {
-    val = parseFloat(v.toFixed(prec()));
-    inputEl.value = fmt(val);
+    const next = parseFloat(v.toFixed(prec()));
+    inputEl.value = fmt(next);
+    if (next === val) return;
+    val = next;
     props.onChange(val);
   };
   // b141.43: wheel gestures update the field every step but the parent (a
@@ -95,6 +103,8 @@ export default function NumberInput(props: NumberInputProps) {
     rootEl.classList.add("num-input-clamped");
   };
   const commit = () => {
+    // Untouched text (focus + blur, Enter on the shown value) is no edit.
+    if (inputEl.value === fmt(val)) return;
     const n = parseFloat(inputEl.value);
     if (isNaN(n)) { inputEl.value = fmt(val); return; }
     const c = clamp(n);
@@ -113,11 +123,12 @@ export default function NumberInput(props: NumberInputProps) {
         attachFieldWheel(el, {
           onSteps: (steps, coarse) => {
             const dir = Math.sign(steps);
+            const before = val;
             for (let k = 0; k < Math.abs(steps); k++) {
               val = parseFloat(clamp(val + dir * step(dir) * (coarse ? 10 : 1)).toFixed(prec()));
             }
             inputEl.value = fmt(val);
-            notifyThrottled(val);
+            if (val !== before) notifyThrottled(val); // at a limit: nothing changed
           },
         });
       }}
@@ -133,11 +144,20 @@ export default function NumberInput(props: NumberInputProps) {
         class="num-field"
         type="text"
         ref={(el: HTMLInputElement) => { inputEl = el; el.value = fmt(val); }}
+        id={props.id}
+        aria-label={props.label}
         onFocus={(e) => e.currentTarget.select()}
         onBlur={() => commit()}
         onKeyDown={(e) => {
           if (e.key === "Enter") { e.preventDefault(); commit(); e.currentTarget.blur(); }
-          if (e.key === "Escape") { inputEl.value = fmt(val); e.currentTarget.blur(); }
+          // b141.105: Escape cancels the draft and stops here — it used to
+          // bubble to the dialog overlay and close the whole dialog.
+          if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            inputEl.value = fmt(val);
+            e.currentTarget.blur();
+          }
           // b141.38: arrows step like the ± buttons (Shift ×10), which are
           // mouse-only by design (tabIndex -1).
           if (e.key === "ArrowUp" || e.key === "ArrowDown") {
