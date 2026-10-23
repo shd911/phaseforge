@@ -351,6 +351,23 @@ mod tests {
         }
     }
 
+    /// b141.101 (audit 2026-10-23 2.2): a noise floor above the boost limit
+    /// panicked in f64::clamp on the cepstral min-phase route with a digital
+    /// section (here: LR4 + tilt), hanging the IPC promise.
+    #[test]
+    fn noise_floor_above_boost_does_not_panic() {
+        let lr4 = FilterConfig { filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: 2000.0,
+            shape: None, linear_phase: false, q: None, subsonic_protect: None };
+        let mut c = curve(Some(lr4), None);
+        c.tilt_db_per_octave = -0.5;
+        let mut s = settings(48_000.0);
+        s.max_boost_db = 6.0;
+        s.noise_floor_db = 10.0;
+        let r = generate_band_fir(&c, &[], &s, false).unwrap();
+        assert_eq!(r.route, BandFirRoute::Cepstral);
+        assert!(r.fir.impulse.iter().all(|v| v.is_finite()));
+    }
+
     #[test]
     fn deviation_is_small_where_the_fir_realises_the_model() {
         let lr4 = |fc: f64| FilterConfig { filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: fc,

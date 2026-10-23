@@ -71,6 +71,18 @@ pub fn auto_peq_lma(
     if !finite {
         return Err(AppError::Dsp { message: "auto_peq_lma: input contains NaN/Inf".into() });
     }
+    // b141.101: the gain bounds feed f64::clamp (lma.rs) — an inverted pair
+    // panics there and hangs the IPC promise.
+    if !(config.max_boost_db >= 0.0 && config.max_cut_db >= 0.0
+        && config.max_boost_db.is_finite() && config.max_cut_db.is_finite())
+    {
+        return Err(AppError::Config {
+            message: format!(
+                "auto_peq_lma: invalid gain limits: boost {}, cut {}",
+                config.max_boost_db, config.max_cut_db
+            ),
+        });
+    }
     if config.freq_range.0 >= config.freq_range.1 {
         return Err(AppError::Config {
             message: format!(

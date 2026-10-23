@@ -590,7 +590,8 @@ pub(crate) fn composite_phase_inner(
         .map(|k| {
             let b = total_mag_db[k] - subsonic_mag_db[k] - peq_mag_db[k];
             match section {
-                Some(s) => (b - s.db[k]).clamp(noise_floor_db, max_boost_db.max(0.0)),
+                // b141.101: max/min — clamp panics when floor > ceiling.
+                Some(s) => (b - s.db[k]).max(noise_floor_db).min(max_boost_db.max(0.0)),
                 None => b.max(noise_floor_db),
             }
         })
