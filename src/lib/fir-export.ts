@@ -46,13 +46,13 @@ export function firExportRequest(
   };
 }
 
-async function generateBandImpulse(b: BandState): Promise<{
+async function generateBandImpulse(req: ReturnType<typeof firExportRequest>): Promise<{
   impulse: number[]; delaySamples: number; route: "iir" | "cepstral"; peakBoostDb: number;
 }> {
   // b139.3: route through canonical BandEvaluator. The b138.4 isLin
   // demotion (Gaussian linear + subsonic → MinimumPhase) lives inside the
   // evaluator, so this call site no longer carries duplicate phase logic.
-  const result = await evaluateBandFull(firExportRequest(b));
+  const result = await evaluateBandFull(req);
   if (!result.fir) {
     throw new Error("FIR generation failed");
   }
@@ -158,13 +158,22 @@ export function wavImpulse(impulse: number[], inverted: boolean): number[] {
  *  Stale PEQ is gated by a confirm dialog at higher-level call sites — keep this
  *  function focused on the export pipeline. */
 export async function exportBandWav(b: BandState): Promise<boolean> {
+  // b141.103 (audit 3.3): every setting is taken HERE, before the first
+  // await — the FIR request, the WAV header rate and the file name come from
+  // one snapshot. SR/taps/window used to be re-read after the FIR was
+  // generated: switching SR during an export wrote a 384 kHz FIR with a
+  // 48 kHz header.
+  const req = firExportRequest(b);
+  const fir = req.fir!;
+  const sr = fir.sampleRate, taps = fir.taps, win = fir.window, maxBoostDb = fir.maxBoostDb;
   const inv = !!b.inverted;
-  const { impulse, delaySamples, route, peakBoostDb } = await generateBandImpulse(b);
-  const sr = exportSampleRate();
-  // b141.74: the analytic route never applies the window — name it as IIR.
-  const winTag = route === "iir" ? "IIR" : exportWindow();
-  const fileName = `${sanitize(driverName(b))}_${sr}_${exportTaps()}_${winTag}${inv ? "_INV" : ""}.wav`;
+  const name = driverName(b);
+  const align = b.alignmentDelay ?? 0;
   const dir = projectDir();
+  const { impulse, delaySamples, route, peakBoostDb } = await generateBandImpulse(req);
+  // b141.74: the analytic route never applies the window — name it as IIR.
+  const winTag = route === "iir" ? "IIR" : win;
+  const fileName = `${sanitize(name)}_${sr}_${taps}_${winTag}${inv ? "_INV" : ""}.wav`;
   if (dir) await invoke("ensure_dir", { path: `${dir}/export` }).catch(() => {});
   const defPath = dir ? `${dir}/export/${fileName}` : fileName;
   const path = await save({
@@ -173,10 +182,9 @@ export async function exportBandWav(b: BandState): Promise<boolean> {
   });
   if (!path) return false;
   await invoke("export_fir_wav", { impulse: wavImpulse(impulse, inv), sampleRate: sr, path });
-  const align = b.alignmentDelay ?? 0;
   const shortfall = convolverDelaySeconds(align, delaySamples, impulse.length, sr) - align;
-  const host = hostSettingsNote(false, align, driverName(b), shortfall);
-  const boost = boostLimitNote(route, peakBoostDb, firMaxBoost(), driverName(b));
+  const host = hostSettingsNote(false, align, name, shortfall);
+  const boost = boostLimitNote(route, peakBoostDb, maxBoostDb, name);
   const saved = path.split(/[\\/]/).pop() ?? path;
   const msg = [host, boost].filter(Boolean).join(" ");
   // A note carries the number to type into the convolver — it stays until
