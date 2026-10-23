@@ -1,7 +1,7 @@
 import { createSignal, Show } from "solid-js";
 import { promptVisible, promptMode, resolvePrompt } from "../lib/project-io";
 import type { ProjectPromptResult } from "../lib/project-io";
-import { handleDialogKeys } from "../lib/dialog-keys";
+import Modal from "./Modal";
 
 export default function ProjectNameDialog() {
   const [name, setName] = createSignal("");
@@ -16,12 +16,6 @@ export default function ProjectNameDialog() {
     resolvePrompt(null);
   }
 
-  // b141.38: on the overlay, not the name field — Escape did nothing once
-  // focus moved to the band-count buttons.
-  function handleKeyDown(e: KeyboardEvent) {
-    handleDialogKeys(e, { onEnter: handleCreate, onEscape: handleCancel });
-  }
-
   function incBands() {
     setBandCount((c) => Math.min(8, c + 1));
   }
@@ -33,15 +27,16 @@ export default function ProjectNameDialog() {
 
   return (
     <Show when={promptVisible()}>
-      <div class="pn-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) handleCancel(); }} onKeyDown={handleKeyDown}>
-        <div class="pn-dialog">
-          <div class="pn-title">{isSaveAs() ? "Сохранить как" : "Новый проект"}</div>
+      <Modal overlayClass="pn-overlay" dialogClass="pn-dialog" titleId="pn-dlg-title"
+        onEnter={handleCreate} onEscape={handleCancel}>
+          <div class="pn-title" id="pn-dlg-title">{isSaveAs() ? "Сохранить как" : "Новый проект"}</div>
 
-          <label class="pn-label">Название проекта</label>
+          <label class="pn-label" for="pn-name">Название проекта</label>
           <input
             ref={(el) => {
               requestAnimationFrame(() => el.focus());
             }}
+            id="pn-name"
             class="pn-input"
             type="text"
             placeholder="Мой проект"
@@ -50,11 +45,11 @@ export default function ProjectNameDialog() {
           />
 
           <Show when={!isSaveAs()}>
-            <label class="pn-label">Количество бэндов</label>
-            <div class="pn-band-count">
-              <button class="pn-bc-btn" onClick={decBands} disabled={bandCount() <= 1}>−</button>
+            <label class="pn-label" id="pn-band-count">Количество полос</label>
+            <div class="pn-band-count" role="group" aria-labelledby="pn-band-count">
+              <button class="pn-bc-btn" onClick={decBands} disabled={bandCount() <= 1} aria-label="Меньше полос">−</button>
               <span class="pn-bc-value">{bandCount()}</span>
-              <button class="pn-bc-btn" onClick={incBands} disabled={bandCount() >= 8}>+</button>
+              <button class="pn-bc-btn" onClick={incBands} disabled={bandCount() >= 8} aria-label="Больше полос">+</button>
             </div>
           </Show>
 
@@ -66,8 +61,7 @@ export default function ProjectNameDialog() {
               disabled={!name().trim()}
             >{isSaveAs() ? "Сохранить" : "Создать"}</button>
           </div>
-        </div>
-      </div>
+      </Modal>
     </Show>
   );
 }

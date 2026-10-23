@@ -1,5 +1,5 @@
 import { createSignal, Show, For } from "solid-js";
-import { handleDialogKeys } from "../lib/dialog-keys";
+import Modal from "./Modal";
 
 interface PendingState {
   bandNames: string[];
@@ -21,7 +21,6 @@ export function showStaleConfirmDialog(bandNames: string[]): Promise<boolean> {
   });
 }
 
-export const isStaleConfirmDialogOpen = () => _pending() !== null;
 
 function resolveAndClose(value: boolean) {
   const p = _pending();
@@ -33,18 +32,10 @@ export default function StalePeqExportDialog() {
   return (
     <Show when={_pending()}>
       {(p) => (
-        <div
-          class="pn-overlay"
-          tabIndex={-1}
-          ref={(el) => requestAnimationFrame(() => el.focus())}
-          onKeyDown={(e) => handleDialogKeys(e, {
-            onEnter: () => resolveAndClose(true),
-            onEscape: () => resolveAndClose(false),
-          })}
-          onMouseDown={(e) => { if (e.target === e.currentTarget) resolveAndClose(false); }}
-        >
-          <div class="pn-dialog" style={{ "min-width": "440px", "max-width": "560px" }}>
-            <div class="pn-title">Экспорт устаревшего PEQ</div>
+        <Modal overlayClass="pn-overlay" dialogClass="pn-dialog"
+          dialogStyle={{ "min-width": "440px", "max-width": "560px" }} titleId="stale-dlg-title"
+          onEnter={() => resolveAndClose(true)} onEscape={() => resolveAndClose(false)}>
+            <div class="pn-title" id="stale-dlg-title">Экспорт устаревшего PEQ</div>
             <div class="pn-label" style={{ "margin-bottom": "8px" }}>
               На следующих полосах PEQ устарел:
             </div>
@@ -52,8 +43,8 @@ export default function StalePeqExportDialog() {
               <For each={p().bandNames}>{(n) => <li>{n}</li>}</For>
             </ul>
             <div class="pn-label" style={{ "margin-bottom": "16px", color: "#aaa" }}>
-              Target изменён после последней оптимизации. Экспорт даст коррекцию,
-              не соответствующую текущему target.
+              Цель изменена после последней оптимизации. Экспорт даст коррекцию,
+              не соответствующую текущей цели.
             </div>
             <div class="pn-buttons">
               <button class="dlg-btn" onClick={() => resolveAndClose(false)}>Отмена</button>
@@ -61,8 +52,7 @@ export default function StalePeqExportDialog() {
                 Экспортировать всё равно
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </Show>
   );

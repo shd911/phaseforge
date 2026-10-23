@@ -1,4 +1,6 @@
-import { createSignal, Show, For, onCleanup } from "solid-js";
+import { createSignal, Show, For } from "solid-js";
+import Modal from "./Modal";
+import { pluralRu } from "../lib/plural";
 import { ask } from "@tauri-apps/plugin-dialog";
 import {
   snapshotsList,
@@ -20,8 +22,6 @@ export function openVersionsDialog(): void {
   void refreshSnapshots();
 }
 
-/** Read-only signal so global shortcuts can suspend while the dialog is open. */
-export const isVersionsDialogOpen = _open;
 
 type RestoreChoice = "yes" | "no" | "cancel";
 
@@ -70,7 +70,7 @@ export default function VersionsDialog() {
     setStatusMsg(null);
     try {
       const n = await rebuildSnapshotIndex();
-      setStatusMsg(`Индекс перестроен: найдено ${n} версий.`);
+      setStatusMsg(`Индекс перестроен: ${pluralRu(n, "найдена", "найдено", "найдено")} ${n} ${pluralRu(n, "версия", "версии", "версий")}.`);
     } catch (e) {
       setStatusMsg(`Перестроить не удалось: ${e}`);
     } finally {
@@ -129,24 +129,19 @@ export default function VersionsDialog() {
     void doRestore(s, choice === "yes");
   }
 
-  // ESC closes the dialog.
-  const onKey = (e: KeyboardEvent) => {
-    if (!_open()) return;
-    if (e.key === "Escape") {
-      e.preventDefault();
-      if (pendingRestore()) setPendingRestore(null);
-      else if (creating()) { setCreating(false); setDraft(""); }
-      else close();
-    }
+  // ESC cancels the description draft first, then closes the dialog. The
+  // restore question is its own modal on top and handles its own Escape.
+  const onEscape = () => {
+    if (creating()) { setCreating(false); setDraft(""); }
+    else close();
   };
-  window.addEventListener("keydown", onKey);
-  onCleanup(() => window.removeEventListener("keydown", onKey));
 
   return (
     <Show when={_open()}>
-      <div class="pn-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}>
-        <div class="pn-dialog" style={{ "min-width": "480px", "max-width": "640px" }}>
-          <div class="pn-title">Версии проекта</div>
+      <Modal overlayClass="pn-overlay" dialogClass="pn-dialog"
+        dialogStyle={{ "min-width": "480px", "max-width": "640px" }} titleId="versions-dlg-title"
+        onEscape={onEscape} onBackdrop={close}>
+          <div class="pn-title" id="versions-dlg-title">Версии проекта</div>
 
           <Show when={!creating()}>
             <div class="pn-buttons" style={{ "justify-content": "flex-start", "margin-bottom": "12px" }}>
@@ -205,7 +200,7 @@ export default function VersionsDialog() {
                   {(s) => (
                     <div style={{ padding: "8px 12px", "border-bottom": "1px solid #333", display: "flex", "align-items": "center", gap: "8px" }}>
                       <div style={{ flex: 1, "min-width": 0 }}>
-                        <div style={{ "font-size": "12px", color: "#888" }}>
+                        <div style={{ "font-size": "12px", color: "var(--text-secondary)" }}>
                           {formatTs(s.ts)} · {s.app_version || "—"}
                         </div>
                         <div
@@ -214,7 +209,7 @@ export default function VersionsDialog() {
                             "overflow": "hidden",
                             "text-overflow": "ellipsis",
                             "font-style": s.description ? "normal" : "italic",
-                            "color": s.description ? undefined : "#888",
+                            "color": s.description ? undefined : "var(--text-secondary)",
                           }}
                           title={s.description || "Описание не сохранилось при перестроении индекса"}
                         >
@@ -231,6 +226,7 @@ export default function VersionsDialog() {
                         class="dlg-btn"
                         onClick={() => handleDelete(s)}
                         disabled={busy()}
+                        aria-label="Удалить версию"
                         title="Удалить эту версию (файл будет удалён с диска)"
                       >×</button>
                     </div>
@@ -249,9 +245,10 @@ export default function VersionsDialog() {
           </div>
 
           <Show when={pendingRestore()}>
-            <div class="pn-overlay" style={{ background: "rgba(0,0,0,0.5)" }}>
-              <div class="pn-dialog" style={{ "max-width": "420px" }}>
-                <div class="pn-title">Сохранить текущее состояние?</div>
+            <Modal overlayClass="pn-overlay pn-overlay-nested" dialogClass="pn-dialog"
+              dialogStyle={{ "max-width": "420px" }} titleId="versions-restore-title"
+              onEscape={() => pendingResolve("cancel")}>
+                <div class="pn-title" id="versions-restore-title">Сохранить текущее состояние?</div>
                 <div class="pn-label" style={{ "margin-bottom": "16px" }}>
                   Сохранить текущее состояние как версию перед восстановлением «{pendingRestore()!.description}»?
                 </div>
@@ -260,11 +257,9 @@ export default function VersionsDialog() {
                   <button class="dlg-btn" onClick={() => pendingResolve("no")}>Нет</button>
                   <button class="dlg-btn dlg-btn-primary" onClick={() => pendingResolve("yes")}>Да</button>
                 </div>
-              </div>
-            </div>
+            </Modal>
           </Show>
-        </div>
-      </div>
+      </Modal>
     </Show>
   );
 }

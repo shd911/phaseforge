@@ -1,4 +1,6 @@
-import { createSignal, Show, For, onCleanup } from "solid-js";
+import { createSignal, Show, For } from "solid-js";
+import Modal from "./Modal";
+import { pluralRu } from "../lib/plural";
 import type { AnalysisFinding, AnalysisRecommendation, AnalysisResult } from "../lib/types";
 import { applyRecommendation } from "../lib/analysis-actions";
 import { setBandAnalysisDismissed } from "../stores/bands";
@@ -20,7 +22,6 @@ export function openMeasurementAnalysis(req: OpenRequest): void {
   setOpen(req);
 }
 
-export const isAnalysisDialogOpen = () => _open() !== null;
 
 function severityIcon(s: AnalysisFinding["severity"]): string {
   if (s === "Error") return "✕";
@@ -66,16 +67,6 @@ export default function MeasurementAnalysisDialog() {
     }
   }
 
-  const onKey = (e: KeyboardEvent) => {
-    if (!_open()) return;
-    if (e.key === "Escape") {
-      e.preventDefault();
-      close();
-    }
-  };
-  window.addEventListener("keydown", onKey);
-  onCleanup(() => window.removeEventListener("keydown", onKey));
-
   return (
     <Show when={_open()}>
       {(req) => {
@@ -93,12 +84,9 @@ export default function MeasurementAnalysisDialog() {
           findings().length > 0 && appliedFindingIds().size >= findings().length;
         const remainingCount = () => findings().length - appliedFindingIds().size;
         return (
-          <div
-            class="pn-overlay"
-            onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}
-          >
-            <div class="pn-dialog" style={{ "min-width": "520px", "max-width": "640px" }}>
-              <div class="pn-title">Анализ замера: {req().fileName}</div>
+          <Modal overlayClass="pn-overlay" dialogClass="pn-dialog"
+            dialogStyle={{ "min-width": "520px", "max-width": "640px" }} titleId="analysis-dlg-title" onEscape={close}>
+              <div class="pn-title" id="analysis-dlg-title">Анализ замера: {req().fileName}</div>
 
               <Show
                 when={findings().length > 0}
@@ -114,8 +102,9 @@ export default function MeasurementAnalysisDialog() {
                   Выберите рекомендации, которые применить. Можно по одной или сразу все.
                 </div>
                 <div style={{ "margin-bottom": "12px", color: "#aaa", "font-size": "12px" }}>
-                  Найдено: {counts().warn} предупреждений, {counts().info} заметок
-                  {counts().err > 0 ? `, ${counts().err} ошибок` : ""}
+                  Найдено: {counts().warn} {pluralRu(counts().warn, "предупреждение", "предупреждения", "предупреждений")},{" "}
+                  {counts().info} {pluralRu(counts().info, "заметка", "заметки", "заметок")}
+                  {counts().err > 0 ? `, ${counts().err} ${pluralRu(counts().err, "ошибка", "ошибки", "ошибок")}` : ""}
                 </div>
 
                 <div style={{ "max-height": "420px", "overflow-y": "auto", "border-top": "1px solid #333" }}>
@@ -166,8 +155,7 @@ export default function MeasurementAnalysisDialog() {
                       : `Применить оставшиеся (${remainingCount()})`}</button>
                 </Show>
               </div>
-            </div>
-          </div>
+          </Modal>
         );
       }}
     </Show>

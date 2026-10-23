@@ -22,9 +22,8 @@ import {
   projectName,
   projectDir,
   confirmIfDirty,
-  promptVisible,
-  unsavedDialogVisible,
 } from "./lib/project-io";
+import { anyModalOpen } from "./lib/dialog-keys";
 import { undo, redo, canUndo, canRedo, lastUndoLabel, lastRedoLabel } from "./stores/history";
 import { peqDragging } from "./stores/bands";
 import FileMenu from "./components/FileMenu";
@@ -33,10 +32,10 @@ import ControlPanel from "./components/ControlPanel";
 import BandTabs from "./components/BandTabs";
 import ProjectNameDialog from "./components/ProjectNameDialog";
 import UnsavedChangesDialog from "./components/UnsavedChangesDialog";
-import VersionsDialog, { openVersionsDialog, isVersionsDialogOpen } from "./components/VersionsDialog";
-import MeasurementAnalysisDialog, { isAnalysisDialogOpen } from "./components/MeasurementAnalysisDialog";
-import StalePeqExportDialog, { isStaleConfirmDialogOpen } from "./components/StalePeqExportDialog";
-import HighQWarningPopup, { isHighQPopupOpen } from "./components/HighQWarningPopup";
+import VersionsDialog, { openVersionsDialog } from "./components/VersionsDialog";
+import MeasurementAnalysisDialog from "./components/MeasurementAnalysisDialog";
+import StalePeqExportDialog from "./components/StalePeqExportDialog";
+import HighQWarningPopup from "./components/HighQWarningPopup";
 import Toasts from "./components/Toasts";
 import { showToast } from "./lib/toast";
 import WelcomeDialog from "./components/WelcomeDialog";
@@ -56,9 +55,10 @@ function App() {
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
     return t.isContentEditable;
   };
-  const isModalOpen = (): boolean =>
-    promptVisible() || unsavedDialogVisible() || isVersionsDialogOpen()
-    || isAnalysisDialogOpen() || isStaleConfirmDialogOpen() || isHighQPopupOpen();
+  // b141.105: every modal registers in one stack (lib/dialog-keys.ts) —
+  // the hand-kept list here missed FIR settings, Crossover, Merge, Baffle
+  // and Welcome, so ⌘Z/⌘O/⌘N ran underneath them.
+  const isModalOpen = anyModalOpen;
 
   const handleKeys = (e: KeyboardEvent) => {
     if (!(e.metaKey || e.ctrlKey)) return;
@@ -106,7 +106,7 @@ function App() {
     const pName = projectName();
     const path = currentProjectPath();
     const dirty = isDirty();
-    const name = pName ?? (path ? path.split("/").pop() : "Untitled");
+    const name = pName ?? (path ? path.split("/").pop() : "Без названия");
     document.title = `PhaseForge — ${name}${dirty ? " •" : ""}`;
   });
 
@@ -121,7 +121,7 @@ function App() {
     const hasPeq = appState.bands.some((b) => (b.peqBands?.length ?? 0) > 0);
     if (hasPeq) {
       const ok = await ask(
-        "Переключение режима переоптимизирует все бэнды и перезапишет ручные правки PEQ. Продолжить?",
+        "Переключение режима переоптимизирует все полосы и перезапишет ручные правки PEQ. Продолжить?",
         { title: toHybrid ? "Перейти в режим Hybrid" : "Перейти в режим Standard", kind: "warning" },
       );
       if (!ok) return;
@@ -154,10 +154,10 @@ function App() {
           aria-label="Повторить"
           title={canRedo() ? `Повторить: ${lastRedoLabel()}` : "Повторить (нет действий)"}
         >↷</button>
-        <span class="top-project-name" title={currentProjectPath() ?? "Untitled"}>
+        <span class="top-project-name" title={currentProjectPath() ?? "Без названия"}>
           {projectName() ?? (currentProjectPath()
             ? currentProjectPath()!.split("/").pop()
-            : "Untitled")}
+            : "Без названия")}
         </span>
         <Show when={isDirty()}>
           <span class="top-project-dirty">(изменён)</span>
@@ -168,13 +168,13 @@ function App() {
             class={`strategy-btn ${!exportHybridPhase() ? "active" : ""}`}
             onClick={() => switchStrategy(false)}
             disabled={computing()}
-            title="Стандартная коррекция (мин./лин. фаза). Переключение переоптимизирует все бэнды."
+            title="Стандартная коррекция (мин./лин. фаза). Переключение переоптимизирует все полосы."
           >Standard</button>
           <button
             class={`strategy-btn ${exportHybridPhase() ? "active" : ""}`}
             onClick={() => switchStrategy(true)}
             disabled={computing()}
-            title="Гибридная фаза экспорта. Переключение переоптимизирует все бэнды."
+            title="Гибридная фаза экспорта. Переключение переоптимизирует все полосы."
           >Hybrid</button>
         </div>
         <button
@@ -186,7 +186,7 @@ function App() {
           class="tb-btn primary"
           onClick={handleOptimizeAll}
           disabled={computing()}
-          title="Оптимизировать PEQ для всех бэндов"
+          title="Оптимизировать PEQ для всех полос"
           aria-busy={computing()}
         >
           {/* b141.38: both labels share one grid cell — the button keeps its
@@ -223,8 +223,8 @@ function App() {
             <div class="right-panel">
               <div class="sum-hint">
                 <div class="sum-hint-title">Режим «Сумма»</div>
-                <p>Это обзор суммарного отклика всех бэндов — только для просмотра.</p>
-                <p>Чтобы редактировать цель и PEQ, выберите вкладку бэнда сверху.</p>
+                <p>Это обзор суммарного отклика всех полос — только для просмотра.</p>
+                <p>Чтобы редактировать цель и PEQ, выберите вкладку полосы сверху.</p>
                 <p>Двойной клик по линии раздела на графике — настройка кроссовера.</p>
               </div>
             </div>
@@ -238,7 +238,7 @@ function App() {
 
       {/* Status bar */}
       <footer class="status-bar">
-        {appState.bands.length} {pluralRu(appState.bands.length, "бэнд", "бэнда", "бэндов")}
+        {appState.bands.length} {pluralRu(appState.bands.length, "полоса", "полосы", "полос")}
         {isSum() ? " — режим Сумма" : ""}
       </footer>
 

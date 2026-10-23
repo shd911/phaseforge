@@ -1,4 +1,4 @@
-import { createSignal, Show } from "solid-js";
+import { createSignal, createEffect, on, Show } from "solid-js";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import type { Measurement, MergeConfig, MergeResult, BaffleConfig } from "../lib/types";
@@ -6,6 +6,7 @@ import type { MergeSource } from "../stores/bands";
 import { showToast } from "../lib/toast";
 import NumberInput from "./NumberInput";
 import BaffleStepDialog from "./BaffleStepDialog";
+import Modal from "./Modal";
 
 interface MergeDialogProps {
   onClose: () => void;
@@ -70,27 +71,45 @@ export default function MergeDialog(props: MergeDialogProps) {
     }
   }
 
+  /** The merge config «Слить» will send; `level_offset_db` decides auto vs manual. */
+  const mergeConfig = (levelOffset: number | null): MergeConfig => ({
+    splice_freq: spliceFreq(),
+    blend_octaves: blendOctaves(),
+    level_offset_db: levelOffset,
+    match_range: null,
+    baffle: baffleEnabled() ? baffleConfig() : null,
+  });
+
+  // b141.105 (audit 2026-10-23 §5.23): «Авто» was computed without the baffle
+  // correction and only when a file was picked, but the merge applies the
+  // baffle (and the current splice/blend) before matching levels — the shown
+  // number, and the manual field seeded from it, were not what the merge
+  // used. Recompute from the same config whenever an input changes.
+  let autoGen = 0;
   async function tryAutoCompute(nf: string, ff: string) {
+    const gen = ++autoGen;
     try {
-      const config: MergeConfig = {
-        splice_freq: spliceFreq(),
-        blend_octaves: blendOctaves(),
-        level_offset_db: null,
-        match_range: null,
-        baffle: null,
-      };
+      const config = mergeConfig(null);
       const result = await invoke<MergeResult>("merge_measurements", {
         nfPath: nf,
         ffPath: ff,
         config,
       });
+      if (gen !== autoGen) return; // a newer request superseded this one
       setAutoOffset(result.auto_level_offset_db);
       setError(null);
     } catch (e) {
+      if (gen !== autoGen) return;
       setAutoOffset(null);
       setError(String(e));
     }
   }
+
+  createEffect(on(
+    () => [spliceFreq(), blendOctaves(), baffleEnabled(), baffleConfig()] as const,
+    () => { const nf = nfPath(); const ff = ffPath(); if (nf && ff) void tryAutoCompute(nf, ff); },
+    { defer: true },
+  ));
 
   async function handleMerge() {
     const nf = nfPath();
@@ -100,13 +119,7 @@ export default function MergeDialog(props: MergeDialogProps) {
     setMerging(true);
     setError(null);
     try {
-      const config: MergeConfig = {
-        splice_freq: spliceFreq(),
-        blend_octaves: blendOctaves(),
-        level_offset_db: useManualOffset() ? manualOffset() : null,
-        match_range: null,
-        baffle: baffleEnabled() ? baffleConfig() : null,
-      };
+      const config = mergeConfig(useManualOffset() ? (manualOffset() ?? autoOffset()) : null);
       const result = await invoke<MergeResult>("merge_measurements", {
         nfPath: nf,
         ffPath: ff,
@@ -123,15 +136,12 @@ export default function MergeDialog(props: MergeDialogProps) {
   }
 
   return (
-    <div class="merge-overlay" onClick={props.onClose}
-      tabIndex={-1}
-      ref={(el) => requestAnimationFrame(() => el.focus())}
-      onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); props.onClose(); } }}>
-      <div class="merge-dialog" onClick={(e) => e.stopPropagation()}>
+    <Modal overlayClass="merge-overlay" dialogClass="merge-dialog" titleId="merge-dlg-title"
+      onEscape={props.onClose}>
         {/* Header */}
         <div class="merge-header">
-          <span class="merge-title">Слияние NF + FF</span>
-          <button class="merge-close" onClick={props.onClose}>
+          <span class="merge-title" id="merge-dlg-title">Слияние NF + FF</span>
+          <button class="merge-close" onClick={props.onClose} aria-label="Закрыть" title="Закрыть">
             ×
           </button>
         </div>
@@ -158,19 +168,21 @@ export default function MergeDialog(props: MergeDialogProps) {
               <div class="merge-param-row">
                 <label class="merge-label">Частота сшивки</label>
                 <NumberInput
+                  label="Частота сшивки"
                   value={spliceFreq()}
                   onChange={(v) => setSpliceFreq(v)}
                   min={50}
                   max={1000}
                   step={10}
-                  unit="Hz"
+                  unit="Гц"
                   freqMode
                 />
               </div>
 
               <div class="merge-param-row">
-                <label class="merge-label">Ширина перехода</label>
+                <label class="merge-label" for="merge-blend">Ширина перехода</label>
                 <select
+                  id="merge-blend"
                   class="merge-select"
                   value={blendOctaves()}
                   onChange={(e) =>
@@ -178,7 +190,7 @@ export default function MergeDialog(props: MergeDialogProps) {
                   }
                 >
                   {BLEND_OPTIONS.map((v) => (
-                    <option value={v}>{v} oct</option>
+                    <option value={v}>{v} окт</option>
                   ))}
                 </select>
               </div>
@@ -186,9 +198,9 @@ export default function MergeDialog(props: MergeDialogProps) {
               <div class="merge-param-row">
                 <label class="merge-label">Сдвиг уровня</label>
                 <span class="merge-auto-val">
-                  Auto:{" "}
+                  Авто:{" "}
                   {autoOffset() !== null
-                    ? autoOffset()!.toFixed(1) + " dB"
+                    ? autoOffset()!.toFixed(1) + " дБ"
                     : "…"}
                 </span>
               </div>
@@ -200,16 +212,17 @@ export default function MergeDialog(props: MergeDialogProps) {
                     checked={useManualOffset()}
                     onChange={() => setUseManualOffset(!useManualOffset())}
                   />
-                  Manual override
+                  Задать вручную
                 </label>
                 <Show when={useManualOffset()}>
                   <NumberInput
+                    label="Сдвиг уровня вручную"
                     value={manualOffset() ?? autoOffset() ?? 0}
                     onChange={(v) => setManualOffset(v)}
                     min={-30}
                     max={30}
                     step={0.5}
-                    unit="dB"
+                    unit="дБ"
                     precision={1}
                   />
                 </Show>
@@ -223,14 +236,14 @@ export default function MergeDialog(props: MergeDialogProps) {
                     checked={baffleEnabled()}
                     onChange={() => setBaffleEnabled(!baffleEnabled())}
                   />
-                  Baffle step
+                  Коррекция baffle step
                 </label>
                 <Show when={baffleEnabled()}>
                   <button
                     class="meas-action-btn"
                     onClick={() => setShowBaffleDialog(true)}
                   >
-                    Configure...
+                    Настроить…
                   </button>
                 </Show>
               </div>
@@ -256,9 +269,8 @@ export default function MergeDialog(props: MergeDialogProps) {
             {merging() ? "Слияние…" : "Слить"}
           </button>
         </div>
-      </div>
 
-      {/* Baffle step configuration dialog */}
+      {/* Baffle step configuration dialog — its own modal on top */}
       <Show when={showBaffleDialog()}>
         <BaffleStepDialog
           config={baffleConfig()}
@@ -269,6 +281,6 @@ export default function MergeDialog(props: MergeDialogProps) {
           onClose={() => setShowBaffleDialog(false)}
         />
       </Show>
-    </div>
+    </Modal>
   );
 }

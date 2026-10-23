@@ -1,5 +1,5 @@
 import { createStore, reconcile } from "solid-js/store";
-import { createSignal, batch, untrack, type Accessor } from "solid-js";
+import { createSignal, batch, untrack, createRoot, createEffect, on, type Accessor } from "solid-js";
 import type { Measurement, TargetCurve, MergeConfig, PeqBand, FirResult, WindowType, ExclusionZone, AnalysisResult, PeqOptimizedTarget, FilterConfig } from "../lib/types";
 import { MEASUREMENT_COLORS, cloneFilterConfig, withCrossoverOf, F_MIN_WORK, F_MAX_WORK } from "../lib/types";
 import {
@@ -285,6 +285,21 @@ const PRESETS: Record<PresetName, () => TargetCurve> = {
   }),
   custom: defaultTarget,
 };
+
+/** b141.105 (audit 2026-10-23 §5.6): the preset a target matches, for the
+ *  «Пресет» select — compared on the curve's shape (tilt and shelves), not on
+ *  level or crossover filters. «custom» when nothing matches. */
+export function presetOfTarget(t: TargetCurve | null | undefined): PresetName {
+  if (!t) return "flat";
+  for (const name of ["flat", "harman", "bk"] as const) {
+    const p = PRESETS[name]();
+    if (p.tilt_db_per_octave === t.tilt_db_per_octave
+      && (p.tilt_db_per_octave === 0 || p.tilt_ref_freq === t.tilt_ref_freq)
+      && JSON.stringify(p.low_shelf) === JSON.stringify(t.low_shelf ?? null)
+      && JSON.stringify(p.high_shelf) === JSON.stringify(t.high_shelf ?? null)) return name;
+  }
+  return "custom";
+}
 
 // ---------------------------------------------------------------------------
 // Store
@@ -985,6 +1000,11 @@ try { localStorage.removeItem("phaseforge.sumMode"); } catch (_) { /* ignore */ 
 // ---------------------------------------------------------------------------
 
 export const [selectedPeqIdx, setSelectedPeqIdx] = createSignal<number | null>(null);
+// b141.105 (audit 2026-10-23 §5.5): the selection is an index into the ACTIVE
+// band's PEQ list — kept across a band switch it pointed at another band's
+// filter, and the wheel then changed that filter's Q. Any change of the
+// active band (tab, delete, project load, undo) clears it.
+createRoot(() => createEffect(on(() => state.activeBandId, () => setSelectedPeqIdx(null), { defer: true })));
 export const [peqDragging, setPeqDragging] = createSignal(false);
 
 // ---------------------------------------------------------------------------

@@ -1,45 +1,23 @@
-import { createSignal, createEffect, createResource, on, onCleanup, Show } from "solid-js";
-import type { FilterType, FilterConfig, Measurement, MergeConfig, MergeResult, PeqBand, FirConfig, FirResult, WindowType, PhaseMode } from "../lib/types";
+import { createSignal, createEffect, createResource, Show } from "solid-js";
+import type { FilterType, FilterConfig, PeqBand } from "../lib/types";
 import NumberInput from "./NumberInput";
-import { MEASUREMENT_COLORS, cloneFilterConfig, F_MAX_WORK } from "../lib/types";
+import { cloneFilterConfig, F_MIN_WORK, F_MAX_WORK } from "../lib/types";
 import {
   activeBand,
   appState,
-  setActiveBand,
   toggleBandTarget,
   toggleBandInverted,
   toggleBandLinked,
   isBandLinkedFromPrev,
   setBandPreset,
+  presetOfTarget,
   setBandReferenceLevel,
   setBandTilt,
   setBandHighPass,
   setBandLowPass,
-  setBandSmoothing,
-  setBandMeasurement,
-  replaceBandMeasurement,
-  setBandDelayInfo,
-  setBandMergeSource,
-  updateBandSpliceFreq,
-  resetBandOriginalPhase,
-  markBandDelayRemoved,
-  restoreBandDelay,
-  clearBandMeasurement,
-  renameBand,
-  toggleBandFloorBounce,
-  updateBandFloorBounceField,
-  setBandFirResult,
-  setBandMeasurementFile,
-  activeTab,
-  setActiveTab,
   exportSampleRate,
-  setExportSampleRate,
   exportTaps,
-  setExportTaps,
-  exportWindow,
-  setExportWindow,
   exportHybridPhase,
-  setBandColor,
   selectedPeqIdx,
   setSelectedPeqIdx,
   addPeqBand,
@@ -48,18 +26,16 @@ import {
   removePeqBand,
   addExclusionZone,
   removeExclusionZone,
-  updateExclusionZone, setNeedAutoFit,
+  updateExclusionZone,
   peqDragging, setPeqDragging, beginInteraction, commitInteraction } from "../stores/bands";
 import { attachFieldWheel } from "../lib/wheel-step";
 import { driverName } from "../lib/fir-export";
-import type { PresetName, SmoothingMode, MergeSource, BandState } from "../stores/bands";
+import type { PresetName } from "../stores/bands";
+import { CORRECTED_COLOR, STATUS_BAD } from "../lib/plot-helpers";
 import {
-  firMaxBoost, firNoiseFloor, firIterations,
-  firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess,
-} from "../stores/bands";
-import { isGaussianMinPhase, gaussianFilterMagDb, CORRECTED_COLOR, PEQ_COLOR, STATUS_BAD } from "../lib/plot-helpers";
-import { evaluateBandFull } from "../lib/band-evaluator";
-import { orderToSlope, slopeToOrder, availableSlopes } from "../lib/slope";
+  orderToSlope, slopeToOrder, availableSlopes, clampNum,
+  FILTER_TYPE_ORDER, FILTER_TYPE_LABEL, CUSTOM_Q_MIN, CUSTOM_Q_MAX, GAUSS_M_MIN, GAUSS_M_MAX, CUSTOM_Q_HINT,
+} from "../lib/slope";
 import {
   tolerance, setTolerance,
   maxBands, setMaxBands,
@@ -74,9 +50,13 @@ import {
   peqRangeFor, formatFreq,
   handleOptimizePeq, handleClearPeq, peqStale, peqStaleReason,
 } from "../stores/peq-optimize";
-import { showStaleConfirmDialog } from "./StalePeqExportDialog";
 import { showToast } from "../lib/toast";
 import { pluralRu } from "../lib/plural";
+import { qWarnAt, peqRingCost } from "../lib/peq-quality";
+import { openHighQPopup } from "./HighQWarningPopup";
+import { invoke } from "@tauri-apps/api/core";
+import { save } from "@tauri-apps/plugin-dialog";
+import { projectDir, sanitize } from "../lib/project-io";
 
 /** b141.38: an out-of-range PEQ entry used to be dropped silently while the
  *  field kept showing it — the table and the model disagreed with no hint.
@@ -85,16 +65,25 @@ function rejectPeqInput(el: HTMLInputElement, shown: string, hint: string) {
   el.value = shown;
   showToast(hint, "warn");
 }
-import { hasActiveSubsonicProtect } from "../lib/types";
-import { qWarnAt, peqRingCost } from "../lib/peq-quality";
-import { openHighQPopup } from "./HighQWarningPopup";
-import { invoke } from "@tauri-apps/api/core";
-import { open, save } from "@tauri-apps/plugin-dialog";
-import { projectDir, projectName, copyMeasurementToProject, copyMergeFilesToProject, sanitize, yymmdd } from "../lib/project-io";
-import { handleImportMeasurement, handleMergeComplete } from "../lib/measurement-actions";
-import MergeDialog from "./MergeDialog";
 
-const FILTER_TYPES: FilterType[] = ["Butterworth", "Bessel", "LinkwitzRiley", "Gaussian", "Custom"];
+/** b141.105 (audit 2026-10-23 §5.9): the PEQ limits, one set for the table,
+ *  the «Вручную» row, typing and the wheel. */
+const PEQ_Q_MIN = 0.1;
+const PEQ_Q_MAX = 20;
+const peqGainLimits = () => (exportHybridPhase() ? { lo: -60, hi: 60 } : { lo: -18, hi: 6 });
+const fmtSigned = (v: number) => (v > 0 ? `+${v}` : `${v}`).replace("-", "−");
+const peqGainHint = () => { const l = peqGainLimits(); return `Усиление PEQ: ${fmtSigned(l.lo)}…${fmtSigned(l.hi)} дБ`; };
+const PEQ_FREQ_HINT = `Частота PEQ: 20–${F_MAX_WORK} Гц`;
+const PEQ_Q_HINT = `Q PEQ: ${PEQ_Q_MIN}–${PEQ_Q_MAX}`;
+
+/** Keyboard side of the custom span checkboxes (Lin-φ, «Без отражений»):
+ *  they stay span+onClick (WebKit spurious events on a real checkbox), with
+ *  role="checkbox" and Space/Enter (§5.15). */
+function checkboxKeys(toggle: () => void) {
+  return (e: KeyboardEvent) => {
+    if (e.key === " " || e.key === "Enter") { e.preventDefault(); toggle(); }
+  };
+}
 
 // Remember last filter config per band so toggle off→on restores settings
 const lastHP = new Map<string, import("../lib/types").FilterConfig>();
@@ -108,16 +97,12 @@ function fmtPeqFreq(f: number): string {
 }
 
 export default function ControlPanel(props: { rightPanel?: boolean }) {
-  const tab = activeTab;
-  const setTab = setActiveTab;
-  const band = () => activeBand();
-
   if (props.rightPanel) {
     // Right panel: Target + PEQ — no tabs, always visible, scrollable
     return (
       <div class="right-panel-content">
         <div class="right-panel-section">
-          <div class="right-panel-title">Target</div>
+          <div class="right-panel-title">Цель</div>
           <FiltersTab />
         </div>
         <div class="right-panel-section">
@@ -164,7 +149,9 @@ function FiltersTab() {
       if (!filePath) return;
       await invoke("export_target_txt", { freq, magnitude: response.magnitude, path: filePath });
     } catch (e) {
+      // b141.105 (§5.19): the failure only reached the console.
       console.error("Export target failed:", e);
+      showToast(`Не удалось экспортировать цель: ${e}`, "warn");
     }
   }
 
@@ -179,7 +166,7 @@ function FiltersTab() {
   const hpLinked = () => { const id = bandId(); return id ? isBandLinkedFromPrev(id) : false; };
 
   return (
-    <Show when={band()} fallback={<p class="meas-empty">Нет активного бэнда. Выберите вкладку бэнда выше.</p>}>
+    <Show when={band()} fallback={<p class="meas-empty">Нет активной полосы. Выберите вкладку полосы выше.</p>}>
       <div class="filters-row">
         {/* General */}
         <div class="filter-block">
@@ -188,23 +175,31 @@ function FiltersTab() {
             <button
               class={`fb-toggle ${enabled() ? "on" : ""}`}
               onClick={() => { const id = bandId(); if (id) toggleBandTarget(id); }}
-              title="Включить/выключить цель для этого бэнда"
-            >{enabled() ? "ON" : "OFF"}</button>
+              aria-pressed={enabled()}
+              title="Включить/выключить цель для этой полосы"
+            >{enabled() ? "Вкл" : "Выкл"}</button>
           </div>
           <div class="fb-row">
-            <label class="fb-label">Пресет</label>
+            <label class="fb-label" for="cp-preset">Пресет</label>
+            {/* b141.105 (§5.6): controlled — shows the preset the band's curve
+                matches («Свой» otherwise). Uncontrolled, it always showed
+                «Плоский», carried one band's choice to the next, and picking
+                the option it showed did nothing. */}
             <select
+              id="cp-preset"
               class="fb-select"
+              value={presetOfTarget(target())}
               onChange={(e) => {
+                const v = e.currentTarget.value as PresetName;
                 const id = bandId();
-                if (id) setBandPreset(id, e.currentTarget.value as PresetName);
+                if (id && v !== "custom") setBandPreset(id, v);
+                e.currentTarget.value = presetOfTarget(target());
               }}
             >
               <option value="flat">Плоский</option>
               <option value="harman">Harman</option>
               <option value="bk">B&K</option>
-              <option value="x-curve">X-Curve</option>
-              <option value="custom">Свой</option>
+              <option value="custom" disabled>Свой</option>
             </select>
           </div>
           <div class="fb-row">
@@ -212,7 +207,7 @@ function FiltersTab() {
             <NumberInput
               value={target()?.reference_level_db ?? 0}
               onChange={(v) => { const id = bandId(); if (id) setBandReferenceLevel(id, v); }}
-              min={-20} max={20} step={0.5} unit="dB"
+              min={-20} max={20} step={0.5} unit="дБ" label="Уровень цели"
             />
           </div>
           <div class="fb-row">
@@ -220,7 +215,7 @@ function FiltersTab() {
             <NumberInput
               value={target()?.tilt_db_per_octave ?? 0}
               onChange={(v) => { const id = bandId(); if (id) setBandTilt(id, v); }}
-              min={-6} max={6} step={0.1} unit="dB/oct"
+              min={-6} max={6} step={0.1} unit="дБ/окт" label="Наклон цели"
             />
           </div>
           <div class="fb-row">
@@ -228,6 +223,7 @@ function FiltersTab() {
             <button
               class={`fb-toggle invert-toggle ${inverted() ? "on" : ""}`}
               onClick={() => { const id = bandId(); if (id) toggleBandInverted(id); }}
+              aria-pressed={inverted()}
               title="Инверсия полярности (NOR — нормальная, INV — инвертированная)"
             >{inverted() ? "INV" : "NOR"}</button>
           </div>
@@ -276,7 +272,8 @@ function FiltersTab() {
 
 
         {/* Export Target — rightmost in the row */}
-        <button class="tb-btn tb-btn-sm" style={{ "align-self": "flex-start", "margin-left": "auto" }} onClick={handleExportTarget}>
+        <button class="tb-btn tb-btn-sm" style={{ "align-self": "flex-start", "margin-left": "auto" }} onClick={handleExportTarget}
+          title="Сохранить кривую цели в текстовый файл REW">
           Экспорт цели
         </button>
       </div>
@@ -340,7 +337,9 @@ function FilterBlock(props: FilterBlockProps) {
         <button
           class={`fb-toggle ${c() ? "on" : ""}`}
           onClick={props.onToggle}
-        >{c() ? "ON" : "OFF"}</button>
+          aria-pressed={c() != null}
+          aria-label={`${props.title}: ${c() ? "выключить" : "включить"}`}
+        >{c() ? "Вкл" : "Выкл"}</button>
       </div>
       <Show when={c()}>
         <div class="fb-grid">
@@ -348,6 +347,7 @@ function FilterBlock(props: FilterBlockProps) {
             <label class="fb-label">Тип</label>
             <select
               class="fb-select"
+              aria-label={`${props.title}: тип`}
               value={c()!.filter_type}
               onChange={(e) => {
                 const ft = e.currentTarget.value as FilterType;
@@ -363,7 +363,7 @@ function FilterBlock(props: FilterBlockProps) {
                 }
               }}
             >
-              {FILTER_TYPES.map((t) => <option value={t}>{t}</option>)}
+              {FILTER_TYPE_ORDER.map((t) => <option value={t}>{FILTER_TYPE_LABEL[t]}</option>)}
             </select>
           </div>
           <div class="fb-row">
@@ -371,7 +371,7 @@ function FilterBlock(props: FilterBlockProps) {
             <NumberInput
               value={c()!.freq_hz}
               onChange={(v) => props.onChange(withOverride({ freq_hz: v }))}
-              min={10} max={F_MAX_WORK} step={1} unit="Hz" freqMode
+              min={10} max={F_MAX_WORK} step={1} unit="Гц" freqMode label={`${props.title}: частота`}
             />
           </div>
           <Show when={!isGaussian()}>
@@ -379,6 +379,7 @@ function FilterBlock(props: FilterBlockProps) {
               <label class="fb-label">Крутизна</label>
               <select
                 class="fb-select"
+                aria-label={`${props.title}: крутизна`}
                 onChange={(e) => {
                   const slope = parseInt(e.currentTarget.value, 10);
                   const order = slopeToOrder(c()!.filter_type, slope);
@@ -391,7 +392,7 @@ function FilterBlock(props: FilterBlockProps) {
                   <option
                     value={String(s)}
                     selected={s === orderToSlope(c()!.filter_type, c()!.order)}
-                  >{`${s} dB/oct`}</option>
+                  >{`${s} дБ/окт`}</option>
                 ))}
               </select>
             </div>
@@ -402,7 +403,7 @@ function FilterBlock(props: FilterBlockProps) {
               <NumberInput
                 value={c()!.shape ?? 1.0}
                 onChange={(v) => props.onChange(withOverride({ shape: v }))}
-                min={0.5} max={10} step={0.1}
+                min={GAUSS_M_MIN} max={GAUSS_M_MAX} step={0.1} label={`${props.title}: M`}
               />
             </div>
           </Show>
@@ -412,13 +413,16 @@ function FilterBlock(props: FilterBlockProps) {
               <NumberInput
                 value={c()!.q ?? 0.707}
                 onChange={(v) => props.onChange(withOverride({ q: v }))}
-                min={0.1} max={5.0} step={0.01}
+                min={CUSTOM_Q_MIN} max={CUSTOM_Q_MAX} step={0.01} label={`${props.title}: Q`}
               />
             </div>
           </Show>
           <div class="fb-row">
             <label class="fb-label"></label>
             <span class="fb-checkbox" title="Линейная фаза (только АЧХ, без поворота фазы)"
+              role="checkbox" tabIndex={0} aria-checked={c()!.linear_phase}
+              aria-label={`${props.title}: линейная фаза`}
+              onKeyDown={checkboxKeys(() => props.onChange(withOverride({ linear_phase: !c()!.linear_phase })))}
               onClick={() => props.onChange(withOverride({ linear_phase: !c()!.linear_phase }))}>
               <span class={`fb-check-box ${c()!.linear_phase ? "checked" : ""}`} />
               <span class="fb-check-label">Lin-φ</span>
@@ -426,12 +430,12 @@ function FilterBlock(props: FilterBlockProps) {
           </div>
         </div>
         <Show when={isCustom()}>
-          <div class="fb-hint">0.50=LR · 0.58=Bsl · 0.71=BW</div>
+          <div class="fb-hint">{CUSTOM_Q_HINT}</div>
         </Show>
         <Show when={props.isHighPass && isGaussian()}>
           <div class="subsonic-protect-row">
             <label
-              title="Минимально-фазовый Butterworth 48 dB/oct на 3 октавы ниже ФВЧ. Защищает динамик от излишнего хода диффузора в инфразвуке."
+              title="Минимально-фазовый Butterworth 48 дБ/окт на 3 октавы ниже ФВЧ. Защищает динамик от излишнего хода диффузора в инфразвуке."
               style={{ display: "flex", "align-items": "center", gap: "6px", cursor: c()!.freq_hz > 40 ? "pointer" : "not-allowed" }}
             >
               <input
@@ -446,7 +450,7 @@ function FilterBlock(props: FilterBlockProps) {
               <span>Защитный инфразвуковой фильтр</span>
             </label>
             <Show when={c()!.freq_hz <= 40}>
-              <span class="hint" title="HP слишком низкий, защита не требуется">⊘</span>
+              <span class="hint" title="ФВЧ слишком низко, защита не требуется">⊘</span>
             </Show>
             <Show when={c()!.subsonic_protect === false && c()!.freq_hz > 40}>
               <div class="warn">⚠ Защита отключена, риск перегруза диффузора на инфразвуке</div>
@@ -498,6 +502,74 @@ function PeqTab() {
     return b ? peqStale(b) : false;
   };
 
+  /** b141.105 (audit 2026-10-23 §5.8): «От»/«До» of an exclusion zone. A
+   *  value below 20 Hz was dropped while the field kept showing it, and
+   *  От ≥ До went through. Out-of-range input is clamped, a reversed zone
+   *  rejected; the field always ends up showing the model. */
+  function commitZone(el: HTMLInputElement, i: number, field: "startHz" | "endHz") {
+    const b = band();
+    const z = b?.exclusionZones?.[i];
+    if (!b || !z) return;
+    const shown = String(Math.round(z[field]));
+    const v = parseFloat(el.value);
+    if (!Number.isFinite(v)) { rejectPeqInput(el, shown, "Зона исключения: введите частоту в Гц"); return; }
+    const c = Math.round(clampNum(v, F_MIN_WORK, F_MAX_WORK));
+    const start = field === "startHz" ? c : z.startHz;
+    const end = field === "endHz" ? c : z.endHz;
+    if (start >= end) { rejectPeqInput(el, shown, "Зона исключения: «От» должно быть меньше «До»"); return; }
+    el.value = String(c);
+    if (c !== v) showToast(`Зона исключения: ${F_MIN_WORK}–${F_MAX_WORK} Гц`, "warn");
+    if (c !== Math.round(z[field])) updateExclusionZone(b.id, i, { [field]: c });
+  }
+
+  /** One commit rule for a typed PEQ value — table rows and the «Вручную»
+   *  row alike (§5.9): frequency and Q out of range are rejected, gain is
+   *  clamped to the mode's limits; the field shows the model afterwards. */
+  function commitPeqField(el: HTMLInputElement, i: number, field: "freq_hz" | "gain_db" | "q") {
+    const bd = band();
+    const cur: PeqBand | undefined = bd?.peqBands[i];
+    if (!bd || !cur) return;
+    const v = parseFloat(el.value);
+    if (field === "freq_hz") {
+      if (Number.isFinite(v) && v >= 20 && v <= F_MAX_WORK) updatePeqBand(bd.id, i, { freq_hz: v });
+      else rejectPeqInput(el, fmtPeqFreq(cur.freq_hz), PEQ_FREQ_HINT);
+    } else if (field === "gain_db") {
+      if (!Number.isFinite(v)) { rejectPeqInput(el, cur.gain_db.toFixed(1), peqGainHint()); return; }
+      const { lo, hi } = peqGainLimits();
+      const g = clampNum(v, lo, hi);
+      if (g !== v) rejectPeqInput(el, g.toFixed(1), peqGainHint());
+      updatePeqBand(bd.id, i, { gain_db: g });
+    } else {
+      if (Number.isFinite(v) && v >= PEQ_Q_MIN && v <= PEQ_Q_MAX) updatePeqBand(bd.id, i, { q: v });
+      else rejectPeqInput(el, cur.q.toFixed(2), PEQ_Q_HINT);
+    }
+  }
+
+  // b141.43: shared wheel model — steps accumulate (trackpad), the field must
+  // have been clicked, and a gesture runs as one PEQ interaction: fast chart
+  // update, one undo entry, full rebuild when it ends. Same limits as typing.
+  const peqWheel = (idx: () => number, field: "freq_hz" | "gain_db" | "q") => (el: HTMLInputElement) => attachFieldWheel(el, {
+    onSteps: (steps, coarse) => {
+      const i = idx();
+      const bd = band(); const cur = bd?.peqBands[i]; if (!bd || !cur) return;
+      if (!peqDragging()) { beginInteraction("PEQ wheel"); setPeqDragging(true); }
+      const dir = Math.sign(steps); const n = Math.abs(steps); const mult = coarse ? 10 : 1;
+      if (field === "freq_hz") {
+        let f = cur.freq_hz;
+        for (let k = 0; k < n; k++) f = clampNum(f + dir * Math.max(1, Math.round(f * 0.02)) * mult, 20, F_MAX_WORK);
+        updatePeqBand(bd.id, i, { freq_hz: f });
+      } else if (field === "gain_db") {
+        const { lo, hi } = peqGainLimits();
+        const g = clampNum(Math.round((cur.gain_db + steps * 0.1 * mult) * 10) / 10, lo, hi);
+        updatePeqBand(bd.id, i, { gain_db: g });
+      } else {
+        const q = clampNum(Math.round((cur.q + steps * 0.1 * mult) * 10) / 10, PEQ_Q_MIN, PEQ_Q_MAX);
+        updatePeqBand(bd.id, i, { q });
+      }
+    },
+    onEnd: () => { if (peqDragging()) { setPeqDragging(false); commitInteraction(); } },
+  });
+
   return (
     <div
       class="peq-tab-content"
@@ -524,16 +596,18 @@ function PeqTab() {
         <div class="peq-exclusion-section">
           <div class="peq-sidebar-header">
             <span class="fb-title" style={{ "font-size": "var(--fs-base)" }}>Исключить</span>
-            <button class="peq-add-btn" onClick={() => { const b = band(); if (b) addExclusionZone(b.id, { startHz: 100, endHz: 200 }); }} title="Добавить зону исключения">+</button>
+            <button class="peq-add-btn" onClick={() => { const b = band(); if (b) addExclusionZone(b.id, { startHz: 100, endHz: 200 }); }} title="Добавить зону исключения" aria-label="Добавить зону исключения">+</button>
           </div>
           <Show when={(band()?.exclusionZones?.length ?? 0) > 0}>
             <table class="peq-table peq-excl-table">
-              <thead><tr><th>От</th><th>До</th><th></th></tr></thead>
+              <thead><tr><th>От, Гц</th><th>До, Гц</th><th></th></tr></thead>
               <tbody>
                 {(band()?.exclusionZones ?? []).map((z, i) => (
                   <tr>
-                    <td><input class="peq-input" type="number" value={Math.round(z.startHz)} min={20} max={F_MAX_WORK} step={1} onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v) && v >= 20) { const b = band(); if (b) updateExclusionZone(b.id, i, { startHz: v }); } }} /></td>
-                    <td><input class="peq-input" type="number" value={Math.round(z.endHz)} min={20} max={F_MAX_WORK} step={1} onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v) && v >= 20) { const b = band(); if (b) updateExclusionZone(b.id, i, { endHz: v }); } }} /></td>
+                    <td><input class="peq-input" type="number" value={Math.round(z.startHz)} min={F_MIN_WORK} max={F_MAX_WORK} step={1}
+                      aria-label={`Зона ${i + 1}: от, Гц`} onChange={(e) => commitZone(e.currentTarget, i, "startHz")} /></td>
+                    <td><input class="peq-input" type="number" value={Math.round(z.endHz)} min={F_MIN_WORK} max={F_MAX_WORK} step={1}
+                      aria-label={`Зона ${i + 1}: до, Гц`} onChange={(e) => commitZone(e.currentTarget, i, "endHz")} /></td>
                     <td><button class="peq-remove" onClick={() => { const b = band(); if (b) removeExclusionZone(b.id, i); }} aria-label="Удалить зону исключения" title="Удалить зону исключения">×</button></td>
                   </tr>
                 ))}
@@ -554,21 +628,23 @@ function PeqTab() {
               addPeqBand(b.id, { freq_hz: 1000, gain_db: 0, q: 2.0, enabled: true, filter_type: "Peaking" });
               setPendingPeqIdx(0); setSelectedPeqIdx(0);
             }
-          }} title="Добавить PEQ-фильтр вручную">+</button>
+          }} title="Добавить PEQ-фильтр вручную" aria-label="Добавить PEQ-фильтр вручную">+</button>
         </div>
         <Show when={pendingPeqIdx() != null && peqBands().length > 0}>
           {(() => {
             const pi = pendingPeqIdx()!;
-            const pb = peqBands()[pi];
-            if (!pb) return null;
+            const pb = () => peqBands()[pi];
+            if (!pb()) return null;
+            // b141.105 (§5.9): same limits as the table (gain ±60 was accepted
+            // in Standard) and the same wheel.
             return (
               <table class="peq-table"><tbody>
                 <tr class="peq-row-pending peq-row-selected" onClick={() => setSelectedPeqIdx(pi)}>
-                  <td><input type="checkbox" class="peq-toggle" checked={pb.enabled} onChange={() => { const bd = band(); if (bd) updatePeqBand(bd.id, pi, { enabled: !pb.enabled }); }} /></td>
-                  <td><select class="peq-type-select" value={pb.filter_type} onChange={(e) => { const bd = band(); if (bd) updatePeqBand(bd.id, pi, { filter_type: e.currentTarget.value as any }); }}><option value="Peaking">PK</option><option value="LowShelf">LS</option><option value="HighShelf">HS</option></select></td>
-                  <td><input class="peq-input" type="number" value={Math.round(pb.freq_hz)} min={20} max={F_MAX_WORK} step={1} onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v) && v >= 20 && v <= F_MAX_WORK) { const bd = band(); if (bd) updatePeqBand(bd.id, pi, { freq_hz: v }); } else rejectPeqInput(e.currentTarget, String(Math.round(pb.freq_hz)), `Частота PEQ: 20–${F_MAX_WORK} Hz`); }} /></td>
-                  <td><input class={`peq-input ${pb.gain_db > 0 ? "peq-boost" : "peq-cut"}`} type="number" value={pb.gain_db.toFixed(1)} min={-60} max={60} step={0.1} onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v)) { const bd = band(); if (bd) updatePeqBand(bd.id, pi, { gain_db: v }); } else rejectPeqInput(e.currentTarget, pb.gain_db.toFixed(1), "Усиление PEQ: введите число"); }} /></td>
-                  <td><input class="peq-input" type="number" value={pb.q.toFixed(1)} min={0.1} max={20} step={0.1} onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v) && v >= 0.1 && v <= 20) { const bd = band(); if (bd) updatePeqBand(bd.id, pi, { q: v }); } else rejectPeqInput(e.currentTarget, pb.q.toFixed(1), "Q PEQ: 0.1–20"); }} /></td>
+                  <td><input type="checkbox" class="peq-toggle" checked={pb()!.enabled} aria-label="Фильтр включён" onChange={() => { const bd = band(); if (bd) updatePeqBand(bd.id, pi, { enabled: !pb()!.enabled }); }} /></td>
+                  <td><select class="peq-type-select" value={pb()!.filter_type} aria-label="Тип фильтра" onChange={(e) => { const bd = band(); if (bd) updatePeqBand(bd.id, pi, { filter_type: e.currentTarget.value as any }); }}><option value="Peaking">PK</option><option value="LowShelf">LS</option><option value="HighShelf">HS</option></select></td>
+                  <td><input class="peq-input" type="number" value={fmtPeqFreq(pb()!.freq_hz)} min={20} max={F_MAX_WORK} step={1} ref={peqWheel(() => pi, "freq_hz")} aria-label="Частота, Гц" onChange={(e) => commitPeqField(e.currentTarget, pi, "freq_hz")} /></td>
+                  <td><input class={`peq-input ${pb()!.gain_db > 0 ? "peq-boost" : "peq-cut"}`} type="number" value={pb()!.gain_db.toFixed(1)} min={peqGainLimits().lo} max={peqGainLimits().hi} step={0.1} ref={peqWheel(() => pi, "gain_db")} aria-label="Усиление, дБ" onChange={(e) => commitPeqField(e.currentTarget, pi, "gain_db")} /></td>
+                  <td><input class="peq-input" type="number" value={pb()!.q.toFixed(2)} min={PEQ_Q_MIN} max={PEQ_Q_MAX} step={0.1} ref={peqWheel(() => pi, "q")} aria-label="Добротность Q" onChange={(e) => commitPeqField(e.currentTarget, pi, "q")} /></td>
                   <td><button class="peq-commit" aria-label="Добавить фильтр" title="Добавить фильтр" onClick={() => { const bd = band(); if (bd) { const ni = commitPeqBand(bd.id, pi); setPendingPeqIdx(null); setSelectedPeqIdx(ni); } }}>✓</button></td>
                 </tr>
               </tbody></table>
@@ -584,83 +660,70 @@ function PeqTab() {
             <span class="fb-title" style={{ "font-size": "var(--fs-base)" }}>Авто-оптимизатор</span>
           </div>
           <div class="peq-grid">
-            <div class="fb-row"><label class="fb-label">Допуск</label><NumberInput value={tolerance()} onChange={setTolerance} min={0.5} max={3.0} step={0.1} unit="dB" /></div>
-            <div class="fb-row"><label class="fb-label">Макс. фильтров</label><NumberInput value={maxBands()} onChange={(v: number) => setMaxBands(Math.round(v))} min={1} max={60} step={1} precision={0} /></div>
-            <div class="fb-row"><label class="fb-label">Регуляризация</label><NumberInput value={gainRegularization()} onChange={setGainRegularization} min={0} max={1} step={0.0001} precision={4} /></div>
+            <div class="fb-row"><label class="fb-label">Допуск</label><NumberInput value={tolerance()} onChange={setTolerance} min={0.5} max={3.0} step={0.1} unit="дБ" label="Допуск" /></div>
+            <div class="fb-row"><label class="fb-label">Макс. фильтров</label><NumberInput value={maxBands()} onChange={(v: number) => setMaxBands(Math.round(v))} min={1} max={60} step={1} precision={0} label="Макс. фильтров" /></div>
+            {/* b141.105 (§5.19): step 0.001 — a 0.0001 step moved nothing visible per click */}
+            <div class="fb-row"><label class="fb-label">Регуляризация</label><NumberInput value={gainRegularization()} onChange={setGainRegularization} min={0} max={1} step={0.001} precision={4} label="Регуляризация" /></div>
             <div class="fb-row">
-              <label class="fb-label">Диапазон</label>
-              <select class="peq-range-select" value={peqRangeMode()} onChange={(e) => setPeqRangeMode(e.currentTarget.value as "auto" | "direct")}><option value="auto">Авто</option><option value="direct">Заданный</option></select>
+              <label class="fb-label" for="cp-peq-range">Диапазон</label>
+              <select id="cp-peq-range" class="peq-range-select" value={peqRangeMode()} onChange={(e) => setPeqRangeMode(e.currentTarget.value as "auto" | "direct")}><option value="auto">Авто</option><option value="direct">Заданный</option></select>
             </div>
             {/* b141.89: own row — beside the buttons it pushed them out of the 280 px panel */}
             <div class="fb-row">
               <label class="fb-label">Замер</label>
-              <span class="fb-checkbox" title="Подгонять PEQ по сглаженному замеру (1/48 окт. ниже 100 Hz, 1/3 выше) — не гнаться за мелкими пульсациями от отражений"
+              <span class="fb-checkbox" title="Подгонять PEQ по сглаженному замеру (1/48 окт. ниже 100 Гц, 1/3 выше) — не гнаться за мелкими пульсациями от отражений"
+                role="checkbox" tabIndex={0} aria-checked={peqSmoothFit()}
+                onKeyDown={checkboxKeys(() => setPeqSmoothFit(!peqSmoothFit()))}
                 onClick={() => setPeqSmoothFit(!peqSmoothFit())}>
                 <span class={`fb-check-box ${peqSmoothFit() ? "checked" : ""}`} />
                 <span class="fb-check-label">Без отражений</span>
               </span>
             </div>
-            <div class="fb-row"><label class="fb-label" title="Не ставить PEQ там, где цель на столько dB ниже опорного уровня (в обоих режимах диапазона)">Порог dB</label><NumberInput value={peqFloor()} onChange={setPeqFloor} min={0} max={120} step={1} precision={0} /></div>
-            <div class="fb-row"><label class="fb-label" title="Подъём PEQ только там, где цель не ниже опорного уровня на столько dB; глубже — только подавление (0 — без ограничения)">Подъём до dB</label><NumberInput value={peqBoostFloor()} onChange={setPeqBoostFloor} min={0} max={120} step={1} precision={0} /></div>
+            <div class="fb-row"><label class="fb-label" title="Не ставить PEQ там, где цель на столько дБ ниже опорного уровня (в обоих режимах диапазона)">Порог, дБ</label><NumberInput value={peqFloor()} onChange={setPeqFloor} min={0} max={120} step={1} precision={0} label="Порог, дБ" /></div>
+            <div class="fb-row"><label class="fb-label" title="Подъём PEQ только там, где цель не ниже опорного уровня на столько дБ; глубже — только подавление (0 — без ограничения)">Подъём до, дБ</label><NumberInput value={peqBoostFloor()} onChange={setPeqBoostFloor} min={0} max={120} step={1} precision={0} label="Подъём до, дБ" /></div>
             {/* b141.90: one Hz row — the auto range as text (it sat beside the
                 buttons), editable fields in «Заданный». */}
             {peqRangeMode() === "direct" ? (
-              <div class="fb-row"><label class="fb-label">Hz</label><NumberInput value={peqDirectLow()} onChange={setPeqDirectLow} min={20} max={F_MAX_WORK} step={10} precision={0} /><span style={{ margin: "0 var(--space-xxs)", color: "#8b8b96" }}>–</span><NumberInput value={peqDirectHigh()} onChange={setPeqDirectHigh} min={20} max={F_MAX_WORK} step={10} precision={0} /></div>
+              <div class="fb-row"><label class="fb-label">Гц</label><NumberInput value={peqDirectLow()} onChange={setPeqDirectLow} min={20} max={F_MAX_WORK} step={10} precision={0} label="Диапазон от, Гц" /><span class="range-dash">–</span><NumberInput value={peqDirectHigh()} onChange={setPeqDirectHigh} min={20} max={F_MAX_WORK} step={10} precision={0} label="Диапазон до, Гц" /></div>
             ) : (
-              <div class="fb-row"><label class="fb-label">Hz</label><span class="align-range-info">{autoPeqRange() ? `${formatFreq(autoPeqRange()![0])}\u2013${formatFreq(autoPeqRange()![1])}` : "—"}</span></div>
+              <div class="fb-row"><label class="fb-label">Гц</label><span class="align-range-info">{autoPeqRange() ? `${formatFreq(autoPeqRange()![0])}–${formatFreq(autoPeqRange()![1])}` : "—"}</span></div>
             )}
           </div>
           <div class="peq-buttons-row">
-            <button class="tb-btn primary" onClick={handleOptimizePeq} disabled={computing()}>{computing() ? "..." : "Оптимизировать"}</button>
+            {/* b141.105 (§5.19): both labels share one grid cell — the button
+                keeps its width and says what it does while computing (it
+                collapsed to «...»). */}
+            <button class="tb-btn primary" onClick={handleOptimizePeq} disabled={computing()} aria-busy={computing()}>
+              <span class="btn-label-stack">
+                <span classList={{ "btn-label-off": computing() }}>Оптимизировать</span>
+                <span classList={{ "btn-label-off": !computing() }}>Оптимизация…</span>
+              </span>
+            </button>
             <Show when={peqBands().length > 0}><button class="tb-btn" onClick={handleClearPeq}>Очистить</button></Show>
           </div>
           <Show when={peqError()}><div class="align-error">{peqError()}</div></Show>
           <Show when={peqBands().length > 0}>
             <div class="align-status">
               {peqBands().length} {pluralRu(peqBands().length, "фильтр", "фильтра", "фильтров")}
-              {maxErr() != null ? ` \u00B7 макс. ошибка ${maxErr()!.toFixed(1)} dB` : ""}
-              {iters() != null ? ` \u00B7 ${iters()} ${pluralRu(iters()!, "итерация", "итерации", "итераций")}` : ""}
+              {maxErr() != null ? ` · макс. ошибка ${maxErr()!.toFixed(1)} дБ` : ""}
+              {iters() != null ? ` · ${iters()} ${pluralRu(iters()!, "итерация", "итерации", "итераций")}` : ""}
             </div>
           </Show>
           <Show when={peqBands().length > 0}>
             <div class="peq-sidebar-table-scroll">
               <table class="peq-table">
-                <thead><tr><th></th><th>Тип</th><th>Hz</th><th>dB</th><th>Q</th><th title="Время звона фильтра: за сколько мс его резонанс затухает до −60 dB">мс</th><th></th><th></th></tr></thead>
+                <thead><tr><th></th><th>Тип</th><th>Гц</th><th>дБ</th><th>Q</th><th title="Время звона фильтра: за сколько мс его резонанс затухает до −60 дБ">мс</th><th></th><th></th></tr></thead>
                 <tbody>
                   {peqBands().map((b, i) => {
                     const isPending = pendingPeqIdx() === i;
-                    // b141.43: shared wheel model — steps accumulate (trackpad), the
-                    // field must have been clicked, and a gesture runs as one PEQ
-                    // interaction: fast chart update, one undo entry, full rebuild
-                    // when it ends. Gain is clamped to the same range as typing.
-                    const peqWheel = (field: "freq_hz" | "gain_db" | "q") => (el: HTMLInputElement) => attachFieldWheel(el, {
-                      onSteps: (steps, coarse) => {
-                        const bd = band(); const cur = bd?.peqBands[i]; if (!bd || !cur) return;
-                        if (!peqDragging()) { beginInteraction("PEQ wheel"); setPeqDragging(true); }
-                        const dir = Math.sign(steps); const n = Math.abs(steps); const mult = coarse ? 10 : 1;
-                        if (field === "freq_hz") {
-                          let f = cur.freq_hz;
-                          for (let k = 0; k < n; k++) f = Math.max(20, Math.min(F_MAX_WORK, f + dir * Math.max(1, Math.round(f * 0.02)) * mult));
-                          updatePeqBand(bd.id, i, { freq_hz: f });
-                        } else if (field === "gain_db") {
-                          const lim = exportHybridPhase() ? 60 : 18; const hi = exportHybridPhase() ? 60 : 6;
-                          const g = Math.max(-lim, Math.min(hi, Math.round((cur.gain_db + steps * 0.1 * mult) * 10) / 10));
-                          updatePeqBand(bd.id, i, { gain_db: g });
-                        } else {
-                          const q = Math.max(0.1, Math.min(20, Math.round((cur.q + steps * 0.1 * mult) * 10) / 10));
-                          updatePeqBand(bd.id, i, { q });
-                        }
-                      },
-                      onEnd: () => { if (peqDragging()) { setPeqDragging(false); commitInteraction(); } },
-                    });
                     return (
                       <tr class={`${selectedPeqIdx() === i ? "peq-row-selected" : ""} ${isPending ? "peq-row-pending" : ""} ${!b.enabled ? "peq-row-disabled" : ""}`}
                         onClick={() => setSelectedPeqIdx(selectedPeqIdx() === i ? null : i)}>
-                        <td><input type="checkbox" class="peq-toggle" checked={b.enabled} onChange={(e) => { e.stopPropagation(); const bd = band(); if (bd) updatePeqBand(bd.id, i, { enabled: !b.enabled }); }} onClick={(e) => e.stopPropagation()} /></td>
-                        <td><select class="peq-type-select" value={b.filter_type ?? "Peaking"} onChange={(e) => { e.stopPropagation(); const bd = band(); if (bd) updatePeqBand(bd.id, i, { filter_type: e.currentTarget.value as any }); }} onClick={(e) => e.stopPropagation()}><option value="Peaking">PK</option><option value="LowShelf">LS</option><option value="HighShelf">HS</option></select></td>
-                        <td><input class="peq-input" type="number" value={fmtPeqFreq(b.freq_hz)} min={20} max={F_MAX_WORK} step={1} ref={peqWheel("freq_hz")} onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v) && v >= 20 && v <= F_MAX_WORK) { const bd = band(); if (bd) updatePeqBand(bd.id, i, { freq_hz: v }); } else rejectPeqInput(e.currentTarget, fmtPeqFreq(b.freq_hz), `Частота PEQ: 20–${F_MAX_WORK} Hz`); }} /></td>
-                        <td><input class={`peq-input ${b.gain_db > 0 ? "peq-boost" : "peq-cut"}`} type="number" value={b.gain_db.toFixed(1)} min={exportHybridPhase() ? -60 : -18} max={exportHybridPhase() ? 60 : 6} step={0.1} ref={peqWheel("gain_db")} onChange={(e) => { const v = parseFloat(e.currentTarget.value); const lim = exportHybridPhase() ? 60 : 18; const hi = exportHybridPhase() ? 60 : 6; if (isNaN(v)) { rejectPeqInput(e.currentTarget, b.gain_db.toFixed(1), `Усиление PEQ: −${lim}…+${hi} dB`); return; } const g = Math.max(-lim, Math.min(hi, v)); if (g !== v) rejectPeqInput(e.currentTarget, g.toFixed(1), `Усиление PEQ: −${lim}…+${hi} dB`); const bd = band(); if (bd) updatePeqBand(bd.id, i, { gain_db: g }); }} /></td>
-                        <td><input class="peq-input" type="number" value={b.q.toFixed(2)} min={0.1} max={20} step={0.1} ref={peqWheel("q")} onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!isNaN(v) && v >= 0.1 && v <= 20) { const bd = band(); if (bd) updatePeqBand(bd.id, i, { q: v }); } else rejectPeqInput(e.currentTarget, b.q.toFixed(2), "Q PEQ: 0.1–20"); }} /></td>
+                        <td><input type="checkbox" class="peq-toggle" checked={b.enabled} aria-label={`Фильтр ${i + 1} включён`} onChange={(e) => { e.stopPropagation(); const bd = band(); if (bd) updatePeqBand(bd.id, i, { enabled: !b.enabled }); }} onClick={(e) => e.stopPropagation()} /></td>
+                        <td><select class="peq-type-select" value={b.filter_type ?? "Peaking"} aria-label={`Фильтр ${i + 1}: тип`} onChange={(e) => { e.stopPropagation(); const bd = band(); if (bd) updatePeqBand(bd.id, i, { filter_type: e.currentTarget.value as any }); }} onClick={(e) => e.stopPropagation()}><option value="Peaking">PK</option><option value="LowShelf">LS</option><option value="HighShelf">HS</option></select></td>
+                        <td><input class="peq-input" type="number" value={fmtPeqFreq(b.freq_hz)} min={20} max={F_MAX_WORK} step={1} ref={peqWheel(() => i, "freq_hz")} aria-label={`Фильтр ${i + 1}: частота, Гц`} onChange={(e) => commitPeqField(e.currentTarget, i, "freq_hz")} /></td>
+                        <td><input class={`peq-input ${b.gain_db > 0 ? "peq-boost" : "peq-cut"}`} type="number" value={b.gain_db.toFixed(1)} min={peqGainLimits().lo} max={peqGainLimits().hi} step={0.1} ref={peqWheel(() => i, "gain_db")} aria-label={`Фильтр ${i + 1}: усиление, дБ`} onChange={(e) => commitPeqField(e.currentTarget, i, "gain_db")} /></td>
+                        <td><input class="peq-input" type="number" value={b.q.toFixed(2)} min={PEQ_Q_MIN} max={PEQ_Q_MAX} step={0.1} ref={peqWheel(() => i, "q")} aria-label={`Фильтр ${i + 1}: Q`} onChange={(e) => commitPeqField(e.currentTarget, i, "q")} /></td>
                         {(() => {
                           // b141.93: time cost of this filter — its ringing to −60 dB.
                           // Red when the tail to −100 dB is longer than half the file:
@@ -670,7 +733,7 @@ function PeqTab() {
                           const cls = () => !b.enabled ? "" : rc().ms100 > halfMs() ? "peq-ring-bad" : rc().ms60 >= 150 ? "peq-ring-warn" : "";
                           return (
                             <td class={`peq-ring ${cls()}`}
-                              title={`Звон до −60 dB: ${Math.round(rc().ms60)} мс, до −100 dB: ${Math.round(rc().ms100)} мс. Половина файла: ${Math.round(halfMs())} мс — если хвост длиннее, экспорт сдвинет задержку полосы.`}>
+                              title={`Звон до −60 дБ: ${Math.round(rc().ms60)} мс, до −100 дБ: ${Math.round(rc().ms100)} мс. Половина файла: ${Math.round(halfMs())} мс — если хвост длиннее, экспорт сдвинет задержку полосы.`}>
                               {Math.abs(b.gain_db) < 0.05 ? "" : Math.round(rc().ms60)}
                             </td>
                           );

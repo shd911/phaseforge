@@ -2,8 +2,12 @@ import { createSignal, Show } from "solid-js";
 import { F_MIN_WORK, F_MAX_WORK } from "../lib/types";
 import type { FilterConfig, FilterType } from "../lib/types";
 import { appState, setBandLowPass } from "../stores/bands";
-import { availableSlopes, orderToSlope, slopeToOrder } from "../lib/slope";
-import { handleDialogKeys } from "../lib/dialog-keys";
+import {
+  availableSlopes, orderToSlope, slopeToOrder, clampNum,
+  FILTER_TYPE_ORDER, FILTER_TYPE_LABEL, CUSTOM_Q_MIN, CUSTOM_Q_MAX, GAUSS_M_MIN, GAUSS_M_MAX, CUSTOM_Q_HINT,
+} from "../lib/slope";
+import NumField from "./NumField";
+import Modal from "./Modal";
 
 export interface CrossoverDialogData {
   bandIndex: number;   // index of band with LP filter
@@ -62,9 +66,14 @@ export default function CrossoverDialog() {
       filter_type: filterType(),
       order: order(),
       freq_hz: Math.round(freq()),
-      shape: isGaussian() ? shape() : null,
-      linear_phase: isGaussian() ? true : linearPhase(),
-      q: isCustom() ? customQ() : null,
+      // b141.105 (§5.7): M and Q are clamped like the filter block clamps them.
+      shape: isGaussian() ? clampNum(shape(), GAUSS_M_MIN, GAUSS_M_MAX) : null,
+      // b141.105 (§5.21): the checkbox is honoured for Gaussian too. Forcing
+      // linear phase dates from b51, before Gaussian min-phase existed (b97):
+      // «Применить» silently turned a min-phase Gaussian crossover — and the
+      // linked HP of the next band — linear-phase.
+      linear_phase: linearPhase(),
+      q: isCustom() ? clampNum(customQ(), CUSTOM_Q_MIN, CUSTOM_Q_MAX) : null,
     };
 
     // Set LP on the band — propagation handles the HP on the next band
@@ -76,17 +85,9 @@ export default function CrossoverDialog() {
     closeCrossoverDialog();
   }
 
-  function handleKeyDown(e: KeyboardEvent) {
-    handleDialogKeys(e, { onEnter: handleApply, onEscape: handleCancel });
-  }
-
   // b141.38: `parseFloat(v) || 0` rewrote a cleared field to 0 on the first
-  // Backspace. An unparsable draft leaves the value alone (freq goes NaN so
-  // Apply stays disabled and the hint explains why).
-  const finite = (v: string): number | null => {
-    const n = parseFloat(v);
-    return Number.isFinite(n) ? n : null;
-  };
+  // Backspace. An unparsable frequency goes NaN so Apply stays disabled and
+  // the hint explains why; M and Q keep their previous value (NumField).
 
   // 2026-09-05 audit: this dialog showed a raw "order" while the filter
   // block shows dB/oct for the same filter (LR order 2 = 24 dB/oct) and
@@ -99,36 +100,28 @@ export default function CrossoverDialog() {
       return d;
     })()}>
       {(data) => (
-        <div class="xo-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) handleCancel(); }} onKeyDown={handleKeyDown}>
-          <div class="xo-dialog">
-            <div class="xo-title">
+        <Modal overlayClass="xo-overlay" dialogClass="xo-dialog" titleId="xo-dlg-title"
+          onEnter={handleApply} onEscape={handleCancel}>
+            <div class="xo-title" id="xo-dlg-title">
               Кроссовер: {data().bandName} / {data().nextBandName}
             </div>
 
             <div class="xo-row">
-              <span class="xo-label">Частота</span>
-              <input
-                ref={(el) => requestAnimationFrame(() => { el.focus(); el.select(); })}
-                class="xo-input"
-                type="number"
-                min="20"
-                max={F_MAX_WORK}
-                step="1"
-                value={freq()}
-                onInput={(e) => setFreq(finite(e.currentTarget.value) ?? NaN)}
-                onKeyDown={handleKeyDown}
-              />
-              <span class="xo-unit">Hz</span>
+              <label class="xo-label" for="xo-freq">Частота</label>
+              <NumField id="xo-freq" autofocus value={freq()} onChange={setFreq} invalidAsNaN
+                min={F_MIN_WORK} max={F_MAX_WORK} step={1} />
+              <span class="xo-unit">Гц</span>
             </div>
             <Show when={!freqValid()}>
               <div class="xo-hint" style={{ color: "var(--warn-amber-text)" }}>
-                Частота: {F_MIN_WORK}–{F_MAX_WORK} Hz
+                Частота: {F_MIN_WORK}–{F_MAX_WORK} Гц
               </div>
             </Show>
 
             <div class="xo-row">
-              <span class="xo-label">Тип</span>
+              <label class="xo-label" for="xo-type">Тип</label>
               <select
+                id="xo-type"
                 class="xo-select"
                 value={filterType()}
                 onChange={(e) => {
@@ -149,25 +142,22 @@ export default function CrossoverDialog() {
                   }
                 }}
               >
-                <option value="LinkwitzRiley">Linkwitz-Riley</option>
-                <option value="Butterworth">Butterworth</option>
-                <option value="Bessel">Bessel</option>
-                <option value="Gaussian">Gaussian</option>
-                <option value="Custom">Произвольный Q</option>
+                {FILTER_TYPE_ORDER.map((t) => <option value={t}>{FILTER_TYPE_LABEL[t]}</option>)}
               </select>
             </div>
 
             {/* Order — for non-Gaussian types */}
             <Show when={!isGaussian()}>
               <div class="xo-row">
-                <span class="xo-label">Крутизна</span>
+                <label class="xo-label" for="xo-slope">Крутизна</label>
                 <select
+                  id="xo-slope"
                   class="xo-select"
                   value={orderToSlope(filterType(), order())}
                   onChange={(e) => setOrder(slopeToOrder(filterType(), parseInt(e.currentTarget.value, 10)))}
                 >
                   {availableSlopes(filterType()).map((s) => (
-                    <option value={s}>{`${s} dB/oct`}</option>
+                    <option value={s}>{`${s} дБ/окт`}</option>
                   ))}
                 </select>
               </div>
@@ -176,38 +166,20 @@ export default function CrossoverDialog() {
             {/* M (shape) — only for Gaussian */}
             <Show when={isGaussian()}>
               <div class="xo-row">
-                <span class="xo-label">M</span>
-                <input
-                  class="xo-input"
-                  type="number"
-                  min="0.5"
-                  max="10"
-                  step="0.1"
-                  value={shape()}
-                  onInput={(e) => { const n = finite(e.currentTarget.value); if (n != null) setShape(n); }}
-                  onKeyDown={handleKeyDown}
-                />
+                <label class="xo-label" for="xo-m">M</label>
+                <NumField id="xo-m" value={shape()} onChange={setShape}
+                  min={GAUSS_M_MIN} max={GAUSS_M_MAX} step={0.1} />
               </div>
             </Show>
 
             {/* Q — only for Custom */}
             <Show when={isCustom()}>
               <div class="xo-row">
-                <span class="xo-label">Q</span>
-                <input
-                  class="xo-input"
-                  type="number"
-                  min="0.1"
-                  max="20"
-                  step="0.01"
-                  value={customQ()}
-                  onInput={(e) => { const n = finite(e.currentTarget.value); if (n != null) setCustomQ(n); }}
-                  onKeyDown={handleKeyDown}
-                />
+                <label class="xo-label" for="xo-q">Q</label>
+                <NumField id="xo-q" value={customQ()} onChange={setCustomQ}
+                  min={CUSTOM_Q_MIN} max={CUSTOM_Q_MAX} step={0.01} />
               </div>
-              <div class="xo-hint">
-                0.500 = LR · 0.577 = Bessel · 0.707 = BW · &gt;0.707 = резонанс
-              </div>
+              <div class="xo-hint">{CUSTOM_Q_HINT}</div>
             </Show>
 
             <div class="xo-checkbox">
@@ -226,8 +198,7 @@ export default function CrossoverDialog() {
               <button class="dlg-btn" onClick={handleCancel}>Отмена</button>
               <button class="dlg-btn dlg-btn-primary" onClick={handleApply} disabled={!freqValid()}>Применить</button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </Show>
   );

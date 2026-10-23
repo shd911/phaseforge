@@ -4,6 +4,7 @@ import uPlot from "uplot";
 import { freqAxisTicks } from "../lib/plot-helpers";
 import type { BaffleConfig, BaffleStepPreview } from "../lib/types";
 import NumberInput from "./NumberInput";
+import Modal from "./Modal";
 
 interface BaffleStepDialogProps {
   config: BaffleConfig;
@@ -14,8 +15,8 @@ interface BaffleStepDialogProps {
 const PREVIEW_FREQS = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000];
 
 function formatFreq(hz: number): string {
-  if (hz >= 1000) return (hz / 1000).toFixed(hz >= 10000 ? 0 : 1) + " kHz";
-  return hz.toFixed(0) + " Hz";
+  if (hz >= 1000) return (hz / 1000).toFixed(hz >= 10000 ? 0 : 1) + " кГц";
+  return hz.toFixed(0) + " Гц";
 }
 
 export default function BaffleStepDialog(props: BaffleStepDialogProps) {
@@ -47,7 +48,7 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
       series: [
         {},
         {
-          label: "dB",
+          label: "дБ",
           stroke: "#4A9EFF",
           width: 1.5,
           scale: "db",
@@ -59,7 +60,7 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
       },
       axes: [
         {
-          stroke: "#8b8b96",
+          stroke: "#a8a8b4",
           grid: { stroke: "rgba(255,255,255,0.06)" },
           ticks: { stroke: "rgba(255,255,255,0.12)" },
           ...(freqAxisTicks as Partial<uPlot.Axis>),
@@ -67,7 +68,7 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
         },
         {
           scale: "db",
-          stroke: "#8b8b96",
+          stroke: "#a8a8b4",
           grid: { stroke: "rgba(255,255,255,0.06)" },
           ticks: { stroke: "rgba(255,255,255,0.12)" },
           values: (_u: uPlot, vals: number[]) =>
@@ -168,15 +169,12 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
   }
 
   return (
-    <div class="baffle-overlay" onClick={props.onClose}
-      tabIndex={-1}
-      ref={(el) => requestAnimationFrame(() => el.focus())}
-      onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); props.onClose(); } }}>
-      <div class="baffle-dialog" onClick={(e) => e.stopPropagation()}>
+    <Modal overlayClass="baffle-overlay" dialogClass="baffle-dialog" titleId="baffle-dlg-title"
+      onEscape={props.onClose}>
         {/* Header */}
         <div class="merge-header">
-          <span class="merge-title">Коррекция baffle step</span>
-          <button class="merge-close" onClick={props.onClose}>
+          <span class="merge-title" id="baffle-dlg-title">Коррекция baffle step</span>
+          <button class="merge-close" onClick={props.onClose} aria-label="Закрыть" title="Закрыть">
             ×
           </button>
         </div>
@@ -187,45 +185,49 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
           <div class="merge-param-row">
             <label class="merge-label">Ширина панели</label>
             <NumberInput
+              label="Ширина панели"
               value={width()}
               onChange={setWidth}
               min={0.05}
               max={2.0}
               step={0.01}
-              unit="m"
+              unit="м"
             />
           </div>
           <div class="merge-param-row">
             <label class="merge-label">Высота панели</label>
             <NumberInput
+              label="Высота панели"
               value={height()}
               onChange={setHeight}
               min={0.05}
               max={2.0}
               step={0.01}
-              unit="m"
+              unit="м"
             />
           </div>
           <div class="merge-param-row">
             <label class="merge-label">Динамик X</label>
             <NumberInput
+              label="Динамик X"
               value={offsetX()}
               onChange={setOffsetX}
               min={0.01}
               max={width() - 0.01}
               step={0.01}
-              unit="m"
+              unit="м"
             />
           </div>
           <div class="merge-param-row">
             <label class="merge-label">Динамик Y</label>
             <NumberInput
+              label="Динамик Y"
               value={offsetY()}
               onChange={setOffsetY}
               min={0.01}
               max={height() - 0.01}
               step={0.01}
-              unit="m"
+              unit="м"
             />
           </div>
 
@@ -243,7 +245,7 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
               <div class="baffle-preview">
                 <div class="baffle-info">
                   <span class="baffle-info-label">f3: </span>
-                  <span>{p().f3_hz.toFixed(0)} Hz</span>
+                  <span>{p().f3_hz.toFixed(0)} Гц</span>
                 </div>
                 <div class="baffle-info">
                   <span class="baffle-info-label">Края: </span>
@@ -251,14 +253,14 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
                     L {p().edge_frequencies[0].toFixed(0)}{" "}
                     R {p().edge_frequencies[1].toFixed(0)}{" "}
                     T {p().edge_frequencies[2].toFixed(0)}{" "}
-                    B {p().edge_frequencies[3].toFixed(0)} Hz
+                    B {p().edge_frequencies[3].toFixed(0)} Гц
                   </span>
                 </div>
                 <div class="baffle-preview-table">
                   {PREVIEW_FREQS.map((f) => (
                     <div class="baffle-preview-row">
                       <span class="freq">{formatFreq(f)}</span>
-                      <span class="value">{getCorrectionAtFreq(f)} dB</span>
+                      <span class="value">{getCorrectionAtFreq(f)} дБ</span>
                     </div>
                   ))}
                 </div>
@@ -266,6 +268,10 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
             )}
           </Show>
 
+          {/* b141.105 (§5.19): the chart used to vanish without a word. */}
+          <Show when={!isValid()}>
+            <div class="merge-error">Динамик должен находиться внутри панели — график и «Применить» недоступны.</div>
+          </Show>
           <Show when={error()}>
             <div class="merge-error">{error()}</div>
           </Show>
@@ -284,7 +290,6 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
             Применить
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

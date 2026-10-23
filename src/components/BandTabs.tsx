@@ -1,4 +1,4 @@
-import { createSignal, For, Show, onCleanup } from "solid-js";
+import { createSignal, For, Show } from "solid-js";
 import { ask } from "@tauri-apps/plugin-dialog";
 import {
   appState,
@@ -19,29 +19,35 @@ export default function BandTabs() {
   const [editingId, setEditingId] = createSignal<string | null>(null);
 
   let containerRef!: HTMLDivElement;
-  let tabEls: HTMLButtonElement[] = [];
   let startX = 0;
   const DRAG_THRESHOLD = 5; // px до начала реального перетаскивания
   let didDrag = false;
 
+  // b141.105 (audit 2026-10-23 §5.22): tab elements used to be kept in an
+  // array by index, written once per element. After deleting a middle band
+  // the survivors kept their old slots (and the last slot a removed node),
+  // so a drop landed one place off: A,B,C,D → delete B → drag A onto C gave
+  // C,D,A. Hit-testing now reads the live DOM and maps it by band id.
   function getTabIndexAtX(clientX: number): number | null {
-    for (let i = 0; i < tabEls.length; i++) {
-      const el = tabEls[i];
-      if (!el) continue;
+    const els = containerRef.querySelectorAll<HTMLElement>(".band-tab[data-band-id]");
+    for (const el of Array.from(els)) {
       const rect = el.getBoundingClientRect();
-      if (clientX >= rect.left && clientX <= rect.right) return i;
+      if (clientX >= rect.left && clientX <= rect.right) {
+        const i = appState.bands.findIndex((b) => b.id === el.dataset.bandId);
+        return i >= 0 ? i : null;
+      }
     }
     return null;
   }
 
   async function confirmRemove(id: string, name: string) {
-    const confirmed = await ask(`Удалить бэнд «${name}»?`, { title: "Удаление бэнда", kind: "warning" });
+    const confirmed = await ask(`Удалить полосу «${name}»?`, { title: "Удаление полосы", kind: "warning" });
     if (confirmed) removeBand(id);
   }
 
   function handlePointerDown(e: PointerEvent, idx: number) {
     // Игнорируем клик по кнопке закрытия
-    if ((e.target as HTMLElement).classList.contains("band-tab-close")) return;
+    if ((e.target as HTMLElement).closest(".band-tab-close")) return;
 
     startX = e.clientX;
     didDrag = false;
@@ -59,9 +65,21 @@ export default function BandTabs() {
       setOverIdx(over);
     };
 
-    const onUp = () => {
+    const detach = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+    };
+    // b141.105 (§5.20): a cancelled pointer (system gesture, lost capture)
+    // left the listeners attached and the tab half-dragged.
+    const onCancel = () => {
+      detach();
+      setDragIdx(null);
+      setOverIdx(null);
+    };
+
+    const onUp = () => {
+      detach();
 
       const from = dragIdx();
       const to = overIdx();
@@ -71,7 +89,8 @@ export default function BandTabs() {
 
       // Если не было настоящего перетаскивания — это обычный клик
       if (!didDrag) {
-        setActiveBand(appState.bands[startIdx].id);
+        const b = appState.bands[startIdx];
+        if (b) setActiveBand(b.id);
       }
 
       setDragIdx(null);
@@ -80,25 +99,34 @@ export default function BandTabs() {
 
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
   }
 
+  // b141.105 (§5.20): a band tab is a role="tab" element, not a <button> —
+  // the «×» inside is a real button now, and a button may not contain one.
   return (
-    <div class="band-tabs" ref={containerRef}>
+    <div class="band-tabs" ref={containerRef} role="tablist" aria-label="Полосы">
       <button
         class={`band-tab band-tab-sum ${isSum() ? "active" : ""}`}
+        role="tab"
+        aria-selected={isSum()}
         onClick={setActiveBandSum}
-        title="Сумма всех бэндов"
+        title="Сумма всех полос"
       >{projectName() ?? "Сумма"}</button>
       <For each={appState.bands}>
         {(band, idx) => (
-          <button
-            ref={(el) => { tabEls[idx()] = el; }}
+          <div
+            role="tab"
+            tabIndex={0}
+            aria-selected={appState.activeBandId === band.id}
+            data-band-id={band.id}
             class={`band-tab ${appState.activeBandId === band.id ? "active" : ""} ${dragIdx() === idx() ? "dragging" : ""} ${overIdx() === idx() && dragIdx() !== null && dragIdx() !== idx() ? "drag-over" : ""}`}
             onPointerDown={(e) => handlePointerDown(e, idx())}
             // b141.38: selection lived only in the pointer path — a focused
             // tab ignored Enter/Space.
             onKeyDown={(e) => {
               if (editingId() === band.id) return;
+              if (e.target !== e.currentTarget) return; // the «×» handles its own keys
               if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setActiveBand(band.id); }
               if (e.key === "F2") { e.preventDefault(); setEditingId(band.id); }
             }}
@@ -135,30 +163,23 @@ export default function BandTabs() {
               </>
             )}
             <Show when={appState.bands.length > 1}>
-              <span
+              <button
+                type="button"
                 class="band-tab-close"
-                role="button"
-                tabIndex={0}
-                aria-label={`Удалить ${band.name}`}
+                aria-label={`Удалить полосу ${band.name}`}
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
                   e.preventDefault();
                   confirmRemove(band.id, band.name);
                 }}
-                onKeyDown={(e) => {
-                  if (e.key !== "Enter" && e.key !== " ") return;
-                  e.stopPropagation();
-                  e.preventDefault();
-                  confirmRemove(band.id, band.name);
-                }}
-                title={`Удалить ${band.name}`}
-              >×</span>
+                title={`Удалить полосу ${band.name}`}
+              >×</button>
             </Show>
-          </button>
+          </div>
         )}
       </For>
-      <button class="band-tab band-tab-add" onClick={addBand} title="Добавить бэнд">+</button>
+      <button class="band-tab band-tab-add" onClick={addBand} title="Добавить полосу" aria-label="Добавить полосу">+</button>
     </div>
   );
 }
