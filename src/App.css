@@ -1498,17 +1498,26 @@ input[type="checkbox"]:focus-visible {
 
 .band-tab-close {
   margin-left: var(--space-xs);
+  padding: 0 2px;
 
+  font: inherit;
   font-size: var(--fs-lg);
   color: var(--text-muted);
+  background: none;
+  border: none;
+  border-radius: 3px;
   cursor: pointer;
   line-height: 1;
   pointer-events: auto;
   opacity: 0;
   transition: opacity 0.15s;
 }
-.band-tab:hover .band-tab-close { opacity: 1; }
-.band-tab-close:hover { color: var(--error, #ef4444); }
+/* b141.105 (§5.24): a keyboard-focused «×» was invisible while Enter deleted the band. */
+.band-tab:hover .band-tab-close,
+.band-tab:focus-within .band-tab-close { opacity: 1; }
+.band-tab-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.band-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.band-tab-close:hover { color: var(--status-bad); }
 
 .band-tab-add {
   font-size: var(--fs-xl);
@@ -3021,4 +3030,4 @@ input[type="checkbox"]:focus-visible {
   white-space: nowrap;
 }
 .peq-table td.peq-ring.peq-ring-warn { color: var(--warn-amber); }
-.peq-table td.peq-ring.peq-ring-bad { color: var(--error, #ef4444); font-weight: 600; }
+.peq-table td.peq-ring.peq-ring-bad { color: var(--status-bad); font-weight: 600; }
