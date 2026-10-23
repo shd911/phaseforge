@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import type { Measurement, MergeConfig, MergeResult, BaffleConfig } from "../lib/types";
 import type { MergeSource } from "../stores/bands";
+import { showToast } from "../lib/toast";
 import NumberInput from "./NumberInput";
 import BaffleStepDialog from "./BaffleStepDialog";
 
@@ -112,6 +113,7 @@ export default function MergeDialog(props: MergeDialogProps) {
         config,
       });
       props.onMerge(result.measurement, { nfPath: nf, ffPath: ff, config });
+      for (const w of result.warnings ?? []) showToast(w, "warn", 12000);
       props.onClose();
     } catch (e) {
       setError(String(e));

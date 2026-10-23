@@ -33,6 +33,10 @@ pub struct MergeResult {
     pub auto_level_offset_db: f64,
     /// Auto-computed delay difference (seconds) between NF and FF
     pub delay_diff_seconds: f64,
+    /// b141.102 (audit 2026-10-23 2.10): what the merge had to drop — shown
+    /// to the user (Russian, UI language). Empty = nothing dropped.
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 /// Merge near-field and far-field measurements using frequency-domain splice
@@ -76,6 +80,24 @@ pub fn merge_nf_ff(
                 nf.freq[0], nf_last, ff.freq[0], ff_last
             ),
         });
+    }
+
+    // b141.102 (audit 2026-10-23 2.10): the merge runs on the INTERSECTION of
+    // the two ranges — say so when that drops part of a measurement the user
+    // expects in the result (NF bass below the FF start, FF treble above the
+    // NF end) instead of losing it silently.
+    let mut warnings: Vec<String> = Vec::new();
+    if nf.freq[0] < f_min * 0.99 {
+        warnings.push(format!(
+            "Ближнее поле ниже {f_min:.0} Гц отброшено: слияние идёт в общем диапазоне, \
+             а дальнее поле начинается с {:.0} Гц (ближнее — с {:.1} Гц).",
+            ff.freq[0], nf.freq[0]
+        ));
+    }
+    if ff_last > f_max * 1.01 {
+        warnings.push(format!(
+            "Дальнее поле выше {f_max:.0} Гц отброшено: ближнее поле заканчивается на {nf_last:.0} Гц."
+        ));
     }
 
     let n_points = 2048;
@@ -130,9 +152,30 @@ pub fn merge_nf_ff(
 
     // --- Phase alignment: two-stage (slope + DC) ---
     // Stage 1: Remove delay difference (linear/slope component)
+    // b141.102 (audit 2026-10-23 2.16): each side was fitted on its own and a
+    // REJECTED fit (R² < 0.5, it returned 0) counted as a real delay of 0.
+    // On every real pair the room-measured FF is rejected, so the result was
+    // «NF's own slope − 0» — right only by chance. Now the delay DIFFERENCE
+    // is fitted directly on (NF − FF): the drivers' shared min-phase cancels,
+    // and the blend-zone phase mismatch drops (6.5M pair @ 500 Hz: 5.3° →
+    // 3.5°; 8x unchanged). A rejected difference fit falls back to the
+    // impulse peaks of both measurements — never to a rejected fit's 0.
+    let ph_diff: Vec<f64> = nf_ph.iter().zip(&ff_ph).map(|(n, f)| n - f).collect();
+    let delay_diff = match phase::fit_delay_exact(&grid_freq, &ph_diff, match_lo, match_hi) {
+        Some(d) => d,
+        None => {
+            let sr = phase::assumed_sample_rate(nf_last.max(ff_last));
+            let n = phase::compute_ir_delay(&nf.freq, &nf.magnitude, nf_phase, sr);
+            let f = phase::compute_ir_delay(&ff.freq, &ff.magnitude, ff_phase, sr);
+            info!(
+                "merge: NF−FF phase fit rejected in {match_lo:.0}-{match_hi:.0} Hz — IR peaks nf={:.4}ms ff={:.4}ms",
+                n * 1000.0, f * 1000.0,
+            );
+            n - f
+        }
+    };
     let nf_delay = phase::compute_average_delay(&grid_freq, &nf_ph, match_lo, match_hi);
     let ff_delay = phase::compute_average_delay(&grid_freq, &ff_ph, match_lo, match_hi);
-    let delay_diff = nf_delay - ff_delay;
 
     info!("merge: nf_delay={:.4}ms  ff_delay={:.4}ms  diff={:.4}ms",
         nf_delay * 1000.0, ff_delay * 1000.0, delay_diff * 1000.0);
@@ -232,10 +275,14 @@ pub fn merge_nf_ff(
         },
     };
 
+    for w in &warnings {
+        tracing::warn!("merge: {w}");
+    }
     Ok(MergeResult {
         measurement: merged,
         auto_level_offset_db: auto_offset,
         delay_diff_seconds: delay_diff,
+        warnings,
     })
 }
 
@@ -410,6 +457,73 @@ mod tests {
 
         let result = merge_nf_ff(&nf, &ff, &config);
         assert!(result.is_err());
+    }
+
+    fn config() -> MergeConfig {
+        MergeConfig { splice_freq: 300.0, blend_octaves: 1.0, level_offset_db: None, match_range: None, baffle: None }
+    }
+
+    /// Flat 80 dB with a pure delay τ, plus an optional phase ripple
+    /// (amplitude, Hz period) confined to 150–700 Hz.
+    fn delayed(name: &str, tau: f64, ripple: Option<(f64, f64)>) -> Measurement {
+        let mut m = make_flat_measurement(name, 80.0, 0.0, 20.0, 20000.0, 600);
+        m.phase = Some(m.freq.iter().map(|&f| {
+            let r = match ripple {
+                Some((a, period)) if (150.0..=700.0).contains(&f) => a * (2.0 * std::f64::consts::PI * f / period).sin(),
+                _ => 0.0,
+            };
+            -360.0 * f * tau + r
+        }).collect());
+        m
+    }
+
+    /// Audit 2026-10-23 2.16: an FF whose phase fit is rejected (reflection
+    /// ripple in the match range) must not count as «0 ms»: the NF used to be
+    /// aligned to 0 instead of to the FF's 3 ms. A rejected NF−FF fit falls
+    /// back to the impulse peaks; a clean one is exact, and the drivers'
+    /// shared minimum phase cancels in the difference.
+    #[test]
+    fn rejected_delay_fit_falls_back_to_impulse_peaks() {
+        let nf = delayed("NF", 0.0005, None);
+        let ff = delayed("FF", 0.003, Some((400.0, 50.0)));
+        let r = merge_nf_ff(&nf, &ff, &config()).unwrap();
+        assert!((r.delay_diff_seconds - (-0.0025)).abs() < 5e-5,
+            "delay diff {:.4} ms, expected −2.5", r.delay_diff_seconds * 1e3);
+        assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+
+        // Clean fits: the LS result.
+        let ff = delayed("FF", 0.003, None);
+        let r = merge_nf_ff(&nf, &ff, &config()).unwrap();
+        assert!((r.delay_diff_seconds - (-0.0025)).abs() < 1e-6);
+
+        // Both carry the driver's BW2 high-pass at 300 Hz (steep phase in
+        // the match range): the difference still reads −2.5 ms exactly.
+        let hp = |f: f64| { let w = f / 300.0; 180.0 - (2f64.sqrt() * w).atan2(1.0 - w * w).to_degrees() };
+        let (mut nf, mut ff) = (nf, ff);
+        for m in [&mut nf, &mut ff] {
+            let freq = m.freq.clone();
+            for (p, f) in m.phase.as_mut().unwrap().iter_mut().zip(freq) { *p += hp(f); }
+        }
+        let r = merge_nf_ff(&nf, &ff, &config()).unwrap();
+        assert!((r.delay_diff_seconds - (-0.0025)).abs() < 1e-6, "{:.4} ms", r.delay_diff_seconds * 1e3);
+    }
+
+    /// Audit 2026-10-23 2.10: NF bass below the FF start is dropped by the
+    /// intersection — the result says so.
+    #[test]
+    fn dropped_nf_bass_is_reported() {
+        let nf = make_flat_measurement("NF", 80.0, 0.0, 10.0, 20000.0, 300);
+        let ff = make_flat_measurement("FF", 80.0, 0.0, 200.0, 20000.0, 300);
+        let r = merge_nf_ff(&nf, &ff, &config()).unwrap();
+        assert!((r.measurement.freq[0] - 200.0).abs() < 1e-6);
+        assert_eq!(r.warnings.len(), 1, "{:?}", r.warnings);
+        assert!(r.warnings[0].starts_with("Ближнее поле ниже 200 Гц"), "{:?}", r.warnings);
+
+        let nf = make_flat_measurement("NF", 80.0, 0.0, 10.0, 5000.0, 300);
+        let ff = make_flat_measurement("FF", 80.0, 0.0, 10.0, 20000.0, 300);
+        let r = merge_nf_ff(&nf, &ff, &config()).unwrap();
+        assert_eq!(r.warnings.len(), 1, "{:?}", r.warnings);
+        assert!(r.warnings[0].starts_with("Дальнее поле выше 5000 Гц"), "{:?}", r.warnings);
     }
 
     #[test]

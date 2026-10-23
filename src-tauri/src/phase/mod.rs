@@ -77,6 +77,29 @@ pub fn compute_average_delay(
     f_low: f64,
     f_high: f64,
 ) -> f64 {
+    fit_average_delay(freq, phase_deg, f_low, f_high).unwrap_or(0.0)
+}
+
+/// The least-squares delay of `compute_average_delay`, with a rejected fit
+/// (fewer than 2 points, R² < 0.5) as `None` instead of 0 — b141.102 (audit
+/// 2026-10-23 2.16): the NF+FF merge took a rejected FF fit's 0 as a real
+/// delay. A flat phase is a perfect fit of 0. Delays under 0.1 ms read 0.
+pub fn fit_average_delay(
+    freq: &[f64],
+    phase_deg: &[f64],
+    f_low: f64,
+    f_high: f64,
+) -> Option<f64> {
+    fit_delay_exact(freq, phase_deg, f_low, f_high).map(|d| if d.abs() < 0.0001 { 0.0 } else { d })
+}
+
+/// `fit_average_delay` without the «< 0.1 ms reads 0» snap.
+pub fn fit_delay_exact(
+    freq: &[f64],
+    phase_deg: &[f64],
+    f_low: f64,
+    f_high: f64,
+) -> Option<f64> {
     let unwrapped = unwrap_phase(phase_deg);
 
     // Collect points in range
@@ -96,7 +119,7 @@ pub fn compute_average_delay(
         }
     }
     if ff.len() < 2 {
-        return 0.0;
+        return None;
     }
 
     // Linear least-squares: φ = slope × f + intercept
@@ -108,7 +131,7 @@ pub fn compute_average_delay(
     let sum_fp: f64 = ff.iter().zip(pp.iter()).map(|(f, p)| f * p).sum();
     let denom = n * sum_ff - sum_f * sum_f;
     if denom.abs() < 1e-30 {
-        return 0.0;
+        return None;
     }
     let slope = (n * sum_fp - sum_f * sum_p) / denom;
 
@@ -120,20 +143,29 @@ pub fn compute_average_delay(
     }).sum();
     let mean_p = sum_p / n;
     let ss_tot: f64 = pp.iter().map(|p| (p - mean_p) * (p - mean_p)).sum();
-    let r_squared = if ss_tot < 1e-30 { 0.0 } else { 1.0 - ss_res / ss_tot };
+    if ss_tot < 1e-30 {
+        // Flat phase: no delay, exactly.
+        return Some(0.0);
+    }
+    let r_squared = 1.0 - ss_res / ss_tot;
 
     // delay = -slope / 360 (slope is dφ/df in deg/Hz)
     let delay = -slope / 360.0;
 
-    // Reject trivial delays: if R² < 0.5 or delay < 0.1ms, it's likely noise/slope artifact
-    if r_squared < 0.5 {
-        return 0.0;
+    // Reject a poor fit (R² < 0.5).
+    if !r_squared.is_finite() || r_squared < 0.5 {
+        return None;
     }
-    if delay.abs() < 0.0001 {
-        return 0.0;
-    }
+    Some(delay)
+}
 
-    delay
+/// The sample rate assumed when the caller has none (a measurement file
+/// does not carry it): the smallest standard rate ≥ 48 kHz whose Nyquist
+/// covers the last grid point. b141.102 (audit 2026-10-23 2.14).
+pub fn assumed_sample_rate(f_last: f64) -> f64 {
+    const RATES: [f64; 9] = [48000.0, 88200.0, 96000.0, 176400.0, 192000.0, 352800.0, 384000.0, 705600.0, 768000.0];
+    let need = 2.0 * f_last;
+    RATES.iter().copied().find(|&r| r >= need).unwrap_or_else(|| need.ceil())
 }
 
 /// Estimate a measurement's time of flight (seconds).
@@ -146,18 +178,23 @@ pub fn compute_average_delay(
 /// LS 0.178 ms beat IR 0.083 → −352° at 10 kHz), and a rejected fit's 0
 /// overrode a correct 0.083 ms IR (288° at 10 kHz). The impulse estimate is
 /// now the fallback for a rejected fit only.
+///
+/// b141.102 (audit 2026-10-23 2.14): production never knows the sample rate
+/// (the frontend passes null, the parser has none) and the `None` path
+/// returned the raw fit — no impulse fallback, a negative time of flight
+/// applied, the excess phase built with Nyquist at the last grid point. A
+/// missing rate is now `assumed_sample_rate` and every rule applies.
 pub fn estimate_delay(freq: &[f64], magnitude: &[f64], phase: &[f64], sample_rate: Option<f64>) -> f64 {
     let f_first = freq.first().copied().unwrap_or(20.0);
     let f_last = freq.last().copied().unwrap_or(20000.0);
     let (f_lo, f_hi) = smart_delay_range(f_first, f_last);
-    let excess: Option<Vec<f64>> = crate::dsp::minimum_phase_on_log_grid(freq, magnitude, sample_rate, None)
+    let sr = sample_rate
+        .filter(|s| s.is_finite() && *s > 0.0)
+        .unwrap_or_else(|| assumed_sample_rate(f_last));
+    let excess: Option<Vec<f64>> = crate::dsp::minimum_phase_on_log_grid(freq, magnitude, Some(sr), None)
         .ok()
         .map(|mp| phase.iter().zip(&mp).map(|(p, m)| p - m).collect());
     let ls_delay = compute_average_delay(freq, excess.as_deref().unwrap_or(phase), f_lo, f_hi);
-    let Some(sr) = sample_rate else {
-        info!("estimate_delay: excess-phase LS fit {:.4}ms (range {:.0}-{:.0} Hz)", ls_delay * 1000.0, f_lo, f_hi);
-        return ls_delay;
-    };
     // The excess-phase fit is unbiased and sub-sample; the impulse estimate
     // is quantised to a sample (12.5 µs off at 1.2 ms / 48 kHz = 54° at
     // 12 kHz), so it only stands in when the fit was rejected.
@@ -168,7 +205,8 @@ pub fn estimate_delay(freq: &[f64], magnitude: &[f64], phase: &[f64], sample_rat
         return ls_delay;
     }
     let ir_delay = compute_ir_delay(freq, magnitude, phase, sr);
-    info!("estimate_delay: LS fit rejected, IR={:.4}ms", ir_delay * 1000.0);
+    info!("estimate_delay: LS fit rejected ({:.4}ms), IR={:.4}ms (sr={sr}{})",
+        ls_delay * 1000.0, ir_delay * 1000.0, if sample_rate.is_none() { ", assumed" } else { "" });
     ir_delay
 }
 
@@ -309,6 +347,11 @@ pub fn compute_ir_delay(
         grid_mag.push(m);
         grid_phase.push(p);
     }
+    // b141.102 (audit 2026-10-23 2.15): above the last grid point continue
+    // the phase with its group delay and fade the magnitude out — the
+    // b141.57 rule of `compute_impulse`. Held flat, the band from the last
+    // point to Nyquist had zero delay: 2 ms read 0.000 at 96 kHz.
+    crate::dsp::impulse::extend_above_grid(freq, phase_deg, &mut grid_mag, &mut grid_phase, sample_rate);
 
     // Build complex spectrum
     let mut spectrum: Vec<Complex64> = Vec::with_capacity(fft_size);
@@ -528,5 +571,80 @@ mod tests {
         let d = estimate_delay(&freq, &mag, &ph, Some(48000.0));
         assert!((d - tau).abs() < 1e-5, "tweeter τ={tau}: {:.4} ms", d * 1e3);
         }
+    }
+
+    fn log_grid_20_20k() -> Vec<f64> {
+        (0..481).map(|i| 20.0 * 2f64.powf(i as f64 / 48.0)).collect()
+    }
+
+    fn bw2_tweeter(freq: &[f64], tau: f64) -> (Vec<f64>, Vec<f64>) {
+        let wrap = |d: f64| ((d + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
+        freq.iter().map(|&f| {
+            let w = f / 2000.0;
+            let m = w * w / ((1.0 - w * w).powi(2) + 2.0 * w * w).sqrt();
+            let p = 180.0 - (2f64.sqrt() * w).atan2(1.0 - w * w).to_degrees();
+            (20.0 * m.log10(), wrap(p - 360.0 * f * tau))
+        }).unzip()
+    }
+
+    /// Audit 2026-10-23 2.14: production passes NO sample rate (the parser
+    /// never knows it). The b141.56 paths — impulse fallback for a rejected
+    /// fit, a negative time of flight treated as rejected, the true Nyquist
+    /// for the excess phase — must work on that path too: before, the
+    /// tweeter's 0.08 ms read 0 (−288° at 10 kHz).
+    #[test]
+    fn estimate_delay_without_sample_rate() {
+        let freq = log_grid_20_20k();
+        for tau in [0.00008, 0.0012] {
+            let (mag, ph) = bw2_tweeter(&freq, tau);
+            let d = estimate_delay(&freq, &mag, &ph, None);
+            assert!((d - tau).abs() < 1e-5, "tweeter τ={tau}, sr=None: {:.4} ms", d * 1e3);
+        }
+        assert_eq!(assumed_sample_rate(20000.0), 48000.0);
+        assert_eq!(assumed_sample_rate(24000.0), 48000.0);
+        assert_eq!(assumed_sample_rate(40000.0), 88200.0);
+        assert_eq!(assumed_sample_rate(45000.0), 96000.0);
+        assert_eq!(assumed_sample_rate(2000.0), 48000.0);
+    }
+
+    /// A negative fitted time of flight is not physical: on the None path it
+    /// must fall back to the impulse estimate as on the Some path.
+    #[test]
+    fn negative_fit_falls_back_without_sample_rate() {
+        let freq = log_grid_20_20k();
+        // A pure advance: LS reads −0.3 ms, the impulse peak sits at t = 0
+        // (the advanced part wraps to the end of the buffer).
+        let mag = vec![0.0; freq.len()];
+        let ph: Vec<f64> = freq.iter().map(|&f| 360.0 * f * 0.0003).collect();
+        let d = estimate_delay(&freq, &mag, &ph, None);
+        assert!(d >= 0.0, "negative time of flight applied: {:.4} ms", d * 1e3);
+    }
+
+    /// Audit 2026-10-23 2.15: the response above the grid is continued by
+    /// its slope (b141.57 rule), not held flat — a flat-held band to Nyquist
+    /// has zero delay and outweighs the measured one at 96 kHz.
+    #[test]
+    fn ir_delay_does_not_depend_on_sample_rate() {
+        let freq = log_grid_20_20k();
+        let mag = vec![0.0; freq.len()];
+        let ph: Vec<f64> = freq.iter().map(|&f| -360.0 * f * 0.002).collect();
+        for sr in [48000.0, 96000.0, 192000.0] {
+            let d = compute_ir_delay(&freq, &mag, &ph, sr);
+            assert!((d - 0.002).abs() <= 1.0 / sr + 1e-12, "sr={sr}: {:.4} ms", d * 1e3);
+        }
+    }
+
+    /// Audit 2026-10-23 2.16: a rejected fit is not a measured delay.
+    #[test]
+    fn fit_reports_rejection() {
+        let freq: Vec<f64> = (0..400).map(|i| 200.0 + i as f64).collect();
+        let clean: Vec<f64> = freq.iter().map(|&f| -360.0 * f * 0.003).collect();
+        let fit = fit_average_delay(&freq, &clean, 200.0, 600.0).unwrap();
+        assert!((fit - 0.003).abs() < 1e-9);
+        let noisy: Vec<f64> = clean.iter().zip(&freq)
+            .map(|(p, &f)| p + 200.0 * (2.0 * std::f64::consts::PI * f / 50.0).sin()).collect();
+        assert_eq!(fit_average_delay(&freq, &noisy, 200.0, 600.0), None);
+        assert_eq!(compute_average_delay(&freq, &noisy, 200.0, 600.0), 0.0);
+        assert_eq!(fit_average_delay(&freq, &vec![10.0; freq.len()], 200.0, 600.0), Some(0.0));
     }
 }
