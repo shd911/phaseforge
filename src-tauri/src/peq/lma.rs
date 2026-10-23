@@ -245,7 +245,10 @@ impl<'a> LmaSolver<'a> {
             let q_max = q_max.min(crate::peq::q_envelope::q_cap_for_gain(params[i * 3 + 1]));
             params[i * 3 + 2] = params[i * 3 + 2].clamp(Q_MIN, q_max);
             // b141.94: no filter that rings past half the export file.
-            params[i * 3 + 2] = self.config.cap_q_for_ring(freq, params[i * 3 + 1], params[i * 3 + 2], &PeqFilterType::Peaking);
+            // b141.101: Q stays ≥ Q_MIN; when no Q fits, the gain gives way.
+            let (g, q) = self.config.fit_ring(freq, params[i * 3 + 1], params[i * 3 + 2], &PeqFilterType::Peaking);
+            params[i * 3 + 1] = g;
+            params[i * 3 + 2] = q;
         }
     }
 

@@ -92,15 +92,16 @@ pub struct PeqConfig {
 }
 
 impl PeqConfig {
-    /// Largest gain a band centred at `freq_hz` may have.
-    /// `q` capped so the filter's ring stays within `max_ring_ms`.
-    pub fn cap_q_for_ring(&self, freq_hz: f64, gain_db: f64, q: f64, ftype: &PeqFilterType) -> f64 {
+    /// (gain, Q) of a filter that rings within `max_ring_ms`: Q lowered first
+    /// (never below Q_MIN), then the gain (b141.101, audit 2026-10-23 1.7).
+    pub fn fit_ring(&self, freq_hz: f64, gain_db: f64, q: f64, ftype: &PeqFilterType) -> (f64, f64) {
         match self.max_ring_ms {
-            Some(lim) => crate::peq::q_envelope::q_cap_for_ring(freq_hz, gain_db, q, ftype, self.sample_rate, lim),
-            None => q,
+            Some(lim) => crate::peq::q_envelope::fit_ring(freq_hz, gain_db, q, ftype, self.sample_rate, lim, Q_MIN),
+            None => (gain_db, q),
         }
     }
 
+    /// Largest gain a band centred at `freq_hz` may have.
     pub fn max_boost_at(&self, freq_hz: f64) -> f64 {
         match self.boost_range {
             Some((lo, hi)) if freq_hz < lo || freq_hz > hi => 0.0,

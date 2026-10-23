@@ -311,7 +311,23 @@ pub fn auto_peq_lma(
         &mut bands, &solver, lp_freq, merge_dist,
     );
 
-    // Compute final max error
+    // b141.94: final guard — every returned filter rings within the limit
+    // (shelf conversions and band additions included). b141.101 (audit
+    // 2026-10-23 1.7): a guarantee — Q ≥ Q_MIN, the gain gives way when no Q
+    // fits (polish_bands lifts Q back to Q_MIN after the solver's cap).
+    for b in &mut bands {
+        if b.filter_type == PeqFilterType::Peaking {
+            b.q = b.q.min(q_envelope::q_cap_for_gain(b.gain_db));
+        }
+        let (g, q) = config.fit_ring(b.freq_hz, b.gain_db, b.q, &b.filter_type);
+        b.gain_db = g;
+        b.q = q;
+    }
+    bands.retain(|b| b.gain_db.abs() >= LMA_MIN_GAIN_DB);
+
+    // Compute final max error — b141.101 (audit 2026-10-23 1.9): on the
+    // filters actually returned, after the guard (the toast read 16.17 dB
+    // where the returned set gave 8.23).
     let correction = apply_peq(freq, &bands, config.sample_rate);
     let max_err = compute_max_error_in_range(freq, meas_mag, target, &correction, config.freq_range);
 
@@ -324,15 +340,6 @@ pub fn auto_peq_lma(
             "  band[{}]: freq={:.0} Hz, gain={:.1} dB, Q={:.2}",
             i, b.freq_hz, b.gain_db, b.q
         );
-    }
-
-    // b141.94: final guard — every returned filter rings within the limit
-    // (shelf conversions and band additions included).
-    for b in &mut bands {
-        if b.filter_type == PeqFilterType::Peaking {
-            b.q = b.q.min(q_envelope::q_cap_for_gain(b.gain_db));
-        }
-        b.q = config.cap_q_for_ring(b.freq_hz, b.gain_db, b.q, &b.filter_type);
     }
 
     Ok(PeqResult {
