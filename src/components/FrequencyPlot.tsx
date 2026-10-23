@@ -2733,6 +2733,25 @@ export default function FrequencyPlot() {
       }
     }
 
+    // b141.104 (audit 4.8): the pre-ringing zone hangs off the peak of the
+    // curve that rings — corrected, else target (a visible one first) — not
+    // off the first measurement, whose peak can sit elsewhere.
+    const zonePeakMs = (() => {
+      const vis = (lbl: string) => irLegend.find((e) => e.label === lbl)?.visible !== false;
+      const cands: { lbl: string; c: { timeMs: number[]; impulse: number[] } | null | undefined }[] = inSum
+        ? [{ lbl: "Σ corrected IR", c: corrSum }, { lbl: "Σ target IR", c: targetSum }]
+        : [{ lbl: "Corrected IR", c: corrBands[0] }, { lbl: "Target IR", c: targetBands[0] }];
+      const pick = cands.find((k) => k.c && k.c.impulse.length > 0 && vis(k.lbl))
+        ?? cands.find((k) => k.c && k.c.impulse.length > 0);
+      if (!pick?.c) return peakTimeMs;
+      let pk = 0, pv = -1;
+      for (let i = 0; i < pick.c.impulse.length; i++) {
+        const a = Math.abs(pick.c.impulse[i]);
+        if (a > pv) { pv = a; pk = i; }
+      }
+      return pick.c.timeMs[pk] ?? peakTimeMs;
+    })();
+
     // Y range — only from visible series and visible X window (±30ms around peak)
     let yMin = Infinity, yMax = -Infinity;
     const xData = uDataArr[0];
@@ -2798,8 +2817,8 @@ export default function FrequencyPlot() {
           const plotLeft = u.bbox.left;
           const plotTop = u.bbox.top;
           const plotHeight = u.bbox.height;
-          const peakX = u.valToPos(peakTimeMs, "x", true);
-          const maskStartX = u.valToPos(peakTimeMs - maskingMs, "x", true);
+          const peakX = u.valToPos(zonePeakMs, "x", true);
+          const maskStartX = u.valToPos(zonePeakMs - maskingMs, "x", true);
           const clampedMaskStart = Math.max(maskStartX, plotLeft);
 
           ctx.save();
@@ -4241,7 +4260,16 @@ export default function FrequencyPlot() {
                   </For>
                   <tr>
                     {(() => {
-                      const zone = () => preRingZoneMs(appState.bands as BandState[]);
+                      // b141.104 (audit 4.8): the zone the chart draws — this
+                      // band's own linear-phase crossovers, and only when a
+                      // target / corrected impulse is there to ring. The
+                      // whole project's zone kept the button live on a
+                      // min-phase band that drew nothing.
+                      const zone = () => {
+                        const b = activeBand();
+                        if (!b || !legendEntries.some((e) => e.category === "target" || e.category === "corrected")) return null;
+                        return preRingZoneMs([b] as BandState[]);
+                      };
                       const zoneTitle = () => zone() != null
                         ? `Зона предзвона: ${zone()!.toFixed(2)} ms — 2 периода нижнего linear-phase кроссовера`
                         : "Нет linear-phase кроссоверов — предзвон не ожидается";
