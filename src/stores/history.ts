@@ -2,11 +2,16 @@
 // Session undo/redo (b132). Light-state snapshots only — measurement arrays
 // and originalPhase are NOT included; band identity is preserved across undo
 // so existing measurement data is reused from current state on apply.
+//
+// b141.103 (audit 2026-10-23 3.1): history holds BAND CONTENT only — target,
+// PEQ, crossovers, order, names, delays, smoothing. Global export / FIR /
+// optimizer settings (SR, taps, window, Standard/Hybrid, «Порог», «Подъём до»,
+// «Без отражений», …) are not part of an entry: undoing a slope change used
+// to put back the SR/taps chosen before it as well.
 // ---------------------------------------------------------------------------
 
 import { createSignal } from "solid-js";
-import type { PeqBand, TargetCurve, WindowType, ExclusionZone, PeqOptimizedTarget } from "../lib/types";
-import type { PeqRangeMode } from "./peq-optimize";
+import type { PeqBand, TargetCurve, ExclusionZone, PeqOptimizedTarget } from "../lib/types";
 
 export interface LightBand {
   id: string;
@@ -22,42 +27,10 @@ export interface LightBand {
   peqOptimizedTarget: PeqOptimizedTarget | null;
 }
 
-export interface PeqParamsSnap {
-  tolerance: number;
-  maxBands: number;
-  gainRegularization: number;
-  peqFloor: number;
-  peqSmoothFit?: boolean;
-  peqBoostFloor?: number;
-  peqRangeMode: PeqRangeMode;
-  peqDirectLow: number;
-  peqDirectHigh: number;
-}
-
-export interface FirParamsSnap {
-  iterations: number;
-  freqWeighting: boolean;
-  narrowbandLimit: boolean;
-  nbSmoothingOct: number;
-  nbMaxExcess: number;
-  maxBoost: number;
-  noiseFloor: number;
-}
-
-export interface ExportParamsSnap {
-  sampleRate: number;
-  taps: number;
-  window: WindowType;
-  hybridPhase: boolean;
-}
-
 export interface HistoryEntry {
   bands: LightBand[];
   activeBandId: string;
   nextBandNum: number;
-  peqParams: PeqParamsSnap;
-  firParams: FirParamsSnap;
-  exportParams: ExportParamsSnap;
   label: string;
   ts: number;
 }

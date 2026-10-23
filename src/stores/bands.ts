@@ -1,5 +1,5 @@
 import { createStore, reconcile } from "solid-js/store";
-import { createSignal, batch } from "solid-js";
+import { createSignal, batch, untrack, type Accessor } from "solid-js";
 import type { Measurement, TargetCurve, MergeConfig, PeqBand, FirResult, WindowType, ExclusionZone, AnalysisResult, PeqOptimizedTarget } from "../lib/types";
 import { MEASUREMENT_COLORS, cloneFilterConfig, withCrossoverOf, F_MIN_WORK, F_MAX_WORK } from "../lib/types";
 import {
@@ -904,19 +904,33 @@ export function suppressXScaleSync(fn: () => void) {
 // Export FIR config signals (used by ExportTab + ExportPlot)
 // ---------------------------------------------------------------------------
 
-export const [exportSampleRate, setExportSampleRate] = createSignal(48000);
-export const [exportTaps, setExportTaps] = createSignal(65536);
-export const [exportWindow, setExportWindow] = createSignal<WindowType>("Blackman");
-export const [exportHybridPhase, setExportHybridPhase] = createSignal(false);
+/** b141.103 (audit 2026-10-23 3.2): a project-wide setting saved in the
+ *  .pfproj. Its setter marks the project dirty when the value actually
+ *  changes — SR/taps/window/FIR/optimizer edits used to be lost on close
+ *  without the «unsaved changes» prompt. Not part of undo history (3.1). */
+export function settingSignal<T>(initial: T): [Accessor<T>, (v: T) => void] {
+  const [get, set] = createSignal<T>(initial);
+  const setter = (v: T) => {
+    if (Object.is(untrack(get), v)) return;
+    set(() => v);
+    markSettingsDirty();
+  };
+  return [get, setter];
+}
+
+export const [exportSampleRate, setExportSampleRate] = settingSignal(48000);
+export const [exportTaps, setExportTaps] = settingSignal(65536);
+export const [exportWindow, setExportWindow] = settingSignal<WindowType>("Blackman");
+export const [exportHybridPhase, setExportHybridPhase] = settingSignal(false);
 
 // FIR optimization settings
-export const [firIterations, setFirIterations] = createSignal(3);
-export const [firFreqWeighting, setFirFreqWeighting] = createSignal(true);
-export const [firNarrowbandLimit, setFirNarrowbandLimit] = createSignal(true);
-export const [firNbSmoothingOct, setFirNbSmoothingOct] = createSignal(0.333);
-export const [firNbMaxExcess, setFirNbMaxExcess] = createSignal(6.0);
-export const [firMaxBoost, setFirMaxBoost] = createSignal(24.0);
-export const [firNoiseFloor, setFirNoiseFloor] = createSignal(-150.0);
+export const [firIterations, setFirIterations] = settingSignal(3);
+export const [firFreqWeighting, setFirFreqWeighting] = settingSignal(true);
+export const [firNarrowbandLimit, setFirNarrowbandLimit] = settingSignal(true);
+export const [firNbSmoothingOct, setFirNbSmoothingOct] = settingSignal(0.333);
+export const [firNbMaxExcess, setFirNbMaxExcess] = settingSignal(6.0);
+export const [firMaxBoost, setFirMaxBoost] = settingSignal(24.0);
+export const [firNoiseFloor, setFirNoiseFloor] = settingSignal(-150.0);
 
 // ---------------------------------------------------------------------------
 // Snapshot overlays: frozen curves for visual A/B comparison.
@@ -1002,23 +1016,27 @@ export const [exportYScale, setExportYScale] = createSignal<{ min: number; max: 
 
 export const [isDirty, setIsDirty] = createSignal(false);
 export const [bandsVersion, setBandsVersion] = createSignal(0);
+/** b141.103 (audit 3.13): bumped on EVERY change that makes the project
+ *  dirty. A save clears the flag only if no change landed while it was
+ *  writing (an edit during the await used to be marked as saved). */
+let _dirtyGen = 0;
+export function dirtyGeneration(): number { return _dirtyGen; }
+/** A project-wide setting changed: dirty, but no band content to rebuild. */
+export function markSettingsDirty() {
+  _dirtyGen++;
+  if (!untrack(isDirty)) setIsDirty(true);
+}
 export function markDirty() {
-  if (!isDirty()) setIsDirty(true);
+  markSettingsDirty();
   setBandsVersion(v => v + 1);
 }
 
 // ---------------------------------------------------------------------------
-// History snapshot helpers (b132). Capture / apply the bands+FIR+export part.
-// PEQ-optimize signals are merged in by peq-optimize.ts at hook registration.
+// History snapshot helpers (b132): band content only (b141.103, audit 3.1 —
+// global export/FIR/optimizer settings are not undone).
 // ---------------------------------------------------------------------------
 
-export function _captureBandsLight(): {
-  bands: LightBand[];
-  activeBandId: string;
-  nextBandNum: number;
-  firParams: HistoryEntry["firParams"];
-  exportParams: HistoryEntry["exportParams"];
-} {
+export function _captureBandsLight(label: string): HistoryEntry {
   const lightBands: LightBand[] = state.bands.map((b) => ({
     id: b.id,
     name: b.name,
@@ -1038,21 +1056,8 @@ export function _captureBandsLight(): {
     bands: lightBands,
     activeBandId: state.activeBandId,
     nextBandNum: state.nextBandNum,
-    firParams: {
-      iterations: firIterations(),
-      freqWeighting: firFreqWeighting(),
-      narrowbandLimit: firNarrowbandLimit(),
-      nbSmoothingOct: firNbSmoothingOct(),
-      nbMaxExcess: firNbMaxExcess(),
-      maxBoost: firMaxBoost(),
-      noiseFloor: firNoiseFloor(),
-    },
-    exportParams: {
-      sampleRate: exportSampleRate(),
-      taps: exportTaps(),
-      window: exportWindow(),
-      hybridPhase: exportHybridPhase(),
-    },
+    label,
+    ts: Date.now(),
   };
 }
 
@@ -1095,21 +1100,11 @@ export function _applyBandsLight(entry: HistoryEntry): void {
       showTarget: state.showTarget,
       nextBandNum: entry.nextBandNum,
     }));
-    setExportSampleRate(entry.exportParams.sampleRate);
-    setExportTaps(entry.exportParams.taps);
-    setExportWindow(entry.exportParams.window);
-    setExportHybridPhase(entry.exportParams.hybridPhase);
-    setFirIterations(entry.firParams.iterations);
-    setFirFreqWeighting(entry.firParams.freqWeighting);
-    setFirNarrowbandLimit(entry.firParams.narrowbandLimit);
-    setFirNbSmoothingOct(entry.firParams.nbSmoothingOct);
-    setFirNbMaxExcess(entry.firParams.nbMaxExcess);
-    setFirMaxBoost(entry.firParams.maxBoost);
-    setFirNoiseFloor(entry.firParams.noiseFloor);
-    setIsDirty(true);
-    setBandsVersion((v) => v + 1);
+    markDirty();
   });
 }
+
+registerHistoryHooks(_captureBandsLight, _applyBandsLight);
 
 // ---------------------------------------------------------------------------
 // Export metrics (set by UnifiedPlot export tab, read by ControlPanel)

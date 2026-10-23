@@ -7,7 +7,7 @@ import {
   restoreState,
   type ProjectFile,
 } from "./project-io";
-import { setIsDirty } from "../stores/bands";
+import { markSettingsDirty } from "../stores/bands";
 import { clearHistory } from "../stores/history";
 import { APP_VERSION } from "./version";
 
@@ -95,5 +95,5 @@ export async function restoreSnapshot(
   // Live .pfproj on disk is unchanged — restored state diverges from it,
   // so flag dirty and clear session-undo (restore is not part of that stack).
   clearHistory();
-  setIsDirty(true);
+  markSettingsDirty();
 }

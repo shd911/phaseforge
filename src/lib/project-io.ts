@@ -18,6 +18,7 @@ import {
   setExportHybridPhase,
   isDirty,
   setIsDirty,
+  dirtyGeneration,
   setBandMeasurementFile,
   firIterations, setFirIterations,
   firFreqWeighting, setFirFreqWeighting,
@@ -773,6 +774,9 @@ export async function newProject(): Promise<void> {
   setExportSampleRate(48000);
   setExportTaps(65536);
   setExportWindow("Blackman");
+  // b141.103 (audit 3.7): Standard/Hybrid is a project setting too — a new
+  // project used to inherit Hybrid from the previous one.
+  setExportHybridPhase(false);
   // Reset FIR optimization signals to defaults
   setFirIterations(3);
   setFirFreqWeighting(true);
@@ -926,10 +930,13 @@ async function saveProjectAsInner(): Promise<void> {
 }
 
 async function doSave(path: string): Promise<void> {
+  // b141.103 (audit 3.13): the file holds the state read HERE. An edit that
+  // lands during the write is not in it — keep the project dirty then.
+  const gen = dirtyGeneration();
   const project = buildProjectData();
   await invoke("save_project", { path, project });
   setCurrentProjectPath(path);
-  setIsDirty(false);
+  if (dirtyGeneration() === gen) setIsDirty(false);
   // Add to recent projects
   await invoke("add_recent_project", { path }).catch(() => {});
 }

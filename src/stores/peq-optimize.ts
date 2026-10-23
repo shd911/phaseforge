@@ -15,29 +15,28 @@ import {
   clearBandPeqBands,
   setBandPeqOptimizedTarget,
   setSelectedPeqIdx,
-  _captureBandsLight,
-  _applyBandsLight,
+  settingSignal,
 } from "./bands";
 import type { BandState } from "./bands";
-import { pushHistory, registerHistoryHooks, type HistoryEntry } from "./history";
+import { pushHistory } from "./history";
 import { passbandRange } from "../lib/band-evaluator/extension";
 import { showToast } from "../lib/toast";
 
 // --- Signals ---
-export const [tolerance, setTolerance] = createSignal(1.0);
-export const [maxBands, setMaxBands] = createSignal(20);
-export const [gainRegularization, setGainRegularization] = createSignal(0.0);
-export const [peqFloor, setPeqFloor] = createSignal(60); // dB below reference — don't optimize below this
+export const [tolerance, setTolerance] = settingSignal(1.0);
+export const [maxBands, setMaxBands] = settingSignal(20);
+export const [gainRegularization, setGainRegularization] = settingSignal(0.0);
+export const [peqFloor, setPeqFloor] = settingSignal(60); // dB below reference — don't optimize below this
 // b141.87: «Без отражений» — fit the smoothed measurement (1/48 < 100 Hz,
 // 1/3 above), not the reflection ripple of a long-window export.
-export const [peqSmoothFit, setPeqSmoothFit] = createSignal(true);
+export const [peqSmoothFit, setPeqSmoothFit] = settingSignal(true);
 // b141.92: «Подъём до» — PEQ may boost only where the target is within this
 // many dB of its reference; deeper it may only cut (0 = no limit).
-export const [peqBoostFloor, setPeqBoostFloor] = createSignal(30);
+export const [peqBoostFloor, setPeqBoostFloor] = settingSignal(30);
 export type PeqRangeMode = "auto" | "direct";
-export const [peqRangeMode, setPeqRangeMode] = createSignal<PeqRangeMode>("auto");
-export const [peqDirectLow, setPeqDirectLow] = createSignal(20);
-export const [peqDirectHigh, setPeqDirectHigh] = createSignal(F_MAX_WORK);
+export const [peqRangeMode, setPeqRangeMode] = settingSignal<PeqRangeMode>("auto");
+export const [peqDirectLow, setPeqDirectLow] = settingSignal(20);
+export const [peqDirectHigh, setPeqDirectHigh] = settingSignal(F_MAX_WORK);
 export const [computing, setComputing] = createSignal(false);
 export const [peqError, setPeqError] = createSignal<string | null>(null);
 // b141.67 (audit stage 2 B5): fit statistics are PER BAND. Global signals
@@ -364,41 +363,3 @@ export function handleClearPeq() {
   if (b) { clearBandPeqBands(b.id); setBandStats(b.id, null); }
   setSelectedPeqIdx(null);
 }
-
-// ---------------------------------------------------------------------------
-// History hook registration: combines bands' light snapshot with PEQ params.
-// ---------------------------------------------------------------------------
-
-registerHistoryHooks(
-  (label: string): HistoryEntry => {
-    const part = _captureBandsLight();
-    return {
-      ...part,
-      peqParams: {
-        tolerance: tolerance(),
-        maxBands: maxBands(),
-        gainRegularization: gainRegularization(),
-        peqFloor: peqFloor(),
-        peqSmoothFit: peqSmoothFit(),
-        peqBoostFloor: peqBoostFloor(),
-        peqRangeMode: peqRangeMode(),
-        peqDirectLow: peqDirectLow(),
-        peqDirectHigh: peqDirectHigh(),
-      },
-      label,
-      ts: Date.now(),
-    };
-  },
-  (entry: HistoryEntry) => {
-    setTolerance(entry.peqParams.tolerance);
-    setMaxBands(entry.peqParams.maxBands);
-    setGainRegularization(entry.peqParams.gainRegularization);
-    setPeqFloor(entry.peqParams.peqFloor);
-    setPeqSmoothFit(entry.peqParams.peqSmoothFit ?? true);
-    setPeqBoostFloor(entry.peqParams.peqBoostFloor ?? 30);
-    setPeqRangeMode(entry.peqParams.peqRangeMode);
-    setPeqDirectLow(entry.peqParams.peqDirectLow);
-    setPeqDirectHigh(entry.peqParams.peqDirectHigh);
-    _applyBandsLight(entry);
-  },
-);
