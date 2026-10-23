@@ -739,7 +739,7 @@ function PeqTab() {
                           );
                         })()}
                         <td>{b.enabled && b.q > qWarnAt(b.freq_hz) ? (
-                          <button class="peq-warn-icon" title="Высокая добротность — подробнее" aria-label="Высокая добротность"
+                          <button class="peq-warn-icon" title="" aria-label="Высокая добротность"
                             onClick={(e) => { e.stopPropagation(); openHighQPopup(b, i); }}>⚠</button>
                         ) : null}</td>
                         <td>{isPending ? <button class="peq-commit" aria-label="Добавить фильтр" title="Добавить фильтр" onClick={(e) => { e.stopPropagation(); const bd = band(); if (bd) { const ni = commitPeqBand(bd.id, i); setPendingPeqIdx(null); setSelectedPeqIdx(ni); } }}>✓</button> : <button class="peq-remove" onClick={() => handleRemovePeq(i)} aria-label="Удалить фильтр" title="Удалить фильтр">×</button>}</td>

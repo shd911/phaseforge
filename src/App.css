@@ -477,6 +477,9 @@ body {
    no ring on the dark buttons. :focus-visible keeps mouse clicks ring-free. */
 button:focus-visible,
 [role="button"]:focus-visible,
+[role="checkbox"]:focus-visible, /* b141.105: Lin-φ, «Без отражений» */
+[role="tab"]:focus-visible,
+[role="status"]:focus-visible, [role="alert"]:focus-visible, /* toasts */
 select:focus-visible,
 input[type="checkbox"]:focus-visible {
   outline: 1px solid var(--accent);
