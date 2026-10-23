@@ -5,8 +5,8 @@ mod windowing;
 mod helpers;
 mod wav;
 // b141.2: `legacy` (generate_fir) is no longer reachable
-// from production — the frontend routes exclusively through generate_model_fir /
-// generate_model_fir_iir, and the two dead Tauri commands were removed. The
+// from production — the frontend goes through generate_band_fir (b141.70),
+// and the two dead Tauri commands were removed. The
 // module is retained only as the baseline for the golden-snapshot tests in
 // `tests.rs`, so it is gated behind cfg(test).
 #[cfg(test)]

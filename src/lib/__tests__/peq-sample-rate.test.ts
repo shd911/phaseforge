@@ -59,16 +59,6 @@ vi.mock("@tauri-apps/api/core", () => ({
       };
     }
     if (cmd === "pick_fir_route") return "Cepstral";
-    if (cmd === "generate_model_fir") {
-      const taps = args.config.taps as number;
-      const mag = args.targetMag as number[];
-      return {
-        impulse: new Array(taps).fill(0),
-        time_ms: new Array(taps).fill(0),
-        realized_mag: mag, realized_phase: new Array(mag.length).fill(0),
-        taps, sample_rate: args.config.sample_rate, norm_db: 0, causality: 1,
-      };
-    }
     throw new Error(`Unmocked command: ${cmd}`);
   }),
 }));

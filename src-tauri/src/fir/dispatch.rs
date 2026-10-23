@@ -10,11 +10,9 @@
 //! two pipelines behind a unified `trait FirPipeline` with internal
 //! preprocessing (target evaluation, PEQ folding, phase composition) is
 //! deferred until at least one production caller wants that surface.
-//! Today the dispatch happens in JS before the Tauri boundary; each
-//! Tauri command (`generate_model_fir`, `generate_model_fir_iir`) is
-//! single-purpose. Centralising the routing predicate is the
-//! foundation; the trait can land in a later promt without changing
-//! any downstream behaviour.
+//! Since b141.70 the dispatch happens in Rust (`fir::band::generate_band_fir`,
+//! via [`route_for_target`]); the per-route Tauri commands were removed in
+//! b141.101.
 
 use crate::target::{FilterConfig, FilterType, TargetCurve};
 use super::types::FirConfig;

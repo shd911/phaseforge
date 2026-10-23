@@ -7,8 +7,8 @@
 //   2. Coherent-sum IR — same routine over the SUM (re, im) accumulator.
 //   3. PEQ optimizers on raw measurements:
 //        - auto_peq        (flat target, full passband)
-//        - auto_peq_lma    (3-zone composite, hp..lp from band target)
-//        - auto_peq_above_lp (cuts only, > lp)
+//        - auto_peq_lma    (flat target, hp..lp from band target)
+//      (auto_peq_above_lp was dead outside tests — removed in b141.101)
 //      Each must produce >= 0 bands with finite gains and a max-error
 //      that is non-NaN.
 //   4. Alignment delay: apply a phase ramp `phi += -2*pi*f*tau` to one
@@ -20,7 +20,7 @@ use phaseforge_lib::fir::band::evaluate_on;
 use phaseforge_lib::fir::{FirConfig, PhaseMode, WindowType};
 use phaseforge_lib::io::import_measurement;
 use phaseforge_lib::peq::{
-    apply_peq_complex, auto_peq, auto_peq_above_lp, auto_peq_lma, PeqConfig,
+    apply_peq_complex, auto_peq, auto_peq_lma, PeqConfig,
 };
 use phaseforge_lib::project::ProjectFile;
 use phaseforge_lib::target;
@@ -195,17 +195,6 @@ fn release_readiness_stage4_sum_ir_peq_alignment() {
         assert!(r_lma.max_error_db.is_finite());
         check_peq_result(bi, "auto_peq_lma", &r_lma.bands);
 
-        // above_lp: only meaningful when there is a LP corner.
-        let r_above = if band.target.low_pass.is_some() {
-            let r = auto_peq_above_lp(&meas_mag_grid, &freq, &cfg, lp_freq, hp_freq)
-                .unwrap_or_else(|e| panic!("B{bi} auto_peq_above_lp: {e}"));
-            assert!(r.max_error_db.is_finite());
-            check_peq_result(bi, "auto_peq_above_lp", &r.bands);
-            Some(r.bands.len())
-        } else {
-            None
-        };
-
         // FIR routing smoke (already covered in stage 2, but include
         // the chosen pipeline label for completeness here).
         let cfg_fir = FirConfig {
@@ -235,7 +224,6 @@ fn release_readiness_stage4_sum_ir_peq_alignment() {
             "peq_auto_max_err_db": r_auto.max_error_db,
             "peq_lma_bands": r_lma.bands.len(),
             "peq_lma_max_err_db": r_lma.max_error_db,
-            "peq_above_lp_bands": r_above,
         }));
     }
 
