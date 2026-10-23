@@ -406,11 +406,22 @@ pub fn detect_hf_cliff(freq: &[f64], magnitude: &[f64], sample_rate: f64) -> Opt
 // Tauri command
 // ---------------------------------------------------------------------------
 
+/// b141.102 (audit 2026-10-23 2.12): async + blocking pool. A sync Tauri
+/// command runs on the main thread — 34 ms on a 1M-point measurement froze
+/// the UI for that long.
 #[tauri::command]
-pub fn analyze_measurement(measurement: Measurement) -> Result<AnalysisResult, String> {
+pub async fn analyze_measurement(measurement: Measurement) -> Result<AnalysisResult, String> {
+    tauri::async_runtime::spawn_blocking(move || analyze(measurement))
+        .await
+        .map_err(|e| format!("analyze_measurement: {e}"))?
+}
+
+pub fn analyze(measurement: Measurement) -> Result<AnalysisResult, String> {
     let freq = &measurement.freq;
     let mag = &measurement.magnitude;
-    if freq.is_empty() || mag.len() != freq.len() {
+    if freq.is_empty() || mag.len() != freq.len()
+        || measurement.phase.as_ref().is_some_and(|p| p.len() != freq.len())
+    {
         return Err("invalid measurement: empty or length mismatch".into());
     }
     let mut findings: Vec<Finding> = Vec::new();

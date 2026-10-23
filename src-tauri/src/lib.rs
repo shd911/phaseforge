@@ -54,6 +54,20 @@ fn validate_export_path(path: &str) -> Result<PathBuf, String> {
     Ok(PathBuf::from(path))
 }
 
+/// b141.102 (audit 2026-10-23 2.6): arrays an IPC command zips or indexes
+/// together must have one length — a mismatch was an index panic deep in
+/// the DSP (interp_at, compute_group_delay, bulk_delay, the smoothing prefix
+/// sum), and a panicking async command leaves the frontend's promise hanging.
+fn check_lengths(cmd: &str, arrays: &[(&str, usize)]) -> Result<(), String> {
+    let Some(&(first, n)) = arrays.first() else { return Ok(()) };
+    for &(name, len) in &arrays[1..] {
+        if len != n {
+            return Err(format!("{cmd}: {name} has {len} points, {first} has {n}"));
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn import_measurement(path: String) -> Result<Measurement, String> {
     info!("import_measurement: {}", path);
@@ -68,6 +82,7 @@ async fn get_smoothed(
     config: SmoothingConfig,
 ) -> Result<Vec<f64>, String> {
     info!("get_smoothed: {} points", freq.len());
+    check_lengths("get_smoothed", &[("freq", freq.len()), ("magnitude", magnitude.len())])?;
     Ok(dsp::variable_smoothing(&freq, &magnitude, &config))
 }
 
@@ -77,6 +92,8 @@ async fn evaluate_target(target: TargetCurve, freq: Vec<f64>) -> Result<TargetRe
     info!("evaluate_target: {} points", freq.len());
     Ok(target::evaluate(&target, &freq))
 }
+
+const MAX_STANDALONE_POINTS: usize = 1 << 16;
 
 #[tauri::command]
 async fn evaluate_target_standalone(
@@ -88,6 +105,14 @@ async fn evaluate_target_standalone(
     let n = n_points.unwrap_or(512);
     let fmin = f_min.unwrap_or(20.0);
     let fmax = f_max.unwrap_or(dsp::F_MAX_WORK);
+    // b141.102 (audit 2026-10-23 2.11): f_max = 0 gave a NaN grid, and the
+    // point count was unbounded.
+    if !(2..=MAX_STANDALONE_POINTS).contains(&n) {
+        return Err(format!("evaluate_target_standalone: n_points {n} outside 2..={MAX_STANDALONE_POINTS}"));
+    }
+    if !(fmin.is_finite() && fmax.is_finite() && fmin > 0.0 && fmax > fmin) {
+        return Err(format!("evaluate_target_standalone: bad range {fmin}..{fmax} Hz"));
+    }
     let freq = dsp::generate_log_freq_grid(n, fmin, fmax);
     let response = target::evaluate(&target, &freq);
     info!("evaluate_target_standalone: {} points", n);
@@ -102,6 +127,8 @@ async fn remove_measurement_delay(
     phase: Vec<f64>,
     sample_rate: Option<f64>,
 ) -> Result<(Vec<f64>, f64, f64), String> {
+    check_lengths("remove_measurement_delay",
+        &[("freq", freq.len()), ("magnitude", magnitude.len()), ("phase", phase.len())])?;
     let delay = phase::estimate_delay(&freq, &magnitude, &phase, sample_rate);
     let distance = phase::compute_distance(delay);
     let new_phase = phase::remove_delay(&freq, &phase, delay);
@@ -121,6 +148,7 @@ async fn apply_manual_delay(
     phase: Vec<f64>,
     delay_seconds: f64,
 ) -> Result<Vec<f64>, String> {
+    check_lengths("apply_manual_delay", &[("freq", freq.len()), ("phase", phase.len())])?;
     let new_phase = phase::remove_delay(&freq, &phase, delay_seconds);
     let distance = phase::compute_distance(delay_seconds);
     info!("apply_manual_delay: {:.4}ms ({:.3}m)", delay_seconds * 1000.0, distance);
@@ -136,6 +164,8 @@ async fn compute_impulse(
 ) -> Result<ImpulseResult, String> {
     let sr = sample_rate.unwrap_or(48000.0);
     info!("compute_impulse: {} points, sr={}", freq.len(), sr);
+    check_lengths("compute_impulse",
+        &[("freq", freq.len()), ("magnitude", magnitude.len()), ("phase", phase.len())])?;
     Ok(dsp::impulse::compute_impulse_response(&freq, &magnitude, &phase, sr))
 }
 
@@ -235,6 +265,8 @@ async fn auto_peq_lma(
     exclusion_zones: Option<Vec<ExclusionZone>>,
     smooth_fit: Option<bool>,
 ) -> Result<PeqResult, String> {
+    // The smoothing below indexes both arrays before peq's own length check.
+    check_lengths("auto_peq_lma", &[("freq", freq.len()), ("measurement_mag", measurement_mag.len())])?;
     let zones = exclusion_zones.unwrap_or_default();
     let smooth_fit = smooth_fit.unwrap_or(false);
     info!(
@@ -450,6 +482,40 @@ async fn export_fir_wav(impulse: Vec<f64>, sample_rate: f64, path: String) -> Re
     let p = validate_export_path(&path)?;
 
     fir::export_wav_f64(&impulse, sample_rate, &p).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod ipc_guard_tests {
+    use super::*;
+    use tauri::async_runtime::block_on;
+
+    /// Audit 2026-10-23 2.6: ragged arrays are an error, not a panic.
+    #[test]
+    fn ragged_arrays_are_an_error() {
+        let f = vec![100.0, 200.0, 400.0];
+        let short = vec![0.0, 0.0];
+        assert!(block_on(get_smoothed(f.clone(), short.clone(), SmoothingConfig::default())).is_err());
+        assert!(block_on(remove_measurement_delay(f.clone(), f.clone(), short.clone(), None)).is_err());
+        assert!(block_on(remove_measurement_delay(f.clone(), short.clone(), f.clone(), None)).is_err());
+        assert!(block_on(apply_manual_delay(f.clone(), short.clone(), 0.001)).is_err());
+        assert!(block_on(compute_impulse(f.clone(), f.clone(), short.clone(), None)).is_err());
+    }
+
+    /// Audit 2026-10-23 2.11.
+    #[test]
+    fn standalone_target_rejects_bad_grid() {
+        let t: target::TargetCurve = serde_json::from_str(r#"{"reference_level_db":0.0,
+            "tilt_db_per_octave":0.0,"tilt_ref_freq":1000.0,"high_pass":null,"low_pass":null,
+            "low_shelf":null,"high_shelf":null}"#).unwrap();
+        for (n, lo, hi) in [(Some(512), Some(20.0), Some(0.0)), (Some(512), Some(0.0), Some(20000.0)),
+                            (Some(512), Some(f64::NAN), None), (Some(1), None, None),
+                            (Some(10_000_000), None, None)] {
+            assert!(block_on(evaluate_target_standalone(t.clone(), n, lo, hi)).is_err(), "{n:?} {lo:?} {hi:?}");
+        }
+        let (freq, r) = block_on(evaluate_target_standalone(t, Some(512), Some(5.0), Some(40000.0))).unwrap();
+        assert_eq!(freq.len(), 512);
+        assert!(r.magnitude.iter().all(|v| v.is_finite()));
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

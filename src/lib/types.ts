@@ -170,6 +170,8 @@ export interface MergeResult {
   measurement: Measurement;
   auto_level_offset_db: number;
   delay_diff_seconds: number;
+  /** What the merge had to drop (b141.102), ready-to-show Russian text. */
+  warnings?: string[];
 }
 
 // --- Auto Align: PEQ ---

@@ -92,7 +92,7 @@ fn ifft_parts(freq: &[f64], parts: &[SpectrumPart], sample_rate: f64, fft_size: 
 /// the last group delay and fade the magnitude out with a raised cosine over
 /// one octave, or up to Nyquist when that is closer. Callers that already extend to Nyquist (noise-
 /// floor tail) are untouched: nothing lies above their last point.
-fn extend_above_grid(freq: &[f64], phase: &[f64], mag: &mut [f64], ph: &mut [f64], sample_rate: f64) {
+pub(crate) fn extend_above_grid(freq: &[f64], phase: &[f64], mag: &mut [f64], ph: &mut [f64], sample_rate: f64) {
     let n = freq.len();
     if n < 2 { return; }
     let n_bins = mag.len();

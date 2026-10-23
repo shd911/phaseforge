@@ -1,6 +1,7 @@
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
@@ -79,16 +80,19 @@ fn write_index(project_dir: &Path, idx: &SnapshotIndex) -> Result<(), String> {
     let dir = snapshots_dir(project_dir);
     std::fs::create_dir_all(&dir).map_err(|e| format!("create snapshots dir: {e}"))?;
     let json = serde_json::to_string_pretty(idx).map_err(|e| format!("serialize index: {e}"))?;
-    // Atomic write: tmp + rename. Crash mid-write leaves the old index intact.
-    let final_path = index_path(project_dir);
-    let tmp_path = dir.join("index.json.tmp");
-    {
-        let mut f = std::fs::File::create(&tmp_path).map_err(|e| format!("create tmp index: {e}"))?;
-        f.write_all(json.as_bytes()).map_err(|e| format!("write tmp index: {e}"))?;
-        f.sync_all().ok();
-    }
-    std::fs::rename(&tmp_path, &final_path).map_err(|e| format!("rename index: {e}"))?;
-    Ok(())
+    // Atomic write: unique tmp + rename. Crash mid-write leaves the old index intact.
+    crate::project::write_atomic(&index_path(project_dir), json.as_bytes())
+        .map_err(|e| format!("write index: {e}"))
+}
+
+/// b141.102 (audit 2026-10-23 2.4): every read-modify-write of `index.json`
+/// runs under this lock. Two concurrent create_snapshot calls each read the
+/// index, pushed their entry and wrote it back — the later write dropped the
+/// earlier entry (the .pfproj stayed on disk, invisible in the list).
+static INDEX_LOCK: Mutex<()> = Mutex::new(());
+
+fn index_lock() -> std::sync::MutexGuard<'static, ()> {
+    INDEX_LOCK.lock().unwrap_or_else(|p| p.into_inner())
 }
 
 fn fresh_id() -> String {
@@ -148,35 +152,59 @@ pub async fn create_snapshot(
     if id.is_empty() {
         return Err("failed to allocate unique snapshot id".into());
     }
+    // b141.102 (audit 2026-10-23 2.7): a failure after the file was
+    // allocated (copying a measurement, writing JSON, the index) used to
+    // leave an empty `<id>.pfproj` and a half-filled `<id>/` behind.
+    let file = file.take().expect("file handle allocated above");
+    match finish_snapshot(&dir, &id, copy, file, ts, description, app_version) {
+        Ok(entry) => {
+            info!("create_snapshot: {} ({})", entry.id, snap_path.display());
+            Ok(entry)
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&snap_path);
+            let _ = std::fs::remove_dir_all(snapshots_dir(&dir).join(&id));
+            Err(e)
+        }
+    }
+}
+
+fn finish_snapshot(
+    dir: &Path,
+    id: &str,
+    mut copy: ProjectFile,
+    mut file: std::fs::File,
+    ts: String,
+    description: String,
+    app_version: String,
+) -> Result<SnapshotEntry, String> {
     // 2026-09-05 audit: a snapshot referenced `inbox/<name>` by path only, so a
     // later re-import with the same file name silently rewrote every older
     // version's measurement. Copy referenced files into `snapshots/<id>/`
     // and point the snapshot at those copies.
-    freeze_measurement_files(&dir, &id, &mut copy)?;
-    copy.snapshot_id = Some(id.clone());
+    freeze_measurement_files(dir, id, &mut copy)?;
+    copy.snapshot_id = Some(id.to_string());
     let json = serde_json::to_string_pretty(&copy).map_err(|e| format!("serialize snapshot: {e}"))?;
-    {
-        let mut f = file.take().expect("file handle allocated above");
-        f.write_all(json.as_bytes()).map_err(|e| format!("write snapshot: {e}"))?;
-        f.sync_all().ok();
-    }
+    file.write_all(json.as_bytes()).map_err(|e| format!("write snapshot: {e}"))?;
+    file.sync_all().ok();
+    drop(file);
 
     let entry = SnapshotEntry {
-        id: id.clone(),
+        id: id.to_string(),
         ts,
         description,
         app_version,
         file: format!("{id}.pfproj"),
     };
 
-    let mut idx = match read_index(&dir) {
+    let _guard = index_lock();
+    let mut idx = match read_index(dir) {
         Ok(i) => i,
         Err(e) if e == INDEX_CORRUPTED => SnapshotIndex::empty(),
         Err(e) => return Err(e),
     };
     idx.entries.push(entry.clone());
-    write_index(&dir, &idx)?;
-    info!("create_snapshot: {} ({})", entry.id, snap_path.display());
+    write_index(dir, &idx)?;
     Ok(entry)
 }
 
@@ -203,21 +231,30 @@ fn resolve_measurement_source(project_dir: &Path, reference: &str) -> Option<Pat
 fn freeze_measurement_files(project_dir: &Path, id: &str, project: &mut ProjectFile) -> Result<(), String> {
     let files_dir = snapshots_dir(project_dir).join(id);
     let rel_dir = format!("snapshots/{id}");
-    let mut copied: std::collections::HashMap<String, PathBuf> = std::collections::HashMap::new();
+    // b141.102 (audit 2026-10-23 2.3): one name per SOURCE file, and a name
+    // is never handed to two different sources. Before, a second file with a
+    // taken basename got `<tag>_<base>` but was recorded under that new name
+    // only — a third same-named file (the NF of another band) found
+    // `<tag>_<base>` already on disk and was pointed at THAT band's copy: the
+    // version restored with a foreign measurement and no error.
+    let mut by_source: std::collections::HashMap<PathBuf, String> = std::collections::HashMap::new();
+    let mut taken: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut freeze = |reference: &mut String, tag: &str| -> Result<(), String> {
         let Some(src) = resolve_measurement_source(project_dir, reference) else { return Ok(()); };
-        let base = src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        // Same basename from a different source (NF vs FF vs merged): prefix.
-        let name = match copied.get(&base) {
-            Some(prev) if prev != &src => format!("{tag}_{base}"),
-            _ => base.clone(),
+        let key = std::fs::canonicalize(&src).unwrap_or_else(|_| src.clone());
+        let name = match by_source.get(&key) {
+            Some(name) => name.clone(),
+            None => {
+                let base = src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let name = unique_name(&base, tag, &taken);
+                std::fs::create_dir_all(&files_dir).map_err(|e| format!("create snapshot files dir: {e}"))?;
+                std::fs::copy(&src, files_dir.join(&name))
+                    .map_err(|e| format!("copy {} into snapshot: {e}", src.display()))?;
+                taken.insert(name.clone());
+                by_source.insert(key, name.clone());
+                name
+            }
         };
-        let dst = files_dir.join(&name);
-        if !dst.exists() {
-            std::fs::create_dir_all(&files_dir).map_err(|e| format!("create snapshot files dir: {e}"))?;
-            std::fs::copy(&src, &dst).map_err(|e| format!("copy {} into snapshot: {e}", src.display()))?;
-        }
-        copied.entry(name.clone()).or_insert(src);
         *reference = format!("{rel_dir}/{name}");
         Ok(())
     };
@@ -231,6 +268,18 @@ fn freeze_measurement_files(project_dir: &Path, id: &str, project: &mut ProjectF
         }
     }
     Ok(())
+}
+
+/// `base` if free, else `<tag>_<base>`, else `<tag>_<n>_<base>` (n = 2, 3, …).
+fn unique_name(base: &str, tag: &str, taken: &std::collections::HashSet<String>) -> String {
+    if !taken.contains(base) {
+        return base.to_string();
+    }
+    let tagged = format!("{tag}_{base}");
+    if !taken.contains(&tagged) {
+        return tagged;
+    }
+    (2..).map(|n| format!("{tag}_{n}_{base}")).find(|c| !taken.contains(c)).expect("unbounded range")
 }
 
 #[tauri::command]
@@ -269,6 +318,7 @@ pub async fn delete_snapshot(project_dir: String, id: String) -> Result<(), Stri
         std::fs::remove_dir_all(&files_dir).map_err(|e| format!("delete snapshot files: {e}"))?;
     }
     // Update index, surfacing corruption so the UI can offer Rebuild.
+    let _guard = index_lock();
     match read_index(&dir) {
         Ok(mut idx) => {
             idx.entries.retain(|e| e.id != id);
@@ -287,6 +337,7 @@ pub async fn delete_snapshot(project_dir: String, id: String) -> Result<(), Stri
 pub async fn rebuild_snapshot_index(project_dir: String) -> Result<u32, String> {
     let dir = validate_dir(&project_dir)?;
     let snap_dir = snapshots_dir(&dir);
+    let _guard = index_lock();
     if !snap_dir.is_dir() {
         write_index(&dir, &SnapshotIndex::empty())?;
         return Ok(0);
@@ -336,7 +387,11 @@ mod freeze_tests {
     use super::*;
 
     fn temp_project() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("pf_snap_{}_{}", std::process::id(), fresh_id()));
+        // A counter, not fresh_id(): tests run in parallel and the 16-bit
+        // nanosecond suffix collided between two tests started together.
+        static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("pf_snap_{}_{}_{n}", std::process::id(), fresh_id()));
         std::fs::create_dir_all(dir.join("inbox")).unwrap();
         dir
     }
@@ -387,6 +442,96 @@ mod freeze_tests {
         // Overwrite the live inbox file — the snapshot copy must keep v1.
         std::fs::write(dir.join("inbox/Woofer.txt"), "v2").unwrap();
         assert_eq!(std::fs::read_to_string(dir.join("snapshots/snap1/Woofer.txt")).unwrap(), "v1");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn empty_project() -> ProjectFile {
+        serde_json::from_str(r#"{
+            "version": 2, "app_name": "PhaseForge", "bands": [],
+            "active_band_id": "b1", "show_phase": true, "show_mag": true,
+            "show_target": true, "next_band_num": 2
+        }"#).unwrap()
+    }
+
+    /// Audit 2026-10-23 2.3: three bands whose NF files share one name but
+    /// live in different folders — each restores to ITS OWN file. The third
+    /// used to be pointed at the second band's copy.
+    #[test]
+    fn same_named_measurements_of_different_bands_stay_apart() {
+        let dir = temp_project();
+        let mut project = empty_project();
+        for (i, sub) in ["a", "b", "c"].iter().enumerate() {
+            std::fs::create_dir_all(dir.join(sub)).unwrap();
+            std::fs::write(dir.join(sub).join("nf.txt"), format!("nf-{sub}")).unwrap();
+            project.bands.push(band(&format!("b{i}"), Some(&format!("{sub}/nf.txt")), Some(&format!("{sub}/nf.txt"))));
+        }
+        std::fs::write(dir.join("inbox/ff.txt"), "ff").unwrap();
+
+        freeze_measurement_files(&dir, "snap2", &mut project).unwrap();
+
+        let read = |r: &str| std::fs::read_to_string(dir.join(r)).unwrap();
+        let mut names = std::collections::HashSet::new();
+        for (b, sub) in project.bands.iter().zip(["a", "b", "c"]) {
+            let mf = b.measurement_file.as_deref().unwrap();
+            let ms = b.settings.as_ref().unwrap().merge_source.as_ref().unwrap();
+            assert_eq!(read(mf), format!("nf-{sub}"), "band {sub}: measurement");
+            assert_eq!(read(&ms.nf_path), format!("nf-{sub}"), "band {sub}: NF");
+            assert_eq!(mf, ms.nf_path, "one source → one copy");
+            assert_eq!(read(&ms.ff_path), "ff");
+            names.insert(mf.to_string());
+        }
+        assert_eq!(names.len(), 3, "three sources need three files: {names:?}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Audit 2026-10-23 2.4: concurrent snapshots must all reach the index.
+    #[test]
+    fn concurrent_snapshots_all_reach_the_index() {
+        let dir = temp_project();
+        let dir_s = dir.to_string_lossy().into_owned();
+        let handles: Vec<_> = (0..8).map(|t| {
+            let dir_s = dir_s.clone();
+            std::thread::spawn(move || {
+                tauri::async_runtime::block_on(create_snapshot(
+                    dir_s, format!("v{t}"), "test".into(), empty_project(),
+                )).unwrap()
+            })
+        }).collect();
+        let ids: std::collections::HashSet<String> = handles.into_iter().map(|h| h.join().unwrap().id).collect();
+        assert_eq!(ids.len(), 8);
+        let listed = tauri::async_runtime::block_on(list_snapshots(dir_s)).unwrap();
+        assert_eq!(listed.len(), 8, "index lost entries: {listed:?}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Audit 2026-10-23 2.7: a failed copy leaves neither the .pfproj nor the
+    /// files folder behind.
+    #[cfg(unix)]
+    #[test]
+    fn failed_snapshot_leaves_nothing_behind() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_project();
+        let a = dir.join("inbox/a.txt");
+        let b = dir.join("inbox/b.txt");
+        std::fs::write(&a, "a").unwrap();
+        std::fs::write(&b, "b").unwrap();
+        std::fs::set_permissions(&b, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(&b).is_ok() {
+            // Running as root: permissions do not stop the copy.
+            std::fs::remove_dir_all(&dir).ok();
+            return;
+        }
+        let mut project = empty_project();
+        project.bands.push(band("b1", Some("inbox/a.txt"), None));
+        project.bands.push(band("b2", Some("inbox/b.txt"), None));
+        let r = tauri::async_runtime::block_on(create_snapshot(
+            dir.to_string_lossy().into_owned(), "v".into(), "test".into(), project,
+        ));
+        assert!(r.is_err(), "{r:?}");
+        let left: Vec<_> = std::fs::read_dir(dir.join("snapshots")).unwrap()
+            .filter_map(|e| e.ok()).map(|e| e.file_name()).collect();
+        assert!(left.is_empty(), "left behind: {left:?}");
+        std::fs::set_permissions(&b, std::fs::Permissions::from_mode(0o644)).ok();
         std::fs::remove_dir_all(&dir).ok();
     }
 }
