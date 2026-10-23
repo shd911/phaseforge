@@ -35,7 +35,7 @@ describe("UI contrast", () => {
       });
     }
   }
-  for (const fill of ["accent-fill", "accent-fill-hover", "danger-fill", "accent-dim"]) {
+  for (const fill of ["accent-fill", "accent-fill-hover", "accent-dim"]) {
     it(`white on --${fill} ≥ 4.5`, () => {
       expect(ratio("#ffffff", token(fill))).toBeGreaterThanOrEqual(4.5);
     });

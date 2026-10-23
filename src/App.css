@@ -16,17 +16,14 @@
      (hover), 5.01 (surface), 5.60 (secondary), 6.19 (primary). */
   --text-secondary: #a8a8b4;
   --text-muted: #9d9daa;
-  --text-on-accent: #fff; /* b141.4: text/icons on accent or danger fills */
 
   --accent: #4a90d9;
-  --accent-hover: #5da3e8;
   --accent-dim: #3a6fa0;
   /* b141.105 (§5.10): fills that carry white text. White on --accent was
      3.34:1 (hover 2.67:1); on these 5.34:1 / 4.89:1. --accent itself stays
      for text, borders and marks on the dark background. */
   --accent-fill: #2f6db0;
   --accent-fill-hover: #3573b8;
-  --danger-fill: #b83a3a; /* white 5.67:1 (--danger: 4.18:1) */
 
   --border: #3a3a48;
   --border-focus: #4a90d9;
@@ -40,12 +37,9 @@
      are the pre-b141.4 literals. */
   --warn-amber: #d97706;
   --warn-amber-text: #fbbf24;
-  --color-meas: #4A9EFF; /* b141.4: measurement-curve blue, distinct from --accent */
 
   --mono: "SF Mono", "Menlo", "Monaco", "Consolas", monospace;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", sans-serif;
-
-  --target-color: #FFD700;
 
   /* Typography scale */
   --fs-xxs: 9px; /* b141.11: 8px нечитаем (кнопка AUTO) */     /* ultra-compact buttons (AUTO) */
@@ -70,27 +64,17 @@
   --space-3xl: 32px;
 
   /* Spacing & sizing */
-  --radius-sm: 2px;
   --radius-md: 4px;
   --radius-lg: 6px;
   --btn-pad-xs: 1px 4px;
   --btn-pad-sm: 2px 6px;
-  --btn-pad-base: 3px 10px;
   --btn-pad-md: 5px 14px;
   --btn-pad-lg: 8px 16px;
 
   /* Semantic status colors */
   --status-good: #22C55E;
-  --status-warn: #FFD700;
   --status-bad: #EF4444;
 
-  /* Curve type colors (non-band-specific) */
-  --color-peq: #FF9F43;
-  --color-peq-hover: #FFA726;
-  --color-peq-drag: #FFC107;
-  --color-peq-base: #FF9800;
-  --color-fir: #38BDF8;
-  --color-corrected: #22C55E;
 }
 
 * {
@@ -155,26 +139,11 @@ body {
   letter-spacing: -0.3px;
 }
 
-.top-version {
-  font-size: var(--fs-sm);
-  color: var(--text-muted);
-}
-
 .top-sep {
   width: 1px;
   height: 16px;
   background: var(--border);
   flex-shrink: 0;
-}
-
-.top-info {
-  font-family: var(--mono);
-  font-size: var(--fs-base);
-  color: var(--text-secondary);
-  margin-left: auto;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* Toolbar buttons */
@@ -210,29 +179,6 @@ body {
 .tb-btn-sm {
   font-size: var(--fs-xs);
   padding: var(--btn-pad-sm);
-}
-
-.tb-hybrid {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-
-  font-size: var(--fs-base);
-  color: var(--text-secondary);
-  cursor: pointer;
-  white-space: nowrap;
-  user-select: none;
-}
-.tb-hybrid input[type="checkbox"] {
-  margin: 0;
-  cursor: pointer;
-  accent-color: var(--accent);
-}
-.tb-hybrid:hover { color: var(--text-primary); }
-
-.tb-label {
-  font-size: var(--fs-base);
-  color: var(--text-secondary);
 }
 
 .tb-select {
@@ -358,65 +304,6 @@ body {
   color: var(--accent);
   padding: var(--space-xxs) var(--space-md) var(--space-xs);
 
-}
-
-/* IR/Step visibility matrix legend */
-.ir-legend-matrix {
-  display: flex;
-  align-items: center;
-  gap: var(--space-lg);
-
-  padding: var(--space-xxs) var(--space-lg);
-
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-  font-size: var(--fs-sm);
-}
-.ir-matrix-table {
-  border-collapse: collapse;
-}
-.ir-matrix-table th {
-  font-size: var(--fs-xs);
-  font-weight: 500;
-  padding: 0 var(--space-md);
-
-  text-align: center;
-}
-.ir-matrix-table td {
-  padding: 1px var(--space-md);
-
-  text-align: center;
-}
-.ir-matrix-label {
-  text-align: left !important;
-  color: var(--text-secondary);
-  font-size: var(--fs-sm);
-  padding-right: var(--space-md) !important;
-
-}
-.ir-matrix-table input[type="checkbox"] {
-  accent-color: var(--accent);
-  cursor: pointer;
-}
-.ir-matrix-options {
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-
-}
-.ir-matrix-check {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-
-  color: var(--text-secondary);
-  font-size: var(--fs-sm);
-  cursor: pointer;
-}
-.ir-matrix-check input[type="checkbox"] {
-  accent-color: var(--accent);
-  cursor: pointer;
 }
 
 .plot-tabs-strip {
@@ -678,29 +565,7 @@ input[type="checkbox"]:focus-visible {
 .sum-vis-table .sum-cell:hover {
   background: var(--bg-hover);
 }
-.sum-cell-dot {
-  display: inline-block;
-  width: 11px;
-  height: 11px;
-  border-radius: 2px;
-  border: 1.5px solid;
-  position: relative;
-  transition: background 0.15s, border-color 0.15s;
-}
-.sum-cell-dot {
-  background: transparent !important;
-}
-.sum-cell-dot.on::after {
-  content: "✓";
-  position: absolute;
-  left: 0;
-  top: -1px;
-  width: 11px;
-  font-size: var(--fs-sm);
-  line-height: 11px;
-  text-align: center;
-  color: #fff;
-}
+
 /* b141.105 (§5.12): units inside an uppercased header stay as written. */
 .sum-row-header span { text-transform: none; }
 /* Row header (category name) */
@@ -863,78 +728,10 @@ input[type="checkbox"]:focus-visible {
 /* ============================================================
    Resize Handle
    ============================================================ */
-.resize-handle {
-  height: 4px;
-  background: var(--border);
-  cursor: row-resize;
-  flex-shrink: 0;
-}
-.resize-handle:hover { background: var(--accent-dim); }
 
 /* ============================================================
    Control Panel Wrapper
    ============================================================ */
-.ctrl-wrap {
-  flex-shrink: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  background: var(--bg-secondary);
-  border-top: 1px solid var(--border);
-}
-
-.ctrl-panel {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-/* Tabs */
-.ctrl-tabs {
-  display: flex;
-  gap: 0;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-  background: var(--bg-primary);
-}
-
-.ctrl-tab {
-  padding: var(--space-sm) var(--space-xl);
-
-  font-size: var(--fs-base);
-  font-weight: 500;
-  font-family: var(--sans);
-  color: var(--text-secondary);
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-
-}
-.ctrl-tab:hover { color: var(--text-primary); }
-.ctrl-tab.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-}
-
-.ctrl-tab-badge {
-  font-size: var(--fs-sm);
-  background: var(--accent-dim);
-  color: #fff;
-  padding: 0 var(--space-sm);
-
-  border-radius: 8px;
-  min-width: 16px;
-  text-align: center;
-}
-
-.ctrl-body {
-  overflow-x: auto;
-  padding: var(--space-sm);
-
-}
 
 /* ============================================================
    Filters Row (horizontal layout)
@@ -1070,13 +867,6 @@ input[type="checkbox"]:focus-visible {
   opacity: 1;
 }
 
-.fb-link-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
 .fb-row {
   display: flex;
   align-items: center;
@@ -1198,13 +988,6 @@ input[type="checkbox"]:focus-visible {
 }
 .num-field:focus { border-color: var(--border-focus); }
 
-.num-display {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: text;
-}
-
 .num-unit {
   font-size: var(--fs-sm);
   color: var(--text-muted);
@@ -1217,102 +1000,12 @@ input[type="checkbox"]:focus-visible {
 /* ============================================================
    Measurements Tab
    ============================================================ */
-.measurements-tab {
-  min-width: 400px;
-}
-
-.meas-actions {
-  display: flex;
-  gap: var(--space-sm);
-
-  padding: 0 0 var(--space-md) 0;
-
-}
 
 .meas-empty {
   color: var(--text-muted);
   font-size: var(--fs-md);
   padding: var(--space-xs) 0;
 
-}
-
-.meas-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--fs-base);
-}
-
-.meas-table th {
-  text-align: left;
-  font-weight: 500;
-  color: var(--text-muted);
-  font-size: var(--fs-sm);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  padding: var(--space-xs) var(--space-sm);
-
-  border-bottom: 1px solid var(--border);
-}
-
-.meas-table td {
-  padding: var(--space-xs) var(--space-sm);
-
-  border-bottom: 1px solid var(--border);
-}
-
-.meas-table tr { cursor: pointer; }
-.meas-table tr:hover td { background: var(--bg-hover); }
-.meas-table tr.active td { background: var(--accent-dim); color: #fff; }
-
-.color-dot {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  vertical-align: middle;
-  cursor: pointer;
-  border: 1px solid rgba(255,255,255,0.2);
-}
-.color-dot:hover {
-  border-color: rgba(255,255,255,0.5);
-}
-.color-dot-label {
-  display: inline-block;
-  position: relative;
-  cursor: pointer;
-}
-.color-dot-input {
-  position: absolute;
-  width: 0;
-  height: 0;
-  opacity: 0;
-}
-
-.meas-name {
-  color: var(--text-primary);
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.meas-pts, .meas-phase {
-  font-family: var(--mono);
-  color: var(--text-secondary);
-}
-
-.meas-smooth-select {
-  font-size: var(--fs-sm);
-  padding: 1px var(--space-xs);
-
-  min-width: 48px;
-}
-
-.meas-dist {
-  font-family: var(--mono);
-  font-size: var(--fs-base);
-  color: var(--text-secondary);
-  white-space: nowrap;
 }
 
 .meas-action-btn {
@@ -1331,35 +1024,6 @@ input[type="checkbox"]:focus-visible {
   background: var(--bg-hover);
   color: var(--text-primary);
 }
-
-.meas-delay-done {
-  font-size: var(--fs-base);
-  color: var(--success);
-}
-.meas-delay-check {
-  display: flex;
-  align-items: center;
-  cursor: pointer;
-}
-.meas-delay-check input {
-  cursor: pointer;
-  accent-color: var(--accent);
-}
-.meas-text-muted {
-  color: var(--text-muted);
-  font-size: var(--fs-base);
-}
-
-.meas-remove {
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: var(--fs-xl);
-  cursor: pointer;
-  padding: 0 var(--space-xs);
-
-}
-.meas-remove:hover { color: var(--danger); }
 
 /* ============================================================
    Status Bar
@@ -1433,55 +1097,6 @@ input[type="checkbox"]:focus-visible {
 
 .band-tab-label {
   pointer-events: none;
-}
-
-/* Export sidebar — right panel with FIR metrics */
-.export-sidebar {
-  width: 160px;
-  min-width: 160px;
-  border-left: 1px solid var(--border);
-  overflow-y: auto;
-  padding: var(--space-sm) var(--space-md);
-
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-md);
-
-}
-.export-sidebar-empty {
-  color: var(--text-muted);
-  font-size: var(--fs-sm);
-  padding: var(--space-lg) var(--space-xs);
-
-  text-align: center;
-}
-.export-section {
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 4px;
-  padding: var(--space-sm);
-
-}
-.export-section-title {
-  font-size: var(--fs-xs);
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: var(--space-xs);
-
-}
-.export-metric {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: var(--fs-base);
-  padding: 1px 0;
-}
-.export-metric-label {
-  color: var(--text-secondary);
-}
-.export-metric-value {
-  font-weight: 500;
-  color: #e0e0e0;
 }
 
 .peq-range-select {
@@ -1568,175 +1183,14 @@ input[type="checkbox"]:focus-visible {
 /* ============================================================
    Impulse Response Plot
    ============================================================ */
-.impulse-wrapper {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  height: 100%;
-}
-
-.impulse-toolbar {
-  display: flex;
-  align-items: center;
-  gap: var(--space-lg);
-
-  padding: var(--space-xs) var(--space-lg);
-
-  font-family: var(--mono);
-  font-size: var(--fs-base);
-  color: var(--text-secondary);
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border);
-  border-top: 1px solid var(--border);
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.impulse-sep {
-  width: 1px;
-  height: 14px;
-  background: var(--border);
-  flex-shrink: 0;
-}
-
-.impulse-mode-btn {
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  font-family: var(--sans);
-  padding: 1px var(--space-md);
-
-  border: 1px solid var(--border);
-  border-radius: 2px;
-  background: var(--bg-primary);
-  color: var(--text-muted);
-  cursor: pointer;
-}
-.impulse-mode-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
-.impulse-mode-btn.active {
-  background: var(--accent-dim);
-  color: #fff;
-  border-color: var(--accent);
-}
-
-.impulse-body {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-
-.impulse-center {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  position: relative;
-}
-
-.impulse-plot {
-  width: 100%;
-  height: 100%;
-  position: relative;
-}
-
-.impulse-center .impulse-plot {
-  flex: 1;
-  min-height: 0;
-}
-
-.impulse-plot .u-wrap {
-  background-color: var(--bg-primary) !important;
-}
-
-.impulse-plot canvas {
-  display: block;
-}
-
-.impulse-empty-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 24px; /* не перекрывать X-axis controls */
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-muted);
-  font-size: var(--fs-md);
-  background: var(--bg-primary);
-  pointer-events: none;
-  z-index: 1;
-}
 
 /* ============================================================
    Splice Slider — inline in table cell
    ============================================================ */
 
-.meas-splice-cell {
-  min-width: 100px;
-}
-
-.splice-inline {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-
-}
-
-.splice-range {
-  width: 60px;
-  height: 3px;
-  -webkit-appearance: none;
-  appearance: none;
-  background: var(--bg-input);
-  border-radius: 2px;
-  outline: none;
-  cursor: pointer;
-}
-
-.splice-range::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--accent);
-  cursor: pointer;
-}
-
-.splice-value {
-  font-family: var(--mono);
-  font-size: var(--fs-sm);
-  color: var(--text-secondary);
-  min-width: 26px;
-  text-align: right;
-}
-
 /* ============================================================
    Floor Bounce — compact inline
    ============================================================ */
-
-.floor-bounce-section {
-  margin-top: var(--space-sm);
-
-  padding: var(--space-xs) 0;
-
-  border-top: 1px solid var(--border);
-}
-
-.floor-bounce-inline {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-
-  flex-wrap: wrap;
-}
-
-.floor-bounce-title {
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
 
 .fb-toggle.small {
   font-size: var(--fs-xs);
@@ -1744,59 +1198,9 @@ input[type="checkbox"]:focus-visible {
 
 }
 
-.fb-inline-sep {
-  width: 1px;
-  height: 14px;
-  background: var(--border);
-}
-
-.fb-inline-label {
-  font-size: var(--fs-sm);
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
 /* ============================================================
    Import Dropdown
    ============================================================ */
-.import-dropdown {
-  position: relative;
-  display: inline-block;
-}
-
-.import-menu {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  z-index: 100;
-  min-width: 140px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 2px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-  padding: var(--space-xxs) 0;
-
-  margin-top: var(--space-xxs);
-
-}
-
-.import-menu-item {
-  display: block;
-  width: 100%;
-  padding: var(--space-sm) var(--space-lg);
-
-  font-size: var(--fs-base);
-  font-family: var(--sans);
-  color: var(--text-primary);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  text-align: left;
-}
-.import-menu-item:hover {
-  background: var(--bg-hover);
-  color: var(--accent);
-}
 
 /* ============================================================
    File Menu
@@ -2048,13 +1452,7 @@ input[type="checkbox"]:focus-visible {
 }
 .dlg-btn-primary:hover { background: var(--accent-fill-hover); }
 .dlg-btn-primary:disabled { opacity: 0.4; cursor: default; }
-.dlg-btn-danger {
-  background: var(--danger-fill);
-  border-color: var(--danger);
-  color: #fff;
-  font-weight: 600;
-}
-.dlg-btn-danger:hover { opacity: 0.85; }
+
 .dlg-btn-lg {
   padding: var(--btn-pad-lg);
   font-size: var(--fs-lg);
@@ -2137,7 +1535,6 @@ input[type="checkbox"]:focus-visible {
   color: var(--text-muted);
   font-size: 12px;
 }
-
 
 /* ============================================================
    Merge NF+FF Dialog
@@ -2380,34 +1777,6 @@ input[type="checkbox"]:focus-visible {
 /* ============================================================
    Auto Align Tab
    ============================================================ */
-.align-tab {
-  min-width: 400px;
-  height: 100%;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.align-sections {
-  display: flex;
-  gap: var(--space-md);
-
-  align-items: flex-start;
-  min-width: max-content;
-  flex: 1;
-  overflow-x: auto;
-  overflow-y: hidden;
-}
-
-.align-block {
-  background: var(--bg-primary);
-  border: 1px solid var(--border);
-  border-radius: 2px;
-  padding: var(--space-sm) var(--space-md);
-
-  min-width: 170px;
-  flex-shrink: 0;
-}
 
 .peq-grid {
   display: grid;
@@ -2424,13 +1793,6 @@ input[type="checkbox"]:focus-visible {
   margin-top: var(--space-xs);
 
   align-items: center;
-}
-
-.align-block .tb-btn {
-  margin-top: var(--space-sm);
-
-  margin-right: var(--space-xs);
-
 }
 
 .align-range-info {
@@ -2455,16 +1817,6 @@ input[type="checkbox"]:focus-visible {
   color: var(--danger);
   background: rgba(217, 74, 74, 0.1);
   border: 1px solid var(--danger);
-  border-radius: 2px;
-}
-
-/* PEQ Bands Table */
-.peq-table-scroll {
-  max-height: 150px;
-  overflow-y: auto;
-  margin-top: var(--space-xs);
-
-  border: 1px solid var(--border);
   border-radius: 2px;
 }
 
@@ -2697,47 +2049,9 @@ input[type="checkbox"]:focus-visible {
   color: #a89050;
 }
 
-/* FIR Preview */
-.fir-block {
-  min-width: 200px;
-}
-
-.fir-preview {
-  margin-top: var(--space-sm);
-
-}
-
-.fir-preview-canvas {
-  width: 100%;
-  height: 60px;
-  border: 1px solid var(--border);
-  border-radius: 2px;
-  display: block;
-}
-
 /* ============================================================
    Export Tab — bands table + settings row
    ============================================================ */
-.export-tab {
-  display: flex;
-  flex-direction: column;
-}
-
-.export-settings-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-
-  padding: var(--space-xs) var(--space-md);
-
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.export-phase-badge {
-  font-size: var(--fs-sm);
-  font-weight: 600;
-}
 
 /* ============================================================
    Welcome Dialog (startup screen)
@@ -2795,7 +2109,6 @@ input[type="checkbox"]:focus-visible {
   margin-bottom: var(--space-2xl);
 
 }
-
 
 .welcome-recent {
   border-top: 1px solid var(--border);
@@ -2976,17 +2289,12 @@ input[type="checkbox"]:focus-visible {
 
 }
 
-
 /* --- Strategy toggle (b82.06) --- */
 .strategy-toggle { display: flex; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
 .strategy-btn { padding: 2px 10px; font-size: var(--fs-base); font-weight: 500; border: none; background: transparent; color: var(--text-secondary); cursor: pointer; }
 .strategy-btn:first-child { border-right: 1px solid var(--border); }
 .strategy-btn.active { background: var(--accent-dim); color: #fff; }
 
-/* --- PEQ Auto-Fit section in sidebar (b82.06) --- */
-.peq-autofit-section { padding: 6px 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
-.peq-autofit-section .peq-grid { display: grid; grid-template-columns: 1fr; gap: 2px; }
-.peq-autofit-section .peq-buttons-row { display: flex; align-items: center; gap: 4px; margin-top: 4px; }
 .peq-auto-section .peq-grid { display: grid; grid-template-columns: 1fr; gap: 2px; }
 .peq-auto-section .peq-buttons-row { display: flex; align-items: center; gap: 4px; margin-top: 4px; }
 .peq-auto-section .peq-sidebar-header { margin-bottom: 4px; }
