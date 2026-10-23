@@ -419,6 +419,51 @@ pub async fn copy_file_to_project(source_path: String, dest_path: String) -> Res
     Ok(())
 }
 
+/// b141.103 (audit 2026-10-23 3.12): copy a measurement into `dest_dir`
+/// under a name no other file there holds. `copy_file_to_project` overwrote
+/// `inbox/<name>` — `/L/wfr.txt` and `/R/wfr.txt` both landed on
+/// `inbox/wfr.txt` and band 1 silently reopened with band 2's measurement.
+/// A taken name gets `_2`, `_3`, … before the extension; a file that is the
+/// source itself or has identical bytes is reused (copying the same source
+/// again yields the same file). Returns the file name chosen.
+#[tauri::command]
+pub async fn copy_into_project_unique(source_path: String, dest_dir: String) -> Result<String, String> {
+    let source = std::path::Path::new(&source_path);
+    let base = source
+        .file_name()
+        .and_then(|n| n.to_str())
+        .filter(|n| !n.is_empty() && *n != "..")
+        .ok_or_else(|| format!("invalid source file name: {source_path}"))?;
+    let (stem, ext) = match base.rfind('.') {
+        Some(i) if i > 0 => (&base[..i], &base[i..]),
+        _ => (base, ""),
+    };
+    let dir = std::path::Path::new(&dest_dir);
+    for k in 1..=9999u32 {
+        let name = if k == 1 { base.to_string() } else { format!("{stem}_{k}{ext}") };
+        let dest = dir.join(&name);
+        let dest_str = dest.to_string_lossy().to_string();
+        validate_write_target(&dest_str)?;
+        if !dest.exists() {
+            info!("copy_into_project_unique: {} -> {}", source_path, dest_str);
+            std::fs::copy(source, &dest).map_err(|e| format!("Copy error: {e}"))?;
+            return Ok(name);
+        }
+        if paths_resolve_to_same_file(source, &dest) || files_identical(source, &dest) {
+            return Ok(name);
+        }
+    }
+    Err(format!("no free file name for {base} in {dest_dir}"))
+}
+
+fn files_identical(a: &std::path::Path, b: &std::path::Path) -> bool {
+    match (std::fs::metadata(a), std::fs::metadata(b)) {
+        (Ok(ma), Ok(mb)) if ma.len() == mb.len() => {}
+        _ => return false,
+    }
+    matches!((std::fs::read(a), std::fs::read(b)), (Ok(x), Ok(y)) if x == y)
+}
+
 /// Check if a path exists on disk.
 #[tauri::command]
 pub fn check_path_exists(path: String) -> Result<bool, String> {
@@ -531,6 +576,28 @@ mod tests {
         assert_eq!(after_size, original_size,
             "self-copy must not truncate: original={}, after={}", original_size, after_size);
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn copy_into_project_unique_keeps_same_named_sources_apart() {
+        let dir = make_scratch_dir("unique-copy");
+        let (l, r, inbox) = (dir.join("L"), dir.join("R"), dir.join("inbox"));
+        for d in [&l, &r, &inbox] { std::fs::create_dir_all(d).unwrap(); }
+        std::fs::write(l.join("wfr.txt"), "left").unwrap();
+        std::fs::write(r.join("wfr.txt"), "right").unwrap();
+        let run = |src: &std::path::Path| tauri::async_runtime::block_on(copy_into_project_unique(
+            src.to_string_lossy().to_string(), inbox.to_string_lossy().to_string(),
+        )).unwrap();
+        assert_eq!(run(&l.join("wfr.txt")), "wfr.txt");
+        assert_eq!(run(&r.join("wfr.txt")), "wfr_2.txt");
+        // The same source again → the same file, no third copy.
+        assert_eq!(run(&l.join("wfr.txt")), "wfr.txt");
+        assert_eq!(run(&r.join("wfr.txt")), "wfr_2.txt");
+        // A file already inside inbox/ → itself.
+        assert_eq!(run(&inbox.join("wfr_2.txt")), "wfr_2.txt");
+        assert_eq!(std::fs::read_to_string(inbox.join("wfr.txt")).unwrap(), "left");
+        assert_eq!(std::fs::read_to_string(inbox.join("wfr_2.txt")).unwrap(), "right");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

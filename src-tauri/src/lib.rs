@@ -510,6 +510,7 @@ pub fn run() {
             project::load_project,
             project::create_project_folder,
             project::copy_file_to_project,
+            project::copy_into_project_unique,
             project::check_path_exists,
             project::ensure_dir,
             project::copy_dir_contents,

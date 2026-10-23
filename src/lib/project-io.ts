@@ -134,11 +134,19 @@ export function sanitize(name: string): string {
     || "untitled";
 }
 
-/** Extract project dir and name from a .pfproj path */
-function deriveProjectInfo(pfprojPath: string): { dir: string; name: string } {
-  const parts = pfprojPath.split("/");
-  const filename = parts.pop() ?? "project.pfproj";
-  const dir = parts.join("/");
+/** Last component of a path — `/` or `\\` (b141.103, audit 3.14: Windows). */
+export function pathBaseName(p: string): string {
+  const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+  return i >= 0 ? p.slice(i + 1) : p;
+}
+
+/** Extract project dir and name from a .pfproj path. b141.103 (audit 3.14):
+ *  `C:\\…\\Proj.pfproj` split on «/» only gave projectDir = "" — measurements
+ *  were not re-imported and the bands opened empty. */
+export function deriveProjectInfo(pfprojPath: string): { dir: string; name: string } {
+  const i = Math.max(pfprojPath.lastIndexOf("/"), pfprojPath.lastIndexOf("\\"));
+  const filename = (i >= 0 ? pfprojPath.slice(i + 1) : pfprojPath) || "project.pfproj";
+  const dir = i >= 0 ? pfprojPath.slice(0, i) : "";
   const name = filename.replace(/\.pfproj$/, "");
   return { dir, name };
 }
@@ -484,7 +492,7 @@ export async function restoreState(project: ProjectFile, projDir: string | null)
         const exists = await invoke<boolean>("check_path_exists", { path: filePath }).catch(() => false);
         if (!exists) {
           // Old project without inbox/: file might be in root
-          const baseName = band.measurementFile.split("/").pop() ?? band.measurementFile;
+          const baseName = pathBaseName(band.measurementFile);
           const rootPath = `${projDir}/${baseName}`;
           const rootExists = await invoke<boolean>("check_path_exists", { path: rootPath }).catch(() => false);
           if (rootExists) {
@@ -657,17 +665,8 @@ async function copyPendingMeasurements(): Promise<void> {
         console.warn(`[Save] Band "${band.name}": measurement has no source_path — data will be embedded in project`);
         continue;
       }
-      // Use original filename (basename) — no renaming
-      const fileName = sanitizeFileName(sourcePath);
-      const destPath = `${dir}/inbox/${fileName}`;
       try {
-        // Skip if already in project folder
-        const srcNorm = sourcePath.replace(/\\/g, "/");
-        const destNorm = destPath.replace(/\\/g, "/");
-        if (srcNorm !== destNorm) {
-          await invoke("copy_file_to_project", { sourcePath, destPath });
-        }
-        setBandMeasurementFile(band.id, `inbox/${fileName}`);
+        setBandMeasurementFile(band.id, await copyIntoInbox(dir, sourcePath));
       } catch (e) {
         console.warn(`Failed to copy measurement for ${band.name}:`, e);
       }
@@ -810,7 +809,10 @@ export async function newProject(): Promise<void> {
     await invoke("save_project", { path: pfprojPath, project });
     await invoke("add_recent_project", { path: pfprojPath }).catch(() => {});
   } catch (e) {
-    console.warn("Auto-save of new project failed:", e);
+    // b141.103 (audit 3.22): said only in the console — the user believed
+    // the project existed on disk. Report it and keep it unsaved.
+    reportProjectError("сохранить", e);
+    setIsDirty(true);
   }
 }
 
@@ -918,15 +920,28 @@ async function saveProjectAsInner(): Promise<void> {
   }
 
   // 5. Update project signals
+  // b141.103 (audit 3.21): a failed write used to leave projectDir/name on
+  // the new folder while the path stayed on the old project — the next
+  // Save wrote the old .pfproj with paths into the new folder. Roll back.
+  const prevName = projectName();
+  const pendingIds = appState.bands.filter((b) => b.measurement && !b.measurementFile).map((b) => b.id);
   setProjectDir(newDir);
   setProjectName(newName);
 
-  // 6. Copy any pending measurements (bands with data but no measurementFile)
-  await copyPendingMeasurements();
+  try {
+    // 6. Copy any pending measurements (bands with data but no measurementFile)
+    await copyPendingMeasurements();
 
-  // 7. Save .pfproj inside the new folder
-  const pfprojPath = `${newDir}/${newName}.pfproj`;
-  await doSave(pfprojPath);
+    // 7. Save .pfproj inside the new folder
+    const pfprojPath = `${newDir}/${newName}.pfproj`;
+    await doSave(pfprojPath);
+  } catch (e) {
+    setProjectDir(oldDir);
+    setProjectName(prevName);
+    // Files copied by step 6 live in the new folder only.
+    for (const id of pendingIds) setBandMeasurementFile(id, null);
+    throw e;
+  }
 }
 
 async function doSave(path: string): Promise<void> {
@@ -1009,16 +1024,18 @@ export async function copyMeasurementToProject(
   // Ensure inbox/ exists (backward compat)
   await invoke("ensure_dir", { path: `${dir}/inbox` }).catch(e => console.debug("ensure_dir:", e));
 
-  // Use original filename — no renaming, copy to inbox/
-  const fileName = sanitizeFileName(sourcePath);
-  const destPath = `${dir}/inbox/${fileName}`;
-  // Skip if already in project folder
-  const srcNorm = sourcePath.replace(/\\/g, "/");
-  const destNorm = destPath.replace(/\\/g, "/");
-  if (srcNorm !== destNorm) {
-    await invoke("copy_file_to_project", { sourcePath, destPath });
-  }
-  return `inbox/${fileName}`;
+  return copyIntoInbox(dir, sourcePath);
+}
+
+/** b141.103 (audit 3.12): copy into `inbox/` under a free name — a file of
+ *  the same name from another folder gets `_2`, … instead of overwriting the
+ *  other band's measurement; the same source again reuses its file.
+ *  Returns the project-relative path. */
+async function copyIntoInbox(dir: string, sourcePath: string): Promise<string> {
+  const name = await invoke<string>("copy_into_project_unique", {
+    sourcePath, destDir: `${dir}/inbox`,
+  });
+  return `inbox/${sanitizeFileName(name)}`;
 }
 
 /** Copy NF/FF merge source files to project folder. Returns new filenames. */
@@ -1033,15 +1050,7 @@ export async function copyMergeFilesToProject(
   // Ensure inbox/ exists (backward compat)
   await invoke("ensure_dir", { path: `${dir}/inbox` }).catch(e => console.debug("ensure_dir:", e));
 
-  // Use original filenames — no renaming, copy to inbox/
-  const nfBaseName = sanitizeFileName(nfPath);
-  const ffBaseName = sanitizeFileName(ffPath);
-
-  const nfFile = `inbox/${nfBaseName}`;
-  const ffFile = `inbox/${ffBaseName}`;
-
-  await invoke("copy_file_to_project", { sourcePath: nfPath, destPath: `${dir}/${nfFile}` });
-  await invoke("copy_file_to_project", { sourcePath: ffPath, destPath: `${dir}/${ffFile}` });
-
+  const nfFile = await copyIntoInbox(dir, nfPath);
+  const ffFile = await copyIntoInbox(dir, ffPath);
   return { nfFile, ffFile };
 }
