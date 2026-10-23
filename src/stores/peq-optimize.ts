@@ -2,6 +2,7 @@
 // PEQ Auto-Fit shared store — extracted from ControlPanel.tsx (b82.06)
 // ---------------------------------------------------------------------------
 import { createSignal, batch } from "solid-js";
+import { unwrap } from "solid-js/store";
 import { invoke } from "@tauri-apps/api/core";
 import type { PeqBand, PeqConfig, PeqResult, FilterConfig, ExclusionZone, PeqOptimizedTarget, Measurement } from "../lib/types";
 import { cloneFilterConfig, measurementKey, F_MAX_WORK, F_MAX_REF, fMaxForRate } from "../lib/types";
@@ -244,8 +245,19 @@ export function captureOptimizedTarget(b: BandState): PeqOptimizedTarget {
     // b141.22 (audit): the rate the biquads were fitted at — see PeqOptimizedTarget.
     sample_rate: exportSampleRate(),
     shaping: currentShaping(b),
-    ...(b.measurement ? { measurement_key: measurementKey(b.measurement)! } : {}),
+    ...(b.measurement ? { measurement_key: measKeyOf(b)! } : {}),
   };
+}
+
+/** Fingerprint of the band's measurement. Hashes the raw arrays: reading
+ *  every element through the store proxy would subscribe a reactive caller
+ *  (the stale banner) to each bin. The two property reads keep it reactive
+ *  to a replaced measurement. */
+function measKeyOf(b: BandState): string | null {
+  const m = b.measurement;
+  if (!m) return null;
+  void m.magnitude; void m.freq;
+  return measurementKey(unwrap(m));
 }
 
 function currentShaping(b: BandState): NonNullable<PeqOptimizedTarget["shaping"]> {
@@ -269,7 +281,7 @@ export function peqStaleReason(b: BandState): string | null {
   }
   if (!exclusionZonesEquals(b.exclusionZones, snap.exclusion_zones)) return "зоны исключения изменены";
   // b141.103 (audit 3.18): fitted to another measurement.
-  if (snap.measurement_key !== undefined && measurementKey(b.measurement) !== snap.measurement_key) {
+  if (snap.measurement_key !== undefined && measKeyOf(b) !== snap.measurement_key) {
     return "замер заменён";
   }
   // b141.22: a fit made at another export rate no longer describes the biquads
