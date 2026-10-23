@@ -139,6 +139,23 @@
   runs every Gaussian/subsonic term on 5 Hz–0.95·Nyquist with the absolute
   −150 dB floor; the FIR continues magnitude below its first grid point by
   slope (never flat). Pinned by `tests/plot_min_phase_matches_fir.rs`.
+  The tilt is one of those terms on a min-phase main (b141.101,
+  `fir::band::min_phase_main`; lin/mixed main → zero-phase tilt on both
+  sides): `reconstructTargetPhase` takes the whole target, not hp/lp.
+  Above 0.95·Nyquist the FIR request continues by slope on a min-phase main
+  too (b141.101) — a −150 dB noise-floor step there lagged the cepstral
+  phase 91° at 15 kHz vs IIR; only the linear main keeps the floor tail.
+  Pinned by `fir::band` `cepstral_min_phase_matches_iir_up_to_nyquist`,
+  `tilt_phase_of_the_plot_is_the_fir_phase`.
+- **Sections at/above 0.49·sr** (b141.101, `fir::SECTION_MAX_FRACTION`):
+  no RBJ biquad exists there (poles outside the unit circle → NaN WAV). One
+  rule for both routes: PEQ there is dropped, a crossover or shelf there
+  routes to cepstral (its in-band part), each with a user warning
+  (`BandFirResult.warnings` → export toast). Never an error, never NaN.
+- **The FIR is level-free** (b141.101): `generate_band_fir` evaluates the
+  target with `reference_level_db = 0` — the level used to move «Макс.
+  подъём», the noise floor and `peak_boost_db`. `norm_db` gets the level
+  added back so `realized_mag + norm_db` = the requested response.
 - **«Corrected» = measurement + PEQ + `filterSection`** (b141.48): HP/LP,
   tilt, shelves and the ultrasonic LP — the whole level-free section the FIR
   bakes in. One TS builder for band, band IR, Σ and Σ IR.
@@ -168,11 +185,23 @@
   UI column, `q_envelope::ring_ms` ↔ `peqRingCost`). Narrow LF boosts chased
   position-made dips and rang (+43 ms of decay at 91 Hz on a real woofer).
   Pinned by `tests/peq_boost_floor.rs`, `peq_ring_limit.rs`, `peq_q_rules.rs`.
+  b141.101: the ring limit is a guarantee — `q_envelope::fit_ring` lowers Q
+  no further than Q_MIN (0.5) and then lowers the gain; a boosting shelf
+  promotion may not lift outside `boost_range` more than the peaking band it
+  replaces; `max_error_db` is measured on the filters actually returned.
 - **Bilinear digital cascade** (IIR path) has frequency-dependent
   deviation up to ~20° vs analog reference accumulated over 8 biquads.
   REPhase reference comparison gives tighter empirical bound (≤ 2.5° on
   sr=44.1k). UI plot guardrail uses 25° tolerance — hard fail signals a
   real regression beyond bilinear math.
+- **Target shelves: analog on the plot and cepstral route, RBJ on the IIR
+  route** — known bilinear deviation, kept on purpose (audit 2026-10-23 1.5).
+  The RBJ shelf IS the pre-warped bilinear transform of the same analog
+  prototype, so the difference is pure frequency warping near Nyquist:
+  HS 10 kHz −6 dB at 44.1 kHz → −0.72 dB / +6.9° at 15 kHz, +12.9° at
+  20 kHz; negligible for LF shelves and at ≥ 88.2 kHz. A single biquad cannot
+  match the analog curve; making the plot digital would need the export rate
+  in every `evaluate_target` call. Do not "fix" one side pointwise.
 
 ## Debugging Rules
 - **NEVER guess at root cause.** Always add diagnostic logging first, get user's console output, then fix based on evidence.
@@ -399,4 +428,4 @@ git diff --stat
 - `batch()`: wrap multiple signal updates to prevent intermediate effects
 - PEQ drag: debounce via `peqDragging` signal + `setTimeout(150ms)`
 - Store proxies: deep clone via `JSON.parse(JSON.stringify(obj))` before passing to async
-- Gaussian min-phase: Rust `target::evaluate` returns 0 phase for Gaussian filters; the min-phase terms come from Rust `compute_target_hilbert_phase` (b141.70), which `reconstructTargetPhase` calls only when a Gaussian/subsonic term exists
+- Gaussian min-phase: Rust `target::evaluate` returns 0 phase for Gaussian filters (and for the tilt); the min-phase terms come from Rust `compute_target_hilbert_phase` (b141.70), which `reconstructTargetPhase` calls only when a Gaussian/subsonic term or a tilt on a min-phase main exists (b141.101)
