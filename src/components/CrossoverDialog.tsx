@@ -3,7 +3,7 @@ import { F_MIN_WORK, F_MAX_WORK } from "../lib/types";
 import type { FilterConfig, FilterType } from "../lib/types";
 import { appState, setBandLowPass } from "../stores/bands";
 import { availableSlopes, orderToSlope, slopeToOrder } from "../lib/slope";
-import { handleDialogKeys } from "../lib/dialog-keys";
+import Modal from "./Modal";
 
 export interface CrossoverDialogData {
   bandIndex: number;   // index of band with LP filter
@@ -76,10 +76,6 @@ export default function CrossoverDialog() {
     closeCrossoverDialog();
   }
 
-  function handleKeyDown(e: KeyboardEvent) {
-    handleDialogKeys(e, { onEnter: handleApply, onEscape: handleCancel });
-  }
-
   // b141.38: `parseFloat(v) || 0` rewrote a cleared field to 0 on the first
   // Backspace. An unparsable draft leaves the value alone (freq goes NaN so
   // Apply stays disabled and the hint explains why).
@@ -99,9 +95,9 @@ export default function CrossoverDialog() {
       return d;
     })()}>
       {(data) => (
-        <div class="xo-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) handleCancel(); }} onKeyDown={handleKeyDown}>
-          <div class="xo-dialog">
-            <div class="xo-title">
+        <Modal overlayClass="xo-overlay" dialogClass="xo-dialog" titleId="xo-dlg-title"
+          onEnter={handleApply} onEscape={handleCancel}>
+            <div class="xo-title" id="xo-dlg-title">
               Кроссовер: {data().bandName} / {data().nextBandName}
             </div>
 
@@ -116,7 +112,6 @@ export default function CrossoverDialog() {
                 step="1"
                 value={freq()}
                 onInput={(e) => setFreq(finite(e.currentTarget.value) ?? NaN)}
-                onKeyDown={handleKeyDown}
               />
               <span class="xo-unit">Hz</span>
             </div>
@@ -185,7 +180,6 @@ export default function CrossoverDialog() {
                   step="0.1"
                   value={shape()}
                   onInput={(e) => { const n = finite(e.currentTarget.value); if (n != null) setShape(n); }}
-                  onKeyDown={handleKeyDown}
                 />
               </div>
             </Show>
@@ -202,7 +196,6 @@ export default function CrossoverDialog() {
                   step="0.01"
                   value={customQ()}
                   onInput={(e) => { const n = finite(e.currentTarget.value); if (n != null) setCustomQ(n); }}
-                  onKeyDown={handleKeyDown}
                 />
               </div>
               <div class="xo-hint">
@@ -226,8 +219,7 @@ export default function CrossoverDialog() {
               <button class="dlg-btn" onClick={handleCancel}>Отмена</button>
               <button class="dlg-btn dlg-btn-primary" onClick={handleApply} disabled={!freqValid()}>Применить</button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </Show>
   );

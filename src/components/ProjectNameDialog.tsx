@@ -1,7 +1,7 @@
 import { createSignal, Show } from "solid-js";
 import { promptVisible, promptMode, resolvePrompt } from "../lib/project-io";
 import type { ProjectPromptResult } from "../lib/project-io";
-import { handleDialogKeys } from "../lib/dialog-keys";
+import Modal from "./Modal";
 
 export default function ProjectNameDialog() {
   const [name, setName] = createSignal("");
@@ -16,12 +16,6 @@ export default function ProjectNameDialog() {
     resolvePrompt(null);
   }
 
-  // b141.38: on the overlay, not the name field — Escape did nothing once
-  // focus moved to the band-count buttons.
-  function handleKeyDown(e: KeyboardEvent) {
-    handleDialogKeys(e, { onEnter: handleCreate, onEscape: handleCancel });
-  }
-
   function incBands() {
     setBandCount((c) => Math.min(8, c + 1));
   }
@@ -33,9 +27,9 @@ export default function ProjectNameDialog() {
 
   return (
     <Show when={promptVisible()}>
-      <div class="pn-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) handleCancel(); }} onKeyDown={handleKeyDown}>
-        <div class="pn-dialog">
-          <div class="pn-title">{isSaveAs() ? "Сохранить как" : "Новый проект"}</div>
+      <Modal overlayClass="pn-overlay" dialogClass="pn-dialog" titleId="pn-dlg-title"
+        onEnter={handleCreate} onEscape={handleCancel}>
+          <div class="pn-title" id="pn-dlg-title">{isSaveAs() ? "Сохранить как" : "Новый проект"}</div>
 
           <label class="pn-label">Название проекта</label>
           <input
@@ -66,8 +60,7 @@ export default function ProjectNameDialog() {
               disabled={!name().trim()}
             >{isSaveAs() ? "Сохранить" : "Создать"}</button>
           </div>
-        </div>
-      </div>
+      </Modal>
     </Show>
   );
 }

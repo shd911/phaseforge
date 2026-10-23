@@ -1,26 +1,13 @@
 import { Show } from "solid-js";
 import { unsavedDialogVisible, resolveUnsavedDialog } from "../lib/project-io";
-import { handleDialogKeys } from "../lib/dialog-keys";
+import Modal from "./Modal";
 
 export default function UnsavedChangesDialog() {
-  function handleKeyDown(e: KeyboardEvent) {
-    handleDialogKeys(e, {
-      onEnter: () => resolveUnsavedDialog("save"),
-      onEscape: () => resolveUnsavedDialog("cancel"),
-    });
-  }
-
   return (
     <Show when={unsavedDialogVisible()}>
-      <div
-        class="pn-overlay"
-        onMouseDown={(e) => { if (e.target === e.currentTarget) resolveUnsavedDialog("cancel"); }}
-        tabIndex={-1}
-        ref={(el) => requestAnimationFrame(() => el.focus())}
-        onKeyDown={handleKeyDown}
-      >
-        <div class="pn-dialog">
-          <div class="pn-title">Несохранённые изменения</div>
+      <Modal overlayClass="pn-overlay" dialogClass="pn-dialog" titleId="unsaved-dlg-title"
+        onEnter={() => resolveUnsavedDialog("save")} onEscape={() => resolveUnsavedDialog("cancel")}>
+          <div class="pn-title" id="unsaved-dlg-title">Несохранённые изменения</div>
           <div class="pn-label" style={{ "margin-bottom": "16px" }}>
             Есть несохранённые изменения. Сохранить их?
           </div>
@@ -32,8 +19,7 @@ export default function UnsavedChangesDialog() {
               onClick={() => resolveUnsavedDialog("save")}
             >Сохранить</button>
           </div>
-        </div>
-      </div>
+      </Modal>
     </Show>
   );
 }

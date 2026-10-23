@@ -22,9 +22,8 @@ import {
   projectName,
   projectDir,
   confirmIfDirty,
-  promptVisible,
-  unsavedDialogVisible,
 } from "./lib/project-io";
+import { anyModalOpen } from "./lib/dialog-keys";
 import { undo, redo, canUndo, canRedo, lastUndoLabel, lastRedoLabel } from "./stores/history";
 import { peqDragging } from "./stores/bands";
 import FileMenu from "./components/FileMenu";
@@ -33,10 +32,10 @@ import ControlPanel from "./components/ControlPanel";
 import BandTabs from "./components/BandTabs";
 import ProjectNameDialog from "./components/ProjectNameDialog";
 import UnsavedChangesDialog from "./components/UnsavedChangesDialog";
-import VersionsDialog, { openVersionsDialog, isVersionsDialogOpen } from "./components/VersionsDialog";
-import MeasurementAnalysisDialog, { isAnalysisDialogOpen } from "./components/MeasurementAnalysisDialog";
-import StalePeqExportDialog, { isStaleConfirmDialogOpen } from "./components/StalePeqExportDialog";
-import HighQWarningPopup, { isHighQPopupOpen } from "./components/HighQWarningPopup";
+import VersionsDialog, { openVersionsDialog } from "./components/VersionsDialog";
+import MeasurementAnalysisDialog from "./components/MeasurementAnalysisDialog";
+import StalePeqExportDialog from "./components/StalePeqExportDialog";
+import HighQWarningPopup from "./components/HighQWarningPopup";
 import Toasts from "./components/Toasts";
 import { showToast } from "./lib/toast";
 import WelcomeDialog from "./components/WelcomeDialog";
@@ -56,9 +55,10 @@ function App() {
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
     return t.isContentEditable;
   };
-  const isModalOpen = (): boolean =>
-    promptVisible() || unsavedDialogVisible() || isVersionsDialogOpen()
-    || isAnalysisDialogOpen() || isStaleConfirmDialogOpen() || isHighQPopupOpen();
+  // b141.105: every modal registers in one stack (lib/dialog-keys.ts) —
+  // the hand-kept list here missed FIR settings, Crossover, Merge, Baffle
+  // and Welcome, so ⌘Z/⌘O/⌘N ran underneath them.
+  const isModalOpen = anyModalOpen;
 
   const handleKeys = (e: KeyboardEvent) => {
     if (!(e.metaKey || e.ctrlKey)) return;

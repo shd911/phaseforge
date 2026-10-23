@@ -1,6 +1,6 @@
 import { createSignal, Show } from "solid-js";
 
-import { handleDialogKeys } from "../lib/dialog-keys";
+import Modal from "./Modal";
 
 /** Parse a numeric draft: keep the previous value on garbage. (`parseFloat(v)
  *  || default` turned a typed 0 into the default — 2026-09-05 audit.) The
@@ -61,15 +61,11 @@ export default function FirSettingsDialog() {
     closeFirSettings();
   }
 
-  function handleKeyDown(e: KeyboardEvent) {
-    handleDialogKeys(e, { onEnter: handleApply, onEscape: handleCancel });
-  }
-
   return (
     <Show when={(() => { const v = visible(); if (v) initFromStore(); return v; })()}>
-      <div class="xo-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) handleCancel(); }} onKeyDown={handleKeyDown}>
-        <div class="xo-dialog" style="min-width: 360px">
-          <div class="xo-title">Настройки оптимизации</div>
+      <Modal overlayClass="xo-overlay" dialogClass="xo-dialog" dialogStyle={{ "min-width": "360px" }}
+        titleId="fir-dlg-title" onEnter={handleApply} onEscape={handleCancel}>
+          <div class="xo-title" id="fir-dlg-title">Настройки оптимизации</div>
 
           {/* Iterations */}
           <div class="xo-row">
@@ -80,7 +76,6 @@ export default function FirSettingsDialog() {
               value={iterations()}
               onInput={(e) => setIterations(numDraft(e.currentTarget.value, iterations(), true))}
               onBlur={() => setIterations(clamp(iterations(), 0, 20))}
-              onKeyDown={handleKeyDown}
               ref={(el) => requestAnimationFrame(() => { el.focus(); el.select(); })}
             />
           </div>
@@ -122,7 +117,6 @@ export default function FirSettingsDialog() {
                 value={nbSmoothing()}
                 onInput={(e) => setNbSmoothing(numDraft(e.currentTarget.value, nbSmoothing()))}
                 onBlur={() => setNbSmoothing(clamp(nbSmoothing(), 0.05, 2))}
-                onKeyDown={handleKeyDown}
               />
               <span class="xo-unit">oct</span>
             </div>
@@ -136,7 +130,6 @@ export default function FirSettingsDialog() {
                 value={nbExcess()}
                 onInput={(e) => setNbExcess(numDraft(e.currentTarget.value, nbExcess()))}
                 onBlur={() => setNbExcess(clamp(nbExcess(), 1, 24))}
-                onKeyDown={handleKeyDown}
               />
               <span class="xo-unit">dB</span>
             </div>
@@ -152,7 +145,6 @@ export default function FirSettingsDialog() {
               value={maxBoost()}
               onInput={(e) => setMaxBoost(numDraft(e.currentTarget.value, maxBoost()))}
               onBlur={() => setMaxBoost(clamp(maxBoost(), 0, 60))}
-              onKeyDown={handleKeyDown}
             />
             <span class="xo-unit">dB</span>
           </div>
@@ -167,7 +159,6 @@ export default function FirSettingsDialog() {
               value={noiseFloor()}
               onInput={(e) => setNoiseFloor(numDraft(e.currentTarget.value, noiseFloor()))}
               onBlur={() => setNoiseFloor(clamp(noiseFloor(), -200, -40))}
-              onKeyDown={handleKeyDown}
             />
             <span class="xo-unit">dB</span>
           </div>
@@ -177,8 +168,7 @@ export default function FirSettingsDialog() {
             <button class="dlg-btn" onClick={handleCancel}>Отмена</button>
             <button class="dlg-btn dlg-btn-primary" onClick={handleApply}>Применить</button>
           </div>
-        </div>
-      </div>
+      </Modal>
     </Show>
   );
 }

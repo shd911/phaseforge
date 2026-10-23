@@ -31,7 +31,12 @@ export default function Toasts() {
               cursor: "pointer",
             }}
             onClick={() => dismissToast(t.id)}
-            title="Скрыть"
+            // b141.105: reachable and dismissable from the keyboard too.
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " " || e.key === "Escape") { e.preventDefault(); dismissToast(t.id); }
+            }}
+            title="Скрыть (Enter)"
           >
             {t.text}
           </div>

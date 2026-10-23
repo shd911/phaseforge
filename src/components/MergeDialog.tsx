@@ -5,6 +5,7 @@ import type { Measurement, MergeConfig, MergeResult, BaffleConfig } from "../lib
 import type { MergeSource } from "../stores/bands";
 import NumberInput from "./NumberInput";
 import BaffleStepDialog from "./BaffleStepDialog";
+import Modal from "./Modal";
 
 interface MergeDialogProps {
   onClose: () => void;
@@ -121,15 +122,12 @@ export default function MergeDialog(props: MergeDialogProps) {
   }
 
   return (
-    <div class="merge-overlay" onClick={props.onClose}
-      tabIndex={-1}
-      ref={(el) => requestAnimationFrame(() => el.focus())}
-      onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); props.onClose(); } }}>
-      <div class="merge-dialog" onClick={(e) => e.stopPropagation()}>
+    <Modal overlayClass="merge-overlay" dialogClass="merge-dialog" titleId="merge-dlg-title"
+      onEscape={props.onClose}>
         {/* Header */}
         <div class="merge-header">
-          <span class="merge-title">Слияние NF + FF</span>
-          <button class="merge-close" onClick={props.onClose}>
+          <span class="merge-title" id="merge-dlg-title">Слияние NF + FF</span>
+          <button class="merge-close" onClick={props.onClose} aria-label="Закрыть" title="Закрыть">
             ×
           </button>
         </div>
@@ -254,9 +252,8 @@ export default function MergeDialog(props: MergeDialogProps) {
             {merging() ? "Слияние…" : "Слить"}
           </button>
         </div>
-      </div>
 
-      {/* Baffle step configuration dialog */}
+      {/* Baffle step configuration dialog — its own modal on top */}
       <Show when={showBaffleDialog()}>
         <BaffleStepDialog
           config={baffleConfig()}
@@ -267,6 +264,6 @@ export default function MergeDialog(props: MergeDialogProps) {
           onClose={() => setShowBaffleDialog(false)}
         />
       </Show>
-    </div>
+    </Modal>
   );
 }

@@ -1911,6 +1911,12 @@ input[type="checkbox"]:focus-visible {
   justify-content: center;
 }
 
+/* b141.105: a nested modal (the restore question in «Версии») dims less. */
+.pn-overlay-nested { background: rgba(0, 0, 0, 0.5); }
+
+/* The dialog box takes focus so Enter/Escape reach it — no ring on the box. */
+[role="dialog"]:focus { outline: none; }
+
 .pn-dialog {
   background: var(--bg-surface);
   border: 1px solid var(--border);

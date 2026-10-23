@@ -4,6 +4,7 @@ import uPlot from "uplot";
 import { freqAxisTicks } from "../lib/plot-helpers";
 import type { BaffleConfig, BaffleStepPreview } from "../lib/types";
 import NumberInput from "./NumberInput";
+import Modal from "./Modal";
 
 interface BaffleStepDialogProps {
   config: BaffleConfig;
@@ -168,15 +169,12 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
   }
 
   return (
-    <div class="baffle-overlay" onClick={props.onClose}
-      tabIndex={-1}
-      ref={(el) => requestAnimationFrame(() => el.focus())}
-      onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); props.onClose(); } }}>
-      <div class="baffle-dialog" onClick={(e) => e.stopPropagation()}>
+    <Modal overlayClass="baffle-overlay" dialogClass="baffle-dialog" titleId="baffle-dlg-title"
+      onEscape={props.onClose}>
         {/* Header */}
         <div class="merge-header">
-          <span class="merge-title">Коррекция baffle step</span>
-          <button class="merge-close" onClick={props.onClose}>
+          <span class="merge-title" id="baffle-dlg-title">Коррекция baffle step</span>
+          <button class="merge-close" onClick={props.onClose} aria-label="Закрыть" title="Закрыть">
             ×
           </button>
         </div>
@@ -284,7 +282,6 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
             Применить
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
