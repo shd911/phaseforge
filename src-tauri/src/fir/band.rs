@@ -58,7 +58,8 @@ pub struct BandFirResult {
     #[serde(flatten)]
     pub fir: FirModelResult,
     pub route: BandFirRoute,
-    /// Peak of target + PEQ (dB) the FIR was asked for (b141.53).
+    /// Peak of target + PEQ (dB) the FIR was asked for (b141.53), relative
+    /// to the target's own level (b141.101) — what «Макс. подъём» limits.
     pub peak_boost_db: f64,
     /// The FIR grid the realized curves are on (5 Hz – Nyquist, with tail).
     pub freq: Vec<f64>,
@@ -283,7 +284,16 @@ pub(crate) fn generate_band_fir_routed(
 
     let config = band_fir_config(target_curve, s);
     let freq_raw = fir_grid(sr);
-    let resp = target::evaluate(target_curve, &freq_raw);
+    // b141.101 (audit 2026-10-23 1.8): the FIR is built level-free. The
+    // target's «Уровень» is a scalar the WAV normalisation removes anyway,
+    // but inside the request it moved «Макс. подъём», the noise floor and
+    // peak_boost_db with it: level 0/+10/+20 → realised PEQ boost
+    // 5.73/5.73/3.73 dB at a 24 dB limit, a false «26 dB above the limit»
+    // on the IIR route at +20, a −40 dB stopband for a −60 floor at −20.
+    let level_db = target_curve.reference_level_db;
+    let mut level_free = target_curve.clone();
+    level_free.reference_level_db = 0.0;
+    let resp = target::evaluate(&level_free, &freq_raw);
     let tilt = Some((target_curve.tilt_db_per_octave, target_curve.tilt_ref_freq));
     let hil = target_hilbert_phase(&freq_raw, hp, lp, tilt, sr).map_err(|e| AppError::Dsp { message: e })?;
     let mut freq = freq_raw.clone();
@@ -351,6 +361,11 @@ pub(crate) fn generate_band_fir_routed(
         fir.realized_mag[i] + fir.norm_db - req
     }).collect();
     let dev_phase: Vec<f64> = (0..freq.len()).map(|i| wrap(fir.realized_phase[i] - combined[i])).collect();
+    // The contract of norm_db stays «realized_mag + norm_db = the requested
+    // response», level included (the Export tab compares it with the target
+    // it evaluates with the level). The IIR route never saw the level, so its
+    // Export comparison and dev_mag were off by it before.
+    fir.norm_db += level_db;
     if omit_impulse { fir.impulse = Vec::new(); }
     Ok(BandFirResult { fir, route, peak_boost_db, freq, dev_mag, dev_phase, warnings })
 }
@@ -562,6 +577,45 @@ mod tests {
                 eprintln!("lin={lin} {f:>6} Hz: tilt term {:+.2}°, its FIR deviation {d:+.2}°", terms[i]);
                 if lin { assert!(terms[i].abs() < 1e-9); } else { assert!(terms[i] < -10.0, "{}", terms[i]); }
                 assert!(d.abs() < 1.0, "tilt deviation {d:.2}° at {f} Hz");
+            }
+        }
+    }
+
+    /// b141.101 (audit 2026-10-23 1.8): the target's level does not change
+    /// the FIR. 48k/64K, LR4 80/3k, PEQ +6 dB @ 200 Hz Q1: on the cepstral
+    /// route (linear-phase) the realised boost was 5.73/5.73/3.73 dB at
+    /// level 0/+10/+20 (24 dB limit) and 2.73 dB at +3 with a 6 dB limit; on
+    /// the IIR route +20 read as a «26 dB» boost.
+    #[test]
+    fn target_level_does_not_shape_the_fir() {
+        let lr4 = |fc: f64, lin: bool| FilterConfig { filter_type: FilterType::LinkwitzRiley, order: 4,
+            freq_hz: fc, shape: None, linear_phase: lin, q: None, subsonic_protect: None };
+        let peq = [PeqBand { freq_hz: 200.0, gain_db: 6.0, q: 1.0, enabled: true,
+            filter_type: crate::peq::PeqFilterType::Peaking }];
+        let mut s = settings(48_000.0);
+        s.taps = 65_536;
+        for (lin, limit) in [(true, 24.0), (true, 6.0), (false, 24.0)] {
+            s.max_boost_db = limit;
+            let run = |level: f64| {
+                let mut c = curve(Some(lr4(80.0, lin)), Some(lr4(3000.0, lin)));
+                c.reference_level_db = level;
+                generate_band_fir(&c, &peq, &s, true).unwrap()
+            };
+            let r0 = run(0.0);
+            let at = |r: &BandFirResult, f: f64| { let i = r.freq.iter().position(|&x| x >= f).unwrap(); r.fir.realized_mag[i] };
+            let boost0 = at(&r0, 200.0) - at(&r0, 1000.0);
+            eprintln!("lin={lin} limit={limit}: boost {boost0:.2} dB, peak_boost {:.2}", r0.peak_boost_db);
+            assert!(boost0 > 5.0, "boost {boost0:.2} dB");
+            for level in [3.0, 10.0, 20.0, -20.0] {
+                let r = run(level);
+                let worst = r.fir.realized_mag.iter().zip(&r0.fir.realized_mag)
+                    .zip(&r.freq).filter(|(_, &f)| (20.0..=20_000.0).contains(&f))
+                    .map(|((a, b), _)| (a - b).abs()).fold(0.0_f64, f64::max);
+                assert!(worst < 1e-6, "level {level}: realised response moved by {worst:.4} dB");
+                assert!((r.peak_boost_db - r0.peak_boost_db).abs() < 1e-9, "peak_boost {}", r.peak_boost_db);
+                assert!((r.fir.norm_db - r0.fir.norm_db - level).abs() < 1e-6, "norm_db carries the level");
+                let dev = r.dev_mag.iter().zip(&r0.dev_mag).map(|(a, b)| (a - b).abs()).fold(0.0_f64, f64::max);
+                assert!(dev < 1e-6, "dev_mag moved by {dev}");
             }
         }
     }
