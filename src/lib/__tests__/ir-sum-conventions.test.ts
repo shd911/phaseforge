@@ -175,6 +175,18 @@ describe("Σ corrected IR weighting (b141.10)", () => {
   });
 });
 
+describe("Σ IR uses the band's smoothing (b141.104, audit 4.9)", () => {
+  it("the measurement part goes through get_smoothed like the band's own IR", async () => {
+    const b = bandWithMeas("Woofer", grid96(20.29, 29812), 80, null, lrFilt(200), {
+      settings: { smoothing: "1/3" },
+    } as any);
+    await evaluateSum([b], { includeIr: true });
+    const smoothCalls = (invoke as Mock).mock.calls.filter(([cmd]) => cmd === "get_smoothed");
+    // evaluateBandFull (SPL Σ corrected) + the Σ IR measurement part.
+    expect(smoothCalls.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
 describe("alignmentDelay sign convention (b141.10 — HQPlayer parity)", () => {
   it("positive delay = LATER: phase ramp −360·f·τ on Σ corrected", async () => {
     const mk = (d: number) => [

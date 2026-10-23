@@ -18,7 +18,7 @@ import type { PeqBand, TargetResponse } from "../types";
 import { alignmentPhaseDeg } from "../types";
 import { buildCommonGrid, buildLogGrid, interpOnGrid, interpPhaseOnGrid, irTime, type ImpulseIpc } from "./grid";
 import { appendNoiseFloorTail, computeExtension, passbandRange } from "./extension";
-import { composeCorrected, evaluateBandFull, reconstructTargetPhase, snapshotBandRequest } from "./evaluate";
+import { applyMeasurementSmoothing, composeCorrected, evaluateBandFull, reconstructTargetPhase, snapshotBandRequest } from "./evaluate";
 import { bandContentKey, hashGrid, memoEval, sumRequestKey } from "./cache";
 
 // ---------------------------------------------------------------------------
@@ -471,6 +471,10 @@ async function evaluateSumImpl(
       }
 
       if (!band.measurement) return out;
+      // b141.104 (audit 4.9 / 3.8): the band's smoothing, as on its own
+      // IR/Step and on SPL — the Σ IR summed the raw measurement next to
+      // smoothed per-band curves.
+      const meas = await applyMeasurementSmoothing(band.measurement, band.settings?.smoothing);
 
       // Measurement on irFreq: extension via target shape when target is on,
       // else fence outside native range.
@@ -478,15 +482,15 @@ async function evaluateSumImpl(
       let extMeasPhase: number[] | null = null;
       if (tgtMagOnIr) {
         const ext = await computeExtension(
-          band.measurement.freq, band.measurement.magnitude,
-          band.measurement.phase ?? null, irFreq, tgtMagOnIr, sumSr,
+          meas.freq, meas.magnitude,
+          meas.phase ?? null, irFreq, tgtMagOnIr, sumSr,
         );
         extMeasMag = ext.mag;
         extMeasPhase = ext.phase;
       } else {
         const r = resampleOntoCommon(
-          band.measurement.freq, band.measurement.magnitude,
-          band.measurement.phase ?? null, irFreq,
+          meas.freq, meas.magnitude,
+          meas.phase ?? null, irFreq,
         );
         extMeasMag = r?.mag ?? null;
         extMeasPhase = r?.phase ?? null;

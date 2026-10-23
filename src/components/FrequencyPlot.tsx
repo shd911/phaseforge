@@ -40,6 +40,7 @@ import { coherentSum } from "../lib/band-evaluator/sum";
 import { buildCommonGrid, buildFirGrid, interpOnGrid, interpPhaseOnGrid, irTime, resampleOnLogGrid, type ImpulseIpc } from "../lib/band-evaluator/grid";
 import { bandRequestKey } from "../lib/band-evaluator/cache";
 import { computeAutoAlign } from "../lib/auto-align";
+import { polarityPhase, polarityAmplitude, sumGroupDelayMs } from "../lib/plot-display";
 import { attachFieldWheel, newWheelAccumulator, wheelSteps } from "../lib/wheel-step";
 
 
@@ -1977,9 +1978,8 @@ export default function FrequencyPlot() {
 
       // Wrap phase for display. b141.100: an inverted band's file is negated
       // — show its phase (and the model's) +180°.
-      const fileFlip = band.inverted ? 180 : 0;
-      const wrappedModelPhase = wrapPhase(fileFlip ? modelPhase.map((v: number) => v + fileFlip) : modelPhase);
-      const wrappedFirPhase = wrapPhase(fileFlip ? firResult.realized_phase.map((v: number) => v + fileFlip) : firResult.realized_phase);
+      const wrappedModelPhase = wrapPhase(polarityPhase(modelPhase as number[], !!band.inverted));
+      const wrappedFirPhase = wrapPhase(polarityPhase(firResult.realized_phase, !!band.inverted));
 
       const opts: uPlot.Options = {
         width: Math.max(rect.width, 400), height: Math.max(rect.height, 200),
@@ -2112,6 +2112,23 @@ export default function FrequencyPlot() {
       : allWithPhase;
     // All bands for per-band curves (including excluded from sum)
     const allBands = allWithPhase;
+    // b141.104 (audit 4.3/4.10): what feeds the Σ target / corrected on
+    // IR/Step and GD — every band the legend keeps in the sum, as on SPL.
+    // A band without measurement phase still has a target; it enters the Σ
+    // target alone (its measurement cannot be summed coherently, so Σ meas
+    // and Σ corrected leave it out instead of summing it at zero phase).
+    const sumBands: BandState[] = sumMode
+      ? untrack(() => appState.bands
+          .filter((b) => !excluded.has(b.name))
+          .map((b) => (!b.measurement || (b.measurement.phase && b.measurement.phase.length > 0)
+            ? b
+            : { ...b, measurement: null } as BandState)))
+      : [];
+    // Polarity / alignment delay of each Σ band, read before any await.
+    const sumMeta = untrack(() => sumBands.map((b) => ({
+      sign: (b.inverted ? -1 : 1) as 1 | -1,
+      delay: typeof b.alignmentDelay === "number" ? b.alignmentDelay : 0,
+    })));
 
     // Read alignment delays synchronously as plain array (store proxy safe)
     // untrack: prevent creating tracking dependency on .alignmentDelay
@@ -2139,37 +2156,35 @@ export default function FrequencyPlot() {
         const b = bands[0];
         const freq = [...b.measurement!.freq];
         const phase = [...b.measurement!.phase!];
-        const magnitude = [...b.measurement!.magnitude];
 
-        // Unwrap phase for GD computation (prevents spikes at ±180° boundaries)
-        let gdFreq = freq;
-        let gdPhase: number[];
-        if (sumMode && bands.length > 1) {
+        let measGd: { freqOut: number[]; gdMs: number[] };
+        if (sumMode) {
           // b141.65 (audit stage 2 B1): each band is resampled onto ONE common
           // grid first (fence outside its own range, delay-aware phase). The
           // sum ran index-wise over bands[0]'s grid although the grids differ
           // (user_4way: 1011 pts from 20 Hz vs 484 pts from 1220 Hz) — GD at
           // 500 Hz −0.97 ms instead of 0.007, Σ at 8 kHz 74 dB instead of 90.
-          gdFreq = buildCommonGrid(bands as BandState[]);
-          // b141.72: the shared coherent sum (sum.ts), not a fourth copy of it.
-          const sum = coherentSum(gdFreq, bands.map((sb) => {
-            const m = sb.measurement!;
-            return {
-              mag: interpOnGrid(m.freq, m.magnitude, gdFreq, { outside: -200 }) as number[],
-              phase: interpPhaseOnGrid(m.freq, m.phase!, gdFreq, { outside: 0, mag: m.magnitude }) as number[],
-              sign: (sb.inverted ? -1 : 1) as 1 | -1,
-              delay: irDelayByName[sb.name] ?? 0,
-            };
-          }));
-          const unwrapped = unwrapDegrees(sum!.phase);
-          gdPhase = unwrapped;
+          // b141.104 (audit 4.7): GD of the complex sum itself, with the
+          // alignment delays analytic — unwrapping the summed phase on 512
+          // points aliased at HF (3 ms → > 10 % off above 12.3 kHz).
+          const gdFreq = buildCommonGrid(bands as BandState[]);
+          measGd = {
+            freqOut: gdFreq,
+            gdMs: sumGroupDelayMs(gdFreq, bands.map((sb) => {
+              const m = sb.measurement!;
+              return {
+                mag: interpOnGrid(m.freq, m.magnitude, gdFreq, { outside: -200 }) as number[],
+                phase: interpPhaseOnGrid(m.freq, m.phase!, gdFreq, { outside: 0, mag: m.magnitude }) as number[],
+                sign: (sb.inverted ? -1 : 1) as 1 | -1,
+                delay: irDelayByName[sb.name] ?? 0,
+              };
+            })),
+          };
         } else {
-          // Band mode: unwrap phase before GD computation
-          gdPhase = unwrapDegrees(phase);
+          // Band mode: unwrap phase before GD computation (prevents spikes
+          // at ±180° boundaries)
+          measGd = computeGroupDelay(freq, unwrapDegrees(phase));
         }
-
-        // Measurement GD
-        const measGd = computeGroupDelay(gdFreq, gdPhase);
         if (gen !== renderGen) return;
 
         // b139.4b: target / corrected GD share BandEvaluator's
@@ -2188,17 +2203,22 @@ export default function FrequencyPlot() {
           // the SPL render). Phases come wrapped (atan2) — unwrap before
           // differentiating, then resample onto the measurement GD grid so
           // all series share one x-axis.
-          const sumRes = await evaluateSum(allBands as BandState[], { sampleRate: exportSampleRate() })
-            .catch((e) => { console.error("[GD] sum eval failed:", e); return null; });
+          const sumRes = sumBands.length > 0
+            ? await evaluateSum(sumBands, { sampleRate: exportSampleRate() })
+              .catch((e) => { console.error("[GD] sum eval failed:", e); return null; })
+            : null;
           if (gen !== renderGen) return;
           if (sumRes) {
-            const toGd = (ph: number[] | null): number[] | null => {
-              if (!ph) return null;
-              const gd = computeGroupDelay(sumRes.freq, unwrapDegrees(ph));
-              return interpOnGrid(gd.freqOut, gd.gdMs, measGd.freqOut, { outside: "nan" }) as number[];
+            // b141.104 (audit 4.7): from the per-band parts (polarity and
+            // alignment delay applied analytically), not the wrapped Σ phase.
+            const toGd = (per: Array<{ mag: number[]; phase: number[] } | null>): number[] | null => {
+              const parts = per.map((p, i) => (p ? { ...p, ...sumMeta[i] } : null));
+              if (!parts.some((p) => p)) return null;
+              const gd = sumGroupDelayMs(sumRes.freq, parts);
+              return interpOnGrid(sumRes.freq, gd, measGd.freqOut, { outside: "nan" }) as number[];
             };
-            targetGdMs = toGd(sumRes.sumTargetPhase);
-            corrGdMs = toGd(sumRes.sumCorrectedPhase);
+            if (sumRes.sumTargetMag) targetGdMs = toGd(sumRes.perBandTarget);
+            if (sumRes.sumCorrectedPhase) corrGdMs = toGd(sumRes.perBandCorrected);
           }
         } else {
           // Target GD (band mode). b141.13: phases are WRAPPED (±180 from
@@ -2295,11 +2315,17 @@ export default function FrequencyPlot() {
         for (const { sb, res } of perBand) {
           if (!res?.ir) continue;
           const delay = irDelayByName[sb.name] ?? 0;
-          const wrap = (c: { time: number[]; impulse: number[]; step: number[] }): IrBandData =>
-            ({ bandName: sb.name, bandColor: sb.color, ...shiftIr(c, delay) });
-          if (res.ir.measurement) measBands.push(wrap(res.ir.measurement));
-          if (res.ir.target) targetBands.push(wrap(res.ir.target));
-          if (res.ir.corrected) corrBands.push(wrap(res.ir.corrected));
+          const wrap = (c: { time: number[]; impulse: number[]; step: number[] }, played: boolean): IrBandData => {
+            const sh = shiftIr(c, delay);
+            // b141.104 (audit 4.2): target / corrected as the band plays —
+            // with its polarity, as in Σ and on the band's own IR tab.
+            const inv = played && !!sb.inverted;
+            return { bandName: sb.name, bandColor: sb.color, timeMs: sh.timeMs,
+              impulse: polarityAmplitude(sh.impulse, inv), step: polarityAmplitude(sh.step, inv) };
+          };
+          if (res.ir.measurement) measBands.push(wrap(res.ir.measurement, false));
+          if (res.ir.target) targetBands.push(wrap(res.ir.target, true));
+          if (res.ir.corrected) corrBands.push(wrap(res.ir.corrected, true));
         }
 
         // Σ target IR — populated by evaluateSum below (single source of truth).
@@ -2310,8 +2336,11 @@ export default function FrequencyPlot() {
 
         // Σ IR/Step from evaluateSum's unified frequency-domain coherent sum.
         try {
-          const sumResult = await evaluateSum(allBands as BandState[], { includeIr: true, sampleRate: exportSampleRate() });
-          if (gen === renderGen && sumResult.ir) {
+          // b141.104 (audit 4.3): the legend's exclusions reach the Σ curves.
+          const sumResult = sumBands.length > 0
+            ? await evaluateSum(sumBands, { includeIr: true, sampleRate: exportSampleRate() })
+            : null;
+          if (gen === renderGen && sumResult?.ir) {
             if (sumResult.ir.measurement) {
               measSum = {
                 timeMs: sumResult.ir.measurement.time.map(t => t * 1000),
@@ -2385,7 +2414,7 @@ export default function FrequencyPlot() {
         // convolver or, with «INV в WAV», in the file) — show its target and
         // corrected impulse/step that way, as the SPL tab shows its phase.
         // The measurement stays as measured.
-        const flip = (a: number[]) => band!.inverted ? a.map(v => -v) : a;
+        const flip = (a: number[]) => polarityAmplitude(a, !!band!.inverted);
         const targetBands: IrBandData[] = irEval.ir.target ? [{
           bandName: band!.name,
           bandColor: band!.color,
@@ -3055,9 +3084,9 @@ export default function FrequencyPlot() {
       }
 
       if (showTarget && result.targetPhase && result.targetPhase.length > 0 && showPhase) {
-        const phase = band.inverted
-          ? result.targetPhase.map((v) => v + 180)
-          : result.targetPhase;
+        // b141.104 (audit 4.1): every phase curve of the band goes through
+        // the one polarity rule — Corrected°, FIR°, Corr FIR° below too.
+        const phase = polarityPhase(result.targetPhase, !!band.inverted);
         uSeries.push({ label: "Target \u00B0", stroke: cf.targetPhase, width: 1, dash: [4, 4], scale: "phase" });
         uData.push(wrapPhase(phase));
         legend.push({ label: "Target \u00B0", color: cf.targetPhase, dash: true, visible: true, seriesIdx: sIdx, category: "target" });
@@ -3201,7 +3230,9 @@ export default function FrequencyPlot() {
 
           // b139.4c: corrected phase from BandEvaluator (Gaussian/subsonic
           // reconstruction is unified with target \u2014 bug fix for SPL tab).
-          const fullCorrectedPhase: number[] | null = evalRes.correctedPhase ?? null;
+          const fullCorrectedPhase: number[] | null = evalRes.correctedPhase
+            ? polarityPhase(evalRes.correctedPhase, !!band.inverted)
+            : null;
           if (fullCorrectedPhase && showPhase) {
             const phaseLabel = isHybrid ? "Corrected + XO" : "Corrected";
             uSeries.push({
@@ -3224,7 +3255,7 @@ export default function FrequencyPlot() {
           }
           if (showPhase && fileForPhase) {
             uSeries.push({ label: "FIR °", stroke: cf.targetPhase, width: 1, dash: [4, 4], scale: "phase" });
-            uData.push(wrapPhase(fileForPhase));
+            uData.push(wrapPhase(polarityPhase(fileForPhase, !!band.inverted)));
             legend.push({ label: "FIR °", color: cf.targetPhase, dash: true, visible: true, seriesIdx: sIdx, category: "fir" });
             sIdx++;
           }
@@ -3241,7 +3272,7 @@ export default function FrequencyPlot() {
         if (result.targetMag) {
           lastCorrData.freq = result.freq!;
           lastCorrData.mag = [...result.targetMag];
-          lastCorrData.phase = result.targetPhase ? wrapPhase(result.targetPhase) : [];
+          lastCorrData.phase = result.targetPhase ? wrapPhase(polarityPhase(result.targetPhase, !!band.inverted)) : [];
         } else if (result.measurement) {
           lastCorrData.freq = [...result.measurement.freq];
           lastCorrData.mag = [...result.measurement.magnitude];
@@ -3262,7 +3293,7 @@ export default function FrequencyPlot() {
       if (result.targetMag) {
         lastTargetData.freq = result.freq!;
         lastTargetData.mag = [...result.targetMag];
-        lastTargetData.phase = result.targetPhase ? wrapPhase(result.targetPhase) : [];
+        lastTargetData.phase = result.targetPhase ? wrapPhase(polarityPhase(result.targetPhase, !!band.inverted)) : [];
       } else {
         lastTargetData.freq = []; lastTargetData.mag = []; lastTargetData.phase = [];
       }
@@ -3452,7 +3483,8 @@ export default function FrequencyPlot() {
               label: `${bands[i].name} tgt °`, stroke: cf.targetPhase,
               width: 1, dash: [4, 4], scale: "phase",
             });
-            uData.push(wrapPhase(pb.phase));
+            // b141.104 (audit 4.2): the band as it enters Σ — with its polarity.
+            uData.push(wrapPhase(polarityPhase(pb.phase, !!bands[i].inverted)));
             legend.push({
               label: `${bands[i].name} tgt °`, color: cf.targetPhase, dash: true,
               visible: false, seriesIdx: sIdx, category: "target",

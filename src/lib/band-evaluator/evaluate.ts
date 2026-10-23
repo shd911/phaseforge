@@ -240,7 +240,7 @@ export async function filterSection(
   }
 }
 
-async function applyMeasurementSmoothing(m: Measurement, mode: string | null | undefined): Promise<Measurement> {
+export async function applyMeasurementSmoothing(m: Measurement, mode: string | null | undefined): Promise<Measurement> {
   if (!mode || mode === "off") return m;
   const config = smoothingConfig(mode as any);
   const smoothed = await invoke<number[]>("get_smoothed", {
