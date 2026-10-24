@@ -38,14 +38,18 @@ pub fn variable_smoothing(freq: &[f64], mag: &[f64], config: &SmoothingConfig) -
 }
 
 /// b141.87: the measurement the PEQ fit sees with «Без отражений» on —
-/// 1/48 octave below 100 Hz (room modes are real and correctable), 1/3
-/// above. Ripple from reflections in a long-window REW export (30–70 Hz
-/// spacing at 150–500 Hz on a real mid band) survives the 1/12 of
-/// [`variable_smoothing`]; the fit planted Q 6–8 filters in it (4 narrow
-/// filters raw, 2 at 1/6, 1 at 1/3).
+/// 1/6 octave below 100 Hz, 1/3 above. Ripple from reflections in a
+/// long-window REW export (30–70 Hz spacing at 150–500 Hz on a real mid band)
+/// survives the 1/12 of [`variable_smoothing`]; the fit planted Q 6–8
+/// filters in it (4 narrow filters raw, 2 at 1/6, 1 at 1/3).
+/// b141.106: below 100 Hz it was 1/48 («room modes are real») — ±1 dB room
+/// ripple at 26–83 Hz on a real sub reached the fit and drew Q 2–2.5 filters
+/// that cannot follow it. Since b141.95 the optimizer has no narrow boosts
+/// and narrow cuts only from 3 dB, so 1/6 keeps every mode it may still
+/// correct (+6 dB Q 5 stays above +4.5 dB).
 pub fn reflection_free_smoothing(freq: &[f64], mag: &[f64]) -> Vec<f64> {
     profile_smoothing(freq, mag, |f| {
-        if f < 100.0 { 1.0 / 48.0 } else { 1.0 / 3.0 }
+        if f < 100.0 { 1.0 / 6.0 } else { 1.0 / 3.0 }
     })
 }
 

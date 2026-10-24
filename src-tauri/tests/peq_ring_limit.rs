@@ -67,10 +67,13 @@ fn longest_ring(range_lo: f64, sr: f64, taps: f64, hybrid: bool, limited: bool) 
     }
     if hybrid {
         // 1.9: the reported error is the error of the returned filters
-        // (hybrid target = flat at the mean measurement in HP..LP).
-        let (s, c) = freq.iter().zip(&meas).filter(|(f, _)| **f >= 20.0 && **f <= lp)
-            .fold((0.0, 0), |(s, c), (_, m)| (s + m, c + 1));
-        let flat = s / c as f64;
+        // (hybrid target = flat at the median measurement over HP..LP inside
+        // the range, b141.106).
+        let mut pb: Vec<f64> = freq.iter().zip(&meas)
+            .filter(|(f, _)| **f >= 20f64.max(range.0) && **f <= lp.min(range.1)).map(|(_, &m)| m).collect();
+        pb.sort_by(|a, b| a.total_cmp(b));
+        let n = pb.len();
+        let flat = if n % 2 == 1 { pb[n / 2] } else { 0.5 * (pb[n / 2 - 1] + pb[n / 2]) };
         let corr = apply_peq(&freq, &res.bands, sr);
         let err = freq.iter().enumerate().filter(|(_, f)| **f >= range.0 && **f <= range.1)
             .map(|(i, _)| (meas[i] + corr[i] - flat).abs()).fold(0.0, f64::max);

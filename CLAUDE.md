@@ -190,6 +190,13 @@
   no further than Q_MIN (0.5) and then lowers the gain; a boosting shelf
   promotion may not lift outside `boost_range` more than the peaking band it
   replaces; `max_error_db` is measured on the filters actually returned.
+  b141.106: the hybrid flat line is the MEDIAN of the measurement over
+  HP..LP inside the optimized range (`peq::passband_median`) — a mean over
+  HP..LP took the roll-off below the range start (−17 dB at 20 Hz) and put
+  the line 1.5 dB under a real sub's passband (four filters cut it down).
+  «Без отражений» is 1/6 octave below 100 Hz (was 1/48): it keeps a +6 dB
+  Q 5 mode at +5.4 dB but only partly removes room ripple whose period is
+  wider than the window (4 Hz at 30 Hz). Pinned by `tests/peq_flat_level.rs`.
 - **Bilinear digital cascade** (IIR path) has frequency-dependent
   deviation up to ~20° vs analog reference accumulated over 8 biquads.
   REPhase reference comparison gives tighter empirical bound (≤ 2.5° on

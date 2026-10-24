@@ -103,17 +103,15 @@ pub fn auto_peq_lma(
     let computed_target;
     let target = if config.hybrid {
         // --- Hybrid mode ---
-        // Flat target at avg measurement level in HP..LP for ALL frequencies.
-        // No 3-zone composite, no service curve, no blend zones.
+        // Flat target at the passband level of the measurement for ALL
+        // frequencies. No 3-zone composite, no service curve, no blend zones.
         // PEQ corrects everything to a straight line; crossover applied later.
-        let (sum, cnt) = freq.iter().zip(meas_mag.iter())
-            .filter(|(&f, _)| f >= hp_freq && f <= lp_freq)
-            .fold((0.0, 0usize), |(s, c), (_, &v)| (s + v, c + 1));
-        let flat_level = if cnt > 0 { sum / cnt as f64 } else { 80.0 };
+        let (lo, hi) = passband_span(hp_freq, lp_freq, config.freq_range);
+        let flat_level = passband_median(freq, meas_mag, lo, hi).unwrap_or(80.0);
 
         info!(
-            "auto_peq_lma [hybrid]: flat_level = {:.1} dB (avg meas in {:.0}..{:.0} Hz)",
-            flat_level, hp_freq, lp_freq
+            "auto_peq_lma [hybrid]: flat_level = {:.1} dB (median meas in {:.0}..{:.0} Hz)",
+            flat_level, lo, hi
         );
 
         computed_target = vec![flat_level; n];
@@ -150,11 +148,9 @@ pub fn auto_peq_lma(
                 &computed_target
             }
             None => {
-                // No target_mag provided — use flat at avg measurement level
-                let (sum, cnt) = freq.iter().zip(meas_mag.iter())
-                    .filter(|(&f, _)| f >= hp_freq && f <= lp_freq)
-                    .fold((0.0, 0usize), |(s, c), (_, &v)| (s + v, c + 1));
-                let flat_level = if cnt > 0 { sum / cnt as f64 } else { 80.0 };
+                // No target_mag provided — flat at the measurement's passband level
+                let (lo, hi) = passband_span(hp_freq, lp_freq, config.freq_range);
+                let flat_level = passband_median(freq, meas_mag, lo, hi).unwrap_or(80.0);
                 computed_target = vec![flat_level; n];
                 &computed_target
             }
@@ -466,6 +462,29 @@ pub fn compute_median_in_range(freq: &[f64], mag: &[f64], f_low: f64, f_high: f6
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+
+/// b141.106: the span the flat line is measured on — HP..LP inside the
+/// optimized range. The driver's roll-off below the range start (−17 dB at
+/// 20 Hz on a real sub, range from 24 Hz) is not something the PEQ is asked
+/// to fix; averaging it in put the line 1.5 dB under the passband and the
+/// optimizer cut the whole 55–200 Hz with four filters.
+fn passband_span(hp_freq: f64, lp_freq: f64, range: (f64, f64)) -> (f64, f64) {
+    let (lo, hi) = (hp_freq.max(range.0), lp_freq.min(range.1));
+    if lo < hi { (lo, hi) } else { (hp_freq, lp_freq) }
+}
+
+/// Median level of `mag` over [lo, hi] — robust to a roll-off edge or a
+/// room-mode peak that a mean follows.
+fn passband_median(freq: &[f64], mag: &[f64], lo: f64, hi: f64) -> Option<f64> {
+    let mut v: Vec<f64> = freq.iter().zip(mag)
+        .filter(|(&f, m)| f >= lo && f <= hi && m.is_finite())
+        .map(|(_, &m)| m).collect();
+    if v.is_empty() { return None; }
+    v.sort_by(|a, b| a.total_cmp(b));
+    let n = v.len();
+    Some(if n % 2 == 1 { v[n / 2] } else { 0.5 * (v[n / 2 - 1] + v[n / 2]) })
+}
 
 #[cfg(test)]
 mod tests {
