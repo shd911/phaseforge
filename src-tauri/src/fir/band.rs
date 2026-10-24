@@ -187,6 +187,7 @@ pub fn target_hilbert_phase(
     sample_rate: f64,
 ) -> Result<Vec<f64>, String> {
     let mut terms: Vec<Vec<f64>> = Vec::new();
+    let mut analytic: Option<Vec<f64>> = None;
     let g = || generate_log_freq_grid(HILBERT_GRID_POINTS, FIR_GRID_F_MIN, sample_rate / 2.0 * 0.95);
     let mut add = |mag: Vec<f64>, grid: &[f64]| -> Result<(), String> {
         let ph = minimum_phase_on_log_grid(grid, &mag, Some(sample_rate), Some(HILBERT_FLOOR_DB))?;
@@ -202,8 +203,17 @@ pub fn target_hilbert_phase(
         }
         add(mag, &grid)?;
     } else if subsonic_active(hp) && hp.map(|h| h.linear_phase).unwrap_or(false) {
-        let grid = g();
-        add(subsonic_db(&grid, hp.expect("checked").freq_hz / 8.0), &grid)?;
+        // b141.108: on a linear main the FIR realises the subsonic as the
+        // true Butterworth-8 (Hilbert of its unclipped magnitude, helpers
+        // `compose_target_phase`). Through the −150 dB-floored Hilbert the
+        // plot lost its 8 zeros at DC: 4.2° at a 100 Hz crossover, 32° at
+        // 13 Hz. The analytic phase is the exact term.
+        let bw8 = FilterConfig { filter_type: FilterType::Butterworth, order: 8,
+            freq_hz: hp.expect("checked").freq_hz / 8.0, shape: None, linear_phase: false, q: None,
+            subsonic_protect: None };
+        let only = crate::target::TargetCurve { reference_level_db: 0.0, tilt_db_per_octave: 0.0,
+            tilt_ref_freq: 1000.0, high_pass: Some(bw8), low_pass: None, low_shelf: None, high_shelf: None };
+        analytic = Some(crate::target::evaluate(&only, freq).phase);
     }
     if is_gaussian_min_phase(lp) {
         let grid = g();
@@ -216,7 +226,7 @@ pub fn target_hilbert_phase(
         }
     }
     let mut out = vec![0.0; freq.len()];
-    for t in &terms { for (o, v) in out.iter_mut().zip(t) { *o += v; } }
+    for t in terms.iter().chain(analytic.iter()) { for (o, v) in out.iter_mut().zip(t) { *o += v; } }
     Ok(out)
 }
 
