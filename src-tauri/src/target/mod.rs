@@ -397,7 +397,7 @@ fn butterworth_hp_complex(f: f64, fc: f64, n: u8) -> (f64, f64) {
 /// These are the standard frequency-normalized Bessel poles for orders 1–8.
 /// Each entry is (real, imag) for left-half-plane poles with imag >= 0.
 /// Conjugate pairs are implied for complex poles.
-fn bessel_poles(order: u8) -> Vec<(f64, f64)> {
+pub(crate) fn bessel_poles(order: u8) -> Vec<(f64, f64)> {
     // b141.46 (audit 2026-10-01 L1): roots of the reverse Bessel polynomial
     // θₙ(s), scaled so |H(jω)| = −3.0103 dB at ω = 1, to 10 digits. The old
     // 4-digit table (with 0.6368 for 0.6360 at order 2) was up to 0.043 dB

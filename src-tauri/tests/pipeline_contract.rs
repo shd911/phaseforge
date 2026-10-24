@@ -217,7 +217,7 @@ fn collect_entries() -> BTreeMap<String, Entry> {
         Some(&gauss_hp), None, &[], &cfg_minphase);
 
     let bess_lp = bessel(500.0);
-    run("contract_05_bessel_lp_route_cepstral", Route::Cepstral,
+    run("contract_05_bessel_lp_route_iir", Route::Iir,
         None, Some(&bess_lp), &[], &cfg_minphase);
 
     let cfg_linear = fir_config(true, None);
@@ -327,8 +327,8 @@ fn rust_routing_predicate_matches_js_decisions() {
         ("gaussian hp routes cepstral",                  Some(&gauss),None,       false, None,      Route::Cepstral),
         ("gaussian lp routes cepstral",                  None,       Some(&gauss),false, None,      Route::Cepstral),
         ("lr hp + gauss lp",                             Some(&lr),  Some(&gauss),false, None,      Route::Cepstral),
-        ("bessel hp routes cepstral",                    Some(&bess),None,        false, None,      Route::Cepstral),
-        ("bessel lp routes cepstral",                    None,       Some(&bess), false, None,      Route::Cepstral),
+        ("bessel hp routes iir (b141.108)",              Some(&bess),None,        false, None,      Route::Iir),
+        ("bessel lp routes iir (b141.108)",              None,       Some(&bess), false, None,      Route::Iir),
         ("all three disqualifiers",                      Some(&gauss),Some(&bess),true,  Some(50.0),Route::Cepstral),
     ];
 

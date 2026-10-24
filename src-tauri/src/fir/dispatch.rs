@@ -41,7 +41,7 @@ pub enum Route {
 ///   - `linear_phase_main = true`            → Cepstral
 ///   - `subsonic_cutoff_hz = Some(_)`        → Cepstral
 ///   - `tilt_db_per_octave != 0`             → Cepstral
-///   - any active filter is Gaussian/Bessel  → Cepstral
+///   - any active filter is Gaussian         → Cepstral (Bessel is a cascade since b141.108)
 ///   - everything else                        → Iir
 pub fn route_for(
     hp: Option<&FilterConfig>,
@@ -97,7 +97,7 @@ fn is_iir_realizable(f: Option<&FilterConfig>) -> bool {
         None => true,
         Some(c) => !c.linear_phase && matches!(
             c.filter_type,
-            FilterType::LinkwitzRiley | FilterType::Butterworth | FilterType::Custom
+            FilterType::LinkwitzRiley | FilterType::Butterworth | FilterType::Custom | FilterType::Bessel
         ),
     }
 }
@@ -169,10 +169,11 @@ mod tests {
     }
 
     #[test]
-    fn cepstral_route_when_gaussian_or_bessel_present() {
+    fn cepstral_route_when_gaussian_present_bessel_is_a_cascade() {
         let c = cfg(false, None);
         assert_eq!(route_for(Some(&flt(FilterType::Gaussian)), None, 0.0, &c), Route::Cepstral);
-        assert_eq!(route_for(None, Some(&flt(FilterType::Bessel)), 0.0, &c), Route::Cepstral);
+        // b141.108: min-phase Bessel is a bilinear cascade (IIR route).
+        assert_eq!(route_for(None, Some(&flt(FilterType::Bessel)), 0.0, &c), Route::Iir);
         assert_eq!(route_for(Some(&flt(FilterType::LinkwitzRiley)), Some(&flt(FilterType::Gaussian)), 0.0, &c), Route::Cepstral);
     }
 

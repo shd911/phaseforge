@@ -43,7 +43,7 @@ pub(crate) fn digital_section(
     use crate::fir::iir_path::build_filter_cascade;
     use crate::target::FilterType;
     let realisable = |f: &FilterConfig| !f.linear_phase && matches!(
-        f.filter_type, FilterType::Butterworth | FilterType::LinkwitzRiley | FilterType::Custom);
+        f.filter_type, FilterType::Butterworth | FilterType::LinkwitzRiley | FilterType::Custom | FilterType::Bessel);
     let mut biquads = Vec::new();
     let mut parts: Vec<(&FilterConfig, bool)> = Vec::new();
     for (f, is_lp) in [(hp, false), (lp, true)] {

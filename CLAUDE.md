@@ -27,11 +27,13 @@
   Display phase uses the same terms (`compute_target_hilbert_phase`).
 - **FIR pipeline routing** (`fir::route_for`, called inside generate_band_fir):
   - **IIR analytical cascade** (`fir/iir_path.rs`) — Min-Phase main +
-    non-Gaussian (LR / Butterworth / Custom HP+LP + PEQ peaking) +
-    no subsonic. Peak-at-0 by construction, REPhase-parity tested.
+    non-Gaussian (LR / Butterworth / Custom / Bessel HP+LP + PEQ) +
+    no subsonic. Bessel is a cascade since b141.108 (poles at |p|·fc,
+    pre-warped once at fc) — through the Hilbert of its floor-clipped
+    magnitude the WAV was 41–94° off the plot. Peak-at-0 by construction, REPhase-parity tested.
   - **FFT cepstral path** (`fir/mod.rs::generate_model_fir`) — every
     other configuration: Linear-Phase main, Composite + subsonic,
-    Gaussian, Bessel, Custom measured targets.
+    Gaussian, Custom measured targets.
 - **Alignment delay convention** (b141.10): положительное значение =
   полоса ИГРАЕТ ПОЗЖЕ (паритет с HQPlayer). Единая точка —
   `alignmentPhaseDeg` (types.ts, −360·f·τ); legacy-проекты мигрируются

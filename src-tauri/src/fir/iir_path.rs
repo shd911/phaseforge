@@ -80,7 +80,13 @@ fn prewarp(fc: f64, sr: f64) -> f64 {
 /// Build a 2nd-order analog low-pass at warped corner ωc = 2π·fc with given
 /// pole-Q: `H(s) = ωc² / (s² + (ωc/Q)·s + ωc²)` → bilinear → digital biquad.
 fn lp_biquad_q(fc: f64, q: f64, sr: f64) -> DigitalBiquad {
-    let fc_w = prewarp(fc, sr);
+    lp_biquad_w(prewarp(fc, sr), q, sr)
+}
+
+/// [`lp_biquad_q`] at an analog corner already in the warped domain (Hz) —
+/// for a cascade pre-warped once at the FILTER's corner (Bessel sections
+/// sit at |p|·fc, b141.108).
+fn lp_biquad_w(fc_w: f64, q: f64, sr: f64) -> DigitalBiquad {
     let omega = 2.0 * PI * fc_w;
     let k = 2.0 * sr;
     let k2 = k * k;
@@ -110,7 +116,10 @@ fn lp_biquad_q(fc: f64, q: f64, sr: f64) -> DigitalBiquad {
 /// Build a 2nd-order analog high-pass: `H(s) = s² / (s² + (ωc/Q)·s + ωc²)`
 /// → bilinear → digital biquad.
 fn hp_biquad_q(fc: f64, q: f64, sr: f64) -> DigitalBiquad {
-    let fc_w = prewarp(fc, sr);
+    hp_biquad_w(prewarp(fc, sr), q, sr)
+}
+
+fn hp_biquad_w(fc_w: f64, q: f64, sr: f64) -> DigitalBiquad {
     let omega = 2.0 * PI * fc_w;
     let k = 2.0 * sr;
     let k2 = k * k;
@@ -136,7 +145,10 @@ fn hp_biquad_q(fc: f64, q: f64, sr: f64) -> DigitalBiquad {
 /// First-order analog low-pass `H(s) = ωc / (s + ωc)` → bilinear → digital.
 /// Used for Butterworth/LR with odd primary order (LR2 = 2× first-order LP).
 fn lp_first_order(fc: f64, sr: f64) -> DigitalBiquad {
-    let fc_w = prewarp(fc, sr);
+    lp_first_w(prewarp(fc, sr), sr)
+}
+
+fn lp_first_w(fc_w: f64, sr: f64) -> DigitalBiquad {
     let omega = 2.0 * PI * fc_w;
     let k = 2.0 * sr;
     // (z+1) in numerator, denominator K(z-1) + ωc(z+1) = (K+ωc)·z + (ωc-K)
@@ -149,7 +161,10 @@ fn lp_first_order(fc: f64, sr: f64) -> DigitalBiquad {
 
 /// First-order analog high-pass `H(s) = s / (s + ωc)` → bilinear → digital.
 fn hp_first_order(fc: f64, sr: f64) -> DigitalBiquad {
-    let fc_w = prewarp(fc, sr);
+    hp_first_w(prewarp(fc, sr), sr)
+}
+
+fn hp_first_w(fc_w: f64, sr: f64) -> DigitalBiquad {
     let omega = 2.0 * PI * fc_w;
     let k = 2.0 * sr;
     let a0 = k + omega;
@@ -222,10 +237,33 @@ pub fn build_filter_cascade(
             }
             Ok(bs)
         }
-        FilterType::Bessel | FilterType::Gaussian => {
+        FilterType::Bessel => Ok(build_bessel_cascade(cfg.order, fc, is_lp, sr)),
+        FilterType::Gaussian => {
             Err(format!("filter type {:?} is not IIR-realizable in b140.7", cfg.filter_type))
         }
     }
+}
+
+/// b141.108: Bessel as a bilinear cascade, pre-warped ONCE at the filter's
+/// corner (like every LR/BW section, which all sit at fc). The poles of
+/// `target::bessel_poles` (−3 dB at ω = 1): a conjugate pair p is a
+/// second-order section at |p|·fc with Q = |p|/(2·|Re p|), a real pole a
+/// first-order section at |p|·fc; the high-pass (s → ωc/s) puts them at
+/// fc/|p|. Before, min-phase Bessel went through the Hilbert of its
+/// floor-clipped magnitude: the WAV was 41–94° off what the plot draws
+/// (Bessel 1–8, 4-way 100/500/2000 Hz), the sum up to 4 dB.
+fn build_bessel_cascade(order: u8, fc: f64, is_lp: bool, sr: f64) -> Vec<DigitalBiquad> {
+    let fw = prewarp(fc, sr);
+    crate::target::bessel_poles(order.clamp(1, 8)).into_iter().map(|(re, im)| {
+        let r = re.hypot(im);
+        let f0 = if is_lp { fw * r } else { fw / r };
+        if im.abs() < 1e-15 {
+            if is_lp { lp_first_w(f0, sr) } else { hp_first_w(f0, sr) }
+        } else {
+            let q = r / (2.0 * re.abs());
+            if is_lp { lp_biquad_w(f0, q, sr) } else { hp_biquad_w(f0, q, sr) }
+        }
+    }).collect()
 }
 
 fn build_butterworth_cascade(order: u8, fc: f64, is_lp: bool, sr: f64) -> Vec<DigitalBiquad> {
