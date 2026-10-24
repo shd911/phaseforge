@@ -264,6 +264,16 @@
 - Forgetting one site = silent loss of the new field across part of the pipeline. Caught only via UI testing on real workflow, expensive.
 
 ## Testing / Verification
+- **Exported-WAV matrix** (`tests/export_matrix_4way.rs`, b141.108, ~35 s):
+  4 flat bands at 100/500/2000 Hz × every family (LR/BW/Bessel 1–8,
+  «Произвольный Q», Gaussian M ± subsonic) × 4 phase modes, export rates/taps
+  and all 20 windows; each WAV is read back FROM DISK, FFT'd and compared with
+  the design (bilinear pre-warped for all-min-phase LR/BW/Custom/Bessel bands,
+  analog otherwise), its N/2 delay and causality, and the sum of the four.
+  Any change to FIR generation, routing, refinement or the plot's phase
+  terms must keep it green — it caught the zero-phase refinement, the
+  Hilbert Bessel and the floored subsonic phase. Report:
+  src-tauri/target/export_matrix_report.md.
 - After every fix, verify that existing functionality on OTHER tabs/views still works.
 - Fixes to one component must not regress others (Export fix must not break IR, snapshot fix must not break legends).
 - Before committing, mentally trace: "what else reads/writes this state?" — if unsure, grep for the variable name.
