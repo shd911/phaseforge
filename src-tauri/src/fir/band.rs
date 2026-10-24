@@ -230,11 +230,17 @@ pub fn target_hilbert_phase(
     Ok(out)
 }
 
-/// FIR grid 5 Hz – 0.95·Nyquist (b141.40); the 512-points-per-5 Hz–40 kHz
-/// density is kept as the span grows.
+/// Points of the FIR grid per 5 Hz–40 kHz (the density is kept as the span
+/// grows). b141.108: was 512 — the dB target between log points is linear,
+/// and on a steep curved slope the chord sagged: −0.33 dB at 106 Hz on a
+/// Gaussian M 10 low-pass at 100 Hz, at any tap count. 4096 cuts that 64×.
+pub const FIR_GRID_POINTS: usize = 4096;
+
+/// FIR grid 5 Hz – 0.95·Nyquist (b141.40).
 pub fn fir_grid(sample_rate: f64) -> Vec<f64> {
     let f_max = sample_rate / 2.0 * 0.95;
-    let n_points = 512usize.max((512.0 * (f_max / 5.0).ln() / (40000.0f64 / 5.0).ln()).ceil() as usize);
+    let n = FIR_GRID_POINTS as f64;
+    let n_points = FIR_GRID_POINTS.max((n * (f_max / 5.0).ln() / (40000.0f64 / 5.0).ln()).ceil() as usize);
     generate_log_freq_grid(n_points, FIR_GRID_F_MIN, f_max)
 }
 
@@ -447,14 +453,14 @@ mod tests {
     #[test]
     fn fir_grid_spans_5_hz_to_095_nyquist_and_keeps_density() {
         let g = fir_grid(48_000.0);
-        assert_eq!(g.len(), 512);
-        assert!((g[0] - 5.0).abs() < 1e-9 && (g[511] - 22_800.0).abs() < 1e-6);
+        assert_eq!(g.len(), FIR_GRID_POINTS);
+        assert!((g[0] - 5.0).abs() < 1e-9 && (g[FIR_GRID_POINTS - 1] - 22_800.0).abs() < 1e-6);
         let g = fir_grid(176_400.0);
         assert!((g.last().unwrap() - 83_790.0).abs() < 1e-6);
-        assert!(g.len() > 512);
+        assert!(g.len() > FIR_GRID_POINTS);
         // Result grid ends at Nyquist (noise-floor tail).
         let r = generate_band_fir(&curve(None, None), &[], &settings(48_000.0), true).unwrap();
-        assert!(*r.freq.last().unwrap() > 23_970.0 && r.freq.len() == 512 + NOISE_TAIL_POINTS);
+        assert!(*r.freq.last().unwrap() > 23_970.0 && r.freq.len() == FIR_GRID_POINTS + NOISE_TAIL_POINTS);
     }
 
     #[test]
