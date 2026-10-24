@@ -308,8 +308,14 @@ pub(crate) fn iterative_refine(
             // is symmetric — −50 dB of 25–35 Hz pre-ring 10–200 ms ahead of
             // the peak on a real woofer band with +6 dB @ 23 Hz (vs −97 dB
             // without refinement).
+            // b141.108: only when there IS a min-phase part (PEQ or the
+            // subsonic). Without one the windowed impulse is symmetric, so is
+            // what the window cut, and the correction must stay zero-phase —
+            // a min-phase correction put 2.9° (Blackman, 44.1k/16K) to 50°
+            // (Poisson) of phase into a linear-phase band.
+            let min_tail = peq_mag_db.iter().chain(sub.iter()).any(|v| v.abs() > 1e-9);
             let peq_eff: Vec<f64>;
-            let peq_term: &[f64] = if config.linear_phase_main {
+            let peq_term: &[f64] = if config.linear_phase_main && min_tail {
                 peq_eff = (0..n_bins)
                     .map(|k| peq_mag_db[k] + refined_db[k] - target_correction_db[k])
                     .collect();
