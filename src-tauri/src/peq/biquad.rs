@@ -181,14 +181,36 @@ pub(crate) fn peq_band_complex(f: f64, band: &PeqBand, sample_rate: f64) -> (f64
         PeqFilterType::Peaking => biquad_peaking_complex(f, band.freq_hz, band.gain_db, band.q, sample_rate),
         PeqFilterType::LowShelf => biquad_lowshelf_complex(f, band.freq_hz, band.gain_db, band.q, sample_rate),
         PeqFilterType::HighShelf => biquad_highshelf_complex(f, band.freq_hz, band.gain_db, band.q, sample_rate),
+        PeqFilterType::LinkwitzTransform => {
+            let [b0, b1, b2, a0, a1, a2] = linkwitz_coeffs(band.freq_hz, band.q, band.gain_db, sample_rate);
+            biquad_eval_complex(f, sample_rate, b0, b1, b2, a0, a1, a2)
+        }
     }
+}
+
+/// b141.107: Linkwitz transform biquad (bilinear, unnormalised
+/// `[b0, b1, b2, a0, a1, a2]`): zeros on the sealed box's poles (f0, Q0),
+/// poles at fp = f0 / 10^(gain/40), Q = 1/√2. At the low frequencies it is
+/// used for the bilinear warp is negligible (2·10⁻⁵ at 30 Hz / 44.1 kHz).
+pub(crate) fn linkwitz_coeffs(f0: f64, q0: f64, gain_db: f64, sample_rate: f64) -> [f64; 6] {
+    let w0 = 2.0 * PI * f0.max(1e-3);
+    let wp = w0 / 10f64.powf(gain_db / 40.0);
+    let (q0, qp) = (q0.max(1e-3), super::types::LINKWITZ_TARGET_Q);
+    let k = 2.0 * sample_rate;
+    // s² + (w/Q)·s + w²  →  z-domain with s = k·(1 − z⁻¹)/(1 + z⁻¹).
+    let bil = |w: f64, q: f64| {
+        let (c1, c0) = (w / q, w * w);
+        [k * k + c1 * k + c0, 2.0 * (c0 - k * k), k * k - c1 * k + c0]
+    };
+    let ([b0, b1, b2], [a0, a1, a2]) = (bil(w0, q0), bil(wp, qp));
+    [b0, b1, b2, a0, a1, a2]
 }
 
 /// Dispatch magnitude-only version.
 pub(crate) fn peq_band_mag_db(f: f64, band: &PeqBand, sample_rate: f64) -> f64 {
     match band.filter_type {
         PeqFilterType::Peaking => biquad_peaking_mag_db(f, band.freq_hz, band.gain_db, band.q, sample_rate),
-        PeqFilterType::LowShelf | PeqFilterType::HighShelf => {
+        PeqFilterType::LowShelf | PeqFilterType::HighShelf | PeqFilterType::LinkwitzTransform => {
             let (mag, _) = peq_band_complex(f, band, sample_rate);
             mag
         }

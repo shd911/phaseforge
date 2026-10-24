@@ -20,7 +20,7 @@ export function highQIndices(bands: PeqBand[]): Set<number> {
   const s = new Set<number>();
   for (let i = 0; i < bands.length; i++) {
     const b = bands[i];
-    if (!b.enabled) continue;
+    if (!b.enabled || b.filter_type === "LinkwitzTransform") continue;
     if (b.q > qWarnAt(b.freq_hz)) s.add(i);
   }
   return s;
@@ -46,6 +46,12 @@ export function peqRingCost(b: Pick<PeqBand, "freq_hz" | "gain_db" | "q" | "filt
   let a0: number, a1: number, a2: number;
   if (type === "LowShelf") { a0 = (A + 1) + (A - 1) * cw + s; a1 = -2 * ((A - 1) + (A + 1) * cw); a2 = (A + 1) + (A - 1) * cw - s; }
   else if (type === "HighShelf") { a0 = (A + 1) - (A - 1) * cw + s; a1 = 2 * ((A - 1) - (A + 1) * cw); a2 = (A + 1) - (A - 1) * cw - s; }
+  else if (type === "LinkwitzTransform") {
+    // b141.107: the transform's own poles — BU2 at fp (bilinear, as Rust
+    // `linkwitz_coeffs`); |A² − 1| is its DC gain minus one.
+    const wp = 2 * Math.PI * (b.freq_hz / A), k = 2 * sampleRate, c1 = wp / Math.SQRT1_2, c0 = wp * wp;
+    a0 = k * k + c1 * k + c0; a1 = 2 * (c0 - k * k); a2 = k * k - c1 * k + c0;
+  }
   else { a0 = 1 + al / A; a1 = -2 * cw; a2 = 1 - al / A; }
   a1 /= a0; a2 /= a0;
   // Slowest pole radius: complex pair → sqrt(a2); real pair → the larger root.

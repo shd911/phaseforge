@@ -1,5 +1,5 @@
 import { createSignal, createEffect, createResource, Show } from "solid-js";
-import type { FilterType, FilterConfig, PeqBand } from "../lib/types";
+import type { FilterType, FilterConfig, PeqBand, PeqFilterType } from "../lib/types";
 import NumberInput from "./NumberInput";
 import { cloneFilterConfig, F_MIN_WORK, F_MAX_WORK } from "../lib/types";
 import {
@@ -53,6 +53,9 @@ import {
 import { showToast } from "../lib/toast";
 import { pluralRu } from "../lib/plural";
 import { qWarnAt, peqRingCost } from "../lib/peq-quality";
+import { isLinkwitz, linkwitzDefaults, linkwitzTargetHz } from "../lib/linkwitz";
+
+const LT_TITLE = "Трансформация Линквица (ЗЯ): Гц — f0 ящика, Q — его Qtc, дБ — подъём НЧ. Теоретическая правка по предполагаемому спаду 12 дБ/окт; оптимизатор её сохраняет и подгоняет остальное вокруг неё.";
 import { openHighQPopup } from "./HighQWarningPopup";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
@@ -522,6 +525,27 @@ function PeqTab() {
     if (c !== Math.round(z[field])) updateExclusionZone(b.id, i, { [field]: c });
   }
 
+  /** b141.107: switching a row to «LT» fills it with a transform for this
+   *  measurement (assumed box f0 at its −3 dB point, Q0 0.707, +6 dB) — a
+   *  peaking filter's 1 kHz / 0 dB read as a box would be meaningless. */
+  function setPeqType(i: number, type: PeqFilterType) {
+    const bd = band(); if (!bd) return;
+    const cur = bd.peqBands[i];
+    if (type === "LinkwitzTransform" && cur && !isLinkwitz(cur)) {
+      const m = bd.measurement;
+      const d = linkwitzDefaults(m?.freq ?? null, m?.magnitude ?? null, bd.target.low_pass?.freq_hz ?? 200);
+      updatePeqBand(bd.id, i, { ...d, enabled: cur.enabled });
+    } else updatePeqBand(bd.id, i, { filter_type: type });
+  }
+
+  function addLinkwitz() {
+    const bd = band(); if (!bd) return;
+    if (pendingPeqIdx() != null) commitPeqBand(bd.id, pendingPeqIdx()!);
+    const m = bd.measurement;
+    addPeqBand(bd.id, linkwitzDefaults(m?.freq ?? null, m?.magnitude ?? null, bd.target.low_pass?.freq_hz ?? 200));
+    setPendingPeqIdx(0); setSelectedPeqIdx(0);
+  }
+
   /** One commit rule for a typed PEQ value — table rows and the «Вручную»
    *  row alike (§5.9): frequency and Q out of range are rejected, gain is
    *  clamped to the mode's limits; the field shows the model afterwards. */
@@ -629,6 +653,7 @@ function PeqTab() {
               setPendingPeqIdx(0); setSelectedPeqIdx(0);
             }
           }} title="Добавить PEQ-фильтр вручную" aria-label="Добавить PEQ-фильтр вручную">+</button>
+          <button class="peq-add-btn" onClick={addLinkwitz} title={LT_TITLE} aria-label="Добавить трансформацию Линквица">LT</button>
         </div>
         <Show when={pendingPeqIdx() != null && peqBands().length > 0}>
           {(() => {
@@ -641,7 +666,7 @@ function PeqTab() {
               <table class="peq-table"><tbody>
                 <tr class="peq-row-pending peq-row-selected" onClick={() => setSelectedPeqIdx(pi)}>
                   <td><input type="checkbox" class="peq-toggle" checked={pb()!.enabled} aria-label="Фильтр включён" onChange={() => { const bd = band(); if (bd) updatePeqBand(bd.id, pi, { enabled: !pb()!.enabled }); }} /></td>
-                  <td><select class="peq-type-select" value={pb()!.filter_type} aria-label="Тип фильтра" onChange={(e) => { const bd = band(); if (bd) updatePeqBand(bd.id, pi, { filter_type: e.currentTarget.value as any }); }}><option value="Peaking">PK</option><option value="LowShelf">LS</option><option value="HighShelf">HS</option></select></td>
+                  <td><select class="peq-type-select" value={pb()!.filter_type} aria-label="Тип фильтра" onChange={(e) => setPeqType(pi, e.currentTarget.value as PeqFilterType)}><option value="Peaking">PK</option><option value="LowShelf">LS</option><option value="HighShelf">HS</option><option value="LinkwitzTransform" title={LT_TITLE}>LT</option></select></td>
                   <td><input class="peq-input" type="number" value={fmtPeqFreq(pb()!.freq_hz)} min={20} max={F_MAX_WORK} step={1} ref={peqWheel(() => pi, "freq_hz")} aria-label="Частота, Гц" onChange={(e) => commitPeqField(e.currentTarget, pi, "freq_hz")} /></td>
                   <td><input class={`peq-input ${pb()!.gain_db > 0 ? "peq-boost" : "peq-cut"}`} type="number" value={pb()!.gain_db.toFixed(1)} min={peqGainLimits().lo} max={peqGainLimits().hi} step={0.1} ref={peqWheel(() => pi, "gain_db")} aria-label="Усиление, дБ" onChange={(e) => commitPeqField(e.currentTarget, pi, "gain_db")} /></td>
                   <td><input class="peq-input" type="number" value={pb()!.q.toFixed(2)} min={PEQ_Q_MIN} max={PEQ_Q_MAX} step={0.1} ref={peqWheel(() => pi, "q")} aria-label="Добротность Q" onChange={(e) => commitPeqField(e.currentTarget, pi, "q")} /></td>
@@ -671,7 +696,7 @@ function PeqTab() {
             {/* b141.89: own row — beside the buttons it pushed them out of the 280 px panel */}
             <div class="fb-row">
               <label class="fb-label">Замер</label>
-              <span class="fb-checkbox" title="Подгонять PEQ по сглаженному замеру (1/48 окт. ниже 100 Гц, 1/3 выше) — не гнаться за мелкими пульсациями от отражений"
+              <span class="fb-checkbox" title="Подгонять PEQ по сглаженному замеру (1/6 окт. ниже 100 Гц, 1/3 выше) — не гнаться за мелкими пульсациями от отражений"
                 role="checkbox" tabIndex={0} aria-checked={peqSmoothFit()}
                 onKeyDown={checkboxKeys(() => setPeqSmoothFit(!peqSmoothFit()))}
                 onClick={() => setPeqSmoothFit(!peqSmoothFit())}>
@@ -720,7 +745,7 @@ function PeqTab() {
                       <tr class={`${selectedPeqIdx() === i ? "peq-row-selected" : ""} ${isPending ? "peq-row-pending" : ""} ${!b.enabled ? "peq-row-disabled" : ""}`}
                         onClick={() => setSelectedPeqIdx(selectedPeqIdx() === i ? null : i)}>
                         <td><input type="checkbox" class="peq-toggle" checked={b.enabled} aria-label={`Фильтр ${i + 1} включён`} onChange={(e) => { e.stopPropagation(); const bd = band(); if (bd) updatePeqBand(bd.id, i, { enabled: !b.enabled }); }} onClick={(e) => e.stopPropagation()} /></td>
-                        <td><select class="peq-type-select" value={b.filter_type ?? "Peaking"} aria-label={`Фильтр ${i + 1}: тип`} onChange={(e) => { e.stopPropagation(); const bd = band(); if (bd) updatePeqBand(bd.id, i, { filter_type: e.currentTarget.value as any }); }} onClick={(e) => e.stopPropagation()}><option value="Peaking">PK</option><option value="LowShelf">LS</option><option value="HighShelf">HS</option></select></td>
+                        <td><select class="peq-type-select" value={b.filter_type ?? "Peaking"} aria-label={`Фильтр ${i + 1}: тип`} onChange={(e) => { e.stopPropagation(); setPeqType(i, e.currentTarget.value as PeqFilterType); }} onClick={(e) => e.stopPropagation()}><option value="Peaking">PK</option><option value="LowShelf">LS</option><option value="HighShelf">HS</option><option value="LinkwitzTransform" title={LT_TITLE}>LT</option></select></td>
                         <td><input class="peq-input" type="number" value={fmtPeqFreq(b.freq_hz)} min={20} max={F_MAX_WORK} step={1} ref={peqWheel(() => i, "freq_hz")} aria-label={`Фильтр ${i + 1}: частота, Гц`} onChange={(e) => commitPeqField(e.currentTarget, i, "freq_hz")} /></td>
                         <td><input class={`peq-input ${b.gain_db > 0 ? "peq-boost" : "peq-cut"}`} type="number" value={b.gain_db.toFixed(1)} min={peqGainLimits().lo} max={peqGainLimits().hi} step={0.1} ref={peqWheel(() => i, "gain_db")} aria-label={`Фильтр ${i + 1}: усиление, дБ`} onChange={(e) => commitPeqField(e.currentTarget, i, "gain_db")} /></td>
                         <td><input class="peq-input" type="number" value={b.q.toFixed(2)} min={PEQ_Q_MIN} max={PEQ_Q_MAX} step={0.1} ref={peqWheel(() => i, "q")} aria-label={`Фильтр ${i + 1}: Q`} onChange={(e) => commitPeqField(e.currentTarget, i, "q")} /></td>
@@ -738,7 +763,10 @@ function PeqTab() {
                             </td>
                           );
                         })()}
-                        <td>{b.enabled && b.q > qWarnAt(b.freq_hz) ? (
+                        <td>{isLinkwitz(b) ? (
+                          <span class="peq-theory" title={`Теоретическая правка: трансформация Линквица по предполагаемому спаду ЗЯ 12 дБ/окт (f0 ${b.freq_hz.toFixed(1)} Гц, Q0 ${b.q.toFixed(2)}) → ${linkwitzTargetHz(b).toFixed(1)} Гц, Q 0,71. Нижний край замера не учитывается.`}
+                            aria-label="Теоретическая правка">≈</span>
+                        ) : b.enabled && b.q > qWarnAt(b.freq_hz) ? (
                           <button class="peq-warn-icon" title="" aria-label="Высокая добротность"
                             onClick={(e) => { e.stopPropagation(); openHighQPopup(b, i); }}>⚠</button>
                         ) : null}</td>

@@ -22,6 +22,7 @@ import type { BandState } from "./bands";
 import { pushHistory, historyEpoch } from "./history";
 import { passbandRange } from "../lib/band-evaluator/extension";
 import { showToast } from "../lib/toast";
+import { isLinkwitz, measurementWithTransforms } from "../lib/linkwitz";
 
 // --- Signals ---
 export const [tolerance, setTolerance] = settingSignal(1.0);
@@ -188,14 +189,20 @@ async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBa
   // `enabled`). b141.46 (audit 2026-10-01 H2): they used to be baked into the
   // measurement as "frozen", so the optimizer fitted around a correction the
   // exported filter never contained — +6 dB left over where it reported 0.
-  const frozenBands = peqBandsSnap.filter((p) => !p.enabled);
-  const measMag = meas.magnitude;
+  // b141.107: an enabled Linkwitz transform is a manual, theoretical
+  // correction of the box roll-off — it stays, and the optimizer fits around
+  // it on the assumed model (below f0 the measured bottom edge is not used).
+  const transforms = peqBandsSnap.filter((p) => p.enabled && isLinkwitz(p));
+  const frozenBands = [...peqBandsSnap.filter((p) => !p.enabled), ...transforms];
+  const measMag = transforms.length
+    ? measurementWithTransforms(meas.freq, meas.magnitude, transforms, fHigh)
+    : meas.magnitude;
   // b141.103 (audit 3.19): `max(1, …)` let disabled filters that already fill
   // «Макс. полос» get one more — maxBands + 1 in the table.
   const activeBandBudget = bandBudget - frozenBands.length;
   if (activeBandBudget < 1) {
     throw new Error(
-      `лимит «Макс. полос» (${bandBudget}) занят выключенными фильтрами (${frozenBands.length}) — ` +
+      `лимит «Макс. полос» (${bandBudget}) занят сохраняемыми фильтрами — выключенными и трансформацией Линквица (${frozenBands.length}) — ` +
       `увеличьте лимит или удалите выключенные`,
     );
   }

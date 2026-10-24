@@ -37,6 +37,7 @@ describe("project schema contract (TS → Rust)", () => {
     setBandPeqBands(b.id, [
       { freq_hz: 40, gain_db: -3, q: 4, enabled: true, filter_type: "Peaking" },
       { freq_hz: 9000, gain_db: 1.5, q: 0.8, enabled: false, filter_type: "HighShelf" },
+      { freq_hz: 25.2, gain_db: 6, q: 0.707, enabled: true, filter_type: "LinkwitzTransform" },
     ]);
     addExclusionZone(b.id, { startHz: 300, endHz: 500 });
     setAlignmentDelay(b.id, 0.00123);

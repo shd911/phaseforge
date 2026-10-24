@@ -291,6 +291,10 @@ pub fn build_peq_biquad(band: &PeqBand, sr: f64) -> DigitalBiquad {
             let a2 =           (a + 1.0) + (a - 1.0) * cos_w - two_sqrt_a_alpha;
             DigitalBiquad { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0 }
         }
+        PeqFilterType::LinkwitzTransform => {
+            let [b0, b1, b2, a0, a1, a2] = crate::peq::linkwitz_coeffs(band.freq_hz, band.q, band.gain_db, sr);
+            DigitalBiquad { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0 }
+        }
         PeqFilterType::HighShelf => {
             let two_sqrt_a_alpha = 2.0 * a.sqrt() * alpha;
             let b0 =       a * ((a + 1.0) + (a - 1.0) * cos_w + two_sqrt_a_alpha);

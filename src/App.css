@@ -1516,6 +1516,13 @@ input[type="checkbox"]:focus-visible {
   margin-left: 4px;
   line-height: 1;
 }
+/* b141.107: theoretical correction (Linkwitz transform on an assumed box) */
+.peq-theory {
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  cursor: help;
+}
+
 .peq-warn-icon:hover {
   background: rgba(217, 119, 6, 0.18);
   border-radius: 3px;

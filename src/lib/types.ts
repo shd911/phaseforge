@@ -176,7 +176,10 @@ export interface MergeResult {
 
 // --- Auto Align: PEQ ---
 
-export type PeqFilterType = "Peaking" | "LowShelf" | "HighShelf";
+/** b141.107: "LinkwitzTransform" — sealed-box f0 = freq_hz, Q0 = q, LF lift
+ *  = gain_db (fp = f0 / 10^(gain/40), Q 1/√2); a theoretical correction, see
+ *  lib/linkwitz.ts. */
+export type PeqFilterType = "Peaking" | "LowShelf" | "HighShelf" | "LinkwitzTransform";
 
 export interface PeqBand {
   freq_hz: number;

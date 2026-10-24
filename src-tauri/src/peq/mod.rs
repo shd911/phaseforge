@@ -24,6 +24,7 @@ pub mod q_envelope;
 
 pub use types::*;
 pub use biquad::{apply_peq, peq_band_response, apply_peq_complex};
+pub(crate) use biquad::linkwitz_coeffs;
 pub use q_envelope::{q_cap_at, q_warn_at};
 pub(crate) use lma::{LmaSolver, compute_weights, compute_uniform_weights, apply_exclusion_zones, try_promote_to_shelves};
 pub(crate) use greedy::{greedy_fit_adaptive, estimate_q_from_peak_width, mark_exclusion_zone, merge_nearby_bands, compute_max_error_in_range};

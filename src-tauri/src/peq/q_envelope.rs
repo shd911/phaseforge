@@ -57,6 +57,12 @@ pub fn ring_ms(freq_hz: f64, gain_db: f64, q: f64, ftype: &PeqFilterType, sample
         PeqFilterType::LowShelf => ((a + 1.0) + (a - 1.0) * cw + s, -2.0 * ((a - 1.0) + (a + 1.0) * cw), (a + 1.0) + (a - 1.0) * cw - s),
         PeqFilterType::HighShelf => ((a + 1.0) - (a - 1.0) * cw + s, 2.0 * ((a - 1.0) - (a + 1.0) * cw), (a + 1.0) - (a - 1.0) * cw - s),
         PeqFilterType::Peaking => (1.0 + al / a, -2.0 * cw, 1.0 - al / a),
+        // b141.107: the transform's own poles (fp, 1/√2); |A² − 1| is its
+        // DC gain minus one, as for a peaking filter's peak.
+        PeqFilterType::LinkwitzTransform => {
+            let [_, _, _, a0, a1, a2] = super::biquad::linkwitz_coeffs(freq_hz, q, gain_db, sample_rate);
+            (a0, a1, a2)
+        }
     };
     let (a1, a2) = (a1 / a0, a2 / a0);
     let disc = a1 * a1 - 4.0 * a2;

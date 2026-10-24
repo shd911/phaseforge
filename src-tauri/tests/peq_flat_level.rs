@@ -128,3 +128,39 @@ fn wall_sub_band_fits_the_passband_not_the_room() {
     assert!(worst.abs() <= 1.8, "corrected passband off by {worst:+.2} dB");
     assert!(mean_peq.abs() <= 0.5, "PEQ shifts the whole passband by {mean_peq:+.2} dB");
 }
+
+/// b141.107: the same band with a theoretical Linkwitz transform (assumed
+/// sealed box f0 25.2 Hz — the UI's −3 dB estimate — Q0 0.707, +6 dB → BU2
+/// at 17.8 Hz). The optimizer sees the model below f0 (lib/linkwitz.ts
+/// `measurementWithTransforms`) plus the transform, so it no longer boosts
+/// the sweep edge at 24 Hz (+4.5 dB Q 1.9, 215 ms) and cancels it at 30 Hz.
+#[test]
+fn wall_sub_band_with_a_linkwitz_transform() {
+    use phaseforge_lib::peq::{peq_band_response, PeqFilterType};
+    let Some((freq, mag)) = load("sub_10x4.txt") else { return };
+    let lt = PeqBand { freq_hz: 25.2, gain_db: 6.0, q: 0.707, enabled: true, filter_type: PeqFilterType::LinkwitzTransform };
+    let hp2 = |f: f64| { let x = f / lt.freq_hz; 20.0 * (x * x / ((1.0 - x * x).powi(2) + (x / lt.q).powi(2)).sqrt()).log10() };
+    let mut d: Vec<f64> = freq.iter().zip(&mag).filter(|(f, _)| **f >= lt.freq_hz && **f <= (4.0 * lt.freq_hz).min(LP))
+        .map(|(f, m)| m - hp2(*f)).collect();
+    let level = median(&mut d);
+    let ltr = peq_band_response(&freq, &lt, SR);
+    let seen: Vec<f64> = freq.iter().zip(&mag).zip(&ltr)
+        .map(|((&f, &m), &t)| if f < lt.freq_hz { level + hp2(f) } else { m } + t).collect();
+    let (bands, range) = optimize(&freq, &seen, 24.0);
+    let lt_ring = ring_ms(lt.freq_hz, lt.gain_db, lt.q, &lt.filter_type, SR, 60.0);
+    println!("LT 25.2 Hz Q0.71 +6 dB (fp {:.1} Hz): {lt_ring:.0} ms; range {:.0}–{:.0} Hz, {} filters:",
+        lt.freq_hz / 10f64.powf(lt.gain_db / 40.0), range.0, range.1, bands.len());
+    for d in describe(&bands) { println!("  {d}"); }
+    let corr = apply_peq(&freq, &bands, SR);
+    let out: Vec<f64> = seen.iter().zip(&corr).map(|(m, c)| m + c).collect();
+    let third = variable_smoothing(&freq, &out, &SmoothingConfig { variable: false, fixed_fraction: Some(1.0 / 3.0) });
+    let mut pb: Vec<f64> = freq.iter().zip(&mag).filter(|(f, _)| **f >= range.0 && **f <= LP).map(|(_, &m)| m).collect();
+    let pbl = median(&mut pb);
+    let worst = freq.iter().enumerate().filter(|(_, f)| **f >= 26.0 && **f <= LP)
+        .map(|(i, _)| third[i] - pbl).fold(0.0f64, |m, e| if e.abs() > m.abs() { e } else { m });
+    println!("worst 1/3-oct deviation 26–130 Hz {worst:+.2} dB");
+    for b in bands.iter().filter(|b| b.freq_hz < 32.0) {
+        assert!(b.gain_db < 1.5, "the optimizer still boosts the bottom edge: {:.0} Hz {:+.1} dB", b.freq_hz, b.gain_db);
+    }
+    assert!(worst.abs() <= 1.8, "corrected passband off by {worst:+.2} dB");
+}

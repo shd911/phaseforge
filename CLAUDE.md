@@ -197,6 +197,15 @@
   «Без отражений» is 1/6 octave below 100 Hz (was 1/48): it keeps a +6 dB
   Q 5 mode at +5.4 dB but only partly removes room ripple whose period is
   wider than the window (4 Hz at 30 Hz). Pinned by `tests/peq_flat_level.rs`.
+- **Linkwitz transform = a PEQ type** (b141.107, `PeqFilterType::LinkwitzTransform`,
+  `lib/linkwitz.ts`): `freq_hz` = assumed sealed-box f0, `q` = its Qtc,
+  `gain_db` = LF lift → BU2 at fp = f0/10^(gain/40). No new PeqBand field.
+  THEORETICAL by design (the measured bottom edge is often the sweep start —
+  wall 10x4: 35–97 dB/oct, phase the wrong way): marked «≈» in the table.
+  The optimizer keeps enabled transforms and fits on the model below f0 +
+  the transform (`measurementWithTransforms`). Same bilinear biquad on both
+  FIR routes (`peq::linkwitz_coeffs`). Pinned by `tests/linkwitz_transform.rs`,
+  `peq_flat_level.rs::wall_sub_band_with_a_linkwitz_transform`.
 - **Bilinear digital cascade** (IIR path) has frequency-dependent
   deviation up to ~20° vs analog reference accumulated over 8 biquads.
   REPhase reference comparison gives tighter empirical bound (≤ 2.5° on

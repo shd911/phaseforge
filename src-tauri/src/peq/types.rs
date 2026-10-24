@@ -27,7 +27,17 @@ pub enum PeqFilterType {
     Peaking,
     LowShelf,
     HighShelf,
+    /// b141.107: Linkwitz transform of a sealed box — a THEORETICAL
+    /// correction of the assumed 12 dB/oct roll-off (the measurement's own
+    /// bottom edge is often a sweep artefact). `freq_hz` = the box's f0,
+    /// `q` = its Qtc, `gain_db` = the LF lift: the target corner is
+    /// fp = f0 / 10^(gain/40) at Q = 1/√2 (DC gain = gain_db). Manual only —
+    /// the optimizer keeps it and fits around it.
+    LinkwitzTransform,
 }
+
+/// b141.107: the Q of the Linkwitz transform's target alignment (BU2).
+pub const LINKWITZ_TARGET_Q: f64 = std::f64::consts::FRAC_1_SQRT_2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeqBand {
