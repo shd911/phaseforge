@@ -113,8 +113,10 @@ export function withCrossoverOf(base: FilterConfig, src: FilterConfig): FilterCo
     shape: src.shape,
     linear_phase: src.linear_phase,
     q: src.q,
-    // b141.109: one side of a link subtracts, never both (2 − HP − LP).
-    complementary: !!base.complementary && !src.complementary,
+    // b141.109/110: one side of a link subtracts, never both (2 − HP − LP),
+    // and only while the other side is a linear «Произвольный Q» it can be
+    // 1 − of — otherwise the «1 − H» side falls back to the plain mirror.
+    complementary: !!base.complementary && !src.complementary && src.linear_phase && complementPartnerOk(src),
   };
 }
 
@@ -122,12 +124,13 @@ export function withCrossoverOf(base: FilterConfig, src: FilterConfig): FilterCo
  *  `target::COMPLEMENT_CUSTOM_Q_MAX`. */
 export const COMPLEMENT_CUSTOM_Q_MAX = 0.708;
 
-/** b141.109: can this section be the complement 1 − H of its mirror? Only
- *  on linear phase (it is zero-phase), and not for «Произвольный Q» above
- *  1/√2, where 1 − |H| changes sign. Mirrors Rust `target::complement_active`
- *  without the flag itself. */
-export function complementAvailable(f: FilterConfig): boolean {
-  return f.linear_phase && !(f.filter_type === "Custom" && (f.q ?? 0.707) > COMPLEMENT_CUSTOM_Q_MAX);
+/** b141.110: can a linked side be «1 − H» of `partner`? Only of a
+ *  «Произвольный Q» (other families sum flat on their own or are offered as
+ *  they are), and not above Q 1/√2, where 1 − |H| changes sign. Choosing it
+ *  turns linear phase on for the link (the complement is zero-phase). The
+ *  physics rule is Rust `target::complement_active`. */
+export function complementPartnerOk(partner: FilterConfig | null | undefined): boolean {
+  return !!partner && partner.filter_type === "Custom" && (partner.q ?? 0.707) <= COMPLEMENT_CUSTOM_Q_MAX;
 }
 
 export interface TargetResponse {

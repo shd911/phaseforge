@@ -15,7 +15,7 @@ import {
   setBandLowPass,
   toggleBandLinked,
 } from "../bands";
-import type { FilterConfig } from "../../lib/types";
+import { complementPartnerOk, type FilterConfig } from "../../lib/types";
 import type { AppState, BandState } from "../bands";
 
 function freshFiveBands(): AppState {
@@ -118,36 +118,61 @@ describe("linkedToNext across removeBand (b140.8.2)", () => {
   });
 });
 
-describe("complementary link (b141.109)", () => {
-  const bw4 = (complementary: boolean): FilterConfig => ({
-    filter_type: "Butterworth", order: 4, freq_hz: 500, shape: null, linear_phase: true, q: null,
+describe("«1 − H» on a link (b141.109–110)", () => {
+  const custom = (complementary: boolean, q = 0.707): FilterConfig => ({
+    filter_type: "Custom", order: 4, freq_hz: 500, shape: null, linear_phase: true, q,
     subsonic_protect: null, complementary,
   });
 
   it("only one side of a link subtracts", () => {
     createRoot((dispose) => {
       resetAppState(freshFiveBands());
-      setBandLowPass("band-1", bw4(false));
-      setBandHighPass("band-2", bw4(true));
+      setBandLowPass("band-1", custom(false));
+      setBandHighPass("band-2", custom(true));
       expect(appState.bands[1].target.high_pass!.complementary).toBe(true);
       expect(appState.bands[0].target.low_pass!.complementary).toBe(false);
-      // Switching the subtraction to the LP side clears the HP's.
-      setBandLowPass("band-1", bw4(true));
+      // Moving «1 − H» to the LP side clears the HP's.
+      setBandLowPass("band-1", custom(true));
       expect(appState.bands[0].target.low_pass!.complementary).toBe(true);
       expect(appState.bands[1].target.high_pass!.complementary).toBe(false);
       dispose();
     });
   });
 
-  it("editing the shared crossover keeps the subtracting side", () => {
+  it("editing the shared crossover keeps the «1 − H» side", () => {
     createRoot((dispose) => {
       resetAppState(freshFiveBands());
-      setBandLowPass("band-1", bw4(false));
-      setBandHighPass("band-2", bw4(true));
-      setBandLowPass("band-1", { ...bw4(false), freq_hz: 600 });
-      expect(appState.bands[1].target.high_pass!.freq_hz).toBe(600);
-      expect(appState.bands[1].target.high_pass!.complementary).toBe(true);
+      setBandLowPass("band-1", custom(false));
+      setBandHighPass("band-2", custom(true));
+      setBandLowPass("band-1", { ...custom(false), freq_hz: 600, q: 0.5, order: 2 });
+      const hp = appState.bands[1].target.high_pass!;
+      expect([hp.freq_hz, hp.q, hp.order, hp.complementary]).toEqual([600, 0.5, 2, true]);
       dispose();
     });
+  });
+
+  it("falls back to the plain mirror when the partner stops being a linear Q ≤ 0.707", () => {
+    for (const partner of [
+      { ...custom(false), filter_type: "Butterworth" as const, q: null },
+      custom(false, 1.0),
+      { ...custom(false), linear_phase: false },
+    ]) {
+      createRoot((dispose) => {
+        resetAppState(freshFiveBands());
+        setBandLowPass("band-1", custom(false));
+        setBandHighPass("band-2", custom(true));
+        setBandLowPass("band-1", partner);
+        expect(appState.bands[1].target.high_pass!.complementary).toBe(false);
+        expect(appState.bands[1].target.high_pass!.filter_type).toBe(partner.filter_type);
+        dispose();
+      });
+    }
+  });
+
+  it("is offered only against a «Произвольный Q» up to 0.707", () => {
+    expect(complementPartnerOk(custom(false))).toBe(true);
+    expect(complementPartnerOk(custom(false, 0.72))).toBe(false);
+    expect(complementPartnerOk({ ...custom(false), filter_type: "Bessel" })).toBe(false);
+    expect(complementPartnerOk(null)).toBe(false);
   });
 });

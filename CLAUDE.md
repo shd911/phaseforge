@@ -211,8 +211,11 @@
 - **Complementary crossover «1 − H»** (b141.109, `FilterConfig::complementary`,
   `target::complement_active`): a section = 1 − |its mirror| (same type/order/
   Q/freq). Honoured only on linear phase and not for Custom Q > 0.708
-  (`COMPLEMENT_CUSTOM_Q_MAX`, 1 − |H| changes sign; UI `complementAvailable`
-  mirrors it). A band with BOTH sections linear and one complementary is
+  (`COMPLEMENT_CUSTOM_Q_MAX`, 1 − |H| changes sign). UI (b141.110): a type
+  «1 − H (вычитание)» in the Type dropdown, offered only against a linked
+  «Произвольный Q» ≤ 0.708 (`complementPartnerOk`); choosing it turns linear
+  phase on for the link; `withCrossoverOf` drops it when the partner stops
+  qualifying. Rust stays family-agnostic (the matrix covers every family). A band with BOTH sections linear and one complementary is
   HP + LP − 1, not HP·LP — the product leaked +0.9 dB (BW1) in a 4-way sum;
   the additive form telescopes to exactly 1. One side of a link only
   (`withCrossoverOf` clears the partner). Everything goes through

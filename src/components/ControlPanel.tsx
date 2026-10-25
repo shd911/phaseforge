@@ -1,7 +1,7 @@
 import { createSignal, createEffect, createResource, Show } from "solid-js";
 import type { FilterType, FilterConfig, PeqBand, PeqFilterType } from "../lib/types";
 import NumberInput from "./NumberInput";
-import { cloneFilterConfig, complementAvailable, F_MIN_WORK, F_MAX_WORK } from "../lib/types";
+import { cloneFilterConfig, complementPartnerOk, F_MIN_WORK, F_MAX_WORK } from "../lib/types";
 import {
   activeBand,
   appState,
@@ -238,6 +238,7 @@ function FiltersTab() {
           isHighPass={true}
           config={cloneFilterConfig(target()?.high_pass)}
           linked={hpLinked()}
+          partner={hpLinked() ? cloneFilterConfig(appState.bands[bandIdx() - 1]?.target.low_pass) : null}
           onToggle={() => {
             const id = bandId();
             if (!id) return;
@@ -257,6 +258,7 @@ function FiltersTab() {
           title="ФНЧ"
           config={cloneFilterConfig(target()?.low_pass)}
           linked={linked()}
+          partner={linked() ? cloneFilterConfig(appState.bands[bandIdx() + 1]?.target.high_pass) : null}
           canLink={!isLastBand()}
           onLinkToggle={() => { const id = bandId(); if (id) toggleBandLinked(id); }}
           onToggle={() => {
@@ -299,12 +301,13 @@ interface FilterBlockProps {
   onToggle: () => void;
   onChange: (c: import("../lib/types").FilterConfig) => void;
   isHighPass?: boolean; // b138: subsonic-protect UI for Gaussian HP only
+  partner?: import("../lib/types").FilterConfig | null; // b141.110: the linked filter on the other side
 }
 
-const COMPLEMENT_TITLE = "Вычитание: этот фильтр = 1 − связанный (та же частота, тип и Q). "
-  + "Сумма двух полос ровная при любом типе фильтра. Спад этой стороны пологий и несимметричный. "
-  + "Вычитает только одна сторона связи.";
-const COMPLEMENT_OFF_TITLE = "Вычитание — только на линейной фазе (Lin-φ) и при Q не выше 0.707";
+const COMPLEMENT = "Complement";
+const COMPLEMENT_TITLE = "1 − H: этот фильтр — дополнение связанного «Произвольного Q» (та же частота, порядок и Q), "
+  + "сумма двух полос ровная. Линейная фаза. Спад этой стороны пологий и несимметричный. "
+  + "Доступно, когда у соседа «Произвольный Q» с Q не выше 0.707.";
 
 function FilterBlock(props: FilterBlockProps) {
   const c = () => props.config;
@@ -325,11 +328,10 @@ function FilterBlock(props: FilterBlockProps) {
     return { ...cloneFilterConfig(cur), ...overrides };
   };
 
-  const complementOn = () => !!c()?.complementary && complementAvailable(c()!);
-  const toggleComplement = () => {
-    if (!complementAvailable(c()!)) return;
-    props.onChange(withOverride({ complementary: !complementOn() }));
-  };
+  // b141.110: «1 − H» is a type of its own in the dropdown — the section is
+  // the complement of the linked «Произвольный Q», not the filter it mirrors.
+  const isComp = () => !!c()?.complementary;
+  const canComp = () => complementPartnerOk(props.partner);
 
   return (
     <div class={`filter-block ${props.linked ? "fb-linked" : ""}`}>
@@ -362,22 +364,33 @@ function FilterBlock(props: FilterBlockProps) {
             <select
               class="fb-select"
               aria-label={`${props.title}: тип`}
-              value={c()!.filter_type}
+              value={isComp() ? COMPLEMENT : c()!.filter_type}
               onChange={(e) => {
-                const ft = e.currentTarget.value as FilterType;
-                if (ft === c()!.filter_type) return; // guard: SolidJS/WebKit programmatic set
+                const v = e.currentTarget.value;
+                if (v === COMPLEMENT) {
+                  const p = props.partner;
+                  if (isComp() || !p || !canComp()) return;
+                  props.onChange(withOverride({ filter_type: "Custom", order: p.order, q: p.q ?? 0.707, shape: null,
+                    subsonic_protect: null, linear_phase: true, complementary: true }));
+                  return;
+                }
+                const ft = v as FilterType;
+                if (ft === c()!.filter_type && !isComp()) return; // guard: SolidJS/WebKit programmatic set
                 // b138: subsonic-protect auto-on for Gaussian HP, dropped otherwise.
                 const subsonic = ft === "Gaussian" && props.isHighPass ? true : null;
                 if (ft === "Gaussian") {
-                  props.onChange(withOverride({ filter_type: ft, shape: c()!.shape ?? 1.0, q: null, subsonic_protect: subsonic }));
+                  props.onChange(withOverride({ filter_type: ft, shape: c()!.shape ?? 1.0, q: null, subsonic_protect: subsonic, complementary: false }));
                 } else if (ft === "Custom") {
-                  props.onChange(withOverride({ filter_type: ft, shape: null, q: c()!.q ?? 0.707, subsonic_protect: null }));
+                  props.onChange(withOverride({ filter_type: ft, shape: null, q: c()!.q ?? 0.707, subsonic_protect: null, complementary: false }));
                 } else {
-                  props.onChange(withOverride({ filter_type: ft, shape: null, q: null, subsonic_protect: null }));
+                  props.onChange(withOverride({ filter_type: ft, shape: null, q: null, subsonic_protect: null, complementary: false }));
                 }
               }}
             >
               {FILTER_TYPE_ORDER.map((t) => <option value={t}>{FILTER_TYPE_LABEL[t]}</option>)}
+              {/* Always in the DOM (a <Show> inside <select> races the value binding). */}
+              <option value={COMPLEMENT} hidden={!props.linked && !isComp()} disabled={!canComp() && !isComp()}
+                title={COMPLEMENT_TITLE}>1 − H (вычитание)</option>
             </select>
           </div>
           <div class="fb-row">
@@ -388,7 +401,7 @@ function FilterBlock(props: FilterBlockProps) {
               min={10} max={F_MAX_WORK} step={1} unit="Гц" freqMode label={`${props.title}: частота`}
             />
           </div>
-          <Show when={!isGaussian()}>
+          <Show when={!isGaussian() && !isComp()}>
             <div class="fb-row">
               <label class="fb-label">Крутизна</label>
               <select
@@ -421,7 +434,7 @@ function FilterBlock(props: FilterBlockProps) {
               />
             </div>
           </Show>
-          <Show when={isCustom()}>
+          <Show when={isCustom() && !isComp()}>
             <div class="fb-row">
               <label class="fb-label">Q</label>
               <NumberInput
@@ -431,35 +444,26 @@ function FilterBlock(props: FilterBlockProps) {
               />
             </div>
           </Show>
-          <div class="fb-row">
-            <label class="fb-label"></label>
-            <span class="fb-checkbox" title="Линейная фаза (только АЧХ, без поворота фазы)"
-              role="checkbox" tabIndex={0} aria-checked={c()!.linear_phase}
-              aria-label={`${props.title}: линейная фаза`}
-              onKeyDown={checkboxKeys(() => props.onChange(withOverride({ linear_phase: !c()!.linear_phase })))}
-              onClick={() => props.onChange(withOverride({ linear_phase: !c()!.linear_phase }))}>
-              <span class={`fb-check-box ${c()!.linear_phase ? "checked" : ""}`} />
-              <span class="fb-check-label">Lin-φ</span>
-            </span>
-          </div>
-          {/* b141.109: subtraction — this side is 1 − the linked filter. */}
-          <Show when={props.linked || c()!.complementary}>
+          <Show when={!isComp()}>
             <div class="fb-row">
               <label class="fb-label"></label>
-              <span class={`fb-checkbox ${complementAvailable(c()!) ? "" : "disabled"}`}
-                title={complementAvailable(c()!) ? COMPLEMENT_TITLE : COMPLEMENT_OFF_TITLE}
-                role="checkbox" tabIndex={0} aria-checked={complementOn()}
-                aria-disabled={!complementAvailable(c()!)}
-                aria-label={`${props.title}: вычитание 1 − H`}
-                onKeyDown={checkboxKeys(toggleComplement)}
-                onClick={toggleComplement}>
-                <span class={`fb-check-box ${complementOn() ? "checked" : ""}`} />
-                <span class="fb-check-label">1 − H</span>
+              <span class="fb-checkbox" title="Линейная фаза (только АЧХ, без поворота фазы)"
+                role="checkbox" tabIndex={0} aria-checked={c()!.linear_phase}
+                aria-label={`${props.title}: линейная фаза`}
+                onKeyDown={checkboxKeys(() => props.onChange(withOverride({ linear_phase: !c()!.linear_phase })))}
+                onClick={() => props.onChange(withOverride({ linear_phase: !c()!.linear_phase }))}>
+                <span class={`fb-check-box ${c()!.linear_phase ? "checked" : ""}`} />
+                <span class="fb-check-label">Lin-φ</span>
               </span>
             </div>
           </Show>
+          <Show when={isComp()}>
+            <div class="fb-hint" title={COMPLEMENT_TITLE}>
+              {`= 1 − соседний: Q ${(c()!.q ?? 0.707).toFixed(2)}, ${orderToSlope("Custom", c()!.order)} дБ/окт, линейная фаза`}
+            </div>
+          </Show>
         </div>
-        <Show when={isCustom()}>
+        <Show when={isCustom() && !isComp()}>
           <div class="fb-hint">{CUSTOM_Q_HINT}</div>
         </Show>
         <Show when={props.isHighPass && isGaussian()}>

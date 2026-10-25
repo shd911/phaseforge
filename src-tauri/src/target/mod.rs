@@ -45,7 +45,7 @@ pub const COMPLEMENT_CUSTOM_Q_MAX: f64 = 0.708;
 /// only on a linear-phase section, and only while the mirror never exceeds
 /// unity — every family but «Произвольный Q» above 1/√2, where 1 − |H|
 /// changes sign and a magnitude-only section cannot carry it. The UI offers
-/// the switch on the same rule (`complementAvailable`, lib/types.ts).
+/// «1 − H» only against a «Произвольный Q» (`complementPartnerOk`, lib/types.ts).
 pub fn complement_active(cfg: &FilterConfig) -> bool {
     cfg.complementary && cfg.linear_phase
         && !(matches!(cfg.filter_type, FilterType::Custom) && cfg.q.unwrap_or(0.707) > COMPLEMENT_CUSTOM_Q_MAX)
