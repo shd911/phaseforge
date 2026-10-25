@@ -124,7 +124,7 @@ mod tests {
     fn flt(ft: FilterType) -> FilterConfig {
         FilterConfig {
             filter_type: ft, order: 4, freq_hz: 1000.0, shape: Some(1.0),
-            linear_phase: false, q: Some(0.707), subsonic_protect: None,
+            linear_phase: false, q: Some(0.707), subsonic_protect: None, complementary: false,
         }
     }
 

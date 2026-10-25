@@ -104,7 +104,7 @@ fn lr_filter(order: u8, fc: f64) -> FilterConfig {
     FilterConfig {
         filter_type: FilterType::LinkwitzRiley,
         order, freq_hz: fc, shape: None,
-        linear_phase: false, q: None, subsonic_protect: None,
+        linear_phase: false, q: None, subsonic_protect: None, complementary: false,
     }
 }
 

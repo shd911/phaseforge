@@ -18,7 +18,7 @@ fn grid(n: usize) -> Vec<f64> {
 fn gauss(fc: f64, subsonic: bool) -> FilterConfig {
     FilterConfig {
         filter_type: FilterType::Gaussian, order: 4, freq_hz: fc, shape: Some(1.0),
-        linear_phase: false, q: None, subsonic_protect: Some(subsonic),
+        linear_phase: false, q: None, subsonic_protect: Some(subsonic), complementary: false,
     }
 }
 

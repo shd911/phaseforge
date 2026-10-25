@@ -34,6 +34,10 @@ export interface FilterConfig {
   /** b138: optional subsonic protection. Honoured only for Gaussian HP
    *  with freq_hz > 40. Null/undefined = inactive. */
   subsonic_protect?: boolean | null;
+  /** b141.109: this section is the complement of its mirror (HP = 1 − LP,
+   *  LP = 1 − HP); a linked band on a linear-phase pair sums exactly flat.
+   *  Rust `target::complement_active` decides when it is honoured. */
+  complementary?: boolean | null;
 }
 
 /** b141.10: single source of truth for the alignment-delay phase ramp.
@@ -92,6 +96,7 @@ export function cloneFilterConfig(f: FilterConfig | null | undefined): FilterCon
     linear_phase: f.linear_phase,
     q: f.q,
     subsonic_protect: f.subsonic_protect ?? null,
+    complementary: f.complementary ?? false,
   };
 }
 
@@ -108,7 +113,21 @@ export function withCrossoverOf(base: FilterConfig, src: FilterConfig): FilterCo
     shape: src.shape,
     linear_phase: src.linear_phase,
     q: src.q,
+    // b141.109: one side of a link subtracts, never both (2 − HP − LP).
+    complementary: !!base.complementary && !src.complementary,
   };
+}
+
+/** Highest «Произвольный Q» whose sections never rise above unity — Rust
+ *  `target::COMPLEMENT_CUSTOM_Q_MAX`. */
+export const COMPLEMENT_CUSTOM_Q_MAX = 0.708;
+
+/** b141.109: can this section be the complement 1 − H of its mirror? Only
+ *  on linear phase (it is zero-phase), and not for «Произвольный Q» above
+ *  1/√2, where 1 − |H| changes sign. Mirrors Rust `target::complement_active`
+ *  without the flag itself. */
+export function complementAvailable(f: FilterConfig): boolean {
+  return f.linear_phase && !(f.filter_type === "Custom" && (f.q ?? 0.707) > COMPLEMENT_CUSTOM_Q_MAX);
 }
 
 export interface TargetResponse {

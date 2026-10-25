@@ -1,7 +1,7 @@
 import { createSignal, createEffect, createResource, Show } from "solid-js";
 import type { FilterType, FilterConfig, PeqBand, PeqFilterType } from "../lib/types";
 import NumberInput from "./NumberInput";
-import { cloneFilterConfig, F_MIN_WORK, F_MAX_WORK } from "../lib/types";
+import { cloneFilterConfig, complementAvailable, F_MIN_WORK, F_MAX_WORK } from "../lib/types";
 import {
   activeBand,
   appState,
@@ -301,6 +301,11 @@ interface FilterBlockProps {
   isHighPass?: boolean; // b138: subsonic-protect UI for Gaussian HP only
 }
 
+const COMPLEMENT_TITLE = "Вычитание: этот фильтр = 1 − связанный (та же частота, тип и Q). "
+  + "Сумма двух полос ровная при любом типе фильтра. Спад этой стороны пологий и несимметричный. "
+  + "Вычитает только одна сторона связи.";
+const COMPLEMENT_OFF_TITLE = "Вычитание — только на линейной фазе (Lin-φ) и при Q не выше 0.707";
+
 function FilterBlock(props: FilterBlockProps) {
   const c = () => props.config;
   const isGaussian = () => c()?.filter_type === "Gaussian";
@@ -318,6 +323,12 @@ function FilterBlock(props: FilterBlockProps) {
     const cur = c();
     if (!cur) throw new Error("withOverride called with null FilterConfig — caller must guard on c() first");
     return { ...cloneFilterConfig(cur), ...overrides };
+  };
+
+  const complementOn = () => !!c()?.complementary && complementAvailable(c()!);
+  const toggleComplement = () => {
+    if (!complementAvailable(c()!)) return;
+    props.onChange(withOverride({ complementary: !complementOn() }));
   };
 
   return (
@@ -431,6 +442,22 @@ function FilterBlock(props: FilterBlockProps) {
               <span class="fb-check-label">Lin-φ</span>
             </span>
           </div>
+          {/* b141.109: subtraction — this side is 1 − the linked filter. */}
+          <Show when={props.linked || c()!.complementary}>
+            <div class="fb-row">
+              <label class="fb-label"></label>
+              <span class={`fb-checkbox ${complementAvailable(c()!) ? "" : "disabled"}`}
+                title={complementAvailable(c()!) ? COMPLEMENT_TITLE : COMPLEMENT_OFF_TITLE}
+                role="checkbox" tabIndex={0} aria-checked={complementOn()}
+                aria-disabled={!complementAvailable(c()!)}
+                aria-label={`${props.title}: вычитание 1 − H`}
+                onKeyDown={checkboxKeys(toggleComplement)}
+                onClick={toggleComplement}>
+                <span class={`fb-check-box ${complementOn() ? "checked" : ""}`} />
+                <span class="fb-check-label">1 − H</span>
+              </span>
+            </div>
+          </Show>
         </div>
         <Show when={isCustom()}>
           <div class="fb-hint">{CUSTOM_Q_HINT}</div>

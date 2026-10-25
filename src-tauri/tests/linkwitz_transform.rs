@@ -43,7 +43,7 @@ fn transform_turns_the_box_into_the_bu2_target() {
 #[test]
 fn both_fir_routes_realise_the_transform() {
     let lp = |lin: bool| FilterConfig { filter_type: FilterType::LinkwitzRiley, order: 1, freq_hz: 130.0,
-        shape: None, linear_phase: lin, q: None, subsonic_protect: None };
+        shape: None, linear_phase: lin, q: None, subsonic_protect: None, complementary: false };
     let peq = [lt(25.3, 0.707, 6.0)];
     for lin in [false, true] {
         let target = TargetCurve { reference_level_db: 0.0, tilt_db_per_octave: 0.0, tilt_ref_freq: 1000.0,

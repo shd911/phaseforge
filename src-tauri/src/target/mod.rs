@@ -30,6 +30,68 @@ pub struct FilterConfig {
     /// peq-stale comparison ignores this field by design.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subsonic_protect: Option<bool>,
+    /// b141.109: realise this section as the complement of its mirror —
+    /// HP = 1 − LP of the same type/order/Q/freq, LP = 1 − HP. A linked pair
+    /// with one complementary side sums to exactly 1 for any family. Honoured
+    /// only where [`complement_active`] says so.
+    #[serde(default)]
+    pub complementary: bool,
+}
+
+/// Highest «Произвольный Q» whose sections never rise above unity.
+pub const COMPLEMENT_CUSTOM_Q_MAX: f64 = 0.708;
+
+/// b141.109: the complement 1 − |mirror| is zero-phase, so it is honoured
+/// only on a linear-phase section, and only while the mirror never exceeds
+/// unity — every family but «Произвольный Q» above 1/√2, where 1 − |H|
+/// changes sign and a magnitude-only section cannot carry it. The UI offers
+/// the switch on the same rule (`complementAvailable`, lib/types.ts).
+pub fn complement_active(cfg: &FilterConfig) -> bool {
+    cfg.complementary && cfg.linear_phase
+        && !(matches!(cfg.filter_type, FilterType::Custom) && cfg.q.unwrap_or(0.707) > COMPLEMENT_CUSTOM_Q_MAX)
+}
+
+/// One section's response (dB, degrees) at f > 0: the family's LP/HP, or the
+/// complement of its mirror when [`complement_active`].
+fn section_response(f: f64, fc: f64, cfg: &FilterConfig, is_lowpass: bool) -> (f64, f64) {
+    if complement_active(cfg) {
+        let (mirror_db, _) = if is_lowpass { filter_hp_response(f, fc, cfg) } else { filter_lp_response(f, fc, cfg) };
+        let c = 1.0 - 10f64.powf(mirror_db / 20.0);
+        return (if c > 1e-30 { 20.0 * c.log10() } else { -600.0 }, 0.0);
+    }
+    if is_lowpass { filter_lp_response(f, fc, cfg) } else { filter_hp_response(f, fc, cfg) }
+}
+
+/// b141.109: a band whose crossovers are both linear-phase and at least one
+/// of them complementary is realised as HP + LP − 1, not HP · LP. The two
+/// differ by (1 − HP)(1 − LP) — where the lower neighbour's LP still passes
+/// above the upper crossover. With the product a 4-way 100/500/2000 Hz sum
+/// rose +0.90 dB (BW1), +0.18 (BW2), +0.17 (Bessel 4–8); the sum telescopes
+/// to exactly 1 (every crossover complementary — or LR/Gaussian, which already
+/// are). Between different families HP + LP − 1 can dip below zero far in a
+/// stopband; a magnitude-only band clamps it there.
+fn complementary_band(hp: &FilterConfig, lp: &FilterConfig) -> bool {
+    hp.linear_phase && lp.linear_phase && (complement_active(hp) || complement_active(lp))
+}
+
+fn apply_complementary_band(mag: &mut [f64], freq: &[f64], hp: &FilterConfig, lp: &FilterConfig) {
+    let lin = |f: f64, cfg: &FilterConfig, is_lp: bool| {
+        if cfg.freq_hz <= 0.0 { return 1.0; }
+        if f <= 0.0 { return if is_lp { 1.0 } else { 0.0 }; }
+        10f64.powf(section_response(f, cfg.freq_hz, cfg, is_lp).0 / 20.0)
+    };
+    for (m, &f) in mag.iter_mut().zip(freq) {
+        let v = lin(f, hp, false) + lin(f, lp, true) - 1.0;
+        *m += (if v > 1e-30 { 20.0 * v.log10() } else { -600.0 }) + subsonic_db(f, hp, false);
+    }
+}
+
+/// The b138 subsonic BW8 three octaves below a Gaussian HP (dB at f).
+fn subsonic_db(f: f64, cfg: &FilterConfig, is_lowpass: bool) -> f64 {
+    let active = !is_lowpass && matches!(cfg.filter_type, FilterType::Gaussian)
+        && cfg.subsonic_protect == Some(true) && cfg.freq_hz > 40.0;
+    if !active || f <= 0.0 { return 0.0; }
+    -10.0 * (1.0 + (cfg.freq_hz / 8.0 / f).powi(16)).log10()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -83,27 +145,16 @@ pub fn apply_filter_complex(
     let fc = cfg.freq_hz;
     if fc <= 0.0 { return; }
 
-    let subsonic_active = !is_lowpass
-        && matches!(cfg.filter_type, FilterType::Gaussian)
-        && cfg.subsonic_protect == Some(true)
-        && fc > 40.0;
-    let f_subsonic = fc / 8.0;
     let is_gaussian = matches!(cfg.filter_type, FilterType::Gaussian);
 
     for i in 0..freq.len() {
         let f = freq[i];
-        let (mut m_db, p_deg) = if f <= 0.0 {
+        let (m_db, p_deg) = if f <= 0.0 {
             (if is_lowpass { 0.0 } else { -600.0 }, 0.0)
-        } else if is_lowpass {
-            filter_lp_response(f, fc, cfg)
         } else {
-            filter_hp_response(f, fc, cfg)
+            section_response(f, fc, cfg, is_lowpass)
         };
-        if subsonic_active && f > 0.0 {
-            let ratio = (f_subsonic / f).powi(16);
-            m_db += -10.0 * (1.0 + ratio).log10();
-        }
-        mag[i] += m_db;
+        mag[i] += m_db + subsonic_db(f, cfg, is_lowpass);
 
         // Skip phase for linear_phase mode and Gaussian (matches pre-fix
         // apply_filter contract).
@@ -176,14 +227,17 @@ pub fn evaluate(target: &TargetCurve, freq: &[f64]) -> TargetResponse {
         add_tilt(&mut magnitude, freq, target.tilt_db_per_octave, target.tilt_ref_freq);
     }
 
-    // 2. High-pass
-    if let Some(hp) = &target.high_pass {
-        apply_filter_complex(&mut magnitude, &mut re_acc, &mut im_acc, freq, hp, false);
-    }
-
-    // 3. Low-pass
-    if let Some(lp) = &target.low_pass {
-        apply_filter_complex(&mut magnitude, &mut re_acc, &mut im_acc, freq, lp, true);
+    // 2–3. High-pass and low-pass (a complementary linear band: HP + LP − 1)
+    match (&target.high_pass, &target.low_pass) {
+        (Some(hp), Some(lp)) if complementary_band(hp, lp) => apply_complementary_band(&mut magnitude, freq, hp, lp),
+        (hp, lp) => {
+            if let Some(hp) = hp {
+                apply_filter_complex(&mut magnitude, &mut re_acc, &mut im_acc, freq, hp, false);
+            }
+            if let Some(lp) = lp {
+                apply_filter_complex(&mut magnitude, &mut re_acc, &mut im_acc, freq, lp, true);
+            }
+        }
     }
 
     // 4. Low shelf
@@ -271,11 +325,7 @@ fn apply_filter(
             filt_mag_db.push(if is_lowpass { 0.0 } else { -600.0 });
             continue;
         }
-        let (m_db, _) = if is_lowpass {
-            filter_lp_response(f, fc, cfg)
-        } else {
-            filter_hp_response(f, fc, cfg)
-        };
+        let (m_db, _) = section_response(f, fc, cfg, is_lowpass);
         let mut total_db = m_db;
         if subsonic_active {
             // Butterworth HP magnitude: |H|^2 = 1 / (1 + (f_c/f)^(2N)), N=8
@@ -858,7 +908,7 @@ mod tests {
                 shape: None,
                 linear_phase: false,
                 q: None,
-                subsonic_protect: None,
+                subsonic_protect: None, complementary: false,
 }),
             low_pass: None,
             low_shelf: None,
@@ -899,7 +949,7 @@ mod tests {
                 shape: None,
                 linear_phase: false,
                 q: None,
-                subsonic_protect: None,
+                subsonic_protect: None, complementary: false,
 }),
             low_shelf: None,
             high_shelf: None,
@@ -925,7 +975,7 @@ mod tests {
             shape: None,
             linear_phase: false,
             q: None,
-            subsonic_protect: None,
+            subsonic_protect: None, complementary: false,
 };
         let lr = FilterConfig {
             filter_type: FilterType::LinkwitzRiley,
@@ -934,7 +984,7 @@ mod tests {
             shape: None,
             linear_phase: false,
             q: None,
-            subsonic_protect: None,
+            subsonic_protect: None, complementary: false,
 };
         let (bw_db, _) = filter_hp_response(100.0, 100.0, &bw);
         let (lr_db, _) = filter_hp_response(100.0, 100.0, &lr);
@@ -1000,12 +1050,12 @@ mod tests {
         let hp = FilterConfig {
             filter_type: FilterType::LinkwitzRiley,
             order: 4, freq_hz: 200.0, shape: None,
-            linear_phase: false, q: None, subsonic_protect: None,
+            linear_phase: false, q: None, subsonic_protect: None, complementary: false,
         };
         let lp = FilterConfig {
             filter_type: FilterType::LinkwitzRiley,
             order: 4, freq_hz: 2000.0, shape: None,
-            linear_phase: false, q: None, subsonic_protect: None,
+            linear_phase: false, q: None, subsonic_protect: None, complementary: false,
         };
 
         // 512 log-spaced points 20..20k — matches the production SPL grid
@@ -1047,7 +1097,7 @@ mod tests {
         let cfg = FilterConfig {
             filter_type: FilterType::LinkwitzRiley,
             order: 4, freq_hz: fc, shape: None,
-            linear_phase: false, q: None, subsonic_protect: None,
+            linear_phase: false, q: None, subsonic_protect: None, complementary: false,
         };
         // Sweep finely around the cutoff where the BW wrap used to fire.
         let mut prev: Option<f64> = None;
@@ -1093,7 +1143,7 @@ mod tests {
                 shape: None,
                 linear_phase: false,
                 q: None,
-                subsonic_protect: None,
+                subsonic_protect: None, complementary: false,
 }),
             low_shelf: None,
             high_shelf: None,
@@ -1142,7 +1192,7 @@ mod tests {
                 low_pass: Some(FilterConfig {
                     filter_type: filter_type.clone(),
                     order, freq_hz: xo_freqs[0], shape, linear_phase, q: None,
-            subsonic_protect: None,
+            subsonic_protect: None, complementary: false,
 }),
                 low_shelf: None, high_shelf: None,
             },
@@ -1153,12 +1203,12 @@ mod tests {
                 high_pass: Some(FilterConfig {
                     filter_type: filter_type.clone(),
                     order, freq_hz: xo_freqs[0], shape, linear_phase, q: None,
-            subsonic_protect: None,
+            subsonic_protect: None, complementary: false,
 }),
                 low_pass: Some(FilterConfig {
                     filter_type: filter_type.clone(),
                     order, freq_hz: xo_freqs[1], shape, linear_phase, q: None,
-            subsonic_protect: None,
+            subsonic_protect: None, complementary: false,
 }),
                 low_shelf: None, high_shelf: None,
             },
@@ -1169,12 +1219,12 @@ mod tests {
                 high_pass: Some(FilterConfig {
                     filter_type: filter_type.clone(),
                     order, freq_hz: xo_freqs[1], shape, linear_phase, q: None,
-            subsonic_protect: None,
+            subsonic_protect: None, complementary: false,
 }),
                 low_pass: Some(FilterConfig {
                     filter_type: filter_type.clone(),
                     order, freq_hz: xo_freqs[2], shape, linear_phase, q: None,
-            subsonic_protect: None,
+            subsonic_protect: None, complementary: false,
 }),
                 low_shelf: None, high_shelf: None,
             },
@@ -1185,7 +1235,7 @@ mod tests {
                 high_pass: Some(FilterConfig {
                     filter_type: filter_type.clone(),
                     order, freq_hz: xo_freqs[2], shape, linear_phase, q: None,
-            subsonic_protect: None,
+            subsonic_protect: None, complementary: false,
 }),
                 low_pass: None,
                 low_shelf: None, high_shelf: None,
@@ -1352,7 +1402,7 @@ mod tests {
     }
 
     fn make_filter(ft: FilterType, order: u8, freq: f64, shape: Option<f64>, linear_phase: bool) -> FilterConfig {
-        FilterConfig { filter_type: ft, order, freq_hz: freq, shape, linear_phase, q: None, subsonic_protect: None }
+        FilterConfig { filter_type: ft, order, freq_hz: freq, shape, linear_phase, q: None, subsonic_protect: None, complementary: false }
     }
 
     fn gaussian_hp(freq_hz: f64, subsonic: Option<bool>) -> FilterConfig {
@@ -1363,7 +1413,7 @@ mod tests {
             shape: Some(2.0),
             linear_phase: false,
             q: None,
-            subsonic_protect: subsonic,
+            subsonic_protect: subsonic, complementary: false,
         }
     }
 
@@ -1796,14 +1846,14 @@ mod tests {
     fn b139_gauss_hp(lin: bool, sub: Option<bool>) -> FilterConfig {
         FilterConfig {
             filter_type: FilterType::Gaussian, order: 4, freq_hz: 632.0,
-            shape: Some(1.0), linear_phase: lin, q: None, subsonic_protect: sub,
+            shape: Some(1.0), linear_phase: lin, q: None, subsonic_protect: sub, complementary: false,
         }
     }
 
     fn b139_lr4_hp() -> FilterConfig {
         FilterConfig {
             filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: 80.0,
-            shape: None, linear_phase: false, q: None, subsonic_protect: None,
+            shape: None, linear_phase: false, q: None, subsonic_protect: None, complementary: false,
         }
     }
 
@@ -1922,6 +1972,70 @@ mod tests {
         for n in 1..=8u8 {
             let (lp_db, _) = bessel_lp_complex(1000.0, 1000.0, n);
             assert!((lp_db + 3.010_299_957).abs() < 1e-6, "order {n}: {lp_db:.7} dB at fc");
+        }
+    }
+
+    // --- b141.109: complementary crossover (1 − H) on a linear-phase link ---
+
+    fn xo(ft: FilterType, order: u8, fc: f64, q: Option<f64>, lin: bool, comp: bool) -> FilterConfig {
+        FilterConfig { filter_type: ft, order, freq_hz: fc, shape: None, linear_phase: lin, q,
+            subsonic_protect: None, complementary: comp }
+    }
+
+    fn band(hp: Option<FilterConfig>, lp: Option<FilterConfig>) -> TargetCurve {
+        TargetCurve { reference_level_db: 0.0, tilt_db_per_octave: 0.0, tilt_ref_freq: 1000.0,
+            high_pass: hp, low_pass: lp, low_shelf: None, high_shelf: None }
+    }
+
+    fn lin_sum(bands: &[TargetCurve], freq: &[f64]) -> Vec<f64> {
+        let mut s = vec![0.0; freq.len()];
+        for b in bands {
+            for (acc, m) in s.iter_mut().zip(evaluate(b, freq).magnitude) { *acc += 10f64.powf(m / 20.0); }
+        }
+        s
+    }
+
+    #[test]
+    fn complementary_link_sums_to_unity_on_either_side() {
+        let freq: Vec<f64> = (0..500).map(|i| 10.0 * 2000f64.powf(i as f64 / 499.0)).collect();
+        for (ft, order, q) in [(FilterType::Butterworth, 1, None), (FilterType::Butterworth, 4, None),
+            (FilterType::Bessel, 3, None), (FilterType::Custom, 2, Some(0.5)), (FilterType::Custom, 4, Some(0.707))] {
+            // HP = 1 − LP, then LP = 1 − HP.
+            for hp_side in [true, false] {
+                let lp = xo(ft.clone(), order, 500.0, q, true, !hp_side);
+                let hp = xo(ft.clone(), order, 500.0, q, true, hp_side);
+                let s = lin_sum(&[band(None, Some(lp)), band(Some(hp), None)], &freq);
+                let worst = s.iter().map(|v| (v - 1.0).abs()).fold(0.0, f64::max);
+                assert!(worst < 1e-9, "{ft:?}{order} hp_side={hp_side}: |Σ − 1| = {worst:e}");
+            }
+        }
+    }
+
+    /// Three bands: the middle one is HP + LP − 1, so the lower LP that still
+    /// passes above 2 kHz does not leak (the product HP·LP gave +0.9 dB on BW1).
+    #[test]
+    fn complementary_middle_band_telescopes() {
+        let freq: Vec<f64> = (0..500).map(|i| 10.0 * 2000f64.powf(i as f64 / 499.0)).collect();
+        let bw1 = |fc, comp| xo(FilterType::Butterworth, 1, fc, None, true, comp);
+        let bands = [band(None, Some(bw1(200.0, false))),
+            band(Some(bw1(200.0, true)), Some(bw1(2000.0, false))),
+            band(Some(bw1(2000.0, true)), None)];
+        let worst = lin_sum(&bands, &freq).iter().map(|v| (v - 1.0).abs()).fold(0.0, f64::max);
+        assert!(worst < 1e-9, "|Σ − 1| = {worst:e}");
+    }
+
+    #[test]
+    fn complement_needs_linear_phase_and_q_up_to_butterworth() {
+        let freq: Vec<f64> = (0..200).map(|i| 20.0 * 1000f64.powf(i as f64 / 199.0)).collect();
+        for (cfg, active) in [
+            (xo(FilterType::Butterworth, 4, 500.0, None, false, true), false),
+            (xo(FilterType::Custom, 2, 500.0, Some(1.0), true, true), false),
+            (xo(FilterType::Custom, 2, 500.0, Some(0.707), true, true), true),
+        ] {
+            assert_eq!(complement_active(&cfg), active, "{cfg:?}");
+            let plain = FilterConfig { complementary: false, ..cfg.clone() };
+            let (a, b) = (evaluate(&band(Some(cfg), None), &freq), evaluate(&band(Some(plain), None), &freq));
+            assert_eq!(a.magnitude == b.magnitude && a.phase == b.phase, !active);
         }
     }
 }

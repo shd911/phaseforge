@@ -34,7 +34,7 @@ fn cfg(mode: PhaseMode) -> FirConfig {
 fn lr4(fc: f64) -> FilterConfig {
     FilterConfig {
         filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: fc, shape: None,
-        linear_phase: false, q: None, subsonic_protect: None,
+        linear_phase: false, q: None, subsonic_protect: None, complementary: false,
     }
 }
 

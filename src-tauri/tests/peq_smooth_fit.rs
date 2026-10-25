@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 fn lr(order: u8, f: f64) -> FilterConfig {
     FilterConfig { filter_type: FilterType::LinkwitzRiley, order, freq_hz: f, shape: None,
-        linear_phase: true, q: None, subsonic_protect: None }
+        linear_phase: true, q: None, subsonic_protect: None, complementary: false }
 }
 
 #[test]

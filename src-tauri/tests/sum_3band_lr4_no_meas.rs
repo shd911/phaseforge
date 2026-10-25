@@ -25,7 +25,7 @@ fn lr4(freq_hz: f64) -> TargetFilterConfig {
     TargetFilterConfig {
         filter_type: TargetFilterType::LinkwitzRiley,
         order: 4, freq_hz, shape: None,
-        linear_phase: false, q: None, subsonic_protect: None,
+        linear_phase: false, q: None, subsonic_protect: None, complementary: false,
     }
 }
 

@@ -608,7 +608,7 @@ mod tests {
         FilterConfig {
             filter_type: FilterType::LinkwitzRiley,
             order: 4, freq_hz: fc, shape: None,
-            linear_phase: false, q: None, subsonic_protect: None,
+            linear_phase: false, q: None, subsonic_protect: None, complementary: false,
         }
     }
 
@@ -761,7 +761,7 @@ mod tests {
         let lp = FilterConfig {
             filter_type: FilterType::LinkwitzRiley,
             order: 2, freq_hz: 1000.0, shape: None,
-            linear_phase: false, q: None, subsonic_protect: None,
+            linear_phase: false, q: None, subsonic_protect: None, complementary: false,
         };
         let bs = build_filter_cascade(&lp, true, 48000.0).unwrap();
         let imp = cascade_impulse(&bs, 16384);
@@ -958,7 +958,7 @@ mod tests {
                     shape: None,
                     linear_phase: false,
                     q: Some(std::f64::consts::FRAC_1_SQRT_2),
-                    subsonic_protect: None,
+                    subsonic_protect: None, complementary: false,
                 };
                 let mut cfg = cfg_min(n_fft, sr);
                 cfg.iterations = 0;
@@ -1187,7 +1187,7 @@ mod wav_tail_tests {
         let hp = FilterConfig {
             filter_type: FilterType::LinkwitzRiley,
             order: 4, freq_hz: 20.0, shape: None,
-            linear_phase: false, q: None, subsonic_protect: None,
+            linear_phase: false, q: None, subsonic_protect: None, complementary: false,
         };
         let peq = PeqBand { freq_hz: 30.0, gain_db: 6.0, q: 10.0, enabled: true, filter_type: PeqFilterType::Peaking };
         let cfg = FirConfig {
@@ -1264,9 +1264,9 @@ mod wav_tail_tests {
     fn realized_curve_is_the_shipped_wav_spectrum() {
         let (taps, sr) = (4096usize, 48_000.0);
         let hp = FilterConfig { filter_type: FilterType::Butterworth, order: 4, freq_hz: 25.0,
-            shape: None, linear_phase: false, q: None, subsonic_protect: None };
+            shape: None, linear_phase: false, q: None, subsonic_protect: None, complementary: false };
         let lp = FilterConfig { filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: 80.0,
-            shape: None, linear_phase: false, q: None, subsonic_protect: None };
+            shape: None, linear_phase: false, q: None, subsonic_protect: None, complementary: false };
         let peq = PeqBand { freq_hz: 30.0, gain_db: 6.0, q: 4.0, enabled: true, filter_type: PeqFilterType::Peaking };
         let cfg = FirConfig {
             taps, sample_rate: sr, max_boost_db: 24.0, noise_floor_db: -150.0,

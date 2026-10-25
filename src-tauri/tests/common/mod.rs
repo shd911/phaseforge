@@ -103,7 +103,7 @@ fn gaussian_hp(fc: f64, linear: bool, subsonic: bool) -> TargetCurve {
             shape: Some(1.0),
             linear_phase: linear,
             q: None,
-            subsonic_protect: Some(subsonic),
+            subsonic_protect: Some(subsonic), complementary: false,
         }),
         low_pass: None,
         low_shelf: None,

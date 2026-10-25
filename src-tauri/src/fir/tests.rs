@@ -415,7 +415,7 @@ use super::*;
                 shape,
                 linear_phase,
                 q: None,
-                subsonic_protect: None,
+                subsonic_protect: None, complementary: false,
             }
         }
 
@@ -555,11 +555,11 @@ use super::*;
 
         let hp = FilterConfig {
             filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: 200.0,
-            shape: None, linear_phase: false, q: None, subsonic_protect: None,
+            shape: None, linear_phase: false, q: None, subsonic_protect: None, complementary: false,
         };
         let lp = FilterConfig {
             filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: 2000.0,
-            shape: None, linear_phase: true, q: None, subsonic_protect: None,
+            shape: None, linear_phase: true, q: None, subsonic_protect: None, complementary: false,
         };
         let tc = TargetCurve {
             reference_level_db: 0.0, tilt_db_per_octave: 0.0, tilt_ref_freq: 1000.0,
@@ -1167,7 +1167,7 @@ use super::*;
                 shape: Some(1.0),
                 linear_phase: true,
                 q: None,
-                subsonic_protect: Some(true),
+                subsonic_protect: Some(true), complementary: false,
             }),
             low_pass: None,
             low_shelf: None,

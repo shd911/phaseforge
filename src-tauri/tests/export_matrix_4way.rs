@@ -33,14 +33,14 @@ static REPORT: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
 static FILE_SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 #[derive(Clone, Copy, Debug)]
-enum Mode { Min, Lin, HpMinLpLin, HpLinLpMin }
+enum Mode { Min, Lin, HpMinLpLin, HpLinLpMin, LinComp }
 
 impl Mode {
     fn name(self) -> &'static str {
-        match self { Mode::Min => "min", Mode::Lin => "lin", Mode::HpMinLpLin => "ФВЧ min+ФНЧ lin", Mode::HpLinLpMin => "ФВЧ lin+ФНЧ min" }
+        match self { Mode::Min => "min", Mode::Lin => "lin", Mode::HpMinLpLin => "ФВЧ min+ФНЧ lin", Mode::HpLinLpMin => "ФВЧ lin+ФНЧ min", Mode::LinComp => "lin, ФВЧ = 1 − ФНЧ" }
     }
     fn lin(self, is_hp: bool) -> bool {
-        match self { Mode::Min => false, Mode::Lin => true, Mode::HpMinLpLin => !is_hp, Mode::HpLinLpMin => is_hp }
+        match self { Mode::Min => false, Mode::Lin => true, Mode::HpMinLpLin => !is_hp, Mode::HpLinLpMin => is_hp, Mode::LinComp => true }
     }
 }
 
@@ -66,12 +66,13 @@ const DEFAULT_RUN: Run = Run { sr: 48_000.0, taps: 65_536, window: WindowType::B
 
 fn filt(f: &Family, fc: f64, lin: bool, is_hp: bool) -> FilterConfig {
     FilterConfig { filter_type: f.ty.clone(), order: f.order, freq_hz: fc, shape: f.shape, linear_phase: lin, q: f.q,
-        subsonic_protect: if f.subsonic && is_hp { Some(true) } else { None } }
+        subsonic_protect: if f.subsonic && is_hp { Some(true) } else { None }, complementary: false }
 }
 
 fn bands(f: &Family, m: Mode) -> Vec<TargetCurve> {
     (0..4).map(|i| {
-        let hp = (i > 0).then(|| filt(f, XO[i - 1], m.lin(true), true));
+        // LinComp (b141.109): every HP is the complement of the LP it is linked to.
+        let hp = (i > 0).then(|| FilterConfig { complementary: matches!(m, Mode::LinComp), ..filt(f, XO[i - 1], m.lin(true), true) });
         let lp = (i < 3).then(|| filt(f, XO[i], m.lin(false), false));
         TargetCurve { reference_level_db: 0.0, tilt_db_per_octave: 0.0, tilt_ref_freq: 1000.0,
             high_pass: hp, low_pass: lp, low_shelf: None, high_shelf: None }
@@ -195,7 +196,11 @@ fn run(f: &Family, m: Mode, r: &Run, tag: &str) -> Outcome {
             (e.phase[k] + hil[k]).to_radians())).collect();
         let mut digital = vec![Complex64::from_polar(1.0, 0.0); grid.len()];
         for (k, d) in digital.iter_mut().enumerate() { *d = Complex64::from_polar(1.0, hil[k].to_radians()); }
-        for (si, c) in sections.iter().enumerate() {
+        // A complementary linear band is HP + LP − 1 as a whole (b141.109),
+        // not a product of sections — its design is the analog evaluate.
+        let comp = sections.iter().any(|c| c.complementary);
+        if comp { digital = analog.clone(); }
+        for (si, c) in sections.iter().enumerate().filter(|_| !comp) {
             let is_hp = si == 0 && tc.high_pass.is_some();
             let one = TargetCurve { reference_level_db: 0.0, tilt_db_per_octave: 0.0, tilt_ref_freq: 1000.0,
                 high_pass: is_hp.then(|| (*c).clone()), low_pass: (!is_hp).then(|| (*c).clone()), low_shelf: None, high_shelf: None };
@@ -270,6 +275,11 @@ fn run(f: &Family, m: Mode, r: &Run, tag: &str) -> Outcome {
     }
     let inv = if pol[1] < 0.0 { "2,4 INV" } else { "—" };
     let inv = if shortfall.is_empty() { inv.to_string() } else { format!("{inv}; недобор {}", shortfall.join(", ")) };
+    // b141.109: with every HP the complement of its LP the sum is exactly
+    // flat — in the design and in the files read back from disk.
+    if matches!(m, Mode::LinComp) && (emin.abs().max(emax.abs()) > 0.01 || wmin.abs().max(wmax.abs()) > 0.05) {
+        fails.push(format!("{lab}: сумма с вычитанием не ровная: расчёт {emin:+.3}…{emax:+.3} дБ, файлы {wmin:+.3}…{wmax:+.3} дБ"));
+    }
     if sum_mag > 0.3 || sum_ph > 2.0 { fails.push(format!("{lab}: сумма файлов отличается от расчётной: {sum_mag:.2} дБ / {sum_ph:.1}°")); }
     let row = format!("| {lab} | {routes} | {worst_mag:.3} / {worst_ph:.2}° | {hf_mag:.2} / {hf_ph:.1}° | {sum_mag:.3} / {sum_ph:.2}° | {:+.2}…{:+.2} | {:+.2}…{:+.2} | {inv} |",
         emin, emax, wmin, wmax);
@@ -290,7 +300,10 @@ fn sweep(ty: FilterType, section: &str) {
     let mut fails = Vec::new();
     let mut rows = String::new();
     for f in families(ty) {
-        for m in [Mode::Min, Mode::Lin, Mode::HpMinLpLin, Mode::HpLinLpMin] {
+        for m in [Mode::Min, Mode::Lin, Mode::HpMinLpLin, Mode::HpLinLpMin, Mode::LinComp] {
+            // The subsonic cuts an inner band's LF below its own crossover —
+            // not part of any complement (the Lin rows dip the same way).
+            if matches!(m, Mode::LinComp) && (f.subsonic || !target::complement_active(&FilterConfig { complementary: true, ..filt(&f, 100.0, true, true) })) { continue; }
             let o = run(&f, m, &DEFAULT_RUN, "48k/64K");
             println!("{}", o.row);
             writeln!(rows, "{}", o.row).unwrap();

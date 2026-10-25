@@ -210,7 +210,7 @@ pub fn target_hilbert_phase(
         // 13 Hz. The analytic phase is the exact term.
         let bw8 = FilterConfig { filter_type: FilterType::Butterworth, order: 8,
             freq_hz: hp.expect("checked").freq_hz / 8.0, shape: None, linear_phase: false, q: None,
-            subsonic_protect: None };
+            subsonic_protect: None, complementary: false };
         let only = crate::target::TargetCurve { reference_level_db: 0.0, tilt_db_per_octave: 0.0,
             tilt_ref_freq: 1000.0, high_pass: Some(bw8), low_pass: None, low_shelf: None, high_shelf: None };
         analytic = Some(crate::target::evaluate(&only, freq).phase);
@@ -430,7 +430,7 @@ mod tests {
     }
     fn gauss(lin: bool, sub: bool) -> FilterConfig {
         FilterConfig { filter_type: FilterType::Gaussian, order: 4, freq_hz: 80.0, shape: Some(1.0),
-            linear_phase: lin, q: None, subsonic_protect: Some(sub) }
+            linear_phase: lin, q: None, subsonic_protect: Some(sub), complementary: false }
     }
 
     #[test]
@@ -481,7 +481,7 @@ mod tests {
     #[test]
     fn noise_floor_above_boost_does_not_panic() {
         let lr4 = FilterConfig { filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: 2000.0,
-            shape: None, linear_phase: false, q: None, subsonic_protect: None };
+            shape: None, linear_phase: false, q: None, subsonic_protect: None, complementary: false };
         let mut c = curve(Some(lr4), None);
         c.tilt_db_per_octave = -0.5;
         let mut s = settings(48_000.0);
@@ -500,7 +500,7 @@ mod tests {
     #[test]
     fn sections_above_nyquist_give_a_finite_fir_with_warnings() {
         let lr4 = |fc: f64| FilterConfig { filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: fc,
-            shape: None, linear_phase: false, q: None, subsonic_protect: None };
+            shape: None, linear_phase: false, q: None, subsonic_protect: None, complementary: false };
         let s = settings(48_000.0);
         let pk = |f: f64| PeqBand { freq_hz: f, gain_db: 6.0, q: 2.0, enabled: true,
             filter_type: crate::peq::PeqFilterType::Peaking };
@@ -549,7 +549,7 @@ mod tests {
     #[test]
     fn cepstral_min_phase_matches_iir_up_to_nyquist() {
         let lr4 = FilterConfig { filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: 2000.0,
-            shape: None, linear_phase: false, q: None, subsonic_protect: None };
+            shape: None, linear_phase: false, q: None, subsonic_protect: None, complementary: false };
         let c = curve(Some(lr4), None);
         let mut s = settings(44_100.0);
         s.taps = 65_536;
@@ -576,7 +576,7 @@ mod tests {
     #[test]
     fn tilt_phase_of_the_plot_is_the_fir_phase() {
         let lr4 = |fc: f64, lin: bool| FilterConfig { filter_type: FilterType::LinkwitzRiley, order: 4,
-            freq_hz: fc, shape: None, linear_phase: lin, q: None, subsonic_protect: None };
+            freq_hz: fc, shape: None, linear_phase: lin, q: None, subsonic_protect: None, complementary: false };
         let mut s = settings(48_000.0);
         s.taps = 65_536;
         for lin in [false, true] {
@@ -605,7 +605,7 @@ mod tests {
     #[test]
     fn target_level_does_not_shape_the_fir() {
         let lr4 = |fc: f64, lin: bool| FilterConfig { filter_type: FilterType::LinkwitzRiley, order: 4,
-            freq_hz: fc, shape: None, linear_phase: lin, q: None, subsonic_protect: None };
+            freq_hz: fc, shape: None, linear_phase: lin, q: None, subsonic_protect: None, complementary: false };
         let peq = [PeqBand { freq_hz: 200.0, gain_db: 6.0, q: 1.0, enabled: true,
             filter_type: crate::peq::PeqFilterType::Peaking }];
         let mut s = settings(48_000.0);
@@ -639,7 +639,7 @@ mod tests {
     #[test]
     fn deviation_is_small_where_the_fir_realises_the_model() {
         let lr4 = |fc: f64| FilterConfig { filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: fc,
-            shape: None, linear_phase: false, q: None, subsonic_protect: None };
+            shape: None, linear_phase: false, q: None, subsonic_protect: None, complementary: false };
         let mut s = settings(96_000.0);
         s.taps = 65_536;
         let r = generate_band_fir(&curve(Some(lr4(200.0)), Some(lr4(3000.0))), &[], &s, true).unwrap();

@@ -14,7 +14,7 @@ fn run(max_boost: f64) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
     let t = TargetCurve {
         reference_level_db: 0.0, tilt_db_per_octave: 0.0, tilt_ref_freq: 1000.0,
         high_pass: Some(FilterConfig { filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: 2000.0,
-            shape: None, linear_phase: true, q: None, subsonic_protect: None }),
+            shape: None, linear_phase: true, q: None, subsonic_protect: None, complementary: false }),
         low_pass: None, low_shelf: None, high_shelf: None,
     };
     let r = target::evaluate(&t, &freq);

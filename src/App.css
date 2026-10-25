@@ -911,6 +911,7 @@ input[type="checkbox"]:focus-visible {
   cursor: pointer;
   white-space: nowrap;
 }
+.fb-checkbox.disabled { opacity: 0.45; cursor: not-allowed; }
 .fb-checkbox input[type="checkbox"] {
   margin: 0;
   cursor: pointer;

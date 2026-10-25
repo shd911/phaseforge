@@ -47,7 +47,7 @@ fn optimize(freq: &[f64], mag: &[f64], range_lo: f64) -> (Vec<PeqBand>, (f64, f6
     let tc = TargetCurve { reference_level_db: 0.0, tilt_db_per_octave: 0.0, tilt_ref_freq: 1000.0,
         high_pass: None,
         low_pass: Some(FilterConfig { filter_type: FilterType::LinkwitzRiley, order: 1, freq_hz: LP, shape: None,
-            linear_phase: false, q: None, subsonic_protect: None }),
+            linear_phase: false, q: None, subsonic_protect: None, complementary: false }),
         low_shelf: None, high_shelf: None };
     let t = target::evaluate(&tc, freq).magnitude;
     let range = trim(freq, &t, range_lo, 26_000.0, -80.0);

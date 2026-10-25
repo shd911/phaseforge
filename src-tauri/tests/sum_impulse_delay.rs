@@ -29,7 +29,7 @@ fn delayed_band_has_no_extra_pre_response() {
         let f = grid(sr);
         let t = TargetCurve { reference_level_db: 0.0, tilt_db_per_octave: 0.0, tilt_ref_freq: 1000.0,
             high_pass: Some(FilterConfig { filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: 2500.0,
-                shape: None, linear_phase: true, q: None, subsonic_protect: None }),
+                shape: None, linear_phase: true, q: None, subsonic_protect: None, complementary: false }),
             low_pass: None, low_shelf: None, high_shelf: None };
         let r = target::evaluate(&t, &f);
         let n0 = f.len() - 32;

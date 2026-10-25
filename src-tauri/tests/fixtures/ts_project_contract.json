@@ -22,7 +22,8 @@
      "shape": 1.2,
      "linear_phase": false,
      "q": null,
-     "subsonic_protect": null
+     "subsonic_protect": null,
+     "complementary": false
     },
     "low_shelf": null,
     "high_shelf": null
@@ -89,7 +90,8 @@
      "shape": 1.2,
      "linear_phase": false,
      "q": null,
-     "subsonic_protect": true
+     "subsonic_protect": true,
+     "complementary": false
     },
     "low_pass": {
      "filter_type": "Custom",
@@ -98,7 +100,8 @@
      "shape": null,
      "linear_phase": true,
      "q": 0.6,
-     "subsonic_protect": null
+     "subsonic_protect": null,
+     "complementary": false
     },
     "low_shelf": null,
     "high_shelf": null
@@ -145,7 +148,8 @@
      "shape": 1.2,
      "linear_phase": false,
      "q": null,
-     "subsonic_protect": true
+     "subsonic_protect": true,
+     "complementary": false
     },
     "low_pass": {
      "filter_type": "Custom",
@@ -154,7 +158,8 @@
      "shape": null,
      "linear_phase": true,
      "q": 0.6,
-     "subsonic_protect": null
+     "subsonic_protect": null,
+     "complementary": false
     },
     "exclusion_zones": [
      {

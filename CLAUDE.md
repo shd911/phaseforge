@@ -208,6 +208,16 @@
   the transform (`measurementWithTransforms`). Same bilinear biquad on both
   FIR routes (`peq::linkwitz_coeffs`). Pinned by `tests/linkwitz_transform.rs`,
   `peq_flat_level.rs::wall_sub_band_with_a_linkwitz_transform`.
+- **Complementary crossover «1 − H»** (b141.109, `FilterConfig::complementary`,
+  `target::complement_active`): a section = 1 − |its mirror| (same type/order/
+  Q/freq). Honoured only on linear phase and not for Custom Q > 0.708
+  (`COMPLEMENT_CUSTOM_Q_MAX`, 1 − |H| changes sign; UI `complementAvailable`
+  mirrors it). A band with BOTH sections linear and one complementary is
+  HP + LP − 1, not HP·LP — the product leaked +0.9 dB (BW1) in a 4-way sum;
+  the additive form telescopes to exactly 1. One side of a link only
+  (`withCrossoverOf` clears the partner). Everything goes through
+  `target::evaluate`, so plot, Corrected and FIR agree. Pinned by the
+  `LinComp` rows of `export_matrix_4way.rs` (design ±0.01 dB, files ±0.05 dB).
 - **Bilinear digital cascade** (IIR path) has frequency-dependent
   deviation up to ~20° vs analog reference accumulated over 8 biquads.
   REPhase reference comparison gives tighter empirical bound (≤ 2.5° on

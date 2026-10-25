@@ -312,7 +312,8 @@ function filterEquals(a: FilterConfig | null, b: FilterConfig | null): boolean {
     // subsonic_protect adds an LF roll-off. Omitting them let the fit go
     // stale in silence.
     && a.linear_phase === b.linear_phase
-    && (a.subsonic_protect ?? null) === (b.subsonic_protect ?? null);
+    && (a.subsonic_protect ?? null) === (b.subsonic_protect ?? null)
+    && !!a.complementary === !!b.complementary;
 }
 
 function exclusionZonesEquals(a: ExclusionZone[], b: ExclusionZone[]): boolean {

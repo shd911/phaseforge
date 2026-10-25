@@ -38,6 +38,7 @@ function siteBandsTs(f: FilterConfig): FilterConfig {
     linear_phase: f.linear_phase,
     q: f.q,
     subsonic_protect: f.subsonic_protect ?? null,
+    complementary: f.complementary ?? false,
   };
 }
 
@@ -51,6 +52,7 @@ function siteControlPanelTsx(f: FilterConfig | null | undefined): FilterConfig |
     linear_phase: f.linear_phase,
     q: f.q,
     subsonic_protect: f.subsonic_protect ?? null,
+    complementary: f.complementary ?? false,
   };
 }
 
@@ -64,6 +66,7 @@ function siteProjectIoTs(f: FilterConfig | null | undefined): FilterConfig | nul
     linear_phase: f.linear_phase,
     q: f.q,
     subsonic_protect: f.subsonic_protect ?? null,
+    complementary: f.complementary ?? false,
   };
 }
 
@@ -78,6 +81,7 @@ function cloneFilterConfigReference(f: FilterConfig | null | undefined): FilterC
     linear_phase: f.linear_phase,
     q: f.q,
     subsonic_protect: f.subsonic_protect ?? null,
+    complementary: f.complementary ?? false,
   };
 }
 
@@ -88,42 +92,49 @@ const FIXTURES: { name: string; cfg: FilterConfig }[] = [
     name: "lr4_hp_min_phase",
     cfg: {
       filter_type: "LinkwitzRiley", order: 4, freq_hz: 80,
-      shape: null, linear_phase: false, q: null, subsonic_protect: null,
+      shape: null, linear_phase: false, q: null, subsonic_protect: null, complementary: false,
     },
   },
   {
     name: "butterworth_lp_lin_phase",
     cfg: {
       filter_type: "Butterworth", order: 2, freq_hz: 2000,
-      shape: null, linear_phase: true, q: null, subsonic_protect: null,
+      shape: null, linear_phase: true, q: null, subsonic_protect: null, complementary: false,
     },
   },
   {
     name: "gaussian_hp_subsonic_on",
     cfg: {
       filter_type: "Gaussian", order: 4, freq_hz: 632,
-      shape: 1.0, linear_phase: false, q: null, subsonic_protect: true,
+      shape: 1.0, linear_phase: false, q: null, subsonic_protect: true, complementary: false,
     },
   },
   {
     name: "bessel_lp_min_phase",
     cfg: {
       filter_type: "Bessel", order: 4, freq_hz: 500,
-      shape: null, linear_phase: false, q: null, subsonic_protect: null,
+      shape: null, linear_phase: false, q: null, subsonic_protect: null, complementary: false,
     },
   },
   {
     name: "custom_hp_with_q",
     cfg: {
       filter_type: "Custom", order: 2, freq_hz: 100,
-      shape: null, linear_phase: false, q: 1.2, subsonic_protect: null,
+      shape: null, linear_phase: false, q: 1.2, subsonic_protect: null, complementary: false,
     },
   },
   {
     name: "subsonic_protect_explicit_false",
     cfg: {
       filter_type: "Gaussian", order: 4, freq_hz: 80,
-      shape: 1.0, linear_phase: false, q: null, subsonic_protect: false,
+      shape: 1.0, linear_phase: false, q: null, subsonic_protect: false, complementary: false,
+    },
+  },
+  {
+    name: "bw4_hp_complementary_lin",
+    cfg: {
+      filter_type: "Butterworth", order: 4, freq_hz: 500,
+      shape: null, linear_phase: true, q: null, subsonic_protect: null, complementary: true,
     },
   },
 ];
@@ -137,7 +148,7 @@ describe("FilterConfig field-coverage guard (b140.15.1)", () => {
     // (now structuredClone-based) handles it correctly (especially if it
     // needs normalization like subsonic_protect undefined → null).
     const sample = FIXTURES[0].cfg;
-    const expectedFieldCount = 7; // filter_type, order, freq_hz, shape, linear_phase, q, subsonic_protect
+    const expectedFieldCount = 8; // filter_type, order, freq_hz, shape, linear_phase, q, subsonic_protect, complementary
     expect(Object.keys(sample).length).toBe(expectedFieldCount);
   });
 });

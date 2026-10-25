@@ -11,8 +11,11 @@ import {
   addBand,
   removeBand,
   resetAppState,
+  setBandHighPass,
+  setBandLowPass,
   toggleBandLinked,
 } from "../bands";
+import type { FilterConfig } from "../../lib/types";
 import type { AppState, BandState } from "../bands";
 
 function freshFiveBands(): AppState {
@@ -110,6 +113,40 @@ describe("linkedToNext across removeBand (b140.8.2)", () => {
       expect(appState.bands[1].linkedToNext).toBe(true);
       expect(appState.bands[2].linkedToNext).toBe(true);
       expect(appState.bands[3].linkedToNext).toBe(false);
+      dispose();
+    });
+  });
+});
+
+describe("complementary link (b141.109)", () => {
+  const bw4 = (complementary: boolean): FilterConfig => ({
+    filter_type: "Butterworth", order: 4, freq_hz: 500, shape: null, linear_phase: true, q: null,
+    subsonic_protect: null, complementary,
+  });
+
+  it("only one side of a link subtracts", () => {
+    createRoot((dispose) => {
+      resetAppState(freshFiveBands());
+      setBandLowPass("band-1", bw4(false));
+      setBandHighPass("band-2", bw4(true));
+      expect(appState.bands[1].target.high_pass!.complementary).toBe(true);
+      expect(appState.bands[0].target.low_pass!.complementary).toBe(false);
+      // Switching the subtraction to the LP side clears the HP's.
+      setBandLowPass("band-1", bw4(true));
+      expect(appState.bands[0].target.low_pass!.complementary).toBe(true);
+      expect(appState.bands[1].target.high_pass!.complementary).toBe(false);
+      dispose();
+    });
+  });
+
+  it("editing the shared crossover keeps the subtracting side", () => {
+    createRoot((dispose) => {
+      resetAppState(freshFiveBands());
+      setBandLowPass("band-1", bw4(false));
+      setBandHighPass("band-2", bw4(true));
+      setBandLowPass("band-1", { ...bw4(false), freq_hz: 600 });
+      expect(appState.bands[1].target.high_pass!.freq_hz).toBe(600);
+      expect(appState.bands[1].target.high_pass!.complementary).toBe(true);
       dispose();
     });
   });

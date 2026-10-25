@@ -30,7 +30,7 @@ fn boosts_wide_narrow_only_for_real_cuts() {
     let tc = TargetCurve { reference_level_db: s / c as f64, tilt_db_per_octave: 0.0, tilt_ref_freq: 1000.0,
         high_pass: None,
         low_pass: Some(FilterConfig { filter_type: FilterType::LinkwitzRiley, order: 2, freq_hz: lp, shape: None,
-            linear_phase: true, q: None, subsonic_protect: None }),
+            linear_phase: true, q: None, subsonic_protect: None, complementary: false }),
         low_shelf: None, high_shelf: None };
     let t = target::evaluate(&tc, &freq).magnitude;
     let r = tc.reference_level_db;
