@@ -208,6 +208,17 @@
   the transform (`measurementWithTransforms`). Same bilinear biquad on both
   FIR routes (`peq::linkwitz_coeffs`). Pinned by `tests/linkwitz_transform.rs`,
   `peq_flat_level.rs::wall_sub_band_with_a_linkwitz_transform`.
+- **Section ring** (b141.111, `fir/section_ring.rs`, Tauri `compute_section_ring`,
+  FilterBlock): the ФВЧ/ФНЧ ring to −60/−100 dB is measured on the section's
+  own impulse at the export rate (min LR/BW/Custom/Bessel = analog at the
+  warped frequency, Gaussian min = cepstrum on the FFT grid — grows until its
+  aliasing floor is 40 dB under −100 dB, linear = zero phase + the plot's
+  Hilbert terms). An HP is read on 1 − HP (click removed) — reading against
+  the click made it rate-dependent (×4.8 instead of ×10 for 100 Hz vs 1 kHz).
+  Warns when the −100 dB tail (linear: either side) exceeds half the file.
+  Pinned by `tests/section_ring.rs` vs the exported WAV; there a linear HP
+  subtracts the flat band's WAV — the 0.95·Nyquist floor edge is a brick wall
+  in an HP's passband (−74 dB of the click at 30–60 ms, any corner).
 - **Complementary crossover «1 − H»** (b141.109, `FilterConfig::complementary`,
   `target::complement_active`): a section = 1 − |its mirror| (same type/order/
   Q/freq). Honoured only on linear phase and not for Custom Q > 0.708

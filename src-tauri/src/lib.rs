@@ -408,6 +408,16 @@ async fn compute_target_hilbert_phase(
     fir::band::target_hilbert_phase(&freq, high_pass.as_ref(), low_pass.as_ref(), tilt, sample_rate)
 }
 
+/// b141.111: ring time of one crossover section at the export rate.
+#[tauri::command]
+async fn compute_section_ring(
+    config: target::FilterConfig,
+    is_low_pass: bool,
+    sample_rate: f64,
+) -> Result<fir::section_ring::SectionRing, String> {
+    fir::section_ring::section_ring(&config, is_low_pass, sample_rate)
+}
+
 #[tauri::command]
 async fn export_fir_wav(impulse: Vec<f64>, sample_rate: f64, path: String) -> Result<(), String> {
     info!("export_fir_wav: {} samples, sr={}, path={}", impulse.len(), sample_rate, path);
@@ -469,7 +479,7 @@ pub fn run() {
             .init();
     }
 
-    info!("PhaseForge b141.110 starting...");
+    info!("PhaseForge b141.111 starting...");
     info!("log file: {}", applog::log_path().map(|p| p.display().to_string()).unwrap_or_else(|| "—".into()));
 
     tauri::Builder::default()
@@ -503,6 +513,7 @@ pub fn run() {
             compute_cross_section,
             generate_band_fir,
             compute_target_hilbert_phase,
+            compute_section_ring,
             export_fir_wav,
             project::save_project,
             project::load_project,

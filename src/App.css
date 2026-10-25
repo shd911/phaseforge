@@ -2309,6 +2309,8 @@ input[type="checkbox"]:focus-visible {
 .peq-auto-section .peq-buttons-row { display: flex; align-items: center; gap: 4px; margin-top: 4px; }
 .peq-auto-section .peq-sidebar-header { margin-bottom: 4px; }
 .fb-hint { font-size: var(--fs-xs); color: var(--text-secondary); padding: 2px 0 0; text-align: center; } /* b141.105: opacity 0.7 gave 3.10:1 */
+.fb-ring { font-size: var(--fs-xs); color: var(--text-secondary); padding: 2px 0 0; text-align: center; } /* b141.111 */
+.fb-ring .warn { color: var(--warn-amber); padding-top: 2px; }
 
 /* b141.4: SUM-view hint (replaces the editing panel in read-only Sum mode) */
 .sum-hint {

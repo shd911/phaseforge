@@ -17,6 +17,7 @@ pub mod dispatch;
 pub mod pipeline;
 pub mod ultrasonic;
 pub mod band;
+pub mod section_ring;
 
 pub use types::*;
 pub use dispatch::{Route, route_for, route_for_target};

@@ -300,9 +300,13 @@ interface FilterBlockProps {
   onLinkToggle?: () => void; // callback переключения связи
   onToggle: () => void;
   onChange: (c: import("../lib/types").FilterConfig) => void;
-  isHighPass?: boolean; // b138: subsonic-protect UI for Gaussian HP only
+  isHighPass?: boolean; // b138: subsonic-protect UI for Gaussian HP; b141.111: ring of an HP
   partner?: import("../lib/types").FilterConfig | null; // b141.110: the linked filter on the other side
 }
+
+/** Rust `fir::section_ring::SectionRing`. */
+interface SectionRing { post60Ms: number; post100Ms: number; pre60Ms: number; pre100Ms: number; lowerBound: boolean }
+const fmtRingMs = (ms: number) => (ms < 10 ? ms.toFixed(1) : String(Math.round(ms)));
 
 const COMPLEMENT = "Complement";
 const COMPLEMENT_TITLE = "1 − H: этот фильтр — дополнение связанного «Произвольного Q» (та же частота, порядок и Q), "
@@ -332,6 +336,24 @@ function FilterBlock(props: FilterBlockProps) {
   // the complement of the linked «Произвольный Q», not the filter it mirrors.
   const isComp = () => !!c()?.complementary;
   const canComp = () => complementPartnerOk(props.partner);
+
+  // b141.111: how long this section rings (to −60 / −100 dB) at the export
+  // rate — the crossover counterpart of the PEQ «мс» column.
+  const [ring] = createResource(
+    () => {
+      const cur = c();
+      if (!cur) return false;
+      const config = cloneFilterConfig(cur);
+      return { config, isLowPass: !props.isHighPass, sampleRate: exportSampleRate(), key: JSON.stringify(config) };
+    },
+    (src) => invoke<SectionRing>("compute_section_ring",
+      { config: src.config, isLowPass: src.isLowPass, sampleRate: src.sampleRate }).catch(() => null),
+  );
+  const halfFileMs = () => exportTaps() / 2 / exportSampleRate() * 1000;
+  const ringTooLong = () => {
+    const r = ring();
+    return !!r && (r.post100Ms > halfFileMs() || (!!c()?.linear_phase && r.pre100Ms > halfFileMs()));
+  };
 
   return (
     <div class={`filter-block ${props.linked ? "fb-linked" : ""}`}>
@@ -465,6 +487,19 @@ function FilterBlock(props: FilterBlockProps) {
         </div>
         <Show when={isCustom() && !isComp()}>
           <div class="fb-hint">{CUSTOM_Q_HINT}</div>
+        </Show>
+        <Show when={ring()}>
+          {(r) => (
+            <div class="fb-ring" title={`Звон фильтра на частоте экспорта ${exportSampleRate() / 1000} кГц: ${c()!.linear_phase
+              ? "линейная фаза звенит симметрично — столько же до пика, сколько после"
+              : "минимальная фаза звенит только после пика"}. Половина файла экспорта: ${fmtRingMs(halfFileMs())} мс.`}>
+              {`Звон −60/−100 дБ: ${c()!.linear_phase ? "до и после пика " : ""}${r().lowerBound ? "≥ " : ""}`
+                + `${fmtRingMs(r().post60Ms)} / ${fmtRingMs(r().post100Ms)} мс`}
+              <Show when={ringTooLong()}>
+                <div class="warn">{`⚠ Хвост длиннее половины файла экспорта (${fmtRingMs(halfFileMs())} мс): экспорт сдвинет задержку полосы или обрежет звон — увеличьте число отсчётов`}</div>
+              </Show>
+            </div>
+          )}
         </Show>
         <Show when={props.isHighPass && isGaussian()}>
           <div class="subsonic-protect-row">
