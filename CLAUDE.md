@@ -147,7 +147,10 @@
   sides): `reconstructTargetPhase` takes the whole target, not hp/lp.
   Above 0.95·Nyquist the FIR request continues by slope on a min-phase main
   too (b141.101) — a −150 dB noise-floor step there lagged the cepstral
-  phase 91° at 15 kHz vs IIR; only the linear main keeps the floor tail.
+  phase 91° at 15 kHz vs IIR. The linear main too since b141.112: its floor
+  step was a zero-phase brick wall in a tweeter HP's passband (LR4 2 kHz at
+  44.1/48 kHz: 7.3–8.0 ms pre-ring to −60 dB, 230–250 ms to −100 dB; 0.7–0.9 /
+  1.8 ms continued). Pinned by `tests/linear_top_edge.rs`.
   Pinned by `fir::band` `cepstral_min_phase_matches_iir_up_to_nyquist`,
   `tilt_phase_of_the_plot_is_the_fir_phase`.
 - **Sections at/above 0.49·sr** (b141.101, `fir::SECTION_MAX_FRACTION`):
@@ -216,9 +219,8 @@
   Hilbert terms). An HP is read on 1 − HP (click removed) — reading against
   the click made it rate-dependent (×4.8 instead of ×10 for 100 Hz vs 1 kHz).
   Warns when the −100 dB tail (linear: either side) exceeds half the file.
-  Pinned by `tests/section_ring.rs` vs the exported WAV; there a linear HP
-  subtracts the flat band's WAV — the 0.95·Nyquist floor edge is a brick wall
-  in an HP's passband (−74 dB of the click at 30–60 ms, any corner).
+  Pinned by `tests/section_ring.rs` vs the exported WAV (it found the linear
+  main's 0.95·Nyquist wall, fixed in b141.112).
 - **Complementary crossover «1 − H»** (b141.109, `FilterConfig::complementary`,
   `target::complement_active`): a section = 1 − |its mirror| (same type/order/
   Q/freq). Honoured only on linear phase and not for Custom Q > 0.708

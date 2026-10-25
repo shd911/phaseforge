@@ -5,8 +5,7 @@
 // `export_wav_f64`, 48 kHz / 256K taps, Rectangular so the window does not
 // shape the tail), the file is read back from disk, its passband level is
 // restored (`norm_db`), an HP's click is removed at the WAV delay (the ring
-// is read on 1 − HP, as `section_ring` does; on a linear HP by subtracting the
-// flat band's WAV) and the envelope is read with the same −60 / −100 dB rule.
+// is read on 1 − HP, as `section_ring` does) and the envelope is read with the same −60 / −100 dB rule.
 // Pre-ring is compared on linear sections only.
 use phaseforge_lib::fir::band::{generate_band_fir, BandFirSettings};
 use phaseforge_lib::fir::section_ring::{ring_samples, section_ring};
@@ -34,10 +33,10 @@ fn read_wav_f64(p: &std::path::Path) -> Vec<f64> {
     panic!("no data chunk");
 }
 
-/// A band's exported WAV read back from disk at its passband level, and its delay.
-fn exported(hp: Option<&FilterConfig>, lp: Option<&FilterConfig>, tag: &str) -> (Vec<f64>, usize) {
+/// The section's exported WAV read back from disk at its passband level, and its delay.
+fn exported(c: &FilterConfig, is_lp: bool, tag: &str) -> (Vec<f64>, usize) {
     let target = TargetCurve { reference_level_db: 0.0, tilt_db_per_octave: 0.0, tilt_ref_freq: 1000.0,
-        high_pass: hp.cloned(), low_pass: lp.cloned(), low_shelf: None, high_shelf: None };
+        high_pass: (!is_lp).then(|| c.clone()), low_pass: is_lp.then(|| c.clone()), low_shelf: None, high_shelf: None };
     let s = BandFirSettings { taps: TAPS, sample_rate: SR, window: WindowType::Rectangular, max_boost_db: 24.0,
         noise_floor_db: -150.0, iterations: 3, freq_weighting: true, narrowband_limit: true,
         nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0 };
@@ -54,20 +53,8 @@ fn exported(hp: Option<&FilterConfig>, lp: Option<&FilterConfig>, tag: &str) -> 
 }
 
 fn measured(c: &FilterConfig, is_lp: bool, tag: &str) -> (f64, f64, f64, f64) {
-    let (mut h, d) = exported((!is_lp).then_some(c), is_lp.then_some(c), tag);
-    if !is_lp && c.linear_phase {
-        // A linear band keeps its top edge at 0.95·Nyquist (the floor tail
-        // above it): on a high-pass that edge is a brick wall in the
-        // passband, −74 dB of the click at 30–60 ms whatever the corner — the
-        // band's, not the section's. The flat band's WAV carries the same
-        // edge: HP − flat is the section's wave alone.
-        let (flat, df) = exported(None, None, &format!("{tag}_flat"));
-        for (i, v) in h.iter_mut().enumerate() {
-            if let Some(&f) = (i + df).checked_sub(d).and_then(|j| flat.get(j)) { *v -= f; }
-        }
-    } else if !is_lp {
-        h[d] -= 1.0;
-    }
+    let (mut h, d) = exported(c, is_lp, tag);
+    if !is_lp { h[d] -= 1.0; }
     // The last 1/32 of the file is left out: a min-phase cepstral FIR wraps
     // its far tail there (−56 dB of the wave at 256K for a Gaussian M1 HP at
     // 80 Hz — the export's own shortfall, not the section's ring).

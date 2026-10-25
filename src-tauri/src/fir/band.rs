@@ -324,19 +324,23 @@ pub(crate) fn generate_band_fir_routed(
     // 0.95·Nyquist is a deep notch to the Hilbert transform: an LR4 2 kHz HP
     // at 44.1 kHz lagged the IIR route by 7° at 2 kHz, 42° at 10 kHz and 91°
     // at 15 kHz — a phase the plot never showed (the plot's min-phase terms
-    // also continue by slope, `minimum_phase_on_log_grid`). The linear-phase
-    // main keeps the floor tail: no Hilbert of it, it is the band limit there.
+    // also continue by slope, `minimum_phase_on_log_grid`).
+    // b141.112: the linear main too. Its −150 dB step was a brick wall at
+    // 0.95·Nyquist in every passband that reaches the top (a tweeter HP):
+    // an LR4 2 kHz linear HP at 44.1/48 kHz pre-rang 7.3–8.0 ms to −60 dB
+    // and 230–250 ms to −100 dB (−62 dB 10–100 ms ahead of the peak), 0.7–0.9
+    // and 1.8 ms continued; 16–20 kHz unchanged, LP bands bit-identical
+    // (their slope sits under the floor clip anyway).
     let nyq = sr / 2.0;
     let f_hi = *freq.last().expect("non-empty grid");
     if f_hi < nyq * 0.999 {
         let f_end = nyq * 0.999;
         let n = freq.len();
-        let continue_slope = config.phase_mode == PhaseMode::Composite && !config.linear_phase_main;
-        let (m_hi, slope) = if continue_slope && n >= 2 {
+        let (m_hi, slope) = if n >= 2 {
             let doct = (freq[n - 1] / freq[n - 2]).log2();
             (mag[n - 1], if doct > 0.0 { (mag[n - 1] - mag[n - 2]) / doct } else { 0.0 })
         } else {
-            (s.noise_floor_db, 0.0)
+            (mag[n - 1], 0.0)
         };
         for i in 1..=NOISE_TAIL_POINTS {
             let t = i as f64 / NOISE_TAIL_POINTS as f64;
@@ -458,7 +462,7 @@ mod tests {
         let g = fir_grid(176_400.0);
         assert!((g.last().unwrap() - 83_790.0).abs() < 1e-6);
         assert!(g.len() > FIR_GRID_POINTS);
-        // Result grid ends at Nyquist (noise-floor tail).
+        // Result grid ends at Nyquist (the tail continued by slope, b141.112).
         let r = generate_band_fir(&curve(None, None), &[], &settings(48_000.0), true).unwrap();
         assert!(*r.freq.last().unwrap() > 23_970.0 && r.freq.len() == FIR_GRID_POINTS + NOISE_TAIL_POINTS);
     }
@@ -466,8 +470,7 @@ mod tests {
     #[test]
     fn flat_target_is_flat_in_the_audio_band() {
         // No filters → both "linear" → linear-phase cepstral route; the FIR is
-        // flat to 0.95·Nyquist where the noise tail starts (an honest band
-        // limit, so not a pure delta at 48 kHz).
+        // flat up to Nyquist since b141.112 (was a −150 dB wall at 0.95·Nyquist).
         let r = generate_band_fir(&curve(None, None), &[], &settings(48_000.0), false).unwrap();
         assert_eq!(r.route, BandFirRoute::Cepstral);
         for (f, m) in r.freq.iter().zip(&r.fir.realized_mag) {
