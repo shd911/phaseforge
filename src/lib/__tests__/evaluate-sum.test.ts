@@ -4,7 +4,7 @@
 // sumIr, …) are intentionally gone — that pipeline accumulated 11
 // fix iterations without parity. The new tests pin only what the
 // minimal aggregator promises: Σ Target = coherent sum of per-band
-// targets with polarity + alignment_delay phase rotation.
+// targets with polarity; alignment_delay rotates Σ corrected only (b141.113).
 
 import { describe, it, expect, vi } from "vitest";
 import { sumParts } from "./helpers/sum-parts";
@@ -198,18 +198,30 @@ describe("evaluateSum (minimal, b140.3.0) — Σ Target only", () => {
     }
   });
 
-  it("alignment delay rotates Σ phase linearly with frequency", async () => {
+  it("alignment delay rotates Σ corrected linearly with frequency, not Σ target", async () => {
     // b141.10: positive delay = LATER (HQPlayer parity) →
     // phase = −360 · f · 0.001 deg for a 1 ms delay.
+    // b141.113: DELAY compensates the measurement's offset — the target has
+    // none, so Σ target stays at zero phase.
     const a = flatBand("a", { alignmentDelay: 0.001 });
     const result = await evaluateSum([a]);
-    expect(result.sumTargetPhase).not.toBeNull();
     const f = result.freq;
-    const ph = result.sumTargetPhase!;
     // Pick an early bin where the phase wrap stays linear (well below
     // ±180°). At 100 Hz, expected = −360·100·0.001 = −36°.
     const idx = f.findIndex((v) => v >= 100);
-    expect(ph[idx]).toBeCloseTo(-36, 0);
+    expect(result.sumCorrectedPhase![idx]).toBeCloseTo(-36, 0);
+    expect(result.sumTargetPhase![idx]).toBeCloseTo(0, 6);
+  });
+
+  it("b141.113: DELAY does not dig a hole in Σ target", async () => {
+    // Jerez VIV: MF 0.53 ms / HF 0.67 ms on a 2621 Hz LR4 — applied to the
+    // targets, the 0.14 ms difference fell Σ target −7.8 dB at 2.62 kHz.
+    // Two flat targets with those delays must still sum to +6.02 dB.
+    const result = await evaluateSum([
+      flatBand("mf", { alignmentDelay: 0.00053 }),
+      flatBand("hf", { alignmentDelay: 0.00067 }),
+    ]);
+    for (const v of result.sumTargetMag!) expect(v).toBeCloseTo(6.0206, 3);
   });
 
   it("targetEnabled=false drops band from the sum", async () => {

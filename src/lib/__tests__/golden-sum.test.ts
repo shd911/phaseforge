@@ -190,7 +190,7 @@ describe("evaluateSum golden snapshots (b140.10.2 phase-0)", () => {
     expect(snapshotShape(result)).toMatchSnapshot();
   });
 
-  it("two_bands_alignment_delay — 1ms delay on band b rotates phase", async () => {
+  it("two_bands_alignment_delay — 1ms delay on band b leaves Σ target alone (b141.113)", async () => {
     const result = await evaluateSum([
       flatBand("a"),
       flatBand("b", { alignmentDelay: 0.001 }),

@@ -2257,14 +2257,15 @@ export default function FrequencyPlot() {
           if (sumRes) {
             // b141.104 (audit 4.7): from the per-band parts (polarity and
             // alignment delay applied analytically), not the wrapped Σ phase.
-            const toGd = (per: Array<{ mag: number[]; phase: number[] } | null>): number[] | null => {
-              const parts = per.map((p, i) => (p ? { ...p, ...sumMeta[i] } : null));
+            // b141.113: the Σ target carries no DELAY (TARGET_DELAY, sum.ts).
+            const toGd = (per: Array<{ mag: number[]; phase: number[] } | null>, delayed: boolean): number[] | null => {
+              const parts = per.map((p, i) => (p ? { ...p, ...sumMeta[i], delay: delayed ? sumMeta[i].delay : 0 } : null));
               if (!parts.some((p) => p)) return null;
               const gd = sumGroupDelayMs(sumRes.freq, parts);
               return interpOnGrid(sumRes.freq, gd, measGd.freqOut, { outside: "nan" }) as number[];
             };
-            if (sumRes.sumTargetMag) targetGdMs = toGd(sumRes.perBandTarget);
-            if (sumRes.sumCorrectedPhase) corrGdMs = toGd(sumRes.perBandCorrected);
+            if (sumRes.sumTargetMag) targetGdMs = toGd(sumRes.perBandTarget, false);
+            if (sumRes.sumCorrectedPhase) corrGdMs = toGd(sumRes.perBandCorrected, true);
           }
         } else {
           // Target GD (band mode). b141.13: phases are WRAPPED (±180 from
@@ -2362,8 +2363,8 @@ export default function FrequencyPlot() {
         for (const { sb, res } of perBand) {
           if (!res?.ir) continue;
           const delay = irDelayByName[sb.name] ?? 0;
-          const wrap = (c: { time: number[]; impulse: number[]; step: number[] }, played: boolean): IrBandData => {
-            const sh = shiftIr(c, delay);
+          const wrap = (c: { time: number[]; impulse: number[]; step: number[] }, played: boolean, delayed = true): IrBandData => {
+            const sh = shiftIr(c, delayed ? delay : 0);
             // b141.104 (audit 4.2): target / corrected as the band plays —
             // with its polarity, as in Σ and on the band's own IR tab.
             const inv = played && !!sb.inverted;
@@ -2371,7 +2372,7 @@ export default function FrequencyPlot() {
               impulse: polarityAmplitude(sh.impulse, inv), step: polarityAmplitude(sh.step, inv) };
           };
           if (res.ir.measurement) measBands.push(wrap(res.ir.measurement, false));
-          if (res.ir.target) targetBands.push(wrap(res.ir.target, true));
+          if (res.ir.target) targetBands.push(wrap(res.ir.target, true, false)); // b141.113: no DELAY on targets
           if (res.ir.corrected) corrBands.push(wrap(res.ir.corrected, true));
         }
 

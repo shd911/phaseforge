@@ -242,7 +242,7 @@ exports[`evaluateSum golden snapshots (b140.10.2 phase-0) > single_flat_band —
 }
 `;
 
-exports[`evaluateSum golden snapshots (b140.10.2 phase-0) > two_bands_alignment_delay — 1ms delay on band b rotates phase 1`] = `
+exports[`evaluateSum golden snapshots (b140.10.2 phase-0) > two_bands_alignment_delay — 1ms delay on band b leaves Σ target alone (b141.113) 1`] = `
 {
   "correctedCoherent": true,
   "freqGridLen": 512,
@@ -307,22 +307,22 @@ exports[`evaluateSum golden snapshots (b140.10.2 phase-0) > two_bands_alignment_
     "500Hz": 88.917778,
   },
   "sumTargetMag": {
-    "10000Hz": 5.960815,
-    "1000Hz": 6.017673,
-    "100Hz": 5.573285,
-    "18000Hz": 4.291645,
-    "25Hz": 5.993423,
-    "5000Hz": 5.960591,
-    "500Hz": -28.456043,
+    "10000Hz": 6.0206,
+    "1000Hz": 6.0206,
+    "100Hz": 6.0206,
+    "18000Hz": 6.0206,
+    "25Hz": 6.0206,
+    "5000Hz": 6.0206,
+    "500Hz": 6.0206,
   },
   "sumTargetPhase": {
-    "10000Hz": -6.714728,
-    "1000Hz": -1.487422,
-    "100Hz": -18.230706,
-    "18000Hz": -34.964603,
-    "25Hz": -4.53009,
-    "5000Hz": -6.727253,
-    "500Hz": 88.917778,
+    "10000Hz": 0,
+    "1000Hz": 0,
+    "100Hz": 0,
+    "18000Hz": 0,
+    "25Hz": 0,
+    "5000Hz": 0,
+    "500Hz": 0,
   },
 }
 `;

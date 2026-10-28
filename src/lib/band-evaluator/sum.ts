@@ -122,6 +122,12 @@ function powerSumDb(magsDb: number[][]): number[] {
  *  noise from accumulating cos/sin of large delay·freq products. */
 const COHERENT_SUM_NULL_FLOOR = 1e-15;
 
+/** TARGET_DELAY (b141.113): the Σ target (SPL, GD, IR/Step) sums the
+ *  targets with polarity but WITHOUT the per-band DELAY. DELAY compensates
+ *  the measurement's acoustic offset; a target has none, so delaying it
+ *  misaligned ideal targets — a 0.14 ms MF/HF difference dug −8 dB at a
+ *  2.6 kHz LR4 crossover while Σ corrected stayed flat. Σ meas / corrected
+ *  keep the delay. */
 export function coherentSum(
   freq: number[],
   bandsData: Array<{ mag: number[]; phase: number[]; sign: 1 | -1; delay: number } | null>,
@@ -257,7 +263,7 @@ async function evaluateSumImpl(
         mag: r.targetMag,
         phase: r.targetPhase,
         sign: band.inverted ? -1 : 1,
-        delay: band.alignmentDelay ?? 0,
+        delay: 0, // b141.113: Σ target ignores DELAY — see TARGET_DELAY note
       };
       perBandTarget[i] = { mag: r.targetMag, phase: r.targetPhase };
     }
@@ -284,7 +290,7 @@ async function evaluateSumImpl(
         mag: response.magnitude,
         phase,
         sign: band.inverted ? -1 : 1,
-        delay: band.alignmentDelay ?? 0,
+        delay: 0, // b141.113: Σ target ignores DELAY — see TARGET_DELAY note
       };
       perBandTarget[i] = { mag: response.magnitude, phase };
     }));
@@ -453,7 +459,7 @@ async function evaluateSumImpl(
         `${options?.sampleRate ?? 48000}|lvl:${corrLevelOffsetDb[bandIdx]}`;
       const cached = await memoEval(key, () => buildIrPartial(band, bandIdx, sign, delay));
       for (const part of [cached.tgt, cached.meas, cached.corr]) {
-        if (part) { part.sign = sign; part.delay = delay; }
+        if (part) { part.sign = sign; part.delay = part === cached.tgt ? 0 : delay; }
       }
       return cached;
     }));
@@ -472,7 +478,7 @@ async function evaluateSumImpl(
           irFreq, resp.phase, band.target, sumSr,
         );
         tgtMagOnIr = resp.magnitude;
-        out.tgt = { magnitude: resp.magnitude, phase: tPhase, delay, sign };
+        out.tgt = { magnitude: resp.magnitude, phase: tPhase, delay: 0, sign };
       }
 
       if (!band.measurement) return out;

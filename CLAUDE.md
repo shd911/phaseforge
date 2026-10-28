@@ -39,6 +39,8 @@
   `alignmentPhaseDeg` (types.ts, −360·f·τ); legacy-проекты мигрируются
   при загрузке (`migrateDelayConvention`). Менять знак где-либо
   точечно — запрещено.
+  Σ target (SPL/GD/IR) суммирует цели БЕЗ DELAY (b141.113, TARGET_DELAY
+  в sum.ts): DELAY компенсирует сдвиг замера, у цели его нет.
 - **Golden baselines платформо-зависимы** (b141.13): хэши FIR бит-точные,
   libm (tan/cos) различается macOS↔Linux. golden_fir скипается на чужой
   ОС, pipeline_contract сравнивает только routes. Re-baseline: удалить
