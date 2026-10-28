@@ -435,6 +435,18 @@ describe("evaluateSum (b140.3.5) — Σ IR/Step via includeIr", () => {
     // Mock impulse = magnitude (in dB). Cancellation → -200 (floor).
     expect(imp.every(v => v <= -150)).toBe(true);
   });
+
+  it("b141.113: DELAY leaves Σ target IR alone, still moves Σ corrected IR", async () => {
+    // Mock impulse = Σ magnitude (dB), step = Σ phase (°).
+    const plain = await evaluateSum([flatBand("a"), flatBand("b")], { includeIr: true });
+    const delayed = await evaluateSum([
+      flatBand("a", { alignmentDelay: 0.00053 }),
+      flatBand("b", { alignmentDelay: 0.00067 }),
+    ], { includeIr: true });
+    expect(delayed.ir!.target!.impulse).toEqual(plain.ir!.target!.impulse);
+    expect(delayed.ir!.target!.step).toEqual(plain.ir!.target!.step);
+    expect(delayed.ir!.corrected!.impulse).not.toEqual(plain.ir!.corrected!.impulse);
+  });
 });
 
 describe("evaluateSum (b141.97) — band level = passband mean only", () => {
