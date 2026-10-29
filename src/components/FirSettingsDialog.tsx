@@ -87,7 +87,7 @@ export default function FirSettingsDialog() {
               min={BOOST.min} max={BOOST.max} step={1} />
             <span class="xo-unit">дБ</span>
           </div>
-          <div class="xo-hint">Глобальный лимит подъёма. Ниже = безопаснее для усилителя</div>
+          <div class="xo-hint">Ограничивает подъём цели и PEQ. Не действует на полосы, которые строятся аналитическим каскадом (мин-фаза без subsonic и гауссов) — экспорт об этом предупредит</div>
 
           {/* Noise floor */}
           <div class="xo-row">

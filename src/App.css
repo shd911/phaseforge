@@ -430,7 +430,11 @@ body {
   transition: opacity 0.15s;
 }
 .legend-item:hover { background: var(--bg-hover); color: var(--text-primary); }
-.legend-item.legend-off { opacity: 0.35; }
+/* b141.119 (UI audit 2026-10-29 §7): an off curve keeps a readable name —
+   only the sample fades; the whole item at 0.35 made it hard to find. */
+.legend-item.legend-off { color: var(--text-muted); }
+.legend-item.legend-off .legend-swatch { opacity: 0.3; }
+.legend-item.legend-off:disabled { opacity: 0.5; cursor: default; }
 
 .legend-swatch {
   display: inline-block;

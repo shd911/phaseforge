@@ -8,6 +8,8 @@ import { FLOOR_BAD_DB, FLOOR_GOOD_DB, FLOOR_MARGIN_DB, PRE_RING_DB } from "../li
 import { pluralRu } from "../lib/plural";
 
 const POPOVER_W = 340;
+/** Below this much room under the label the popover opens upward. */
+const POPOVER_MIN_H = 240;
 
 function fmtHz(hz: number): string {
   return hz >= 1000 ? `${(hz / 1000).toFixed(hz >= 10000 ? 1 : 2)} кГц` : `${Math.round(hz)} Гц`;
@@ -27,7 +29,9 @@ export default function ExportMetricsBar(props: { m: ExportMetrics }) {
   const m = () => props.m;
   const [open, setOpen] = createSignal<string | null>(null);
   // Fixed position from the clicked label: the plot containers clip overflow.
-  const [pos, setPos] = createSignal({ top: 0, left: 0 });
+  // b141.119 (UI audit §9): opens upward when the room below is short — the
+  // bar sits at the bottom of the plot and the text shrank to a few lines.
+  const [pos, setPos] = createSignal({ top: 0, bottom: 0, left: 0, up: false });
   let root: HTMLDivElement | undefined;
 
   const onDown = (e: MouseEvent) => {
@@ -49,9 +53,13 @@ export default function ExportMetricsBar(props: { m: ExportMetrics }) {
   const toggle = (id: string, el: HTMLElement) => {
     if (open() === id) { setOpen(null); return; }
     const r = el.getBoundingClientRect();
+    const below = window.innerHeight - r.bottom - 14;
+    const above = r.top - 14;
     setPos({
       top: r.bottom + 6,
+      bottom: window.innerHeight - r.top + 6,
       left: Math.max(8, Math.min(r.left, window.innerWidth - POPOVER_W - 8)),
+      up: below < POPOVER_MIN_H && above > below,
     });
     setOpen(id);
   };
@@ -69,15 +77,20 @@ export default function ExportMetricsBar(props: { m: ExportMetrics }) {
   const items: Item[] = [
     {
       id: "causal",
-      label: () => <>Причинность: {m().causality}%</>,
-      color: () => m().causality >= 95 ? STATUS_GOOD : m().causality >= 80 ? STATUS_WARN : STATUS_BAD,
-      title: "Причинность",
+      // b141.119 (UI audit 2026-10-29 §3): «Причинность» went red on every
+      // linear-phase band, where ~50 % is the design. Coloured only where
+      // ~100 % is expected (all sections min-phase).
+      label: () => <>После пика: {m().causality}%</>,
+      color: () => !m().expectCausal ? undefined
+        : m().causality >= 95 ? STATUS_GOOD : m().causality >= 80 ? STATUS_WARN : STATUS_BAD,
+      title: "Энергия на пике и после него",
       body: () => <>
         <p>Доля энергии импульса, которая приходится на пик и время после него.</p>
         <p>Min-phase — около 100%: вся энергия после пика. Linear-phase — около 50%:
-          импульс симметричен. Гибрид — между ними.</p>
-        <p>Низкое значение само по себе не ошибка, если фазу выбрали linear. Энергию до пика
-          добавляют и предзвон, и фон — их отдельно показывают «Предзвон» и «Фон».</p>
+          импульс симметричен. Mixed — между ними.</p>
+        <p>Цветом оценивается только min-phase полоса: там ожидается около 100%, и меньшее
+          значение значит, что до пика попали хвосты. Энергию до пика добавляют и предзвон,
+          и фон — их отдельно показывают «Предзвон» и «Фон».</p>
       </>,
     },
     {
@@ -140,9 +153,9 @@ export default function ExportMetricsBar(props: { m: ExportMetrics }) {
     },
     {
       id: "gd",
-      label: () => <>Рябь ГЗ: {m().gdRippleMs} мс</>,
-      color: () => m().gdRippleMs <= 1 ? STATUS_GOOD : m().gdRippleMs <= 3 ? STATUS_WARN : STATUS_BAD,
-      title: "Рябь групповой задержки",
+      // b141.119 (UI audit §4): a span, not an error — no traffic light.
+      label: () => <>Размах ГЗ: {m().gdRippleMs} мс</>,
+      title: "Размах групповой задержки",
       body: () => <>
         <p>Разница между наибольшей и наименьшей групповой задержкой FIR в полосе
           пропускания {band()}.</p>
@@ -173,8 +186,9 @@ export default function ExportMetricsBar(props: { m: ExportMetrics }) {
       label: () => <>Нормировка: {m().normDb.toFixed(1)} дБ</>,
       title: "Нормировка",
       body: () => <>
-        <p>Насколько ослаблен фильтр, чтобы максимум его АЧХ был 0 дБ. Подъёмы PEQ
-          не перегружают цифровой тракт.</p>
+        <p>Насколько ослаблен фильтр, чтобы максимум АЧХ файла был 0 дБ: подъёмы
+          цели и PEQ сами по себе не выводят файл за полную шкалу. Запас по уровню
+          на входе сигнала это не заменяет.</p>
         <p>Каждая полоса нормируется отдельно, так задумано. Уровни полос между собой
           выставляются в плеере или DSP-хосте.</p>
       </>,
@@ -218,9 +232,13 @@ export default function ExportMetricsBar(props: { m: ExportMetrics }) {
           </span>
           <Show when={open() === it.id}>
             <div style={{
-              position: "fixed", top: `${pos().top}px`, left: `${pos().left}px`,
-              width: `${POPOVER_W}px`, "z-index": 1000,
-              "max-height": `calc(100vh - ${pos().top + 8}px)`, "overflow-y": "auto",
+              position: "fixed", left: `${pos().left}px`,
+              ...(pos().up ? { bottom: `${pos().bottom}px` } : { top: `${pos().top}px` }),
+              width: `min(${POPOVER_W}px, calc(100vw - 16px))`, "z-index": 1000,
+              "max-height": pos().up
+                ? `calc(100vh - ${pos().bottom + 8}px)`
+                : `calc(100vh - ${pos().top + 8}px)`,
+              "overflow-y": "auto",
               background: "var(--bg-surface)", border: "1px solid var(--border)",
               "border-radius": "6px", padding: "10px 12px",
               "box-shadow": "0 8px 24px rgba(0,0,0,0.5)",
