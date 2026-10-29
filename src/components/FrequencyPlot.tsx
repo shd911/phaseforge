@@ -2189,7 +2189,11 @@ export default function FrequencyPlot() {
       }
     });
 
-    if (allBands.length === 0) {
+    // b141.117: a project of targets only (no band has measured phase) still
+    // draws the Σ target / corrected on IR/Step and GD — the early return was
+    // for "no measurement", and it hid the Σ target with its DELAY (b141.114).
+    const targetOnlySum = sumMode && allBands.length === 0 && sumBands.length > 0;
+    if (allBands.length === 0 && !targetOnlySum) {
       try { if (chart) { chart.destroy(); chart = undefined; } } catch (_) { chart = undefined; }
       setShowLegend(false);
       setCursorFreq("—"); setCursorSPL("—"); setCursorPhase("—");
@@ -2199,13 +2203,13 @@ export default function FrequencyPlot() {
     try {
       // For GD: compute from phase directly (no IPC needed)
       if (mode === "gd") {
-        if (bands.length === 0) return;
-        const b = bands[0];
-        const freq = [...b.measurement!.freq];
-        const phase = [...b.measurement!.phase!];
+        if (bands.length === 0 && !targetOnlySum) return;
+        const freq = bands.length > 0 ? [...bands[0].measurement!.freq] : [];
 
-        let measGd: { freqOut: number[]; gdMs: number[] };
-        if (sumMode) {
+        let measGd: { freqOut: number[]; gdMs: number[] } | null = null;
+        if (bands.length === 0) {
+          // target-only Σ: no measurement GD, the grid comes from evaluateSum below
+        } else if (sumMode) {
           // b141.65 (audit stage 2 B1): each band is resampled onto ONE common
           // grid first (fence outside its own range, delay-aware phase). The
           // sum ran index-wise over bands[0]'s grid although the grids differ
@@ -2230,7 +2234,7 @@ export default function FrequencyPlot() {
         } else {
           // Band mode: unwrap phase before GD computation (prevents spikes
           // at ±180° boundaries)
-          measGd = computeGroupDelay(freq, unwrapDegrees(phase));
+          measGd = computeGroupDelay(freq, unwrapDegrees([...bands[0].measurement!.phase!]));
         }
         if (gen !== renderGen) return;
 
@@ -2244,6 +2248,7 @@ export default function FrequencyPlot() {
 
         let targetGdMs: number[] | null = null;
         let corrGdMs: number[] | null = null;
+        let gdGrid: number[] | null = measGd?.freqOut ?? null;
         if (sumMode) {
           // b141.12: Σ target / corrected GD from evaluateSum's coherent
           // phases (call is served from the b141.7 cache — same params as
@@ -2255,6 +2260,8 @@ export default function FrequencyPlot() {
             : null;
           if (gen !== renderGen) return;
           if (sumRes) {
+            gdGrid ??= sumRes.freq;
+            const grid = gdGrid;
             // b141.104 (audit 4.7): from the per-band parts (polarity and
             // alignment delay applied analytically), not the wrapped Σ phase.
             // b141.113/114: the Σ target carries DELAY only without measurements (TARGET_DELAY, sum.ts).
@@ -2262,7 +2269,7 @@ export default function FrequencyPlot() {
               const parts = per.map((p, i) => (p ? { ...p, ...sumMeta[i], delay: delayed ? sumMeta[i].delay : 0 } : null));
               if (!parts.some((p) => p)) return null;
               const gd = sumGroupDelayMs(sumRes.freq, parts);
-              return interpOnGrid(sumRes.freq, gd, measGd.freqOut, { outside: "nan" }) as number[];
+              return interpOnGrid(sumRes.freq, gd, grid, { outside: "nan" }) as number[];
             };
             if (sumRes.sumTargetMag) targetGdMs = toGd(sumRes.perBandTarget, sumRes.targetDelayed);
             if (sumRes.sumCorrectedPhase) corrGdMs = toGd(sumRes.perBandCorrected, true);
@@ -2284,6 +2291,9 @@ export default function FrequencyPlot() {
           }
         }
 
+        if (!gdGrid) return;
+        const measGdMs = measGd?.gdMs ?? gdGrid.map(() => NaN);
+
         // GD colors from band
         const bandColor = (!sumMode && band) ? band.color : DEFAULT_GD_COLORS.meas;
         const cf = bandColorFamily(bandColor);
@@ -2296,11 +2306,11 @@ export default function FrequencyPlot() {
 
         // Save corrected GD data for snapshot capture
         // Save GD data for snapshot: use corrected if available and visible, else measurement
-        lastGdData.freq = [...measGd.freqOut];
+        lastGdData.freq = [...gdGrid];
         if (corrGdMs && gdCfg.corr) {
           lastGdData.gdMs = [...corrGdMs];
         } else if (gdCfg.meas) {
-          lastGdData.gdMs = [...measGd.gdMs];
+          lastGdData.gdMs = [...measGdMs];
         } else if (targetGdMs && gdCfg.target) {
           lastGdData.gdMs = [...targetGdMs];
         } else {
@@ -2310,21 +2320,20 @@ export default function FrequencyPlot() {
         lastGdBandId = !sumMode && band ? band.id : null;
         // b141.116: the opaque colour is for the legend text; the measurement
         // LINE keeps its family's transparency so Corr GD stays on top.
-        renderGdChart(measGd.freqOut, measGd.gdMs, targetGdMs, corrGdMs, { ...gdClr, meas: cf.meas }, gdCfg);
+        renderGdChart(gdGrid, measGdMs, targetGdMs, corrGdMs, { ...gdClr, meas: cf.meas }, gdCfg);
         return;
       }
 
-      // IR or Step: compute via IPC. Reference grid from allBands — `bands`
-      // may be empty when every band is excluded from the sum via the legend.
-      const b = allBands[0];
-      const freq = [...b.measurement!.freq];
-      const sr = b.measurement!.sample_rate ?? 48000;
-
+      // IR or Step: compute via IPC.
       if (sumMode) {
         // ============================================================
         // SUM MODE: per-band IR/Step + coherent sum IR/Step
         // ============================================================
-        const n = freq.length;
+        // b141.117: targets only → every band draws its target (a magnitude-only
+        // measurement has no IR to show, as in the Σ).
+        const irBands: BandState[] = targetOnlySum
+          ? untrack(() => appState.bands.map((b) => (b.measurement ? { ...b, measurement: null } as BandState : b)))
+          : allBands;
 
         // Per-band curves (all bands, incl. excluded from the sum) come from
         // evaluateBandFull(includeIr) — the same cached wide-grid pipeline the
@@ -2349,9 +2358,9 @@ export default function FrequencyPlot() {
           };
           return { timeMs: c.time.map(t => t * 1000), impulse: roll(c.impulse), step: roll(c.step) };
         };
-        const perBand = await Promise.all(allBands.map(async (sb) => {
+        const perBand = await Promise.all(irBands.map(async (sb) => {
           const res = await evaluateBandFull({
-            band: sb, freq: sb.measurement!.freq, includeIr: true, sampleRate: exportSampleRate(),
+            band: sb, freq: sb.measurement?.freq, includeIr: true, sampleRate: exportSampleRate(),
           }).catch((e) => { console.error("[SUM IR] band eval failed:", e); return null; });
           return { sb, res };
         }));
@@ -2374,7 +2383,7 @@ export default function FrequencyPlot() {
               impulse: polarityAmplitude(sh.impulse, inv), step: polarityAmplitude(sh.step, inv) };
           };
           if (res.ir.measurement) measBands.push(wrap(res.ir.measurement, false));
-          if (res.ir.target) targetBands.push(wrap(res.ir.target, true, false)); // b141.113: no DELAY on targets (these bands have measured phase)
+          if (res.ir.target) targetBands.push(wrap(res.ir.target, true, targetOnlySum)); // b141.113/114: DELAY on targets only without measured phase (TARGET_DELAY)
           if (res.ir.corrected) corrBands.push(wrap(res.ir.corrected, true));
         }
 
@@ -2434,7 +2443,7 @@ export default function FrequencyPlot() {
 
         const sumArgs: Parameters<typeof renderIrStepChart> =
           [measBands, measSum, targetBands, targetSum, corrBands, corrSum,
-           preRingZoneMs(allBands as BandState[]), irCfg];
+           preRingZoneMs(irBands), irCfg];
         lastIrChart = { key: irDataKey(mode, sumMode, band), args: sumArgs };
         renderIrStepChart(...sumArgs);
 
@@ -2445,6 +2454,7 @@ export default function FrequencyPlot() {
         // b139.4c: BandEvaluator returns measurement / target / corrected
         // impulses in one shot. No inline compute_impulse, compute_cross_section
         // or addGaussianMinPhase here — single source of truth.
+        const freq = [...allBands[0].measurement!.freq];
         const irEval = await evaluateBandFull({ band: band!, freq, includeIr: true, sampleRate: exportSampleRate() })
           .catch((e) => { console.error("[IR] band eval failed:", e); return null; });
         if (gen !== renderGen) return;
@@ -2528,8 +2538,9 @@ export default function FrequencyPlot() {
     const toDb = (v: number) => { const a = Math.abs(v); return a > 1e-8 ? 20 * Math.log10(a / 100) : -200; };
     const stripAlpha = (c: string) => c.length === 9 ? c.slice(0, 7) : c;
 
-    // Reference time axis: first measurement band's raw timeMs (no peak alignment)
-    const refBand = measBands[0];
+    // Reference time axis: first measurement band's raw timeMs (no peak alignment);
+    // a project of targets only (b141.117) takes the first target's.
+    const refBand = measBands[0] ?? targetBands[0] ?? targetSum;
     if (!refBand) return;
     const timeMs = [...refBand.timeMs];
 
