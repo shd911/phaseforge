@@ -502,8 +502,10 @@ function FilterBlock(props: FilterBlockProps) {
         <Show when={props.isHighPass && isGaussian()}>
           <div class="subsonic-protect-row">
             <label
-              title="Минимально-фазовый Butterworth 48 дБ/окт на 3 октавы ниже ФВЧ. Защищает динамик от излишнего хода диффузора в инфразвуке."
-              style={{ display: "flex", "align-items": "center", gap: "6px", cursor: c()!.freq_hz > 40 ? "pointer" : "not-allowed" }}
+              title={c()!.freq_hz > 40
+                ? "Минимально-фазовый Butterworth 48 дБ/окт на 3 октавы ниже ФВЧ. Защищает динамик от излишнего хода диффузора в инфразвуке."
+                : "Недоступно при ФВЧ ≤ 40 Гц: на 3 октавы ниже защита встала бы под 5 Гц и ничего бы не защищала. Поднимите ФВЧ выше 40 Гц."}
+              style={{ display: "flex", "align-items": "center", gap: "6px", cursor: c()!.freq_hz > 40 ? "pointer" : "not-allowed", opacity: c()!.freq_hz > 40 ? 1 : 0.6 }}
             >
               <input
                 type="checkbox"
