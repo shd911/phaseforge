@@ -31,7 +31,7 @@ import {
 import { attachFieldWheel } from "../lib/wheel-step";
 import { driverName } from "../lib/fir-export";
 import type { PresetName } from "../stores/bands";
-import { CORRECTED_COLOR, STATUS_BAD } from "../lib/plot-helpers";
+import { CORRECTED_COLOR } from "../lib/plot-helpers";
 import {
   orderToSlope, slopeToOrder, availableSlopes, clampNum,
   FILTER_TYPE_ORDER, FILTER_TYPE_LABEL, CUSTOM_Q_MIN, CUSTOM_Q_MAX, GAUSS_M_MIN, GAUSS_M_MAX, CUSTOM_Q_HINT,
@@ -60,7 +60,7 @@ import { openHighQPopup } from "./HighQWarningPopup";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { projectDir, sanitize } from "../lib/project-io";
-import { type SectionRing, fmtRingMs, ringLabel, ringTitle, ringTooLong as ringTooLongFor } from "../lib/section-ring";
+import { type SectionRing, ringWarning, ringLabel, ringTitle, ringTooLong as ringTooLongFor } from "../lib/section-ring";
 
 /** b141.38: an out-of-range PEQ entry used to be dropped silently while the
  *  field kept showing it — the table and the model disagreed with no hint.
@@ -361,7 +361,13 @@ function FilterBlock(props: FilterBlockProps) {
               class={`fb-link-btn ${props.linked ? "on" : ""}`}
               onClick={(e) => { e.stopPropagation(); props.onLinkToggle!(); }}
               title={props.linked ? "Отвязать от следующей полосы" : "Связать со следующей полосой"}
-            ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={props.linked ? CORRECTED_COLOR : STATUS_BAD} stroke-width="2.5" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
+            >{/* b141.116: unlinked = a broken chain, dimmed — not the same icon in red */}
+              <Show when={props.linked} fallback={
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="2.5" stroke-linecap="round"><path d="m18.84 12.25 1.72-1.71a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="m5.17 11.75-1.71 1.71a5 5 0 0 0 7.07 7.07l1.71-1.71"/><path d="M8 2v3M2 8h3M16 19v3M19 16h3"/></svg>
+              }>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={CORRECTED_COLOR} stroke-width="2.5" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+              </Show>
+            </button>
           </Show>
           <Show when={!props.canLink && props.linked}>
             <span class="fb-link-indicator" title="Связана с соседней полосой"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={CORRECTED_COLOR} stroke-width="2.5" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>
@@ -488,7 +494,7 @@ function FilterBlock(props: FilterBlockProps) {
             <div class="fb-ring" title={ringTitle(r(), c()!.linear_phase, exportSampleRate(), halfFileMs())}>
               {ringLabel(r(), c()!.linear_phase)}
               <Show when={ringTooLong()}>
-                <div class="warn">{`⚠ Хвост длиннее половины файла экспорта (${fmtRingMs(halfFileMs())} мс): экспорт сдвинет задержку полосы или обрежет звон — увеличьте число отсчётов`}</div>
+                <div class="warn">{ringWarning(halfFileMs())}</div>
               </Show>
             </div>
           )}

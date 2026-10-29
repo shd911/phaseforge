@@ -13,12 +13,17 @@ describe("section ring line (b141.115)", () => {
 
   it("linear Gaussian + subsonic shows before and after apart", () => {
     expect(ringSymmetric(gaussLinSub)).toBe(false);
-    expect(ringLabel(gaussLinSub, true)).toBe("Звон −60/−100 дБ: до пика 8.2 / 170, после 53 / 400 мс");
+    expect(ringLabel(gaussLinSub, true)).toBe("Звон −60/−100 дБ: до пика 8.2 / 169.9, после 53 / 400 мс");
   });
 
   it("min-phase: one pair, the tail after the peak", () => {
     const r: SectionRing = { pre60Ms: 0.4, pre100Ms: 0.9, post60Ms: 12, post100Ms: 30, lowerBound: true };
     expect(ringLabel(r, false)).toBe("Звон −60/−100 дБ: ≥ 12 / 30 мс");
+  });
+
+  it("a pair shares one precision across 10 ms", () => {
+    const r: SectionRing = { pre60Ms: 0, pre100Ms: 0, post60Ms: 9.8, post100Ms: 12.04, lowerBound: false };
+    expect(ringLabel(r, false)).toBe("Звон −60/−100 дБ: 9.8 / 12.0 мс");
   });
 
   it("min-phase warning counts the rise to the peak, linear each side alone", () => {

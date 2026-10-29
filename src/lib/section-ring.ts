@@ -4,6 +4,14 @@ export interface SectionRing { post60Ms: number; post100Ms: number; pre60Ms: num
 
 export const fmtRingMs = (ms: number) => (ms < 10 ? ms.toFixed(1) : String(Math.round(ms)));
 
+/** b141.116: a −60/−100 pair shares one precision — «9.8 / 12» mixed two
+ *  and the line changed width as the corner moved across 10 ms. */
+const fmtPair = (a: number, b: number) =>
+  Math.min(a, b) < 10 ? `${a.toFixed(1)} / ${b.toFixed(1)}` : `${Math.round(a)} / ${Math.round(b)}`;
+
+export const ringWarning = (halfFileMs: number) =>
+  `⚠ Хвост длиннее ½ файла (${fmtRingMs(halfFileMs)} мс): звон обрежется или сдвинется задержка — увеличьте число отсчётов`;
+
 /** A linear Gaussian HP with subsonic protection is not symmetric (the
  *  protection is min-phase): then before and after are shown apart. */
 export function ringSymmetric(r: SectionRing): boolean {
@@ -22,7 +30,7 @@ export function ringTooLong(r: SectionRing, linear: boolean, halfFileMs: number)
 
 export function ringLabel(r: SectionRing, linear: boolean): string {
   const lb = r.lowerBound ? "≥ " : "";
-  const pair = (a: number, b: number) => `${fmtRingMs(a)} / ${fmtRingMs(b)}`;
+  const pair = fmtPair;
   if (linear && !ringSymmetric(r)) {
     return `Звон −60/−100 дБ: ${lb}до пика ${pair(r.pre60Ms, r.pre100Ms)}, после ${pair(r.post60Ms, r.post100Ms)} мс`;
   }

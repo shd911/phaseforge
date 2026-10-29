@@ -2308,7 +2308,9 @@ export default function FrequencyPlot() {
         }
 
         lastGdBandId = !sumMode && band ? band.id : null;
-        renderGdChart(measGd.freqOut, measGd.gdMs, targetGdMs, corrGdMs, gdClr, gdCfg);
+        // b141.116: the opaque colour is for the legend text; the measurement
+        // LINE keeps its family's transparency so Corr GD stays on top.
+        renderGdChart(measGd.freqOut, measGd.gdMs, targetGdMs, corrGdMs, { ...gdClr, meas: cf.meas }, gdCfg);
         return;
       }
 
