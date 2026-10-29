@@ -70,3 +70,46 @@ fn linear_lp_band_keeps_its_stopband() {
         assert!(top < -140.0 && p60 < 1.5, "{sr}: 0.99·Nyq {top:.0} dB, pre −60 {p60:.2} ms");
     }
 }
+
+/// b141.115: the phase above 0.95·Nyquist is held, not dropped to 0°. Under
+/// a mixed main (HP min + LP lin) the model phase is taken verbatim, and the
+/// 0° tail was a step: 0.19–0.38° off at 5 kHz..0.95·Nyquist; held, 0.01°.
+#[test]
+fn mixed_main_tail_holds_the_phase() {
+    for sr in [44_100.0, 48_000.0] {
+        let mut hp = lr4(3000.0);
+        hp.linear_phase = false;
+        let t = TargetCurve { reference_level_db: 0.0, tilt_db_per_octave: 0.0, tilt_ref_freq: 1000.0,
+            high_pass: Some(hp), low_pass: Some(lr4(20_000.0)), low_shelf: None, high_shelf: None };
+        let s = BandFirSettings { taps: 65_536, sample_rate: sr, window: WindowType::Blackman, max_boost_db: 24.0,
+            noise_floor_db: -150.0, iterations: 3, freq_weighting: true, narrowband_limit: true,
+            nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0 };
+        let r = generate_band_fir(&t, &[], &s, false).unwrap();
+        let dp = (0..r.freq.len()).filter(|&i| r.freq[i] > 5_000.0 && r.freq[i] < 0.95 * sr / 2.0
+            && r.fir.realized_mag[i] + r.fir.norm_db > -40.0).fold(0.0f64, |m, i| m.max(r.dev_phase[i].abs()));
+        assert!(dp < 0.05, "{sr}: {dp:.3}° off at 5 kHz..0.95·Nyquist");
+    }
+}
+
+/// b141.115: a target still rising at the top edge (a high shelf) does not
+/// keep rising above 0.95·Nyquist — the continuation is at most the tilt.
+#[test]
+fn rising_top_edge_does_not_lift_the_ultrasonic_band() {
+    use phaseforge_lib::target::ShelfConfig;
+    let sr = 44_100.0;
+    let hs = ShelfConfig { freq_hz: 18_000.0, gain_db: 6.0, q: 0.707 };
+    let t = TargetCurve { reference_level_db: 0.0, tilt_db_per_octave: 0.0, tilt_ref_freq: 1000.0,
+        high_pass: Some(lr4(2000.0)), low_pass: None, low_shelf: None, high_shelf: Some(hs) };
+    let s = BandFirSettings { taps: 65_536, sample_rate: sr, window: WindowType::Blackman, max_boost_db: 24.0,
+        noise_floor_db: -150.0, iterations: 3, freq_weighting: true, narrowband_limit: true,
+        nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0 };
+    let r = generate_band_fir(&t, &[], &s, false).unwrap();
+    let g = 10f64.powf(r.fir.norm_db / 20.0);
+    let mut sp: Vec<Complex64> = r.fir.impulse.iter().map(|&v| Complex64::new(v * g, 0.0)).collect();
+    let n = sp.len();
+    FftPlanner::new().plan_fft_forward(n).process(&mut sp);
+    let at = |f: f64| db(sp[(f / sr * n as f64).round() as usize].norm());
+    let (edge, top) = (at(0.95 * sr / 2.0), at(0.995 * sr / 2.0));
+    println!("HS 18 kHz +6 dB: 0.95·Nyq {edge:.3} dB, 0.995·Nyq {top:.3} dB");
+    assert!(top - edge < 0.05, "rose {:.3} dB above the edge", top - edge);
+}

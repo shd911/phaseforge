@@ -331,6 +331,12 @@ pub(crate) fn generate_band_fir_routed(
     // and 230–250 ms to −100 dB (−62 dB 10–100 ms ahead of the peak), 0.7–0.9
     // and 1.8 ms continued; 16–20 kHz unchanged, LP bands bit-identical
     // (their slope sits under the floor clip anyway).
+    // b141.115 (Gemini audit 2026-10-29): the phase is held at its last value
+    // — a 0° tail under a mixed main's verbatim model phase (HP min + LP lin)
+    // was a phase step: 0.2–0.4° off at 5 kHz..0.95·Nyquist, 1–3 dB more
+    // ring ahead of the peak; held, 0.01°. And the slope may not rise faster
+    // than the target's own tilt: a shelf or boost still rising at the top
+    // edge is not a reason to lift the ultrasonic band.
     let nyq = sr / 2.0;
     let f_hi = *freq.last().expect("non-empty grid");
     if f_hi < nyq * 0.999 {
@@ -342,12 +348,14 @@ pub(crate) fn generate_band_fir_routed(
         } else {
             (mag[n - 1], 0.0)
         };
+        let slope = slope.min(target_curve.tilt_db_per_octave.max(0.0));
+        let ph_hi = *phase.last().expect("non-empty grid");
         for i in 1..=NOISE_TAIL_POINTS {
             let t = i as f64 / NOISE_TAIL_POINTS as f64;
             let f = f_hi * (f_end / f_hi).powf(t);
             freq.push(f);
             mag.push(m_hi + slope * (f / f_hi).log2());
-            phase.push(0.0);
+            phase.push(ph_hi);
         }
     }
 

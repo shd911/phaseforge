@@ -60,6 +60,7 @@ import { openHighQPopup } from "./HighQWarningPopup";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { projectDir, sanitize } from "../lib/project-io";
+import { type SectionRing, fmtRingMs, ringLabel, ringTitle, ringTooLong as ringTooLongFor } from "../lib/section-ring";
 
 /** b141.38: an out-of-range PEQ entry used to be dropped silently while the
  *  field kept showing it — the table and the model disagreed with no hint.
@@ -304,9 +305,6 @@ interface FilterBlockProps {
   partner?: import("../lib/types").FilterConfig | null; // b141.110: the linked filter on the other side
 }
 
-/** Rust `fir::section_ring::SectionRing`. */
-interface SectionRing { post60Ms: number; post100Ms: number; pre60Ms: number; pre100Ms: number; lowerBound: boolean }
-const fmtRingMs = (ms: number) => (ms < 10 ? ms.toFixed(1) : String(Math.round(ms)));
 
 const COMPLEMENT = "Complement";
 const COMPLEMENT_TITLE = "1 − H: этот фильтр — дополнение связанного «Произвольного Q» (та же частота, порядок и Q), "
@@ -350,10 +348,7 @@ function FilterBlock(props: FilterBlockProps) {
       { config: src.config, isLowPass: src.isLowPass, sampleRate: src.sampleRate }).catch(() => null),
   );
   const halfFileMs = () => exportTaps() / 2 / exportSampleRate() * 1000;
-  const ringTooLong = () => {
-    const r = ring();
-    return !!r && (r.post100Ms > halfFileMs() || (!!c()?.linear_phase && r.pre100Ms > halfFileMs()));
-  };
+  const ringTooLong = () => { const r = ring(); return !!r && ringTooLongFor(r, !!c()?.linear_phase, halfFileMs()); };
 
   return (
     <div class={`filter-block ${props.linked ? "fb-linked" : ""}`}>
@@ -490,11 +485,8 @@ function FilterBlock(props: FilterBlockProps) {
         </Show>
         <Show when={ring()}>
           {(r) => (
-            <div class="fb-ring" title={`Звон фильтра на частоте экспорта ${exportSampleRate() / 1000} кГц: ${c()!.linear_phase
-              ? "линейная фаза звенит симметрично — столько же до пика, сколько после"
-              : "минимальная фаза звенит только после пика"}. Половина файла экспорта: ${fmtRingMs(halfFileMs())} мс.`}>
-              {`Звон −60/−100 дБ: ${c()!.linear_phase ? "до и после пика " : ""}${r().lowerBound ? "≥ " : ""}`
-                + `${fmtRingMs(r().post60Ms)} / ${fmtRingMs(r().post100Ms)} мс`}
+            <div class="fb-ring" title={ringTitle(r(), c()!.linear_phase, exportSampleRate(), halfFileMs())}>
+              {ringLabel(r(), c()!.linear_phase)}
               <Show when={ringTooLong()}>
                 <div class="warn">{`⚠ Хвост длиннее половины файла экспорта (${fmtRingMs(halfFileMs())} мс): экспорт сдвинет задержку полосы или обрежет звон — увеличьте число отсчётов`}</div>
               </Show>

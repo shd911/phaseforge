@@ -156,6 +156,9 @@
   step was a zero-phase brick wall in a tweeter HP's passband (LR4 2 kHz at
   44.1/48 kHz: 7.3–8.0 ms pre-ring to −60 dB, 230–250 ms to −100 dB; 0.7–0.9 /
   1.8 ms continued). Pinned by `tests/linear_top_edge.rs`.
+  The tail HOLDS the last phase (b141.115 — 0° under a mixed main's verbatim
+  model phase was a step, 0.2–0.4°) and its slope is capped at max(tilt, 0)
+  (a shelf still rising at the edge must not lift the ultrasonic band).
   Pinned by `fir::band` `cepstral_min_phase_matches_iir_up_to_nyquist`,
   `tilt_phase_of_the_plot_is_the_fir_phase`.
 - **Sections at/above 0.49·sr** (b141.101, `fir::SECTION_MAX_FRACTION`):
@@ -223,7 +226,9 @@
   aliasing floor is 40 dB under −100 dB, linear = zero phase + the plot's
   Hilbert terms). An HP is read on 1 − HP (click removed) — reading against
   the click made it rate-dependent (×4.8 instead of ×10 for 100 Hz vs 1 kHz).
-  Warns when the −100 dB tail (linear: either side) exceeds half the file.
+  Warns when the −100 dB tail exceeds half the file (linear: either side;
+  min: rise + tail, b141.115). Asymmetric linear (Gaussian + subsonic) shows
+  before/after apart (`lib/section-ring.ts`).
   Pinned by `tests/section_ring.rs` vs the exported WAV (it found the linear
   main's 0.95·Nyquist wall, fixed in b141.112).
 - **Complementary crossover «1 − H»** (b141.109, `FilterConfig::complementary`,
