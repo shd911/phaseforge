@@ -219,9 +219,8 @@ describe("evaluateSum cache (b141.7)", () => {
     expect(r2.sumTargetMag).not.toEqual(r1.sumTargetMag);
   });
 
-  // b141.113: DELAY no longer reaches Σ target (only Σ meas / corrected,
-  // absent here) — the key still carries it; the target stays put.
-  it("alignmentDelay change → recompute (cache miss, Σ target unchanged)", async () => {
+  // b141.114: no measurements here, so DELAY reaches Σ target (TARGET_DELAY).
+  it("alignmentDelay change → recompute (cache miss, Σ target rotates)", async () => {
     const bands = [makeBand(), makeBand({ id: "b2" })];
     const r1 = await evaluateSum(bands, {});
     const r2 = await evaluateSum(
@@ -229,7 +228,7 @@ describe("evaluateSum cache (b141.7)", () => {
     );
     expect(sumRequestKey([makeBand({ id: "b2", alignmentDelay: 1.5 })]))
       .not.toBe(sumRequestKey([makeBand({ id: "b2" })]));
-    expect(r2.sumTargetPhase).toEqual(r1.sumTargetPhase);
+    expect(r2.sumTargetPhase).not.toEqual(r1.sumTargetPhase);
   });
 });
 

@@ -2257,14 +2257,14 @@ export default function FrequencyPlot() {
           if (sumRes) {
             // b141.104 (audit 4.7): from the per-band parts (polarity and
             // alignment delay applied analytically), not the wrapped Σ phase.
-            // b141.113: the Σ target carries no DELAY (TARGET_DELAY, sum.ts).
+            // b141.113/114: the Σ target carries DELAY only without measurements (TARGET_DELAY, sum.ts).
             const toGd = (per: Array<{ mag: number[]; phase: number[] } | null>, delayed: boolean): number[] | null => {
               const parts = per.map((p, i) => (p ? { ...p, ...sumMeta[i], delay: delayed ? sumMeta[i].delay : 0 } : null));
               if (!parts.some((p) => p)) return null;
               const gd = sumGroupDelayMs(sumRes.freq, parts);
               return interpOnGrid(sumRes.freq, gd, measGd.freqOut, { outside: "nan" }) as number[];
             };
-            if (sumRes.sumTargetMag) targetGdMs = toGd(sumRes.perBandTarget, false);
+            if (sumRes.sumTargetMag) targetGdMs = toGd(sumRes.perBandTarget, sumRes.targetDelayed);
             if (sumRes.sumCorrectedPhase) corrGdMs = toGd(sumRes.perBandCorrected, true);
           }
         } else {
@@ -2372,7 +2372,7 @@ export default function FrequencyPlot() {
               impulse: polarityAmplitude(sh.impulse, inv), step: polarityAmplitude(sh.step, inv) };
           };
           if (res.ir.measurement) measBands.push(wrap(res.ir.measurement, false));
-          if (res.ir.target) targetBands.push(wrap(res.ir.target, true, false)); // b141.113: no DELAY on targets
+          if (res.ir.target) targetBands.push(wrap(res.ir.target, true, false)); // b141.113: no DELAY on targets (these bands have measured phase)
           if (res.ir.corrected) corrBands.push(wrap(res.ir.corrected, true));
         }
 

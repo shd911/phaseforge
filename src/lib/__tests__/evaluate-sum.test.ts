@@ -447,6 +447,31 @@ describe("evaluateSum (b140.3.5) — Σ IR/Step via includeIr", () => {
     expect(delayed.ir!.target!.step).toEqual(plain.ir!.target!.step);
     expect(delayed.ir!.corrected!.impulse).not.toEqual(plain.ir!.corrected!.impulse);
   });
+
+  it("b141.114: without measurements DELAY reaches Σ target (SPL and IR)", async () => {
+    // A target-only design: DELAY is a design delay, nothing else shows it.
+    const noMeas = (n: string, o: Partial<BandState> = {}) => ({ ...flatBand(n, o), measurement: null }) as BandState;
+    const r = await evaluateSum([noMeas("a", { alignmentDelay: 0.001 })], { includeIr: true });
+    expect(r.targetDelayed).toBe(true);
+    const idx = r.freq.findIndex((v) => v >= 100);
+    expect(r.sumTargetPhase![idx]).toBeCloseTo(-36, 0);
+    const plain = await evaluateSum([noMeas("a"), noMeas("b")], { includeIr: true });
+    const delayed = await evaluateSum([
+      noMeas("a", { alignmentDelay: 0.00053 }),
+      noMeas("b", { alignmentDelay: 0.00067 }),
+    ], { includeIr: true });
+    expect(delayed.ir!.target!.step).not.toEqual(plain.ir!.target!.step);
+  });
+
+  it("b141.114: a magnitude-only measurement does not stop DELAY on Σ target", async () => {
+    const a = flatBand("a", { alignmentDelay: 0.001 });
+    (a.measurement as any).phase = null;
+    const r = await evaluateSum([a]);
+    expect(r.targetDelayed).toBe(true);
+    // One band with measured phase is enough to keep targets undelayed.
+    const r2 = await evaluateSum([a, flatBand("b")]);
+    expect(r2.targetDelayed).toBe(false);
+  });
 });
 
 describe("evaluateSum (b141.97) — band level = passband mean only", () => {

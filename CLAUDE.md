@@ -41,6 +41,9 @@
   точечно — запрещено.
   Σ target (SPL/GD/IR) суммирует цели БЕЗ DELAY (b141.113, TARGET_DELAY
   в sum.ts): DELAY компенсирует сдвиг замера, у цели его нет.
+  Исключение (b141.114, `targetCarriesDelay`): ни у одной полосы нет замера
+  с фазой → DELAY — проектная задержка, Σ target её несёт (иначе в проекте
+  из одних целей DELAY не виден ни на одном графике Σ).
 - **Golden baselines платформо-зависимы** (b141.13): хэши FIR бит-точные,
   libm (tan/cos) различается macOS↔Linux. golden_fir скипается на чужой
   ОС, pipeline_contract сравнивает только routes. Re-baseline: удалить

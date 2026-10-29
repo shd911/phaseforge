@@ -50,6 +50,9 @@ export interface SumEvalResult {
   /** True iff Σ Corrected was computed via coherentSum (all bands had
    *  phase). False = power-sum fallback (no phase, no polarity). */
   correctedCoherent: boolean;
+  /** b141.114: the Σ target carries the per-band DELAY — only when no
+   *  band has a measurement with phase (TARGET_DELAY). GD reads it. */
+  targetDelayed: boolean;
   /** b140.3.5: Σ IR/Step results (only set when options.includeIr=true).
    *  Each curve is a coherent sum on a wide IR grid (5 Hz – Nyquist·0.95)
    *  with polarity + alignment_delay applied per band, converted to time
@@ -127,7 +130,15 @@ const COHERENT_SUM_NULL_FLOOR = 1e-15;
  *  the measurement's acoustic offset; a target has none, so delaying it
  *  misaligned ideal targets — a 0.14 ms MF/HF difference dug −8 dB at a
  *  2.6 kHz LR4 crossover while Σ corrected stayed flat. Σ meas / corrected
- *  keep the delay. */
+ *  keep the delay.
+ *  b141.114: when NO band has a measurement with phase there is no acoustic
+ *  offset to compensate — DELAY is a design delay and the Σ target (SPL, GD,
+ *  IR/Step) carries it, or a target-only project could not see it at all.
+ *  A magnitude-only measurement does not count: it cannot be aligned. */
+export function targetCarriesDelay(bands: BandState[]): boolean {
+  return !bands.some((b) => (b.measurement?.phase?.length ?? 0) > 0);
+}
+
 export function coherentSum(
   freq: number[],
   bandsData: Array<{ mag: number[]; phase: number[]; sign: 1 | -1; delay: number } | null>,
@@ -239,6 +250,7 @@ async function evaluateSumImpl(
   // reuse its target output → saves N evaluate_target round-trips per
   // SUM render. Per-band measurement case stays on the existing path
   // (intentional refLevel difference, Logic-#3 audit).
+  const targetDelayed = targetCarriesDelay(bands);
   const allBandsNoMeasurement = bands.every(
     b => !b.measurement || b.measurement.freq.length === 0,
   );
@@ -263,7 +275,7 @@ async function evaluateSumImpl(
         mag: r.targetMag,
         phase: r.targetPhase,
         sign: band.inverted ? -1 : 1,
-        delay: 0, // b141.113: Σ target ignores DELAY — see TARGET_DELAY note
+        delay: targetDelayed ? (band.alignmentDelay ?? 0) : 0, // TARGET_DELAY
       };
       perBandTarget[i] = { mag: r.targetMag, phase: r.targetPhase };
     }
@@ -290,7 +302,7 @@ async function evaluateSumImpl(
         mag: response.magnitude,
         phase,
         sign: band.inverted ? -1 : 1,
-        delay: 0, // b141.113: Σ target ignores DELAY — see TARGET_DELAY note
+        delay: targetDelayed ? (band.alignmentDelay ?? 0) : 0, // TARGET_DELAY
       };
       perBandTarget[i] = { mag: response.magnitude, phase };
     }));
@@ -459,7 +471,7 @@ async function evaluateSumImpl(
         `${options?.sampleRate ?? 48000}|lvl:${corrLevelOffsetDb[bandIdx]}`;
       const cached = await memoEval(key, () => buildIrPartial(band, bandIdx, sign, delay));
       for (const part of [cached.tgt, cached.meas, cached.corr]) {
-        if (part) { part.sign = sign; part.delay = part === cached.tgt ? 0 : delay; }
+        if (part) { part.sign = sign; part.delay = part === cached.tgt && !targetDelayed ? 0 : delay; }
       }
       return cached;
     }));
@@ -563,6 +575,7 @@ async function evaluateSumImpl(
     sumCorrectedPhase,
     perBandCorrected,
     correctedCoherent,
+    targetDelayed,
     ir: irOut,
   };
 }
