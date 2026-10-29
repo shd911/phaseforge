@@ -56,7 +56,11 @@ export default function NumberInput(props: NumberInputProps) {
   const push = (v: number) => {
     const next = parseFloat(v.toFixed(prec()));
     inputEl.value = fmt(next);
-    if (next === val) return;
+    // b141.118: a direct edit supersedes the wheel's trailing value — it
+    // used to land 120 ms later and overwrite the newer one. If the parent
+    // has not seen the wheel's last value yet, an unchanged push still sends it.
+    const wheelPending = notifyThrottled.cancel();
+    if (next === val) { if (wheelPending) props.onChange(val); return; }
     val = next;
     props.onChange(val);
   };
@@ -64,6 +68,9 @@ export default function NumberInput(props: NumberInputProps) {
   // filter frequency, a tolerance…) at most every 120 ms plus the final
   // value — each onChange can start a full re-evaluation.
   const notifyThrottled = throttleTrailing((v: number) => props.onChange(v), 120);
+  // b141.118: never call onChange after unmount — the handler may already
+  // point at another band.
+  onCleanup(() => notifyThrottled.cancel());
 
   const inc = (dir: number) => {
     const s = step(dir);

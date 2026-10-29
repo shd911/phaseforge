@@ -12,12 +12,19 @@ vi.mock("@tauri-apps/api/core", () => ({
       return [new Array(n).fill(0), new Array(n).fill(0)];
     }
     if (cmd === "compute_target_hilbert_phase") return (args.freq as number[]).map(() => 0);
+    if (cmd === "evaluate_target") {
+      const n = (args.freq as number[]).length;
+      return { magnitude: new Array(n).fill(0), phase: new Array(n).fill(0) };
+    }
+    if (cmd === "compute_minimum_phase") return (args.freq as number[]).map(() => 0);
+    // compute_cross_section stays unmocked: it fails (b141.118 test below).
     throw new Error(`Unmocked command: ${cmd}`);
   }),
 }));
 
 import { createBand } from "../../stores/bands";
 import { evaluateBandFull, composeCorrected, sameGridValues } from "../band-evaluator/evaluate";
+import { evaluateSum } from "../band-evaluator/sum";
 import { computeExtension } from "../band-evaluator/extension";
 
 beforeEach(() => { calls.length = 0; });
@@ -70,5 +77,20 @@ describe("computeExtension inside the native range (3.24)", () => {
     const f = Math.sqrt(100 * 1000);
     const r = await computeExtension([100, 1000], [0, 10], null, [100, f, 1000], [0, 0, 0]);
     expect(r.mag[1]).toBeCloseTo(5, 9);
+  });
+});
+
+describe("a failed filter section is not a missing one (b141.118, external audit §2)", () => {
+  it("no Corrected curve for the band, and no Σ Corrected", async () => {
+    const band = createBand(1);
+    band.measurement = meas();
+    band.targetEnabled = true;
+    band.target.high_pass = { filter_type: "LinkwitzRiley", order: 4, freq_hz: 80, shape: null, linear_phase: false, q: null } as any;
+    const r = await evaluateBandFull({ band });
+    expect(r.correctedFailed).toBe(true);
+    expect(r.correctedMag).toBeNull();
+    expect(r.crossSectionMag).toBeNull();
+    const sum = await evaluateSum([band]);
+    expect(sum.sumCorrectedMag).toBeNull();
   });
 });

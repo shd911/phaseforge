@@ -3,6 +3,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render } from "solid-js/web";
 import NumberInput from "../NumberInput";
+import { WHEEL_PX_PER_STEP } from "../../lib/wheel-step";
 
 let dispose: (() => void) | undefined;
 afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""; });
@@ -71,6 +72,40 @@ describe("NumberInput", () => {
     input.focus();
     key(input, "ArrowUp");
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  // b141.118 (external audit 2026-10-29 §1): the wheel's trailing value
+  // landed 120 ms after a newer direct edit and overwrote it.
+  it("a direct edit is not overwritten by the wheel's trailing value", () => {
+    vi.useFakeTimers();
+    const now = vi.spyOn(performance, "now");
+    let t = 1000; now.mockImplementation(() => t);
+    const onChange = vi.fn();
+    const input = mount(onChange);
+    input.focus();
+    const field = input.closest(".num-input")!;
+    const wheel = () => field.dispatchEvent(new WheelEvent("wheel", { deltaY: -WHEEL_PX_PER_STEP, bubbles: true, cancelable: true }));
+    wheel(); t += 10; wheel(); t += 10;          // 81 now, 82 pending
+    key(input, "ArrowUp");                        // 83 directly
+    t += 200; vi.advanceTimersByTime(200);
+    expect(onChange.mock.calls.map((c) => c[0])).toEqual([81, 83]);
+    now.mockRestore(); vi.useRealTimers();
+  });
+
+  it("no wheel value reaches the parent after unmount", () => {
+    vi.useFakeTimers();
+    const now = vi.spyOn(performance, "now");
+    let t = 1000; now.mockImplementation(() => t);
+    const onChange = vi.fn();
+    const input = mount(onChange);
+    input.focus();
+    const field = input.closest(".num-input")!;
+    const wheel = () => field.dispatchEvent(new WheelEvent("wheel", { deltaY: -WHEEL_PX_PER_STEP, bubbles: true, cancelable: true }));
+    wheel(); t += 10; wheel();
+    dispose?.(); dispose = undefined;
+    t += 200; vi.advanceTimersByTime(200);
+    expect(onChange.mock.calls.map((c) => c[0])).toEqual([81]);
+    now.mockRestore(); vi.useRealTimers();
   });
 
   it("the field carries its accessible name", () => {

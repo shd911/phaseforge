@@ -90,6 +90,10 @@ export interface BandEvalResult {
    *  linear-Gaussian + subsonic produced corrected phase = 0. */
   correctedMag: number[] | null;
   correctedPhase: number[] | null;
+  /** b141.118: the filter section could not be computed — there is no
+   *  Corrected curve (null above), and Σ Corrected must not be drawn
+   *  without this band. */
+  correctedFailed: boolean;
 
   refLevel: number;
 
@@ -243,29 +247,31 @@ export async function composeCorrected(
  *  «Corrected» curve (band view, band IR, Σ, Σ IR): they used HP/LP only,
  *  so the plot missed what the exported WAV contains. Phase is the analytic
  *  phase before the Gaussian/subsonic Hilbert terms (callers add those via
- *  reconstructTargetPhase). */
+ *  reconstructTargetPhase).
+ *  b141.118 (external audit 2026-10-29 §2): a failure THROWS. It returned
+ *  null, which every caller reads as "no section" — a Corrected curve
+ *  without its HP/LP that looked valid. */
+const FAILED: unique symbol = Symbol("section failed");
+
 export async function filterSection(
   freq: number[],
   target: BandState["target"],
   sampleRate: number,
-): Promise<{ mag: number[]; phase: number[] } | null> {
-  try {
-    const [xm, xp] = await invoke<[number[], number[], number]>("compute_cross_section", {
-      freq,
-      highPass: target.high_pass ?? null,
-      lowPass: target.low_pass ?? null,
-      lowShelf: target.low_shelf ?? null,
-      highShelf: target.high_shelf ?? null,
-      tiltDbPerOctave: target.tilt_db_per_octave ?? 0,
-      tiltRefFreq: target.tilt_ref_freq ?? 1000,
-      sampleRate,
-    });
-    if (!xm || xm.length !== freq.length) return null;
-    return { mag: xm, phase: xp };
-  } catch (e) {
-    console.warn("[filterSection] compute_cross_section failed:", e);
-    return null;
+): Promise<{ mag: number[]; phase: number[] }> {
+  const [xm, xp] = await invoke<[number[], number[], number]>("compute_cross_section", {
+    freq,
+    highPass: target.high_pass ?? null,
+    lowPass: target.low_pass ?? null,
+    lowShelf: target.low_shelf ?? null,
+    highShelf: target.high_shelf ?? null,
+    tiltDbPerOctave: target.tilt_db_per_octave ?? 0,
+    tiltRefFreq: target.tilt_ref_freq ?? 1000,
+    sampleRate,
+  });
+  if (!xm || xm.length !== freq.length || !xp || xp.length !== freq.length) {
+    throw new Error(`compute_cross_section: ${xm?.length ?? 0} points for a ${freq.length}-point grid`);
   }
+  return { mag: xm, phase: xp };
 }
 
 /** Same grid, bin for bin. */
@@ -431,8 +437,14 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
     enabledPeq.length > 0
       ? invoke<[number[], number[]]>("compute_peq_complex", { freq, bands: enabledPeq, sampleRate: peqSampleRate })
       : Promise.resolve(null),
-    band.targetEnabled ? filterSection(freq, band.target, peqSampleRate) : Promise.resolve(null),
+    band.targetEnabled
+      ? filterSection(freq, band.target, peqSampleRate).catch((e): typeof FAILED => {
+          console.error("[XS] filter section failed — no Corrected curve:", e);
+          return FAILED;
+        })
+      : Promise.resolve(null),
   ]);
+  const correctedFailed = xsRes === FAILED;
   if (peqRes) {
     peqMag = peqRes[0];
     peqPhase = peqRes[1];
@@ -453,9 +465,9 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
   //      — used to build the corrected response (measurement + PEQ + xs).
   let crossSectionMag: number[] | null = null;
   let crossSectionPhase: number[] | null = null;
-  if (band.targetEnabled) {
-    crossSectionMag = xsRes?.mag ?? null;
-    crossSectionPhase = xsRes?.phase ?? null;
+  if (band.targetEnabled && xsRes && xsRes !== FAILED) {
+    crossSectionMag = xsRes.mag;
+    crossSectionPhase = xsRes.phase;
   }
 
   // 5c. Corrected = measurement + PEQ + cross-section. Phase goes through
@@ -464,7 +476,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
   //      the SPL bug where corrected phase = 0 for linear-Gaussian + subsonic.
   let correctedMag: number[] | null = null;
   let correctedPhase: number[] | null = null;
-  if (measurement) {
+  if (measurement && !correctedFailed) {
     const c = await composeCorrected(freq, measurement.magnitude, measurement.phase ?? null, band, evalSr, {
       peq: { mag: peqMag, phase: peqPhase },
       section: crossSectionMag && crossSectionPhase ? { mag: crossSectionMag, phase: crossSectionPhase } : null,
@@ -704,6 +716,7 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
     crossSectionPhase,
     correctedMag,
     correctedPhase,
+    correctedFailed,
     refLevel,
     extendedFreq,
     nativeRange,

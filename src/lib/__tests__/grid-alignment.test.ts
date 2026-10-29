@@ -22,6 +22,11 @@ vi.mock("@tauri-apps/api/core", () => ({
       return [new Array(n).fill(2), new Array(n).fill(0)]; // +2 dB everywhere
     }
     if (cmd === "get_smoothed") return args.magnitude;
+    // b141.118: a failed section no longer passes as "no section".
+    if (cmd === "compute_cross_section") {
+      const n = (args.freq as number[]).length;
+      return [new Array(n).fill(0), new Array(n).fill(0), 0];
+    }
     throw new Error(`Unmocked command: ${cmd}`);
   }),
 }));

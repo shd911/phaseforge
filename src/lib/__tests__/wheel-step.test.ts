@@ -63,4 +63,18 @@ describe("throttleTrailing", () => {
     expect(seen).toEqual([1, 3]);
     now.mockRestore(); vi.useRealTimers();
   });
+
+  it("cancel drops the trailing value and reports it", () => {
+    vi.useFakeTimers();
+    const now = vi.spyOn(performance, "now");
+    let t = 1000; now.mockImplementation(() => t);
+    const seen: number[] = [];
+    const f = throttleTrailing((v: number) => seen.push(v), 120);
+    f(1); t += 10; f(2);
+    expect(f.cancel()).toBe(true);
+    expect(f.cancel()).toBe(false);
+    t += 200; vi.advanceTimersByTime(200);
+    expect(seen).toEqual([1]);
+    now.mockRestore(); vi.useRealTimers();
+  });
 });

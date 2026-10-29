@@ -97,12 +97,17 @@ export function attachFieldWheel(el: HTMLElement, h: FieldWheelHandlers): void {
 }
 
 /** Call `fn` at most every `ms` while values keep coming, and once more with
- *  the last value when they stop. */
-export function throttleTrailing<T>(fn: (v: T) => void, ms: number): (v: T) => void {
+ *  the last value when they stop. `cancel()` drops the trailing value and
+ *  says whether there was one (b141.118: a direct edit must not be
+ *  overwritten 120 ms later by an older wheel value). */
+export function throttleTrailing<T>(
+  fn: (v: T) => void,
+  ms: number,
+): ((v: T) => void) & { cancel: () => boolean } {
   let last = -Infinity;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let pending: { v: T } | null = null;
-  return (v: T) => {
+  const call = (v: T) => {
     const now = performance.now();
     if (now - last >= ms) {
       last = now;
@@ -118,4 +123,11 @@ export function throttleTrailing<T>(fn: (v: T) => void, ms: number): (v: T) => v
       }, ms - (now - last));
     }
   };
+  const cancel = () => {
+    if (timer) { clearTimeout(timer); timer = undefined; }
+    const had = pending !== null;
+    pending = null;
+    return had;
+  };
+  return Object.assign(call, { cancel });
 }

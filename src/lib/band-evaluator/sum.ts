@@ -407,7 +407,10 @@ async function evaluateSumImpl(
   let sumCorrectedMag: number[] | null = null;
   let sumCorrectedPhase: number[] | null = null;
   let correctedCoherent = true;
-  if (anyCorrected) {
+  // b141.118: a band whose filter section failed has no Corrected curve; a
+  // Σ without it would look valid and be wrong — draw no Σ Corrected.
+  const corrFailed = bands.some((b, i) => b.targetEnabled && perBandResults[i].correctedFailed);
+  if (anyCorrected && !corrFailed) {
     if (!anyMissingPhase) {
       const cs = coherentSum(freq, correctedDataForSum);
       sumCorrectedMag = cs?.mag ?? null;
@@ -460,6 +463,8 @@ async function evaluateSumImpl(
       tgt: Part | null;
       meas: Part | null;
       corr: Part | null;
+      /** b141.118: the filter section failed — no Σ corrected IR at all. */
+      corrFailed?: boolean;
     }
 
     const partials: IrPartial[] = await Promise.all(bands.map(async (band, bandIdx): Promise<IrPartial> => {
@@ -524,10 +529,15 @@ async function evaluateSumImpl(
       if (band.targetEnabled) {
         const enabledPeq = (band.peqBands ?? []).filter((p: PeqBand) => p.enabled);
         // b141.10: same scalar level shift as the SPL Σ corrected curve.
-        const c = await composeCorrected(irFreq, extMeasMag, measPhaseArr, band, sumSr, {
-          levelDb: corrLevelOffsetDb[bandIdx],
-        });
-        out.corr = { magnitude: c.mag, phase: c.phase!, delay, sign };
+        try {
+          const c = await composeCorrected(irFreq, extMeasMag, measPhaseArr, band, sumSr, {
+            levelDb: corrLevelOffsetDb[bandIdx],
+          });
+          out.corr = { magnitude: c.mag, phase: c.phase!, delay, sign };
+        } catch (e) {
+          console.error("[XS] Σ IR: filter section failed — no Σ corrected IR:", e);
+          out.corrFailed = true;
+        }
       }
 
       return out;
@@ -560,7 +570,7 @@ async function evaluateSumImpl(
       const r = await toIR(tgtParts);
       if (r) irOut.target = r;
     }
-    if (corrParts.length > 0) {
+    if (corrParts.length > 0 && !partials.some((p) => p.corrFailed)) {
       const r = await toIR(corrParts);
       if (r) irOut.corrected = r;
     }

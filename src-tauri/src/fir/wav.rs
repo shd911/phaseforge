@@ -24,7 +24,10 @@ fn validate(impulse: &[f64], sample_rate: f64, bytes_per_sample: usize) -> Resul
     if impulse.is_empty() {
         return Err(AppError::Config { message: "WAV export: the impulse is empty".into() });
     }
-    if let Some(i) = impulse.iter().position(|v| !v.is_finite()) {
+    // b141.118 (external audit 2026-10-29 §4): checked in the written format —
+    // a finite f64 beyond f32::MAX became +inf after the f32 cast.
+    let finite = |v: f64| if bytes_per_sample == 4 { (v as f32).is_finite() } else { v.is_finite() };
+    if let Some(i) = impulse.iter().position(|&v| !finite(v)) {
         return Err(AppError::Dsp {
             message: format!("WAV export: sample {i} of {} is not finite ({})", impulse.len(), impulse[i]),
         });
@@ -124,7 +127,13 @@ mod tests {
             assert!(export_wav_f64(&imp, sr, &path).is_err(), "f64 accepted {imp:?} @ {sr}");
             assert!(export_wav_f32(&imp, sr, &path).is_err(), "f32 accepted {imp:?} @ {sr}");
         }
+        // b141.118: finite in f64, infinite once cast to f32 — the f32 writer
+        // refuses it, the f64 one still writes it.
+        assert!(export_wav_f32(&[1.0, 1e39], 48000.0, &path).is_err(), "f32 accepted 1e39");
         assert_eq!(std::fs::read(&path).unwrap(), good, "a rejected export touched the file");
+        let p64 = tmp("reject64");
+        assert!(export_wav_f64(&[1.0, 1e39], 48000.0, &p64).is_ok());
+        std::fs::remove_file(&p64).ok();
         std::fs::remove_file(&path).ok();
     }
 
