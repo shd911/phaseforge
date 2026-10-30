@@ -43,10 +43,10 @@ export interface BandEvalRequest {
   /** Override the freq grid. If omitted: measurement.freq when present,
    *  otherwise a 512-point log grid 5 Hz – 40 kHz via evaluate_target_standalone. */
   freq?: number[];
-  /** Pass a config to also generate FIR coefficients via generate_model_fir.
-   *  If omitted, fir output is undefined. */
+  /** Pass a config to also generate FIR coefficients via generate_band_fir
+   *  (only when band.targetEnabled). If omitted, fir output is undefined. */
   fir?: FirRequestConfig;
-  /** Generate IR + step via compute_impulse / compute_corrected_impulse. */
+  /** Generate IR + step via compute_impulse. */
   includeIr?: boolean;
   /** b140.2.1.3: when set, overrides the per-band autoRefLevel that
    *  shifts target_curve.reference_level_db. evaluateSum uses this to
@@ -593,6 +593,9 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
       try {
         const irFMax = Math.min(40000, sr / 2 * 0.95);
         const irFreqRaw = buildLogGrid(512, 5, irFMax);
+        // Without a measurement refLevel already IS reference_level_db, so the
+        // level counts twice here. Harmless: compute_impulse normalises the
+        // impulse and step to their peaks.
         const irTargetCurve = {
           ...JSON.parse(JSON.stringify(targetCurve)),
           reference_level_db: (targetCurve.reference_level_db ?? 0) + refLevel,
@@ -658,13 +661,13 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
     if (!ir.measurement) await rawMeasurementIr(ir);
   }
 
-  // 8. b140.3.2: extension block. Single source of truth for "what does the
-  //    measurement / corrected look like outside the native range?". When
-  //    the band has measurement + targetEnabled we evaluate target on a
-  //    standard wide grid and extend both measurement and corrected via
-  //    target shape + boundary offset (magnitude) and Hilbert reconstruction
-  //    + boundary offsets (phase). evaluateSum and the band view both read
-  //    from these fields — no extension logic anywhere else.
+  // 8. b140.3.2: extension block for the band view: what the measurement /
+  //    corrected look like outside the native range. When the band has
+  //    measurement + targetEnabled we evaluate target on a standard wide grid
+  //    and extend both measurement and corrected via target shape + boundary
+  //    offset (magnitude) and Hilbert reconstruction + boundary offsets
+  //    (phase). The extension RULE is one (`computeExtension`), the calls are
+  //    not: the IR block above and evaluateSum run it on their own grids.
   let extendedFreq: number[] | null = null;
   let nativeRange: [number, number] | null = null;
   let extendedMeasurementMag: number[] | null = null;
@@ -677,8 +680,9 @@ async function evaluateBandFullImpl(req: BandEvalRequest): Promise<BandEvalResul
     nativeRange = [measurement.freq[0], measurement.freq[measurement.freq.length - 1]];
 
     // Target on extendedFreq for extension shape — mirrors the level
-    // adjustment the measurement-grid target eval used above so the boundary
-    // offset compensates for any constant level mismatch.
+    // adjustment of the measurement-grid target eval above. refLevel changes
+    // nothing here: the boundary offset in computeExtension cancels any
+    // constant level of the target.
     const tgtCurveExt = { ...targetCurve, reference_level_db: targetCurve.reference_level_db + refLevel };
     const tgtRespExt = await invoke<TargetResponse>("evaluate_target", {
       target: tgtCurveExt, freq: extendedFreq,

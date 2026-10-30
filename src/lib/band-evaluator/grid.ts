@@ -140,8 +140,9 @@ export function interpOnGrid(
  *  at 3 ms that is > 180° between neighbouring bins of a 1/48-octave or
  *  512-point grid above ~10 kHz, and shortest-arc then turns the wrong way
  *  (179° error at 16 kHz). The residual after removing τ is slow, so the
- *  same interpolation is exact enough. Values at the source nodes are
- *  unchanged; bands with |τ| < 0.5 ms are interpolated as before. */
+ *  same interpolation is exact enough. Values at the source nodes keep their
+ *  angle but come back wrapped to (−180, 180]; bands with |τ| < 0.5 ms are
+ *  interpolated as before. */
 export function interpPhaseOnGrid(
   srcFreq: number[],
   srcPhase: readonly (number | null)[],

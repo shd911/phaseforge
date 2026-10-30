@@ -1,20 +1,20 @@
 //! b140.7: IIR-based min-phase FIR pipeline.
 //!
-//! For non-Gaussian Min-Phase user choice (linear_phase_main = false,
-//! no subsonic protect, no Composite linear), we synthesise the FIR
-//! impulse from an analytical IIR cascade rather than the cepstral
+//! For a non-Gaussian min-phase main (`dispatch::route_for`:
+//! linear_phase_main = false, no subsonic protect, no tilt), we synthesise
+//! the FIR impulse from an analytical IIR cascade rather than the cepstral
 //! FFT pipeline. Because every section is built from analog filter
 //! coefficients with all poles in the left-half plane and bilinear-
 //! transformed to digital, the resulting impulse is **causal by
-//! construction** — peak at sample 0, no constant group delay
-//! artefact, and magnitude follows the analytical target exactly
-//! (within bilinear pre-warping accuracy).
+//! construction** — nothing precedes sample 0 (the peak follows the
+//! section's rise time, later for an LF section), no constant group delay
+//! artefact, and magnitude follows the analytical target (within bilinear
+//! pre-warping accuracy).
 //!
-//! Scope b140.7: LR / Butterworth / Custom HP+LP, optional PEQ
-//! peaking sections, no Bessel (routes to FFT path), no Gaussian,
-//! no subsonic protect, no Composite linear-phase. The FFT path
-//! (`generate_model_fir`) is left untouched and serves every other
-//! configuration.
+//! Scope: LR / Butterworth / Custom / Bessel (cascade since b141.108) HP+LP,
+//! target shelves, PEQ sections; no Gaussian, no subsonic protect, no tilt,
+//! no linear-phase section. The FFT path (`generate_model_fir`) serves every
+//! other configuration.
 //!
 //! References used while writing this:
 //! - Robert Bristow-Johnson, "Cookbook formulae for audio EQ biquad
@@ -35,17 +35,13 @@ use super::types::*;
 use super::helpers::compute_causality;
 
 // ---------------------------------------------------------------------------
-// Routing predicate — when can we use the IIR path?
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // Digital biquad (Direct Form I)
 // ---------------------------------------------------------------------------
 
 /// One second-order section in the standard biquad form
 /// `H(z) = (b0 + b1·z⁻¹ + b2·z⁻²) / (1 + a1·z⁻¹ + a2·z⁻²)`.
-/// Sections with `b2 = a2 = 0` represent first-order filters (LR-2 needs
-/// these, Butterworth odd orders too).
+/// Sections with `b2 = a2 = 0` represent first-order filters (Butterworth
+/// odd orders, and LR of an odd order, which is two of them).
 #[derive(Clone, Debug)]
 pub struct DigitalBiquad {
     pub b0: f64, pub b1: f64, pub b2: f64,
@@ -196,8 +192,8 @@ fn butterworth_has_first_order(order: u8) -> bool { order % 2 == 1 }
 // ---------------------------------------------------------------------------
 
 /// Build the digital biquad cascade for a single FilterConfig (LP if
-/// `is_lp`, HP otherwise). LR-N is realised as TWO Butterworth-(N/2)
-/// cascades concatenated.
+/// `is_lp`, HP otherwise). LR-N is realised as TWO Butterworth-N cascades
+/// concatenated (PhaseForge convention: LR-N = (BU-N)²).
 pub fn build_filter_cascade(
     cfg: &FilterConfig, is_lp: bool, sr: f64,
 ) -> Result<Vec<DigitalBiquad>, String> {
@@ -352,8 +348,8 @@ pub fn build_peq_biquad(band: &PeqBand, sr: f64) -> DigitalBiquad {
 
 /// Apply a unit impulse δ[n] through the cascade and return `n_taps`
 /// samples. The impulse is causal by construction (analog poles in LHP →
-/// bilinear-stable digital poles inside the unit circle), so impulse[0]
-/// is the natural location of the peak.
+/// bilinear-stable digital poles inside the unit circle): nothing precedes
+/// impulse[0]. The peak itself lies later on an LF section (its rise time).
 pub fn cascade_impulse(biquads: &[DigitalBiquad], n_taps: usize) -> Vec<f64> {
     let mut impulse = vec![0.0_f64; n_taps];
     let mut states: Vec<[f64; 4]> = vec![[0.0; 4]; biquads.len()];
@@ -436,23 +432,17 @@ pub fn generate_min_phase_fir_iir(input: &IirPathInput) -> Result<FirModelResult
     );
 
     // 2. Apply impulse → raw causal IIR impulse response (truncated to n_fft).
-    //    This is the analytical filter realisation in time domain. Its FFT
-    //    equals the analytical frequency response by construction, so we
-    //    use it directly for `realized_mag/phase` (no phase corrections).
+    //    This is the analytical filter realisation in time domain.
     let raw_impulse = cascade_impulse(&biquads, n_fft);
     let n = raw_impulse.len();
     let raw_peak_idx = raw_impulse.iter().enumerate()
         .max_by(|(_, a), (_, b)| a.abs().partial_cmp(&b.abs()).unwrap_or(std::cmp::Ordering::Equal))
         .map(|(i, _)| i).unwrap_or(0);
 
-    // 4. b140.7.10: build the WAV impulse separately from the plot data.
-    //    Pad with exactly N/2 leading zeros (REPhase convention) so REW's
-    //    WAV-import path auto-locates the peak near the centre — REW
-    //    mis-handled peak-at-start impulses on sr = 44.1/48 kHz (notch
-    //    artefacts on otherwise correct content). The padding is applied
-    //    only to the WAV output; UI plot keeps reading from the raw
-    //    cascade (no phase correction needed → no parity / wrap artefacts
-    //    near Nyquist, no over-subtraction of LP natural delay).
+    // 4. b140.7.10: build the WAV impulse: the cascade delayed by leading
+    //    zeros, N/2 when the tail fits (REPhase convention; adaptive below).
+    //    REW mis-handled peak-at-start impulses on sr = 44.1/48 kHz (notch
+    //    artefacts on otherwise correct content).
     let half = n / 2;
     // b141.8 (audit): the shift is adaptive, not a fixed N/2. Shifting by k
     // discards the last k samples of the causal cascade impulse; for small
@@ -460,9 +450,9 @@ pub fn generate_min_phase_fir_iir(input: &IirPathInput) -> Result<FirModelResult
     // energy and skewed the shipped WAV by ~2-3 dB at LF vs the plotted
     // response. Center at N/2 when the tail has decayed (≤ -100 dB of peak),
     // otherwise shrink the pad so no significant sample is dropped — content
-    // correctness wins over peak centering for REW import.
+    // correctness wins over the full N/2.
     // b141.14: the cepstral path mirrors this exact block (cepstral.rs,
-    // unified WAV peak convention) — keep the two in sync on any change.
+    // unified WAV delay convention) — keep the two in sync on any change.
     let peak_abs = raw_impulse.iter().fold(0.0_f64, |a, &v| a.max(v.abs()));
     let tail_threshold = peak_abs * 1e-5;
     let last_significant = raw_impulse
@@ -561,7 +551,7 @@ pub fn generate_min_phase_fir_iir(input: &IirPathInput) -> Result<FirModelResult
     );
 
     // Rename for the return statement: `impulse` is the WAV-bound centered
-    // version; `realized_mag` / `realized_phase` came from raw FFT above.
+    // version; `realized_mag` / `realized_phase` are its own FFT (step 5b).
     let impulse = wav_impulse;
 
     let mut result = FirModelResult {

@@ -3,26 +3,24 @@
 //! Locks down the unified-API contract that Phase 2 (`trait FirPipeline`)
 //! must satisfy:
 //!   - Single entry point taking (hp, lp, peq, fir_config, freq) → FirModelResult.
-//!   - Routing decision derived from the same predicate that JS-side
-//!     `pickFirRoute` uses (LR/BW/Custom + min-phase + no subsonic → IIR,
+//!   - Routing decision derived from the production predicate
+//!     `fir::route_for` (LR/BW/Custom/Bessel + min-phase + no subsonic → IIR,
 //!     everything else → cepstral).
 //!   - For each route the produced FirModelResult hashes to a baseline
 //!     committed in tests/fixtures/pipeline_contract.json.
 //!
-//! Today the test routes via local helpers below (`pick_route_rust` +
-//! `evaluate_via_contract`) that directly call `generate_min_phase_fir_iir`
-//! or `generate_model_fir`. After Phase 2 lands, only `evaluate_via_contract`
-//! switches to `pick_pipeline(...).evaluate(...)`; baselines must remain
-//! bit-identical (modulo the 6-decimal rounding in `hash_fir_result`).
+//! The test routes via `evaluate_via_contract` below, which calls
+//! `pick_pipeline(...).evaluate(...)`; baselines must remain bit-identical
+//! (modulo the 6-decimal rounding in `hash_fir_result`). Production does not
+//! use `pick_pipeline` (see `fir/pipeline.rs`).
 //!
 //! Bootstrap workflow mirrors golden_fir_snapshots.rs.
 //!
 //! Why this is separate from `golden_fir_snapshots.rs`:
 //!   - golden_fir directly chooses the pipeline per fixture (value lock).
 //!   - pipeline_contract uses the ROUTING PREDICATE to choose, so it
-//!     additionally locks down that routing-decision parity across JS/Rust.
-//!     Drift here = JS and Rust disagree about which path a given config
-//!     should go to. Drift in golden_fir = DSP math changed.
+//!     additionally locks down the routing decision. Drift here = a config
+//!     moved to another path. Drift in golden_fir = DSP math changed.
 
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -37,8 +35,7 @@ use phaseforge_lib::target::{FilterConfig as TargetFilterConfig, FilterType as T
 // ---------------------------------------------------------------------------
 // Routing predicate — b140.12: imported from production source
 // (`phaseforge_lib::fir::route_for`). The earlier in-test mirror was
-// removed; this test now LOCKS DOWN the production predicate's parity
-// with JS-side `pickFirRoute` via the table-driven test below.
+// removed; the table-driven test below LOCKS DOWN the predicate's decisions.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -302,9 +299,8 @@ fn pipeline_contract_matches_baseline() {
 
 #[test]
 fn rust_routing_predicate_matches_js_decisions() {
-    // Direct table-driven mirror of src/lib/__tests__/routing-decision.test.ts.
-    // Any divergence here means the JS-side and Rust-side routing decisions
-    // would disagree after Phase 2 unification.
+    // Table-driven pin of `route_for`'s decisions (routing lives in Rust since
+    // b141.70, the JS predicate this once mirrored is gone).
     let lr = lr4(1000.0);
     let bw_ = bw(4, 1000.0);
     let cust = TargetFilterConfig {

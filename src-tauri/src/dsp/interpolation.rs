@@ -1,7 +1,8 @@
 /// Interpolate measurement onto a log-spaced frequency grid.
 ///
 /// Used for display and PEQ fitting. Typically 1024 points from 10 Hz to 24 kHz.
-/// Uses linear interpolation in log(freq) space.
+/// Only the output grid is log-spaced: between source points the value is
+/// interpolated linearly in Hz (`interp_1d`).
 pub fn interpolate_log_grid(
     freq: &[f64],
     mag: &[f64],

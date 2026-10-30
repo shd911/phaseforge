@@ -44,6 +44,8 @@
   Исключение (b141.114, `targetCarriesDelay`): ни у одной полосы нет замера
   с фазой → DELAY — проектная задержка, Σ target её несёт (иначе в проекте
   из одних целей DELAY не виден ни на одном графике Σ).
+  Решается по ВСЕМ полосам проекта (b141.130, опция `targetDelayed` у
+  `evaluateSum`), а не по показанным в легенде.
 - **Golden baselines платформо-зависимы** (b141.13): хэши FIR бит-точные,
   libm (tan/cos) различается macOS↔Linux. golden_fir скипается на чужой
   ОС, pipeline_contract сравнивает только routes. Re-baseline: удалить
@@ -166,6 +168,8 @@
   rule for both routes: PEQ there is dropped, a crossover or shelf there
   routes to cepstral (its in-band part), each with a user warning
   (`BandFirResult.warnings` → export toast). Never an error, never NaN.
+  The plot drops the same PEQ (b141.127, `fir::band::peq_response_as_exported`,
+  behind `compute_peq_complex`): Corr FIR drew it beside an impulse without it.
 - **The FIR is level-free** (b141.101): `generate_band_fir` evaluates the
   target with `reference_level_db = 0` — the level used to move «Макс.
   подъём», the noise floor and `peak_boost_db`. `norm_db` gets the level

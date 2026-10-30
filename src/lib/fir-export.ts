@@ -67,10 +67,10 @@ async function generateBandImpulse(req: ReturnType<typeof firExportRequest>): Pr
   };
 }
 
-// b141.14: every route pads the impulse with N/2 leading zeros, so bands
-// share a latency and stay aligned in a convolver. The b141.8
-// mixed-convention warning (`bandWavConvention` / `mixedWavConventionWarning`)
-// is gone.
+// b141.14: every route pads the impulse with leading zeros, N/2 unless the
+// tail does not fit, so bands share a latency; a shortfall is made up in the
+// convolver (`convolverDelaySeconds`). The b141.8 mixed-convention warning
+// (`bandWavConvention` / `mixedWavConventionWarning`) is gone.
 
 /** b141.16 (audit): residual desync check, b141.19: measured on the applied
  *  DELAY rather than the peak index. The N/2 shift is adaptive — when the
@@ -109,11 +109,11 @@ export function convolverDelaySeconds(
   return alignmentDelayS + shortfall / sampleRate;
 }
 
-/** b141.50 (audit 2026-10-01 H6): polarity and alignment delay are shown in
- *  Σ but, like the per-band level, are NOT baked into the WAV — they belong
- *  to the convolver/host (HQPlayer parity). An inverted LR tweeter whose WAV
- *  ships uninverted sums to a null where the plot shows +3 dB, so the export
- *  says so. Returns a user-facing note, or null when nothing is left to set. */
+/** b141.50 (audit 2026-10-01 H6): the alignment delay is shown in Σ but, like
+ *  the per-band level, is NOT baked into the WAV — it belongs to the
+ *  convolver/host (HQPlayer parity), so the export says so. Polarity IS written
+ *  since b141.100 (`wavImpulse`): the export passes `inverted = false`.
+ *  Returns a user-facing note, or null when nothing is left to set. */
 export function hostSettingsNote(
   inverted: boolean, alignmentDelayS: number, bandName: string, shortfallS = 0,
 ): string | null {

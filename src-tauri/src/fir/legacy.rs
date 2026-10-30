@@ -1,18 +1,10 @@
-//! b140.13.1 — legacy FIR-correction pipelines extracted from
-//! `fir/mod.rs`. Two functions live here, both retained verbatim so
-//! their callers (Tauri commands `generate_fir` / `generate_hybrid_fir`
-//! in `crate::lib`) keep the same `crate::fir::generate_fir(...)`
-//! resolution path via the re-export in `fir/mod.rs`.
+//! b140.13.1 — the legacy measurement-based FIR-correction pipeline
+//! (`generate_fir`), extracted from `fir/mod.rs`.
 //!
-//! "Legacy" in the sense of architectural priority: the cepstral
-//! `generate_model_fir` and the analytical `iir_path` are the two
-//! supported pipelines going forward. These functions are kept because
-//! the JS UI still calls them through dedicated Tauri commands for the
-//! measurement-based correction flow; they are not deprecated.
-//!
-//! Behaviour is byte-identical to the pre-b140.13.1 definitions —
-//! verified by `golden_fir_snapshots` and `pipeline_contract` baselines
-//! staying unchanged across this move.
+//! No production caller: the cepstral `generate_model_fir` and the
+//! analytical `iir_path` are the two production pipelines. It is built
+//! under `cfg(test)` only, as a baseline for the tests in `fir/tests.rs`
+//! (see `fir/mod.rs`).
 
 use num_complex::Complex64;
 

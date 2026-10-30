@@ -29,8 +29,8 @@ export const [tolerance, setTolerance] = settingSignal(1.0);
 export const [maxBands, setMaxBands] = settingSignal(20);
 export const [gainRegularization, setGainRegularization] = settingSignal(0.0);
 export const [peqFloor, setPeqFloor] = settingSignal(60); // dB below reference — don't optimize below this
-// b141.87: «Без отражений» — fit the smoothed measurement (1/48 < 100 Hz,
-// 1/3 above), not the reflection ripple of a long-window export.
+// b141.87: «Без отражений» — fit the smoothed measurement (1/6 < 100 Hz since
+// b141.106, 1/3 above), not the reflection ripple of a long-window export.
 export const [peqSmoothFit, setPeqSmoothFit] = settingSignal(true);
 // b141.92: «Подъём до» — PEQ may boost only where the target is within this
 // many dB of its reference; deeper it may only cut (0 = no limit).
@@ -170,7 +170,8 @@ export async function peqRangeFor(b: BandState): Promise<[number, number]> {
 
 // --- Internal: optimize a specific band ---
 // Disabled PEQ bands are kept in the table as they are; the optimizer re-fits
-// only the remaining enabled slots and does not count the disabled ones.
+// only the enabled slots. Disabled filters and enabled Linkwitz transforms
+// still take up «Макс. полос» (`activeBandBudget`).
 async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBands: PeqBand[] }> {
   // b141.5 (audit): pre-read EVERY store-proxy field into plain objects
   // BEFORE the first await. Proxy reads after an await observe concurrent

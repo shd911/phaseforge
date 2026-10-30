@@ -1,18 +1,8 @@
-//! b140.12 — Phase 2 (lite): single Rust source of truth for the
-//! FIR-pipeline routing predicate.
-//!
-//! Mirrors `src/lib/fir-routing.ts::pickFirRoute` exactly. The
-//! `pipeline_contract` integration test asserts JS↔Rust parity on a
-//! table of inputs — any drift between this function and the JS one
-//! fails that test on the first disagreeing fixture.
-//!
-//! Why "lite": only the routing decision is unified here. Wrapping the
-//! two pipelines behind a unified `trait FirPipeline` with internal
-//! preprocessing (target evaluation, PEQ folding, phase composition) is
-//! deferred until at least one production caller wants that surface.
-//! Since b141.70 the dispatch happens in Rust (`fir::band::generate_band_fir`,
-//! via [`route_for_target`]); the per-route Tauri commands were removed in
-//! b141.101.
+//! b140.12 — the single source of truth for the FIR-pipeline routing
+//! predicate. Since b141.70 the dispatch happens in Rust
+//! (`fir::band::generate_band_fir`, via [`route_for_target`]); the per-route
+//! Tauri commands were removed in b141.101. The `pipeline_contract`
+//! integration test pins the route of a table of inputs.
 
 use crate::target::{FilterConfig, FilterType, TargetCurve};
 use super::types::FirConfig;
@@ -22,26 +12,29 @@ use super::types::FirConfig;
 pub enum Route {
     /// `iir_path::generate_min_phase_fir_iir` — bit-exact phase via
     /// DigitalBiquad cascade. Restricted to min-phase main + no subsonic
-    /// + every active crossover is LR / Butterworth / Custom.
+    /// + no tilt + every active crossover is a min-phase LR / Butterworth /
+    /// Custom / Bessel realisable below `SECTION_MAX_FRACTION`·sr.
     Iir,
-    /// `generate_model_fir` (FFT cepstral). Used for Gaussian, Bessel,
-    /// linear-phase main, composite + subsonic, and custom measured
-    /// targets.
+    /// `generate_model_fir` (FFT cepstral). Used for Gaussian, a linear-phase
+    /// section (main or mixed), a subsonic, a tilt, and a section at or above
+    /// `SECTION_MAX_FRACTION`·sr.
     Cepstral,
 }
 
 /// Pick the FIR pipeline for the given band configuration.
 ///
 /// Pure function — no allocation, no global state, safe to call from
-/// any thread. Reads `linear_phase_main` and `subsonic_cutoff_hz` from
-/// the supplied `FirConfig`; HP/LP filter types come from the optional
-/// crossover configs.
+/// any thread. Reads `linear_phase_main`, `subsonic_cutoff_hz` and
+/// `sample_rate` from the supplied `FirConfig`; HP/LP filter types come from
+/// the optional crossover configs.
 ///
-/// Contract (kept in lockstep with `src/lib/fir-routing.ts`):
+/// Contract:
 ///   - `linear_phase_main = true`            → Cepstral
 ///   - `subsonic_cutoff_hz = Some(_)`        → Cepstral
 ///   - `tilt_db_per_octave != 0`             → Cepstral
-///   - any active filter is Gaussian         → Cepstral (Bessel is a cascade since b141.108)
+///   - any active filter is Gaussian or
+///     has `linear_phase`                    → Cepstral (Bessel is a cascade since b141.108)
+///   - a crossover at/above `SECTION_MAX_FRACTION`·sr → Cepstral
 ///   - everything else                        → Iir
 pub fn route_for(
     hp: Option<&FilterConfig>,

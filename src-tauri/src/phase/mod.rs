@@ -212,9 +212,9 @@ pub fn estimate_delay(freq: &[f64], magnitude: &[f64], phase: &[f64], sample_rat
 
 /// Select delay estimation range based on measurement bandwidth.
 ///
-/// For narrow-band data (sub: <1 decade), fit the lower half to avoid
-/// port resonance. For mid-range, use central 50%. For wide-band, use
-/// central 60%.
+/// For narrow-band data (sub: < 1.2 decades), fit the lower half to avoid
+/// port resonance. For mid-range (< 2 decades), use central 50%. For
+/// wide-band, use central 60%.
 pub fn smart_delay_range(f_first: f64, f_last: f64) -> (f64, f64) {
     let log_lo = f_first.ln();
     let log_hi = f_last.ln();
@@ -226,7 +226,7 @@ pub fn smart_delay_range(f_first: f64, f_last: f64) -> (f64, f64) {
         let f_hi = (log_lo + (log_hi - log_lo) * 0.5).exp();
         (f_lo, f_hi)
     } else if decades < 2.0 {
-        // Mid band (~200-3000 Hz): central 50%
+        // Mid band (~200-5000 Hz): central 50%
         let f_lo = (log_lo + (log_hi - log_lo) * 0.25).exp();
         let f_hi = (log_lo + (log_hi - log_lo) * 0.75).exp();
         (f_lo, f_hi)
@@ -284,7 +284,7 @@ pub fn remove_delay(freq: &[f64], phase_deg: &[f64], delay_seconds: f64) -> Vec<
         .collect()
 }
 
-/// Interpolate a value array at frequency `f` using linear search + interpolation.
+/// Interpolate a value array at frequency `f` using binary search + linear interpolation.
 /// Clamps to edge values when out of range.
 pub fn interp_scalar_at(freq: &[f64], values: &[f64], f: f64) -> f64 {
     if freq.is_empty() || values.is_empty() {

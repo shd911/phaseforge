@@ -1,5 +1,6 @@
-// b141.50 (audit 2026-10-01 H6): INV and alignment delay are host settings,
-// not baked into the WAV — the export must say so.
+// b141.50 (audit 2026-10-01 H6): the alignment delay is a host setting, not
+// baked into the WAV — the export must say so. INV is written since b141.100
+// (the export passes inverted = false); the note's INV branch stays pinned here.
 import { describe, it, expect } from "vitest";
 import { hostSettingsNote } from "../fir-export";
 

@@ -5,9 +5,10 @@
 //! nature (longer the lower, steeper and higher-Q it is), so there is no pole
 //! formula that covers every family (Gaussian has no poles at all). The ring
 //! is measured on the section's own impulse instead: the response the FIR
-//! realises — a min-phase LR/BW/Custom/Bessel section as the bilinear cascade
-//! pre-warped at its corner, Gaussian/subsonic min-phase terms through the
-//! plot's Hilbert (`target_hilbert_phase`), a linear section zero-phase — at
+//! realises, without the ultrasonic low-pass — a min-phase LR/BW/Custom/Bessel
+//! section as the bilinear cascade pre-warped at its corner, a min-phase
+//! Gaussian by cepstrum on this very grid, a linear section zero-phase plus
+//! the plot's Hilbert terms (`target_hilbert_phase`, its subsonic) — at
 //! the export rate, on a grid long enough for the tail to die, IFFT'd and
 //! read from the peak to the last sample above −60 / −100 dB (after) and from
 //! the first such sample to the peak (before; meaningful on linear phase,

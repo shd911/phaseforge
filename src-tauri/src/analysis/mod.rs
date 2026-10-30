@@ -263,8 +263,9 @@ fn slope_db_per_oct(freq: &[f64], magnitude: &[f64], lo_idx: usize, hi_idx: usiz
     (n * sxy - sx * sy) / denom
 }
 
-/// True if [lo_idx, hi_idx) has no oscillatory peak/trough wider than
-/// RESONANCE_LOCAL_OCTAVE with amplitude swing > RESONANCE_MIN_AMPLITUDE_DB.
+/// False if [lo_idx, hi_idx) has at least two swings (a full ripple cycle)
+/// between neighbouring extrema NARROWER than RESONANCE_LOCAL_OCTAVE with
+/// amplitude > RESONANCE_MIN_AMPLITUDE_DB; wider humps do not count.
 /// Tiny ripple from measurement noise must not suppress legitimate cliff or
 /// rolloff detection on real (rippled) data.
 fn no_resonance(freq: &[f64], magnitude: &[f64], lo_idx: usize, hi_idx: usize) -> bool {
@@ -303,7 +304,8 @@ pub fn detect_lf_rolloff(measurement: &Measurement, noise_floor_low: Option<f64>
     if freq.len() < 16 {
         return None;
     }
-    // Look at the bottom 2 octaves above f_min for steep monotonic slope.
+    // Look at the 2 octaves above the LF noise floor (f_min when there is
+    // none), capped at the middle of the array, for steep monotonic slope.
     let f_min = freq[0].max(1.0);
     let f_lo = noise_floor_low.unwrap_or(f_min);
     let f_hi = (f_lo * 4.0).min(freq[freq.len() / 2]);

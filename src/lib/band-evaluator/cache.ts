@@ -6,10 +6,12 @@
 //
 // Mutation safety: renderBandMode mutates the result envelope in place
 // (FrequencyPlot interpolation onto extendedFreq), so the cache stores the
-// pristine object and every return — hit AND miss — is a structuredClone.
+// pristine object and every return — hit AND miss — is a structuredClone,
+// except a long FIR impulse: frozen and shared by reference (`cloneOut`).
 //
-// Measurement is keyed by object identity (WeakMap id): production replaces
-// band.measurement wholesale (project-io.ts), never mutates it in place.
+// Measurement is keyed by the identity (WeakMap id) of the object AND of its
+// data arrays (`measurementKey`): project-io.ts replaces band.measurement
+// wholesale, but delay remove/restore swaps `measurement.phase` in place.
 
 import type { BandState } from "../../stores/bands";
 import type { BandEvalRequest } from "./evaluate";

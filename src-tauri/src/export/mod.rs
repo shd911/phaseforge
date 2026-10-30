@@ -1,4 +1,4 @@
-// Export: WAV (f32/f64), PEQ configs (APO, miniDSP, Roon, CamillaDSP), project files
+// Export: target curve as a REW-compatible TXT file.
 
 use std::path::PathBuf;
 use tracing::info;
@@ -8,8 +8,8 @@ use tracing::info;
 /// Format:
 /// ```text
 /// * Freq(Hz)	SPL(dB)
-/// 20.000	-3.5
-/// 25.119	-2.1
+/// 20.000	-3.500
+/// 25.119	-2.100
 /// ...
 /// ```
 #[tauri::command]

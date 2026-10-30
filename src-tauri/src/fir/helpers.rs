@@ -119,6 +119,7 @@ pub(crate) fn iter_stats_take() -> Vec<IterStats> {
 /// Higher weight = tighter correction in that frequency range.
 /// - Crossover transition bands: 3.0 (critical for phase alignment)
 /// - 200-4000 Hz (speech/music): 2.0 (max auditory sensitivity)
+/// - 4000-8000 Hz: 1.5
 /// - Below 200 Hz: 1.0 (standard)
 /// - Above 8000 Hz: 0.5 (psychoacoustic masking reduces requirements)
 pub(crate) fn frequency_weight(freq_hz: f64, crossover_range: (f64, f64)) -> f64 {
@@ -213,9 +214,10 @@ pub(crate) fn iterative_refine(
         || use_model_phase;
     // b139.3.4: in MinimumPhase mode the (magnitude, phase) pair must stay
     // consistent across iterations — Hilbert(refined_db) recomputed each
-    // pass. LinearPhase keeps zero phase; MixedPhase/HybridPhase carry a
-    // composite phase from per-filter Hilbert that doesn't depend on the
-    // running magnitude, so they reuse the entry-point phase.
+    // pass. LinearPhase keeps zero phase, HybridPhase reuses the entry-point
+    // phase; Composite recomputes its Hilbert terms each pass; MixedPhase keeps
+    // its entry-point model phase plus a Hilbert of the running correction
+    // (b141.86, below).
     let recompute_min_phase = matches!(config.phase_mode, PhaseMode::MinimumPhase);
     let recompute_composite = matches!(config.phase_mode, PhaseMode::Composite);
     // For Composite mode, the subsonic part is fixed (depends only on

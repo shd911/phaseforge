@@ -144,7 +144,8 @@ pub(crate) fn compute_weights(freq: &[f64], meas_mag: &[f64], hp_freq: f64, lp_f
 
 /// Uniform weights for Hybrid mode: all frequencies equally important.
 /// NO null suppression — hybrid PEQ must flatten everything including deep rolloffs.
-/// Acoustic nulls are not a concern here because hybrid applies unlimited boost.
+/// Its boost is still limited like in any mode: `clamp_params` applies
+/// `max_boost_at` and `fit_ring` (hybrid asks for 60 dB, peq-optimize.ts).
 pub(crate) fn compute_uniform_weights(freq: &[f64], _meas_mag: &[f64], _hp_freq: f64, _lp_freq: f64) -> Vec<f64> {
     vec![1.0; freq.len()]
 }

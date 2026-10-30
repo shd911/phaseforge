@@ -208,8 +208,9 @@ fn finish_snapshot(
     Ok(entry)
 }
 
-/// Resolve a measurement reference the way `restoreState` does: absolute
-/// path, then project-relative, then `inbox/<basename>`, then `<basename>`.
+/// Resolve a measurement reference the way `restoreState` does: as given (an
+/// absolute path; a relative one reads from the process CWD), then
+/// project-relative, then `inbox/<basename>`, then `<basename>`.
 fn resolve_measurement_source(project_dir: &Path, reference: &str) -> Option<PathBuf> {
     if reference.is_empty() || reference.contains("..") {
         return None;

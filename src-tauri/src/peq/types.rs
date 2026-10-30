@@ -72,7 +72,8 @@ pub struct PeqConfig {
     /// Smaller values allow denser band placement (useful for HF correction).
     #[serde(default)]
     pub min_band_distance_oct: Option<f64>,
-    /// Hybrid mode: flat target at avg measurement level, uniform weights.
+    /// Hybrid mode: flat target at the measurement's median over HP..LP inside
+    /// the optimized range (`passband_median`, b141.106), uniform weights.
     /// When true, PEQ optimizes to a straight line across ALL frequencies
     /// (no 3-zone composite, no ERB weighting). Default: false.
     #[serde(default)]

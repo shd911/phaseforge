@@ -68,11 +68,8 @@ pub fn section_realisable(freq_hz: f64, sample_rate: f64) -> bool {
     freq_hz > 0.0 && freq_hz < SECTION_MAX_FRACTION * sample_rate
 }
 
-/// Recommend tap count based on lowest frequency and sample rate.
-///
-
 // b140.13:   `export_wav_f64`  → `fir/wav.rs`
-// b140.13.1: `generate_fir` / `generate_hybrid_fir` → `fir/legacy.rs`
+// b140.13.1: `generate_fir`                        → `fir/legacy.rs` (cfg(test))
 // b140.13.2: `generate_model_fir`                  → `fir/cepstral.rs`
 // b140.13.3: in-file integration tests              → `fir/tests.rs`
 // All re-exported above; call sites keep the same `fir::*` paths.

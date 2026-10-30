@@ -1,7 +1,7 @@
 /**
  * b140.14.3 — Phase 4 slice 4: multi-band SUM aggregator.
  *
- * Carries `evaluateSum` and its four sum-only helpers
+ * Carries `evaluateSum` and its sum-only helpers
  * (`resampleOntoCommon`, `powerSumDb`, `coherentSum`;
  * the b140.3.1.4 wide-excess shift was removed in b141.97) out of band-evaluator.ts. The SumEvalResult and
  * SumEvalOptions interfaces move with them.
@@ -29,8 +29,8 @@ export interface SumEvalResult {
   freq: number[];
   /** Coherent sum of per-band target curves (HP × LP × shelves × tilt
    *  × subsonic, with Gaussian/subsonic min-phase reconstruction) with
-   *  polarity and alignment_delay phase rotation. Null when no band has
-   *  targetEnabled=true. */
+   *  polarity; the per-band DELAY only when `targetDelayed` (TARGET_DELAY).
+   *  Null when no band has targetEnabled=true. */
   sumTargetMag: number[] | null;
   sumTargetPhase: number[] | null;
   /** Per-band target on the common grid (no polarity / alignment_delay
@@ -54,9 +54,9 @@ export interface SumEvalResult {
    *  band has a measurement with phase (TARGET_DELAY). GD reads it. */
   targetDelayed: boolean;
   /** b140.3.5: Σ IR/Step results (only set when options.includeIr=true).
-   *  Each curve is a coherent sum on a wide IR grid (5 Hz – Nyquist·0.95)
-   *  with polarity + alignment_delay applied per band, converted to time
-   *  domain via compute_impulse. */
+   *  Each curve is a coherent sum on a wide IR grid (5 Hz – Nyquist) with
+   *  polarity per band and DELAY on measurement/corrected (on the target only
+   *  when `targetDelayed`), converted to time domain via compute_sum_impulse. */
   ir?: {
     measurement?: { time: number[]; impulse: number[]; step: number[] };
     target?: { time: number[]; impulse: number[]; step: number[] };
@@ -68,8 +68,8 @@ export interface SumEvalOptions {
   /** Override the common freq grid. */
   freq?: number[];
   /** b140.3.5: also compute Σ IR/Step (measurement, target, corrected) by
-   *  coherent-summing per-band responses on a wide IR grid (5 Hz – Nyquist·0.95)
-   *  in the frequency domain, then taking compute_impulse of the result. */
+   *  coherent-summing per-band responses on a wide IR grid (5 Hz – Nyquist)
+   *  in the frequency domain (compute_sum_impulse). */
   includeIr?: boolean;
   /** b141.5 (audit): realization sample rate for PEQ biquads (= export
    *  sample rate). Threaded into every compute_peq_complex call. */
@@ -119,8 +119,8 @@ function powerSumDb(magsDb: number[][]): number[] {
 }
 
 /** Threshold below which we treat re/im as numerically zero and report
- *  the phase as NaN (signaling "phase is undefined here", typically a
- *  cancellation null). Without this, atan2 of two near-zero floats
+ *  the phase as 0 (phase is undefined here, typically a cancellation
+ *  null). Without this, atan2 of two near-zero floats
  *  returns ulp-grid-quantized values that jump ±180° across bins —
  *  visually as jaggedness around crossover nulls.
  *
@@ -329,7 +329,7 @@ async function evaluateSumImpl(
   let anyMissingPhase = false;
   let anyCorrected = false;
   // b141.10: scalar level shift applied to each band's corrected curve on
-  // the SPL path (normalize-to-target + global wide-excess shift). The IR
+  // the SPL path (normalize-to-target). The IR
   // section MUST reuse it so the Σ step weights bands exactly like the SPL
   // Σ — measurements are merged/recorded at arbitrary levels; the norm is
   // "corrected sits at target" (realised live via per-band attenuation).
@@ -431,7 +431,7 @@ async function evaluateSumImpl(
 
   // b140.3.5: Σ IR/Step. Coherent-sum per-band responses on a wide IR grid in
   // the frequency domain (alignment_delay → phase rotation, polarity → sign),
-  // then compute_impulse for each category.
+  // then compute_sum_impulse for each category.
   let irOut: SumEvalResult["ir"];
   if (options?.includeIr) {
     // b141.38: capped at the export rate — see evaluate.ts (PEQ above the
@@ -442,7 +442,7 @@ async function evaluateSumImpl(
     );
     const irFMax = Math.min(40000, irSr / 2 * 0.95);
     const irFreqBase = buildLogGrid(1024, 5, irFMax);
-    // b140.5: extend up to Nyquist with explicit silent tail. The dummy
+    // b140.5: extend the grid up to Nyquist. The dummy
     // arrays satisfy the helper signature; only freq is reused for SUM IR
     // since per-band target / measurement / corrected get re-evaluated on
     // the extended grid below.

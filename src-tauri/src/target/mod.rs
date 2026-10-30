@@ -454,8 +454,8 @@ fn butterworth_hp_complex(f: f64, fc: f64, n: u8) -> (f64, f64) {
 // Bessel complex transfer function (frequency-normalized poles)
 // ---------------------------------------------------------------------------
 
-/// Bessel filter poles (normalized to unit group delay at DC).
-/// These are the standard frequency-normalized Bessel poles for orders 1–8.
+/// Bessel filter poles for orders 1–8, frequency-normalized: −3.0103 dB at
+/// ω = 1 (so `fc` is the −3 dB point), not unit group delay at DC.
 /// Each entry is (real, imag) for left-half-plane poles with imag >= 0.
 /// Conjugate pairs are implied for complex poles.
 pub(crate) fn bessel_poles(order: u8) -> Vec<(f64, f64)> {
@@ -479,7 +479,7 @@ pub(crate) fn bessel_poles(order: u8) -> Vec<(f64, f64)> {
 
 fn bessel_lp_complex(f: f64, fc: f64, n: u8) -> (f64, f64) {
     let poles = bessel_poles(n);
-    // Frequency scaling: Bessel poles are normalized to ω₀=1 for group delay.
+    // Frequency scaling: Bessel poles are normalized to −3.0103 dB at ω = 1.
     // Scale by fc to move cutoff: s_scaled = s / (2π·fc), but we evaluate at s=j·2π·f.
     // Simplified: w = f/fc, evaluate H(jw) = K / product(jw - p_k) for all poles (including conjugates).
     let w = f / fc;

@@ -75,13 +75,14 @@ pub(crate) fn greedy_fit_adaptive(freq: &[f64], smoothed_error: &[f64], config: 
     bands
 }
 
-/// Estimate Q from the half-power width of the error peak.
+/// Estimate Q from the width of the error peak at half its height in dB.
 ///
-/// Measures how many octaves the error peak extends at half its amplitude,
-/// then converts to Q: Q ~ fc / bandwidth_hz
+/// Measures how wide (Hz) the error peak is at half its dB value (a 6 dB
+/// peak is read at 3 dB, not at a fixed −3 dB or half power), then converts
+/// to Q: Q ~ fc / bandwidth_hz
 pub(crate) fn estimate_q_from_peak_width(freq: &[f64], error: &[f64], peak_idx: usize) -> f64 {
     let peak_val = error[peak_idx].abs();
-    let half_val = peak_val * 0.5; // -6 dB (half amplitude in dB)
+    let half_val = peak_val * 0.5; // half the peak's height in dB
     let peak_freq = freq[peak_idx];
 
     // Search left for half-amplitude crossing

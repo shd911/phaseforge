@@ -44,7 +44,6 @@ describe("same-named measurements (3.12)", () => {
     expect(await copyMeasurementToProject("/R/wfr.txt", "b")).toBe("inbox/wfr_2.txt");
     const c = calls.find((x) => x.cmd === "copy_into_project_unique")!;
     expect(c.args).toEqual({ sourcePath: "/R/wfr.txt", destDir: "/p/inbox" });
-    expect(calls.some((x) => x.cmd === "copy_file_to_project")).toBe(false);
   });
 });
 

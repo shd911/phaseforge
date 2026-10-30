@@ -34,7 +34,8 @@ pub struct MergeResult {
     /// Auto-computed delay difference (seconds) between NF and FF
     pub delay_diff_seconds: f64,
     /// b141.102 (audit 2026-10-23 2.10): what the merge had to drop — shown
-    /// to the user (Russian, UI language). Empty = nothing dropped.
+    /// to the user (Russian, UI language). Covers NF bass and FF treble only;
+    /// empty does not mean nothing was dropped (see the check in the merge).
     #[serde(default)]
     pub warnings: Vec<String>,
 }
@@ -85,7 +86,8 @@ pub fn merge_nf_ff(
     // b141.102 (audit 2026-10-23 2.10): the merge runs on the INTERSECTION of
     // the two ranges — say so when that drops part of a measurement the user
     // expects in the result (NF bass below the FF start, FF treble above the
-    // NF end) instead of losing it silently.
+    // NF end), with a 1 % margin. The other two cuts (FF below the NF start,
+    // NF above the FF end) are not reported.
     let mut warnings: Vec<String> = Vec::new();
     if nf.freq[0] < f_min * 0.99 {
         warnings.push(format!(

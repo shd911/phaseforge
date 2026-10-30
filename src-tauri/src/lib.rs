@@ -303,16 +303,14 @@ async fn compute_peq_complex(
 }
 
 // ---------------------------------------------------------------------------
-// Cross-section: apply user filters + min-phase makeup where corrected < target
+// Cross-section: the level-free filter section of the corrected curve
 // ---------------------------------------------------------------------------
 
-/// Compute cross-section correction for the corrected curve.
-///
-/// 1. Apply HP/LP filters as configured (LR/BW/Bessel, lin-φ or min-φ).
-/// 2. Compute `corrected = meas_mag + peq_correction + filter_response`.
-/// 3. Where corrected < target outside the filter band → generate minimum-phase
-///    makeup gain to bring corrected up to target.
-/// 4. Return total (filter + makeup) magnitude and phase corrections.
+/// Compute the filter section of the corrected curve: HP/LP, tilt and shelves
+/// through `target::evaluate` plus, at ≥ 88.2 kHz, the ultrasonic low-pass.
+/// Returns (magnitude dB, phase °, norm_db = its peak if above 0 dB, else 0).
+/// No measurement, PEQ or makeup here: the caller composes
+/// measurement + PEQ + this section.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 async fn compute_cross_section(
@@ -479,7 +477,7 @@ pub fn run() {
             .init();
     }
 
-    info!("PhaseForge b141.131 starting...");
+    info!("PhaseForge b141.132 starting...");
     info!("log file: {}", applog::log_path().map(|p| p.display().to_string()).unwrap_or_else(|| "—".into()));
 
     tauri::Builder::default()
@@ -518,7 +516,6 @@ pub fn run() {
             project::save_project,
             project::load_project,
             project::create_project_folder,
-            project::copy_file_to_project,
             project::copy_into_project_unique,
             project::check_path_exists,
             project::ensure_dir,

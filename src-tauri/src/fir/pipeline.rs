@@ -1,24 +1,17 @@
-//! b140.16.1 — Phase 2 full: unified `FirPipeline` trait + two
-//! implementations + `pick_pipeline` factory.
+//! b140.16.1 — `FirPipeline` trait + two implementations +
+//! `pick_pipeline` factory. **Only tests use it** (the `pipeline_contract`
+//! integration test and the tests below): production goes through
+//! `fir::band::generate_band_fir` (b141.70), which picks the route with
+//! `route_for_target`.
 //!
-//! Previously (b140.12 "Phase 2 lite") only the routing predicate
-//! `route_for` was unified in Rust; the two FIR-generation functions
-//! kept distinct signatures and the dispatch happened in JS before
-//! crossing the Tauri boundary.
+//! Both pipelines implement a uniform
+//! `(hp, lp, peq, fir_config, freq) → FirModelResult` signature. The cepstral
+//! implementation evaluates target magnitude/phase and PEQ contribution
+//! internally.
 //!
-//! This module adds a single trait that both pipelines implement, with
-//! a uniform `(hp, lp, peq, fir_config, freq) → FirModelResult`
-//! signature. The cepstral implementation internally evaluates target
-//! magnitude/phase and PEQ contribution so the trait surface is
-//! transport-agnostic.
-//!
-//! Production routing (via the `pick_fir_route` Tauri command added
-//! in b140.15.5) still happens JS-side for backwards compatibility.
-//! This trait is consumed by the `pipeline_contract` integration test
-//! to verify the unified path produces identical hashes to the direct
-//! per-pipeline calls. When/if production gains a unified Tauri command
-//! it can call `pick_pipeline(...).evaluate(...)` without any further
-//! refactor.
+//! The signature has NO shelves and NO tilt and both implementations build
+//! the target without them, so this is not a drop-in production path: a
+//! band's shelves and tilt would be lost silently.
 
 use crate::error::AppError;
 use crate::peq::{apply_peq_complex, PeqBand};
@@ -44,7 +37,7 @@ pub trait FirPipeline {
 
 /// IIR-analytical cascade pipeline (uses `generate_min_phase_fir_iir`).
 /// Restricted to min-phase main + no subsonic + every active crossover
-/// is LR / Butterworth / Custom — selected by `route_for`.
+/// is LR / Butterworth / Custom / Bessel — selected by `route_for`.
 pub struct IirAnalyticalPipeline;
 
 impl FirPipeline for IirAnalyticalPipeline {
@@ -58,8 +51,7 @@ impl FirPipeline for IirAnalyticalPipeline {
     ) -> Result<FirModelResult, AppError> {
         // b141.17: this contract-test pipeline builds its TargetCurve with no
         // shelves and no tilt (see CepstralFftPipeline below), so both are None
-        // here. Production goes through the Tauri command, which passes the
-        // band's real shelves.
+        // here. Production (`generate_band_fir`) passes the band's real shelves.
         generate_min_phase_fir_iir(&IirPathInput {
             freq, hp, lp, low_shelf: None, high_shelf: None, peq, config,
         })
@@ -124,8 +116,8 @@ impl FirPipeline for CepstralFftPipeline {
 }
 
 /// Pick the right pipeline for the given band configuration. Same
-/// predicate as `route_for` — the dispatch happens here too for
-/// callers that don't want to handle the enum themselves.
+/// predicate as `route_for` with tilt = 0 — the dispatch happens here too
+/// for callers that don't want to handle the enum themselves.
 pub fn pick_pipeline(
     hp: Option<&FilterConfig>,
     lp: Option<&FilterConfig>,

@@ -444,34 +444,8 @@ fn paths_resolve_to_same_file(source: &std::path::Path, dest: &std::path::Path) 
     matches!(dst_canon_opt, Some(d) if d == src_canon)
 }
 
-/// Copy a file into the project folder.
-#[tauri::command]
-pub async fn copy_file_to_project(source_path: String, dest_path: String) -> Result<(), String> {
-    validate_write_target(&dest_path)?;
-    let dest = std::path::Path::new(&dest_path);
-
-    // b139.5.2: guard against self-copy. If a user drops a file directly into
-    // <project>/inbox/ and then "imports" it via the picker pointing at the
-    // same path, std::fs::copy would truncate dest before reading source and
-    // leave the user with a 0-byte file. Skip the copy when paths resolve to
-    // the same on-disk file.
-    let source = std::path::Path::new(&source_path);
-    if paths_resolve_to_same_file(source, dest) {
-        info!(
-            "copy_file_to_project: source == dest ({}), skipping self-copy",
-            source_path
-        );
-        return Ok(());
-    }
-
-    info!("copy_file_to_project: {} -> {}", source_path, dest_path);
-    std::fs::copy(&source_path, &dest_path)
-        .map_err(|e| format!("Copy error: {e}"))?;
-    Ok(())
-}
-
 /// b141.103 (audit 2026-10-23 3.12): copy a measurement into `dest_dir`
-/// under a name no other file there holds. `copy_file_to_project` overwrote
+/// under a name no other file there holds. A plain copy overwrote
 /// `inbox/<name>` — `/L/wfr.txt` and `/R/wfr.txt` both landed on
 /// `inbox/wfr.txt` and band 1 silently reopened with band 2's measurement.
 /// A taken name gets `_2`, `_3`, … before the extension; a file that is the
@@ -659,28 +633,6 @@ mod tests {
     }
 
     #[test]
-    fn copy_file_to_project_handles_self_copy() {
-        let dir = make_scratch_dir("self-copy");
-        let path = dir.join("test.txt");
-        {
-            let mut f = std::fs::File::create(&path).unwrap();
-            writeln!(f, "important data").unwrap();
-        }
-        let original_size = std::fs::metadata(&path).unwrap().len();
-        assert!(original_size > 0);
-
-        let same = path.to_string_lossy().to_string();
-        let result = tauri::async_runtime::block_on(copy_file_to_project(same.clone(), same.clone()));
-        assert!(result.is_ok(), "self-copy must not fail: {:?}", result.err());
-
-        let after_size = std::fs::metadata(&path).unwrap().len();
-        assert_eq!(after_size, original_size,
-            "self-copy must not truncate: original={}, after={}", original_size, after_size);
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
     fn copy_into_project_unique_keeps_same_named_sources_apart() {
         let dir = make_scratch_dir("unique-copy");
         let (l, r, inbox) = (dir.join("L"), dir.join("R"), dir.join("inbox"));
@@ -699,30 +651,6 @@ mod tests {
         assert_eq!(run(&inbox.join("wfr_2.txt")), "wfr_2.txt");
         assert_eq!(std::fs::read_to_string(inbox.join("wfr.txt")).unwrap(), "left");
         assert_eq!(std::fs::read_to_string(inbox.join("wfr_2.txt")).unwrap(), "right");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn copy_file_to_project_normal_copy_works() {
-        let dir = make_scratch_dir("normal-copy");
-        let src = dir.join("src.txt");
-        let dst = dir.join("dst.txt");
-        {
-            let mut f = std::fs::File::create(&src).unwrap();
-            writeln!(f, "data").unwrap();
-        }
-
-        let result = tauri::async_runtime::block_on(copy_file_to_project(
-            src.to_string_lossy().to_string(),
-            dst.to_string_lossy().to_string(),
-        ));
-        assert!(result.is_ok(), "normal copy failed: {:?}", result.err());
-        assert!(dst.exists());
-        assert_eq!(
-            std::fs::metadata(&dst).unwrap().len(),
-            std::fs::metadata(&src).unwrap().len(),
-        );
-
         let _ = std::fs::remove_dir_all(&dir);
     }
 

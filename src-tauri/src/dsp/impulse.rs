@@ -153,7 +153,8 @@ pub struct ImpulseResult {
 /// 3. Mirror for conjugate symmetry
 /// 4. IFFT → time-domain impulse response
 /// 5. Circular reorder: include pre-peak samples (negative time) from end of buffer
-/// 6. Normalize peak to 100%, trim to 0.5% decay threshold
+/// 6. Normalize peak to 100%; no trimming by decay: post-peak is the full half
+///    buffer, pre-peak is chosen by a 0.2% (-54 dB) scan
 /// 7. Cumulative sum → step response
 pub fn compute_impulse_response(
     freq: &[f64],
@@ -248,7 +249,8 @@ pub fn compute_sum_impulse_response(
             pre_peak_count = i + 1;
         }
     }
-    // Always include at least 50ms of pre-peak context (linear-phase filters and masking zone need this)
+    // At least 50 ms of pre-peak context (linear-phase filters and masking zone
+    // need this), never past max_pre: N/4 is only 21 ms at 4096 points, 48 kHz.
     let min_pre = ((sample_rate * 0.050) as usize).min(max_pre);
     pre_peak_count = pre_peak_count.max(min_pre);
 

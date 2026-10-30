@@ -580,13 +580,6 @@ export function setBandDelayInfo(bandId: string, delay: number, distance: number
   markDirty();
 }
 
-/** Сбросить сохранённую оригинальную фазу (чтобы следующий markBandDelayRemoved сохранил свежую) */
-export function resetBandOriginalPhase(bandId: string) {
-  const idx = bandIndex(bandId);
-  if (idx < 0 || !state.bands[idx].settings) return;
-  setState("bands", idx, "settings", "originalPhase", null);
-}
-
 // Применить компенсацию задержки (сохраняя оригинал для возможности отмены)
 export function markBandDelayRemoved(bandId: string, newPhase: number[]) {
   const idx = bandIndex(bandId);

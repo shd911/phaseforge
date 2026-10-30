@@ -121,7 +121,8 @@ export default function FrequencyPlot() {
 
   // Safe series visibility toggle: uses stroke=transparent instead of setSeries
   // to avoid uPlot internal scale recalculation (which breaks zoom).
-  // setSeries({ show }) is only safe on freq tab where scales use range functions.
+  // setSeries({ show }) is only safe on the freq and export tabs, where scales
+  // use range functions.
   function safeToggleSeries(seriesIdx: number, visible: boolean, needsRedraw = true) {
     if (!chart || seriesIdx < 1 || seriesIdx >= chart.series.length) return;
     const s = chart.series[seriesIdx] as any;
@@ -244,8 +245,9 @@ export default function FrequencyPlot() {
   const [cursorFreq, setCursorFreq] = createSignal("—");
   const [autoAligning, setAutoAligning] = createSignal(false);
 
-  // b141.61: the delay each band needs IN THE CONVOLVER — alignment plus the
-  // shortfall of its WAV's leading zeros (a tail that did not fit in N/2).
+  // b141.61: what each band's WAV lacks of the N/2 leading zeros (a tail that
+  // did not fit), seconds. The delay IN THE CONVOLVER is this + the alignment,
+  // which is read live at render (b141.74).
   // Computed from the exact FIR the WAV export ships (same evaluator cache),
   // shown under the Σ DELAY fields when it differs from them.
   const [convDelays, setConvDelays] = createSignal<Record<string, number>>({});

@@ -1,20 +1,18 @@
 //! b140.13.2 — FFT-cepstral FIR pipeline extracted from `fir/mod.rs`.
 //!
-//! Houses `generate_model_fir`, the forward-going pipeline for FIR
-//! synthesis from pre-evaluated target + PEQ magnitudes and a model
-//! phase array. Used by the JS UI for every band configuration that
-//! `pickFirRoute` (a.k.a. `fir::route_for`) classifies as `Cepstral`:
-//! Gaussian / Bessel filters, linear-phase main, composite + subsonic,
-//! and custom measured targets.
+//! Houses `generate_model_fir`, the pipeline for FIR synthesis from
+//! pre-evaluated target + PEQ magnitudes and a model phase array.
+//! `fir::band::generate_band_fir` (b141.70) calls it for every band that
+//! `fir::route_for_target` classifies as `Cepstral`: a Gaussian section,
+//! a linear-phase or mixed main, a subsonic, a tilt, a section at or above
+//! `SECTION_MAX_FRACTION`·sr.
 //!
-//! The IIR-analytical sibling lives in `fir/iir_path.rs` (kept as-is
-//! pending b140.13.3); the legacy measurement-based pipelines live in
-//! `fir/legacy.rs`.
+//! The IIR-analytical sibling lives in `fir/iir_path.rs`; the legacy
+//! measurement-based pipeline (test baseline only) in `fir/legacy.rs`.
 //!
-//! The b140.13.2 extraction was byte-identical to the inline original.
-//! Since b141.14 the causal min-phase output additionally gets the
-//! adaptive N/2 WAV centering shift (unified peak convention, mirrors
-//! `iir_path.rs`) — cepstral golden baselines were re-captured then.
+//! Since b141.14 the causal min-phase output gets the adaptive WAV delay
+//! shift of `iir_path.rs`: up to N/2 leading zeros, the delay is aligned and
+//! not the peak.
 
 use num_complex::Complex64;
 use std::f64::consts::PI;
@@ -49,7 +47,8 @@ use super::types::{FirConfig, FirModelResult, PhaseMode};
 /// - `freq` — log-spaced frequency axis
 /// - `target_mag` — target-only magnitude in dB (HP/LP/shelf/tilt, no PEQ)
 /// - `peq_mag` — PEQ-only magnitude in dB (may be empty → treated as 0 dB)
-/// - `model_phase` — combined model phase in degrees (for display/zero-detection)
+/// - `model_phase` — combined model phase in degrees (the phase itself on
+///   MixedPhase, only logged otherwise)
 /// - `config` — FIR configuration (taps, sample_rate, window, phase_mode)
 pub fn generate_model_fir(
     freq: &[f64],
@@ -63,7 +62,7 @@ pub fn generate_model_fir(
 
 /// `generate_model_fir` that knows the band's HP/LP. b141.51 (audit
 /// 2026-10-01 H3): on the Composite min-phase main, the IIR-realisable
-/// sections (LR/BW/Custom) take their exact digital phase from the biquad
+/// sections (LR/BW/Custom/Bessel) take their exact digital phase from the biquad
 /// cascade and only the residual goes through the Hilbert transform — see
 /// `helpers::DigitalSection`.
 pub fn generate_model_fir_with_sections(
@@ -156,12 +155,12 @@ pub fn generate_model_fir_with_sections(
         .map(|(&t, &p)| (t + p).min(config.max_boost_db)).collect();
     let lin_peq: Vec<f64> = lin_mag.iter().zip(&lin_target).map(|(&m, &t)| m - t).collect();
 
-    // b141.2: mixed per-filter phase path. The frontend sends phase_mode =
-    // MixedPhase (with an empty gaussian list) for a band whose HP and LP
-    // disagree on linear_phase (e.g. HP min + LP linear) — physically not
-    // expressible through a single linear_phase_main flag. In that case we
-    // honour the exact `model_phase` the UI computed per-filter, rather than
-    // recomposing a single-mode phase. Realised like a linear-phase FIR
+    // b141.2: mixed per-filter phase path. `band_fir_config` sets phase_mode =
+    // MixedPhase for a band whose HP and LP disagree on linear_phase (e.g.
+    // HP min + LP linear) — not expressible through a single
+    // linear_phase_main flag. In that case we honour the exact `model_phase`
+    // `generate_band_fir` composed per filter, rather than recomposing a
+    // single-mode phase. Realised like a linear-phase FIR
     // (peak-centred, full window, N/2 delay removed) but with non-zero phase.
     let use_model_phase = config.phase_mode == PhaseMode::MixedPhase;
 
@@ -169,8 +168,8 @@ pub fn generate_model_fir_with_sections(
     let max_phase_abs = model_phase.iter().map(|p| p.abs()).fold(0.0_f64, f64::max);
     let effective_linear = match config.phase_mode {
         PhaseMode::LinearPhase => true,
-        // MixedPhase carries an explicit phase (per-filter Gaussian, or the
-        // frontend model phase) — never the zero-phase linear realisation.
+        // MixedPhase carries an explicit phase (the per-filter model phase)
+        // — never the zero-phase linear realisation.
         PhaseMode::MixedPhase => false,
         PhaseMode::MinimumPhase | PhaseMode::HybridPhase => false,
         // b139.4a: Composite follows linear_phase_main for the impulse
@@ -191,13 +190,12 @@ pub fn generate_model_fir_with_sections(
     // 5. Phase for IFFT:
     //    LinearPhase: zero phase (symmetric FIR)
     //    MinimumPhase/HybridPhase: Hilbert from full magnitude (causal FIR)
-    //    MixedPhase + non-zero model_phase: use frontend-provided per-filter phase
-    //      (some filters lin-phase, some min-phase — frontend computes per-filter Hilbert)
-    //    MixedPhase + zero model_phase: fallback to LinearPhase
+    //    MixedPhase: the per-filter model_phase verbatim (some filters
+    //      lin-phase, some min-phase — generate_band_fir composes it)
     //    PEQ phase: ALWAYS Hilbert (min-phase biquads)
     let target_phase_rad = if use_model_phase {
-        // Honour the frontend-supplied per-filter phase verbatim. model_phase
-        // (degrees) already includes PEQ (firCombinedPhase) and lives on the
+        // Honour the per-filter phase verbatim. model_phase (degrees) already
+        // includes PEQ (`combined` in generate_band_fir) and lives on the
         // caller's `freq` grid — interpolate (wrap-aware) onto the linear FFT
         // grid and convert to radians. No Hilbert recompute: the whole point is
         // to keep HP-min and LP-linear distinct.
@@ -376,10 +374,11 @@ pub fn generate_model_fir_with_sections(
     //    content correctness wins over centering. The realized mag/phase
     //    above were computed from the unshifted impulse and stay valid.
     //    No tail taper here (unlike iir_path): the half-window already
-    //    decays to 0 at n-1, and shift ≤ n-1-last_significant guarantees
-    //    the new endpoint sample is at or below the -100 dB threshold —
-    //    nothing audible to fade. A short-of-center peak is surfaced to
-    //    the user at export (offCenterWavWarning, fir-export.ts).
+    //    decays to 0 at n-1, and shift ≤ n-1-last_significant drops only
+    //    samples at or below the -100 dB threshold (at the cap the new
+    //    endpoint is the last sample above it) — nothing audible to fade.
+    //    A shortfall of the N/2 delay is surfaced to the user at export
+    //    (offCenterWavWarning, fir-export.ts).
     // b141.19: the applied delay (leading zeros). Linear-phase and mixed
     // impulses are already centred by construction, so their delay is N/2.
     let mut wav_delay_samples = n_fft / 2;

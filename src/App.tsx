@@ -203,10 +203,10 @@ function App() {
       {/* Band Tabs */}
       <BandTabs />
 
-      {/* Main content row: plots+panel on left, PeqSidebar on right */}
+      {/* Main content row: plots on the left, right panel on the right */}
       <div class="main-content-row">
         <div class="main-content-col">
-          {/* Plot area — dual graph when not SUM */}
+          {/* Plot area */}
           <main class="plot-area">
             <div class="freq-plot-area" style={{ flex: "1" }}>
               <FrequencyPlot />
