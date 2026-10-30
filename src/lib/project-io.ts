@@ -680,6 +680,22 @@ async function copyPendingMeasurements(): Promise<void> {
 
 const FILTERS = [{ name: "PhaseForge Project", extensions: ["pfproj"] }];
 
+/** b141.120 (external audit 2026-10-29): `parent/name/` for a new project, or
+ *  null after telling the user why not. An existing folder is never reused:
+ *  New Project and Save As silently wrote over the `.pfproj` already in it. */
+async function createFreshProjectFolder(parentPath: string, name: string): Promise<string | null> {
+  try {
+    return await invoke<string>("create_project_folder", { parentDir: parentPath, projectName: name });
+  } catch (e) {
+    console.error("Cannot create project folder:", e);
+    const exists = await invoke<boolean>("check_path_exists", { path: `${parentPath}/${name}` }).catch(() => false);
+    showToast(exists
+      ? `Папка «${name}» здесь уже есть, в ней может лежать другой проект. Выберите другое имя или место.`
+      : `Не удалось создать папку проекта «${name}»: ${e}`, "warn", 12000);
+    return null;
+  }
+}
+
 /** Create a new project with folder.
  *  1. Modal dialog for project name
  *  2. Folder picker for parent location
@@ -703,23 +719,8 @@ export async function newProject(): Promise<void> {
   const parentPath = Array.isArray(parentDir) ? parentDir[0] : parentDir;
 
   // 3. Create project subfolder: parentPath/trimmedName/
-  let folderPath: string;
-  try {
-    folderPath = await invoke<string>("create_project_folder", {
-      parentDir: parentPath,
-      projectName: trimmedName,
-    });
-  } catch (e) {
-    // If folder already exists, reuse it
-    const existsPath = `${parentPath}/${trimmedName}`;
-    const exists = await invoke<boolean>("check_path_exists", { path: existsPath });
-    if (exists) {
-      folderPath = existsPath;
-    } else {
-      console.error("Cannot create project folder:", e);
-      return;
-    }
-  }
+  const folderPath = await createFreshProjectFolder(parentPath, trimmedName);
+  if (!folderPath) return;
 
   // 4. Reset state — create N bands with default crossover filters
   //    Split the working range into equal logarithmic intervals
@@ -880,27 +881,8 @@ async function saveProjectAsInner(): Promise<void> {
   const parentPath = Array.isArray(parentDir) ? parentDir[0] : parentDir;
 
   // 3. Create project folder: parentPath/newName/ + inbox/ + target/ + export/
-  let newDir: string;
-  try {
-    newDir = await invoke<string>("create_project_folder", {
-      parentDir: parentPath,
-      projectName: newName,
-    });
-  } catch (_e) {
-    // Folder may already exist — reuse it
-    const existsPath = `${parentPath}/${newName}`;
-    const exists = await invoke<boolean>("check_path_exists", { path: existsPath });
-    if (exists) {
-      newDir = existsPath;
-      // Ensure subdirectories exist
-      for (const sub of ["inbox", "target", "export"]) {
-        await invoke("ensure_dir", { path: `${newDir}/${sub}` }).catch(e => console.debug("ensure_dir:", e));
-      }
-    } else {
-      console.error("Cannot create project folder:", _e);
-      return;
-    }
-  }
+  const newDir = await createFreshProjectFolder(parentPath, newName);
+  if (!newDir) return;
 
   // 4. Copy files from old project folder (if exists)
   const oldDir = projectDir();

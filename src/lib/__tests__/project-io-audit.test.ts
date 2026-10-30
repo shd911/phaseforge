@@ -3,11 +3,16 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const calls: { cmd: string; args: any }[] = [];
 let failSave = false;
+let folderTaken = false;
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async (cmd: string, args: any) => {
     calls.push({ cmd, args });
     if (cmd === "copy_into_project_unique") return "wfr_2.txt";
-    if (cmd === "create_project_folder") return `${args.parentDir}/${args.projectName}`;
+    if (cmd === "create_project_folder") {
+      if (folderTaken) throw new Error("Folder already exists");
+      return `${args.parentDir}/${args.projectName}`;
+    }
+    if (cmd === "check_path_exists") return folderTaken;
     if (cmd === "save_project" && failSave) throw new Error("Write error: disk full");
     return null;
   }),
@@ -23,7 +28,7 @@ import {
 import { appState, setBandMeasurement, isDirty, setIsDirty } from "../../stores/bands";
 import { toasts } from "../toast";
 
-beforeEach(() => { calls.length = 0; failSave = false; });
+beforeEach(() => { calls.length = 0; failSave = false; folderTaken = false; });
 
 describe("Windows paths (3.14)", () => {
   it("project dir and name from a backslash path", () => {
@@ -76,5 +81,40 @@ describe("new project auto-save failure (3.22)", () => {
     expect(isDirty()).toBe(true);
     expect(toasts().length).toBeGreaterThan(before);
     expect(toasts()[toasts().length - 1].text).toMatch(/сохранить/);
+  });
+});
+
+// b141.120 (external audit 2026-10-29): the name of an existing folder used to
+// reuse it, and the save wrote over the `.pfproj` already there.
+describe("a project name taken by an existing folder", () => {
+  const refused = () => {
+    expect(calls.some((c) => c.cmd === "save_project")).toBe(false);
+    expect(toasts()[toasts().length - 1].text).toMatch(/уже есть/);
+  };
+
+  it("New Project writes nothing and keeps the open project", async () => {
+    setIsDirty(false);
+    setProjectDir("/old");
+    setCurrentProjectPath("/old/Old.pfproj");
+    folderTaken = true;
+    const p = newProject();
+    await Promise.resolve();
+    resolvePrompt({ name: "Taken", bandCount: 2 });
+    await p;
+    refused();
+    expect(projectDir()).toBe("/old");
+    expect(currentProjectPath()).toBe("/old/Old.pfproj");
+  });
+
+  it("Save As writes and copies nothing", async () => {
+    setProjectDir("/old");
+    setCurrentProjectPath("/old/Old.pfproj");
+    folderTaken = true;
+    const p = saveProjectAs();
+    resolvePrompt({ name: "Taken", bandCount: 1 });
+    await p;
+    refused();
+    expect(calls.some((c) => c.cmd === "copy_dir_contents")).toBe(false);
+    expect(projectDir()).toBe("/old");
   });
 });
