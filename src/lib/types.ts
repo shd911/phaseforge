@@ -218,8 +218,7 @@ export interface ExclusionZone {
 
 /** Snapshot of target fields that affect PEQ optimization. Stored on
  *  BandState after Optimize so we can detect when current target diverges
- *  (peqStale). reference_level_db is intentionally excluded — refOffset is
- *  recomputed every optimization so changing it does not invalidate PEQ. */
+ *  (peqStale). */
 export interface PeqOptimizedTarget {
   high_pass: FilterConfig | null;
   low_pass: FilterConfig | null;
@@ -239,6 +238,11 @@ export interface PeqOptimizedTarget {
     low_shelf: ShelfConfig | null;
     high_shelf: ShelfConfig | null;
   };
+  /** b141.126 (external audit 2026-10-29): the target's «Уровень». Standard
+   *  mode fits to a flat line at the target's maximum, which includes it; hybrid
+   *  fits to the measurement's own median and ignores it, so a hybrid fit leaves
+   *  this out. Optional: older snapshots lack it (not stale). */
+  reference_level_db?: number;
   /** b141.103 (audit 3.18): fingerprint of the measurement magnitude the PEQ
    *  was fitted to (`measurementKey`). A new measurement in the band makes
    *  the fit stale. Optional: older snapshots lack it (not stale). */

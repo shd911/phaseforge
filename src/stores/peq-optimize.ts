@@ -252,6 +252,7 @@ export function captureOptimizedTarget(b: BandState): PeqOptimizedTarget {
     // b141.22 (audit): the rate the biquads were fitted at — see PeqOptimizedTarget.
     sample_rate: exportSampleRate(),
     shaping: currentShaping(b),
+    ...(exportHybridPhase() ? {} : { reference_level_db: b.target.reference_level_db }),
     ...(b.measurement ? { measurement_key: measKeyOf(b)! } : {}),
   };
 }
@@ -285,6 +286,9 @@ export function peqStaleReason(b: BandState): string | null {
   }
   if (snap.shaping && JSON.stringify(snap.shaping) !== JSON.stringify(currentShaping(b))) {
     return "наклон или полки цели изменены";
+  }
+  if (snap.reference_level_db !== undefined && snap.reference_level_db !== b.target.reference_level_db) {
+    return "уровень цели изменён";
   }
   if (!exclusionZonesEquals(b.exclusionZones, snap.exclusion_zones)) return "зоны исключения изменены";
   // b141.103 (audit 3.18): fitted to another measurement.

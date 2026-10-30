@@ -139,6 +139,10 @@ pub struct PeqOptimizedTargetData {
     /// b141.67: tilt + shelves at fit time (opaque to Rust; read by `peqStale`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shaping: Option<serde_json::Value>,
+    /// b141.126: the target's level at fit time, absent for a hybrid fit, which
+    /// does not depend on it (read by `peqStale`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_level_db: Option<f64>,
     /// b141.103: fingerprint of the measurement the PEQ was fitted to
     /// (opaque to Rust; read by `peqStale`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
