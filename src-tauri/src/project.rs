@@ -408,6 +408,7 @@ pub async fn create_project_folder(parent_dir: String, project_name: String) -> 
     }
 
     let folder = std::path::PathBuf::from(&parent_dir).join(&safe_name);
+    validate_write_target(&folder.to_string_lossy())?;
     if folder.exists() {
         return Err(format!("Folder already exists: {}", folder.display()));
     }
@@ -547,6 +548,12 @@ pub async fn copy_dir_contents(source_dir: String, dest_dir: String) -> Result<u
             continue;
         }
         let dest_file = dst.join(entry.file_name());
+        // b141.131 (external audit 2026-10-29): a checked folder is not a checked
+        // file — `.zshrc` in the source would land in the home folder. Hidden
+        // files (.DS_Store) are not project content anyway.
+        if validate_write_target(&dest_file.to_string_lossy()).is_err() {
+            continue;
+        }
         // b139.5.2: same self-copy guard — when source_dir == dest_dir the
         // entries resolve to themselves and std::fs::copy would zero them.
         if paths_resolve_to_same_file(&entry.path(), &dest_file) {
@@ -593,6 +600,22 @@ mod tests {
         ] {
             assert!(validate_write_target(good).is_ok(), "must accept: {good}");
         }
+    }
+
+    #[test]
+    fn hidden_names_do_not_get_past_the_guard() {
+        let src = make_scratch_dir("guard-src");
+        let dst = make_scratch_dir("guard-dst");
+        std::fs::write(src.join(".zshrc"), "x").unwrap();
+        std::fs::write(src.join("a.txt"), "x").unwrap();
+        let n = tauri::async_runtime::block_on(copy_dir_contents(
+            src.to_string_lossy().into(), dst.to_string_lossy().into())).unwrap();
+        assert_eq!(n, 1);
+        assert!(dst.join("a.txt").exists() && !dst.join(".zshrc").exists());
+        let bad = dst.join(".hidden").to_string_lossy().to_string();
+        assert!(tauri::async_runtime::block_on(create_project_folder(bad, "p".into())).is_err());
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&dst);
     }
 
     static TEST_DIR_COUNTER: AtomicU32 = AtomicU32::new(0);

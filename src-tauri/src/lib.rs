@@ -131,10 +131,10 @@ async fn remove_measurement_delay(
     let delay = phase::estimate_delay(&freq, &magnitude, &phase, sample_rate);
     let distance = phase::compute_distance(delay);
     let new_phase = phase::remove_delay(&freq, &phase, delay);
-    // Check for overcorrection
-    let excess_gd = phase::check_overcorrection(&freq, &new_phase);
-    if excess_gd > 0.0002 {
-        info!("remove_measurement_delay: WARNING overcorrection detected, excess GD={:.3}ms", excess_gd * 1000.0);
+    let residual_gd = phase::residual_group_delay(&freq, &new_phase);
+    if residual_gd.abs() > 0.0002 {
+        let what = if residual_gd > 0.0 { "undercorrection" } else { "overcorrection" };
+        info!("remove_measurement_delay: WARNING {what}, residual GD={:.3}ms", residual_gd * 1000.0);
     }
     info!("remove_measurement_delay: removed {:.4}ms ({:.3}m)", delay * 1000.0, distance);
     Ok((new_phase, delay, distance))
@@ -479,7 +479,7 @@ pub fn run() {
             .init();
     }
 
-    info!("PhaseForge b141.130 starting...");
+    info!("PhaseForge b141.131 starting...");
     info!("log file: {}", applog::log_path().map(|p| p.display().to_string()).unwrap_or_else(|| "—".into()));
 
     tauri::Builder::default()

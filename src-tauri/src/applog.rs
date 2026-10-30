@@ -114,6 +114,13 @@ mod tests {
         assert!(cur <= 1000 && prev <= 1000, "current {cur} B, previous {prev} B");
         fs::remove_dir_all(&dir).ok();
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn reveal_reports_a_failed_exit_code() {
+        assert!(run_reveal(&mut std::process::Command::new("true")).is_ok());
+        assert!(run_reveal(&mut std::process::Command::new("false")).is_err());
+    }
 }
 
 /// Frontend → log file. `level`: "error" | "warn" | anything else = info.
@@ -127,16 +134,40 @@ pub fn log_frontend(level: String, message: String) {
     }
 }
 
+/// b141.131 (external audit 2026-10-29): `open -R` on a missing file exits 1, and
+/// the command reported success. Explorer exits 1 on success too: Windows checks
+/// only that it started.
+fn run_reveal(cmd: &mut std::process::Command) -> Result<(), String> {
+    if cfg!(target_os = "windows") {
+        cmd.spawn().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    let status = cmd.status().map_err(|e| e.to_string())?;
+    if status.success() { Ok(()) } else { Err(format!("{:?}: {status}", cmd.get_program())) }
+}
+
 /// Reveal the log file in Finder / Explorer.
 #[tauri::command]
 pub async fn reveal_log_file() -> Result<String, String> {
     let path = log_path().ok_or("no log directory")?;
     #[cfg(target_os = "macos")]
-    let r = std::process::Command::new("open").arg("-R").arg(&path).spawn();
+    let mut cmd = {
+        let mut c = std::process::Command::new("open");
+        c.arg("-R").arg(&path);
+        c
+    };
     #[cfg(target_os = "windows")]
-    let r = std::process::Command::new("explorer").arg(format!("/select,{}", path.display())).spawn();
+    let mut cmd = {
+        let mut c = std::process::Command::new("explorer");
+        c.arg(format!("/select,{}", path.display()));
+        c
+    };
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    let r = std::process::Command::new("xdg-open").arg(path.parent().unwrap_or(&path)).spawn();
-    r.map_err(|e| e.to_string())?;
+    let mut cmd = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(path.parent().unwrap_or(&path));
+        c
+    };
+    run_reveal(&mut cmd)?;
     Ok(path.display().to_string())
 }

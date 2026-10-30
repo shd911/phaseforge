@@ -238,11 +238,10 @@ pub fn smart_delay_range(f_first: f64, f_last: f64) -> (f64, f64) {
     }
 }
 
-/// Check if delay removal resulted in overcorrection.
-///
-/// Returns average excess group delay (seconds) in the passband.
-/// Positive value means delay was overestimated (phase slopes upward).
-pub fn check_overcorrection(freq: &[f64], corrected_phase: &[f64]) -> f64 {
+/// Average group delay (seconds) left in the central 50 % of the range after
+/// delay removal. Positive: delay remains, it was underestimated. Negative: the
+/// phase slopes upward, it was overestimated.
+pub fn residual_group_delay(freq: &[f64], corrected_phase: &[f64]) -> f64 {
     if freq.len() < 4 { return 0.0; }
     let f_first = freq[0];
     let f_last = freq[freq.len() - 1];
@@ -646,5 +645,18 @@ mod tests {
         assert_eq!(fit_average_delay(&freq, &noisy, 200.0, 600.0), None);
         assert_eq!(compute_average_delay(&freq, &noisy, 200.0, 600.0), 0.0);
         assert_eq!(fit_average_delay(&freq, &vec![10.0; freq.len()], 200.0, 600.0), Some(0.0));
+    }
+
+    /// b141.131 (external audit 2026-10-29): the log called a leftover delay
+    /// overcorrection.
+    #[test]
+    fn residual_group_delay_sign() {
+        let freq: Vec<f64> = (0..200).map(|i| 100.0 + i as f64 * 50.0).collect();
+        let phase: Vec<f64> = freq.iter().map(|&f| -360.0 * f * 0.001).collect();
+        let gd = residual_group_delay(&freq, &phase);
+        assert!((gd - 0.001).abs() < 1e-5, "delay left: {gd}");
+        let over = remove_delay(&freq, &phase, 0.002);
+        let gd = residual_group_delay(&freq, &over);
+        assert!((gd + 0.001).abs() < 1e-5, "removed too much: {gd}");
     }
 }
