@@ -64,3 +64,57 @@ fn gaussian_lp_plot_phase_matches_fir() {
 fn gaussian_hp_with_subsonic_plot_phase_matches_fir() {
     check(&curve(Some(gauss(100.0, true)), None), Some(100.0 / 8.0), &[20.0, 50.0, 100.0, 400.0], 2.0);
 }
+
+/// b141.125 (external audit 2026-10-29): on a linear main the file's shelves are
+/// zero-phase, and the plot drew their analog phase on target and Corrected:
+/// 27.6° at the corner of HS 4 kHz +6 dB. Elsewhere the file carries them, and so
+/// does the plot. Compared with and without the shelves, so the known analog vs
+/// bilinear difference of the crossovers stays out of it.
+#[test]
+fn shelf_phase_of_the_plot_is_the_file_phase() {
+    use phaseforge_lib::fir::band::{generate_band_fir, BandFirSettings};
+    use phaseforge_lib::target::ShelfConfig;
+    const SR: f64 = 48_000.0;
+    let xo = |fc: f64, lin: bool| FilterConfig {
+        filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: fc, shape: None,
+        linear_phase: lin, q: None, subsonic_protect: None, complementary: false,
+    };
+    let s = BandFirSettings {
+        taps: 65_536, sample_rate: SR, window: WindowType::Blackman,
+        max_boost_db: 24.0, noise_floor_db: -150.0, iterations: 0, freq_weighting: false,
+        narrowband_limit: false, nb_smoothing_oct: 0.333, nb_max_excess_db: 6.0,
+    };
+    let wrap = |d: f64| (d + 180.0).rem_euclid(360.0) - 180.0;
+    let cases: [(&str, Option<FilterConfig>, Option<FilterConfig>, bool); 6] = [
+        ("linear HP+LP", Some(xo(100.0, true)), Some(xo(15_000.0, true)), true),
+        ("linear LP only", None, Some(xo(15_000.0, true)), true),
+        ("linear HP only", Some(xo(100.0, true)), None, true),
+        ("no crossovers", None, None, true),
+        ("min HP+LP", Some(xo(100.0, false)), Some(xo(15_000.0, false)), false),
+        ("mixed HP min + LP lin", Some(xo(100.0, false)), Some(xo(15_000.0, true)), false),
+    ];
+    for (name, hp, lp, zero) in cases {
+        let curve = |shelved: bool| TargetCurve {
+            reference_level_db: 0.0, tilt_db_per_octave: 0.0, tilt_ref_freq: 1000.0,
+            high_pass: hp.clone(), low_pass: lp.clone(),
+            low_shelf: shelved.then_some(ShelfConfig { freq_hz: 300.0, gain_db: -4.0, q: 0.707 }),
+            high_shelf: shelved.then_some(ShelfConfig { freq_hz: 4000.0, gain_db: 6.0, q: 0.707 }),
+        };
+        let with = generate_band_fir(&curve(true), &[], &s, false).expect("fir");
+        let base = generate_band_fir(&curve(false), &[], &s, false).expect("fir");
+        let fs = [500.0, 1000.0, 2000.0, 4000.0, 8000.0];
+        let pw = target::evaluate(&curve(true), &fs).phase;
+        let pb = target::evaluate(&curve(false), &fs).phase;
+        for (i, &f) in fs.iter().enumerate() {
+            let at = |r: &phaseforge_lib::fir::band::BandFirResult| {
+                r.fir.realized_phase[r.freq.iter().position(|&x| x >= f).unwrap()]
+            };
+            let plot = wrap(pw[i] - pb[i]);
+            let file = wrap(at(&with) - at(&base));
+            if zero {
+                assert!(plot.abs() < 1e-9, "{name} @ {f} Hz: plot {plot}°, file is zero-phase");
+            }
+            assert!((plot - file).abs() < 2.5, "{name} @ {f} Hz: plot {plot:.2}° vs file {file:.2}°");
+        }
+    }
+}

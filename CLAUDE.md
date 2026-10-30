@@ -247,8 +247,14 @@
 - **Bilinear digital cascade** (IIR path) has frequency-dependent
   deviation up to ~20° vs analog reference accumulated over 8 biquads.
   REPhase reference comparison gives tighter empirical bound (≤ 2.5° on
-  sr=44.1k). UI plot guardrail uses 25° tolerance — hard fail signals a
+  sr=44.1k). Not a bound for a high LP at a low rate: LR4 15 kHz at 48 kHz is
+  3.3° at 500 Hz, 27° at 4 kHz, 48° at 8 kHz plot vs file (audit 2026-10-29). UI plot guardrail uses 25° tolerance — hard fail signals a
   real regression beyond bilinear math.
+- **Shelf phase on a linear main is zero** on the plot and in the file (b141.125,
+  `target::linear_main` — no min-phase crossover, none at all counts): the FIR
+  is zero-phase, `target::evaluate` used to draw the shelf's analog phase (27.6°
+  at the corner of HS 4 kHz +6 dB). Pinned by
+  `plot_min_phase_matches_fir::shelf_phase_of_the_plot_is_the_file_phase`.
 - **Target shelves: analog on the plot and cepstral route, RBJ on the IIR
   route** — known bilinear deviation, kept on purpose (audit 2026-10-23 1.5).
   The RBJ shelf IS the pre-warped bilinear transform of the same analog

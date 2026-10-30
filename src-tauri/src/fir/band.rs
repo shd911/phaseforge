@@ -251,7 +251,6 @@ pub fn fir_grid(sample_rate: f64) -> Vec<f64> {
 pub fn band_fir_config(target_curve: &TargetCurve, s: &BandFirSettings) -> FirConfig {
     let hp = target_curve.high_pass.as_ref();
     let lp = target_curve.low_pass.as_ref();
-    let lin = |f: Option<&FilterConfig>| f.map_or(true, |c| c.linear_phase);
     let is_lin = |f: Option<&FilterConfig>| f.map(|c| c.linear_phase).unwrap_or(false);
     let mixed = hp.is_some() && lp.is_some() && is_lin(hp) != is_lin(lp);
     FirConfig {
@@ -266,7 +265,7 @@ pub fn band_fir_config(target_curve: &TargetCurve, s: &BandFirSettings) -> FirCo
         narrowband_limit: s.narrowband_limit,
         nb_smoothing_oct: s.nb_smoothing_oct,
         nb_max_excess_db: s.nb_max_excess_db,
-        linear_phase_main: lin(hp) && lin(lp),
+        linear_phase_main: crate::target::linear_main(hp, lp),
         subsonic_cutoff_hz: if subsonic_active(hp) { hp.map(|h| h.freq_hz / 8.0) } else { None },
     }
 }

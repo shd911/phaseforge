@@ -251,9 +251,20 @@ pub fn evaluate(target: &TargetCurve, freq: &[f64]) -> TargetResponse {
     }
 
     let mut phase = vec![0.0_f64; n];
-    complex_acc_to_phase_deg(&re_acc, &im_acc, &mut phase);
+    // b141.125 (external audit 2026-10-29): on a linear main the FIR is zero-phase,
+    // shelves included; their analog phase here was on the plot only (27.6° at
+    // the corner of HS 4 kHz +6 dB). Same rule as the tilt (b141.101).
+    if !linear_main(target.high_pass.as_ref(), target.low_pass.as_ref()) {
+        complex_acc_to_phase_deg(&re_acc, &im_acc, &mut phase);
+    }
 
     TargetResponse { magnitude, phase }
+}
+
+/// THE predicate of a linear FIR main: no minimum-phase crossover, none at all
+/// counts. `FirConfig::linear_phase_main` is this too.
+pub fn linear_main(hp: Option<&FilterConfig>, lp: Option<&FilterConfig>) -> bool {
+    [hp, lp].into_iter().flatten().all(|f| f.linear_phase)
 }
 
 // ---------------------------------------------------------------------------
