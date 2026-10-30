@@ -55,7 +55,8 @@ async function generateBandImpulse(req: ReturnType<typeof firExportRequest>): Pr
   // evaluator, so this call site no longer carries duplicate phase logic.
   const result = await evaluateBandFull(req);
   if (!result.fir) {
-    throw new Error("FIR generation failed");
+    // The evaluator builds no FIR only for a band with its target off.
+    throw new Error(`у полосы «${req.band.name}» выключена цель — включите её, чтобы экспортировать FIR`);
   }
   return {
     impulse: result.fir.impulse,

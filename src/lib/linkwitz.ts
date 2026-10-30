@@ -46,10 +46,13 @@ function modelLevel(freq: number[], mag: number[], t: Pick<PeqBand, "freq_hz" | 
   return v.length ? median(v) : null;
 }
 
+const F0_SEARCH_MAX_HZ = 200;
+
 /** Assumed −3 dB corner of a sealed box: going up from the bottom of the
  *  measurement, the first frequency where the 1/6-octave level reaches 3 dB
  *  under the passband median (40 Hz .. fHigh) — room dips above the corner
- *  do not count. Null when the measurement starts already in the passband. */
+ *  do not count. Null when the measurement starts already in the passband, or
+ *  has not reached it by F0_SEARCH_MAX_HZ (no longer a box roll-off). */
 export function estimateSealedF0(freq: number[], mag: number[], fHigh: number): number | null {
   const pb = freq.flatMap((f, i) => (f >= 40 && f <= Math.max(60, fHigh) ? [mag[i]] : []));
   if (pb.length < 4) return null;
@@ -63,7 +66,8 @@ export function estimateSealedF0(freq: number[], mag: number[], fHigh: number): 
     return n ? 10 * Math.log10(p / n) : NaN;
   };
   let below = false;
-  for (let i = 0; i < freq.length && freq[i] <= 60; i++) {
+  const last = Math.min(F0_SEARCH_MAX_HZ, Math.max(60, fHigh));
+  for (let i = 0; i < freq.length && freq[i] <= last; i++) {
     const l = smooth(freq[i]);
     if (l < level - 3) { below = true; continue; }
     return below ? Math.round(freq[i] * 10) / 10 : null;

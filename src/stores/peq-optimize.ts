@@ -131,6 +131,13 @@ async function resolveRange(inp: RangeInputs) {
   let range: [number, number] = inp.mode === "direct"
     ? [Math.min(inp.directLow, inp.directHigh), Math.min(Math.max(inp.directLow, inp.directHigh), fMax)]
     : [20, fMax];
+  // b141.129 (external audit 2026-10-29): 21–25 kHz at 44.1 kHz lies wholly above
+  // the cap and came back from Rust as «invalid freq_range».
+  if (!(range[0] < range[1])) {
+    throw new PeqRangeError(
+      `заданный диапазон ${Math.round(inp.directLow)}–${Math.round(inp.directHigh)} Hz пуст: при экспорте ${inp.sampleRate} Hz оптимизатор работает до ${Math.round(fMax)} Hz`,
+    );
+  }
   // b141.84: the floor trims BOTH modes — in direct mode it used to be
   // ignored, and a woofer LR2 @ 250 Hz got two of its six PEQ at 3.9/5.1 kHz,
   // where the target sits ~95 dB down.

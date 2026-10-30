@@ -21,6 +21,7 @@ vi.mock("../band-evaluator", () => ({
   evaluateBandFull: vi.fn(async (req: any) => {
     firReq = req;
     duringFir?.();
+    if (!req.band.targetEnabled) return {};
     return { fir: { impulse: new Array(req.fir.taps).fill(0), wavDelaySamples: req.fir.taps / 2, route: "cepstral", peakBoostDb: 0, warnings: [] } };
   }),
 }));
@@ -34,10 +35,17 @@ describe("WAV export settings snapshot (3.3)", () => {
     setExportTaps(65536);
     setExportWindow("Blackman");
     duringFir = () => { setExportSampleRate(384000); setExportTaps(131072); setExportWindow("Hann"); };
-    const ok = await exportBandWav(appState.bands[0]);
+    const ok = await exportBandWav({ ...appState.bands[0], targetEnabled: true });
     expect(ok).toBe(true);
     expect(firReq.fir.sampleRate).toBe(48000);
     expect(wavCalls[0].sampleRate).toBe(48000);
     expect(wavCalls[0].path).toMatch(/_48000_65536_Blackman\.wav$/);
+  });
+
+  // b141.129 (external audit 2026-10-29): it was a bare «FIR generation failed».
+  it("a band with its target off is named", async () => {
+    duringFir = null;
+    await expect(exportBandWav({ ...appState.bands[0], name: "Mid", targetEnabled: false }))
+      .rejects.toThrow(/«Mid».*выключена цель/);
   });
 });

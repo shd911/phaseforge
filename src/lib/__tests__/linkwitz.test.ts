@@ -30,6 +30,15 @@ describe("Linkwitz transform (b141.107)", () => {
     expect(f0).toBeLessThan(31);
   });
 
+  // b141.129: the search stopped at 60 Hz, a higher corner fell back to 30 Hz.
+  it("finds a corner above 60 Hz, gives up past 200 Hz", () => {
+    const freq = logGrid(400, 15, 3000);
+    const f0 = estimateSealedF0(freq, freq.map((f) => 84 + hp2Db(f, 80, 0.707)), 1000)!;
+    expect(f0).toBeGreaterThan(70);
+    expect(f0).toBeLessThan(90);
+    expect(estimateSealedF0(freq, freq.map((f) => 84 + hp2Db(f, 500, 0.707)), 2000)).toBeNull();
+  });
+
   it("the optimizer sees the model below f0 and the target alignment with the transform", () => {
     const freq = logGrid(300, 20, 300);
     // passband 84 dB; a sweep-edge cliff below 24 Hz instead of the box roll-off

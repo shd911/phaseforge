@@ -25,6 +25,7 @@ export default function MergeDialog(props: MergeDialogProps) {
   const [autoOffset, setAutoOffset] = createSignal<number | null>(null);
   const [manualOffset, setManualOffset] = createSignal<number | null>(null);
   const [useManualOffset, setUseManualOffset] = createSignal(false);
+  const shownManualOffset = () => manualOffset() ?? autoOffset() ?? 0;
   const [merging, setMerging] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
 
@@ -119,7 +120,9 @@ export default function MergeDialog(props: MergeDialogProps) {
     setMerging(true);
     setError(null);
     try {
-      const config = mergeConfig(useManualOffset() ? (manualOffset() ?? autoOffset()) : null);
+      // b141.129 (external audit 2026-10-29): the value the field shows. With no
+      // auto estimate the field read 0.0 dB and null sent «auto» instead.
+      const config = mergeConfig(useManualOffset() ? shownManualOffset() : null);
       const result = await invoke<MergeResult>("merge_measurements", {
         nfPath: nf,
         ffPath: ff,
@@ -217,7 +220,7 @@ export default function MergeDialog(props: MergeDialogProps) {
                 <Show when={useManualOffset()}>
                   <NumberInput
                     label="Сдвиг уровня вручную"
-                    value={manualOffset() ?? autoOffset() ?? 0}
+                    value={shownManualOffset()}
                     onChange={(v) => setManualOffset(v)}
                     min={-30}
                     max={30}

@@ -29,9 +29,9 @@ import {
 } from "../bands";
 import {
   handleOptimizeAll, handleOptimizePeq, setPeqRangeMode, setPeqDirectLow, setPeqDirectHigh, setPeqFloor,
-  setMaxBands, captureOptimizedTarget, peqStaleReason,
+  setMaxBands, captureOptimizedTarget, peqStaleReason, peqRangeFor,
 } from "../peq-optimize";
-import { setBandPeqOptimizedTarget } from "../bands";
+import { setBandPeqOptimizedTarget, exportSampleRate, setExportSampleRate } from "../bands";
 import { undo, clearHistory } from "../history";
 
 function meas(level = 80) {
@@ -69,6 +69,21 @@ describe("«Оптимизировать все» with one empty range (3.4)", (
     expect(lmaCalls.length).toBe(1);
     expect(appState.bands[0].peqBands.length).toBe(1);
     expect(appState.bands[1].peqBands.length).toBe(0);
+  });
+});
+
+// b141.129 (external audit 2026-10-29)
+describe("a direct range wholly above the optimizer's cap", () => {
+  it("is named instead of failing in Rust", async () => {
+    const was = exportSampleRate();
+    setExportSampleRate(44100);
+    const id = appState.bands[0].id;
+    setBandMeasurement(id, meas());
+    setPeqRangeMode("direct");
+    setPeqDirectLow(21000);
+    setPeqDirectHigh(25000);
+    await expect(peqRangeFor(appState.bands[0])).rejects.toThrow(/21000–25000 Hz пуст/);
+    setExportSampleRate(was);
   });
 });
 
