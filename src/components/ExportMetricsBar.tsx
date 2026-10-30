@@ -77,20 +77,19 @@ export default function ExportMetricsBar(props: { m: ExportMetrics }) {
   const items: Item[] = [
     {
       id: "causal",
-      // b141.119 (UI audit 2026-10-29 §3): «Причинность» went red on every
-      // linear-phase band, where ~50 % is the design. Coloured only where
-      // ~100 % is expected (all sections min-phase).
+      // b141.123 (external audit 2026-10-29): no traffic light at all. b141.119
+      // graded min-phase bands against ~100 %, but a steep section's peak comes
+      // after its rise: a correct LR4 band reads 42–72 %, and it went red.
       label: () => <>После пика: {m().causality}%</>,
-      color: () => !m().expectCausal ? undefined
-        : m().causality >= 95 ? STATUS_GOOD : m().causality >= 80 ? STATUS_WARN : STATUS_BAD,
       title: "Энергия на пике и после него",
       body: () => <>
         <p>Доля энергии импульса, которая приходится на пик и время после него.</p>
-        <p>Min-phase — около 100%: вся энергия после пика. Linear-phase — около 50%:
-          импульс симметричен. Mixed — между ними.</p>
-        <p>Цветом оценивается только min-phase полоса: там ожидается около 100%, и меньшее
-          значение значит, что до пика попали хвосты. Энергию до пика добавляют и предзвон,
-          и фон — их отдельно показывают «Предзвон» и «Фон».</p>
+        <p>Справочное число, цветом не оценивается. Linear-phase — около 50%: импульс
+          симметричен. Min-phase — от 40 до 100%: у крутого фильтра пик наступает позже
+          начала нарастания, и часть энергии законно приходится на время до пика
+          (LR4 в рабочей полосе — 40–70%, ФВЧ на 30 Гц — 100%).</p>
+        <p>Предзвон и фон, которые тоже дают энергию до пика, показаны отдельно:
+          «Предзвон» и «Фон».</p>
       </>,
     },
     {

@@ -1988,7 +1988,6 @@ export default function FrequencyPlot() {
         phaseLabel,
         peqCount: peqBands.length, normDb: firResult.norm_db,
         causality: Math.round(firResult.causality * 100),
-        expectCausal: [target.high_pass, target.low_pass].every((f) => !f || !f.linear_phase),
         preRingMs: Math.round(pre.preRingMs * 100) / 100,
         preRingThresholdDb: pre.thresholdDb, preRingLimited: pre.limited,
         floorDb: pre.floorDb,

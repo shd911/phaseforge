@@ -1270,9 +1270,6 @@ registerHistoryHooks(_captureBandsLight, _applyBandsLight);
 export interface ExportMetrics {
   taps: number; sampleRate: number; window: string; phaseLabel: string;
   peqCount: number; normDb: number; causality: number;
-  /** b141.119: every section min-phase — ~100 % after the peak is expected,
-   *  so the value is graded; on linear / mixed phase it is shown neutral. */
-  expectCausal: boolean;
   preRingMs: number; maxMagErr: number; gdRippleMs: number;
   /** b141.37: pre-ring threshold (dB re peak), raised above a loud floor. */
   preRingThresholdDb: number;
