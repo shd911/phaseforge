@@ -176,7 +176,8 @@ function repairEdges(hp: Xo[], lp: Xo[]): Set<number> {
 /** Assign default HP/LP filters based on equal-octave split — only to bands
  *  that have NO measurement and still sit on the default split (b141.103).
  *  An edge next to a band the user configured takes that band's frequency,
- *  so linked neighbours stay on one crossover. */
+ *  so linked neighbours stay on one crossover; an unlinked pair keeps its own
+ *  (b141.121). Links are the caller's: this function does not touch them. */
 function assignDefaultTargets(bands: BandState[], prev?: PrevLayout) {
   const n = bands.length;
   if (n <= 0) return;
@@ -185,6 +186,7 @@ function assignDefaultTargets(bands: BandState[], prev?: PrevLayout) {
   const hp: Xo[] = bands.map((b) => cloneFilterConfig(b.target.high_pass ?? null));
   const lp: Xo[] = bands.map((b) => cloneFilterConfig(b.target.low_pass ?? null));
   const edge = xovers.map((f, e) => {
+    if (!bands[e].linkedToNext) return f;
     if (!pristine[e] && lp[e]) return lp[e]!.freq_hz;
     if (!pristine[e + 1] && hp[e + 1]) return hp[e + 1]!.freq_hz;
     return f;
@@ -204,12 +206,6 @@ function assignDefaultTargets(bands: BandState[], prev?: PrevLayout) {
   }
   const repaired = repairEdges(hp, lp);
   for (let i = 0; i < n; i++) {
-    // b140.8.2: re-establish positional link to next band regardless of
-    // measurement presence. Was previously inside the measurement-skip
-    // block → measurement-driven projects lost link state after removeBand.
-    if (i < n - 1 && !bands[i].linkedToNext) {
-      setState("bands", i, "linkedToNext", true);
-    }
     // Last band cannot be linked downstream; clear stale flag if any.
     if (i === n - 1 && bands[i].linkedToNext) {
       setState("bands", i, "linkedToNext", false);
@@ -358,6 +354,10 @@ export function addBand() {
   const num = state.nextBandNum;
   const band = createBand(num);
   batch(() => {
+    // b141.121 (external audit 2026-10-29): only the new pair gets a link. Every
+    // pair used to be relinked here, so a pair the user had unlinked was
+    // linked again and its neighbour's crossover rewritten.
+    if (state.bands.length > 0) setState("bands", state.bands.length - 1, "linkedToNext", true);
     setState("bands", (prev) => [...prev, band]);
     setState("nextBandNum", num + 1);
     setState("activeBandId", band.id);
@@ -404,12 +404,11 @@ export function removeBand(id: string) {
   parkHeavy(state.bands[idx]);
   const prev = captureLayout();
   batch(() => {
-    // b140.8.2: linkedToNext describes positional coupling — after the
-    // filter() removes the deleted band, prev's link transfers to the new
-    // downstream neighbour. Only clear if the deleted band was last
-    // (no downstream neighbour exists anymore).
-    const wasLast = idx === state.bands.length - 1;
-    if (wasLast && idx > 0 && state.bands[idx - 1].linkedToNext) {
+    // b140.8.2: linkedToNext describes positional coupling — the two pairs
+    // around the deleted band become one. b141.121: it stays linked only if
+    // both were, so a pair the user unlinked does not come back linked. The
+    // deleted band's own flag is false when it was last, which clears prev's.
+    if (idx > 0 && state.bands[idx - 1].linkedToNext && !state.bands[idx].linkedToNext) {
       setState("bands", idx - 1, "linkedToNext", false);
     }
     setState("bands", (prev) => prev.filter((b) => b.id !== id));
@@ -668,7 +667,11 @@ export function setBandPreset(bandId: string, preset: PresetName) {
   const idx = bandIndex(bandId);
   if (idx < 0) return;
   pushHistory("Apply preset");
-  setState("bands", idx, "target", PRESETS[preset]());
+  // b141.121 (external audit 2026-10-29): a preset is a tilt and shelves
+  // (`detectPreset` compares only those). Replacing the whole target wiped the
+  // band's crossovers and level.
+  const { tilt_db_per_octave, tilt_ref_freq, low_shelf, high_shelf } = PRESETS[preset]();
+  setState("bands", idx, "target", { tilt_db_per_octave, tilt_ref_freq, low_shelf, high_shelf });
   markDirty();
 }
 

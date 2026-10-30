@@ -13,6 +13,8 @@ import {
   resetAppState,
   setBandHighPass,
   setBandLowPass,
+  setBandPreset,
+  setBandReferenceLevel,
 } from "./bands";
 import type { FilterConfig } from "../lib/types";
 import { cloneFilterConfig } from "../lib/types";
@@ -475,6 +477,30 @@ describe("SolidJS reconcile shared-node behavior", () => {
       expect(store.target.high_pass?.linear_phase).toBe(false);
       expect(store.target.low_pass?.linear_phase).toBe(true); // MUST be isolated
 
+      dispose();
+    });
+  });
+});
+
+// b141.121 (external audit 2026-10-29): a preset used to replace the whole
+// target, so choosing one wiped the band's crossovers and level.
+describe("target preset", () => {
+  it("changes the tilt and shelves, keeps crossovers and level", () => {
+    createRoot((dispose) => {
+      const id = appState.bands[0].id;
+      setBandHighPass(id, makeGaussianFilter(100, false));
+      setBandLowPass(id, makeGaussianFilter(500, true));
+      setBandReferenceLevel(id, -6);
+      setBandPreset(id, "harman");
+      const t = appState.bands[0].target;
+      expect(t.tilt_db_per_octave).toBe(-0.4);
+      expect(t.high_pass!.freq_hz).toBe(100);
+      expect(t.low_pass!.freq_hz).toBe(500);
+      expect(t.low_pass!.linear_phase).toBe(true);
+      expect(t.reference_level_db).toBe(-6);
+      setBandPreset(id, "flat");
+      expect(appState.bands[0].target.tilt_db_per_octave).toBe(0);
+      expect(appState.bands[0].target.high_pass!.freq_hz).toBe(100);
       dispose();
     });
   });
