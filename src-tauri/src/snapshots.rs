@@ -118,6 +118,10 @@ pub async fn create_snapshot(
     if description.chars().count() > 1000 {
         return Err("description too long (>1000 chars)".into());
     }
+    // b141.122 (external audit 2026-10-29): a corrupt index is refused before
+    // anything is written. It used to be replaced with one holding only the
+    // new version: every older one vanished from the list until a Rebuild.
+    read_index(&dir)?;
 
     let now = Utc::now();
     let ts = now.to_rfc3339_opts(SecondsFormat::Secs, true);
@@ -198,11 +202,7 @@ fn finish_snapshot(
     };
 
     let _guard = index_lock();
-    let mut idx = match read_index(dir) {
-        Ok(i) => i,
-        Err(e) if e == INDEX_CORRUPTED => SnapshotIndex::empty(),
-        Err(e) => return Err(e),
-    };
+    let mut idx = read_index(dir)?;
     idx.entries.push(entry.clone());
     write_index(dir, &idx)?;
     Ok(entry)
@@ -501,6 +501,30 @@ mod freeze_tests {
         assert_eq!(ids.len(), 8);
         let listed = tauri::async_runtime::block_on(list_snapshots(dir_s)).unwrap();
         assert_eq!(listed.len(), 8, "index lost entries: {listed:?}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// b141.122: creating a version does not overwrite a corrupt index, and
+    /// Rebuild still finds the versions on disk.
+    #[test]
+    fn corrupt_index_is_refused_and_left_alone() {
+        let dir = temp_project();
+        let dir_s = dir.to_string_lossy().into_owned();
+        let create = |d: &str| tauri::async_runtime::block_on(create_snapshot(
+            dir_s.clone(), d.into(), "test".into(), empty_project(),
+        ));
+        create("first").unwrap();
+        let index = dir.join("snapshots/index.json");
+        std::fs::write(&index, "{ not json").unwrap();
+        let on_disk = || std::fs::read_dir(dir.join("snapshots")).unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|x| x == "pfproj")).count();
+        let before = on_disk();
+        assert_eq!(create("second").unwrap_err(), INDEX_CORRUPTED);
+        assert_eq!(std::fs::read_to_string(&index).unwrap(), "{ not json");
+        assert_eq!(on_disk(), before, "a refused version wrote a file");
+        let rebuilt = tauri::async_runtime::block_on(rebuild_snapshot_index(dir_s.clone())).unwrap();
+        assert_eq!(rebuilt as usize, before);
         std::fs::remove_dir_all(&dir).ok();
     }
 

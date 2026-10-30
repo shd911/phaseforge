@@ -59,7 +59,11 @@ export default function VersionsDialog() {
       setCreating(false);
       setDraft("");
     } catch (e) {
-      setStatusMsg(`Не удалось сохранить: ${e}`);
+      // b141.122: the index may have gone bad since the dialog opened.
+      if (`${e}`.includes("INDEX_CORRUPTED")) {
+        setCreating(false);
+        void refreshSnapshots();
+      } else setStatusMsg(`Не удалось сохранить: ${e}`);
     } finally {
       setBusy(false);
     }
@@ -148,8 +152,10 @@ export default function VersionsDialog() {
               <button
                 class="dlg-btn dlg-btn-primary"
                 onClick={() => { setCreating(true); setDraft(""); setStatusMsg(null); }}
-                disabled={busy()}
-                title="Создать версию текущего состояния с описанием"
+                disabled={busy() || snapshotsError() === "INDEX_CORRUPTED"}
+                title={snapshotsError() === "INDEX_CORRUPTED"
+                  ? "Сначала перестройте индекс версий"
+                  : "Создать версию текущего состояния с описанием"}
               >+ Сохранить версию</button>
             </div>
           </Show>
