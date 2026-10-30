@@ -6,9 +6,14 @@ import type { AnalysisRecommendation } from "./types";
 const SMOOTHING_VALUES: SmoothingMode[] = ["off", "1/3", "1/6", "1/12", "1/24", "var"];
 
 export function applyRecommendation(bandId: string, rec: AnalysisRecommendation, findingId: string): void {
+  // The optimizer range is a project setting and is not undone (b141.103,
+  // audit 3.1): an undo step for it would restore nothing (b141.128).
+  if (rec.action.type === "SetOptLowerBound" || rec.action.type === "SetOptUpperBound") {
+    applyAction(bandId, rec);
+    return;
+  }
   // One undo step per recommendation: the setters' own history pushes
-  // (smoothing, exclusion zone) are absorbed. The optimizer range is a
-  // project setting and is not undone (b141.103, audit 3.1).
+  // (smoothing, exclusion zone) are absorbed.
   historyGroup(`Apply recommendation: ${findingId}`, () => applyAction(bandId, rec));
 }
 

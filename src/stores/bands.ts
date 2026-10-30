@@ -353,6 +353,9 @@ export function addBand() {
   const prev = captureLayout();
   const num = state.nextBandNum;
   const band = createBand(num);
+  // b141.128 (external audit 2026-10-29): a band renamed to «Band 3» and the
+  // third band added after it shared the name.
+  band.name = uniqueBandName(band.name, state.bands);
   batch(() => {
     // b141.121 (external audit 2026-10-29): only the new pair gets a link. Every
     // pair used to be relinked here, so a pair the user had unlinked was
@@ -1256,6 +1259,9 @@ export function _applyBandsLight(entry: HistoryEntry): void {
         setState("bands", i, "settings", "smoothing", lb.smoothing);
       }
     });
+    // b141.128 (external audit 2026-10-29): the restored list may differ, and an
+    // index kept across it moved the highlight and the wheel to another filter.
+    setSelectedPeqIdx(null);
     markDirty();
   });
   pruneParked();

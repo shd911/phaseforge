@@ -4,9 +4,10 @@
 import { describe, it, expect } from "vitest";
 import {
   appState, addBand, removeBand, setBandMeasurement, resetAppState, createBand,
-  addPlotSnapshot, plotSnapshots, _parkedCount,
+  addPlotSnapshot, plotSnapshots, _parkedCount, renameBand, setBandPeqBands, addPeqBand,
+  selectedPeqIdx, setSelectedPeqIdx,
 } from "../bands";
-import { undo, redo, clearHistory } from "../history";
+import { undo, redo, clearHistory, canUndo } from "../history";
 import { applyRecommendation } from "../../lib/analysis-actions";
 
 const meas = () => ({
@@ -41,6 +42,34 @@ describe("undo of the «Сглаживание» recommendation (3.9)", () => {
     expect(appState.bands.find((b) => b.id === id)!.settings!.smoothing).toBe("1/3");
     undo();
     expect(appState.bands.find((b) => b.id === id)!.settings!.smoothing).toBe("off");
+  });
+});
+
+// b141.128 (external audit 2026-10-29)
+describe("Undo, names and recommendations", () => {
+  it("a range recommendation adds no undo step: there is nothing to restore", () => {
+    clearHistory();
+    applyRecommendation("x", { action: { type: "SetOptLowerBound", value: 40 } } as any, "f1");
+    expect(canUndo()).toBe(false);
+  });
+  it("undo clears the selected PEQ", () => {
+    addBand();
+    const id = appState.bands[appState.bands.length - 1].id;
+    const f = { freq_hz: 100, gain_db: -3, q: 2, enabled: true, filter_type: "Peaking" } as const;
+    setBandPeqBands(id, [{ ...f }, { ...f, freq_hz: 200 }]);
+    clearHistory();
+    addPeqBand(id, { ...f, freq_hz: 50 });
+    setSelectedPeqIdx(2);
+    undo();
+    expect(selectedPeqIdx()).toBeNull();
+  });
+  it("a new band does not take a name a renamed band already holds", () => {
+    addBand();
+    const b = appState.bands[appState.bands.length - 1];
+    renameBand(b.id, `Band ${appState.nextBandNum}`);
+    addBand();
+    const names = appState.bands.map((x) => x.name);
+    expect(new Set(names).size).toBe(names.length);
   });
 });
 
