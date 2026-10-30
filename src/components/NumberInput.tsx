@@ -154,7 +154,7 @@ export default function NumberInput(props: NumberInputProps) {
         id={props.id}
         aria-label={props.label}
         onFocus={(e) => e.currentTarget.select()}
-        onBlur={() => commit()}
+        onBlur={() => { commit(); notifyThrottled.flush(); }}
         onKeyDown={(e) => {
           if (e.key === "Enter") { e.preventDefault(); commit(); e.currentTarget.blur(); }
           // b141.105: Escape cancels the draft and stops here — it used to

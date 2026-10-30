@@ -16,7 +16,7 @@ A precision tool for audiophiles and acoustic engineers to generate PEQ and FIR 
 | **FIR Generation** | Correction spectrum → phase strategy → IFFT → windowing → WAV export |
 | **Phase Strategies** | Linear phase, minimum phase, mixed phase (freq-dependent) |
 | **Multi-point Averaging** | Spatially-weighted measurement fusion |
-| **WAV Export** | IEEE Float 64-bit for lossless chaining; 32-bit for playback |
+| **WAV Export** | IEEE Float 64-bit |
 
 ## Architecture
 

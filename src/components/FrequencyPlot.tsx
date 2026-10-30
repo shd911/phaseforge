@@ -3237,17 +3237,17 @@ export default function FrequencyPlot() {
           // b139.4c: corrected mag/phase come from BandEvaluator (single
           // unified path through reconstructTargetPhase). The view-specific
           // passband normalization (corrOffset) stays here.
-          const fullCorrected = evalRes.correctedMag
-            ? [...evalRes.correctedMag]
-            : result.measurement.magnitude.map((v: number, i: number) =>
-                v + (peqMag ? peqMag[i] : 0)
-              );
+          // b141.124 (external audit 2026-10-29): `correctedMag` is null only when
+          // the filter section failed. A «measurement + PEQ» stand-in was drawn
+          // here as «Corrected», without the crossovers the file has; b141.118
+          // closed this for Σ only. Now there is simply no such curve.
+          const fullCorrected = evalRes.correctedMag ? [...evalRes.correctedMag] : null;
 
           // Normalize corrected to target in passband (b82.06)
           let corrOffsetUsed = 0;
           let firDevForPhase: number[] | null = null;
           let fileForPhase: number[] | null = null;
-          if (result.targetMag) {
+          if (result.targetMag && fullCorrected) {
             const [eL, eH] = passbandRange(band.target.high_pass?.freq_hz, band.target.low_pass?.freq_hz);
             let dSum = 0, dN = 0;
             for (let k = 0; k < result.measurement.freq.length; k++) {
@@ -3269,6 +3269,7 @@ export default function FrequencyPlot() {
 
           if (showMag) {
             const corrLabel = isHybrid ? "Corrected + XO" : "Corrected";
+            if (fullCorrected) {
             uSeries.push({
               label: corrLabel + " dB",
               stroke: cf.corrected,
@@ -3278,6 +3279,7 @@ export default function FrequencyPlot() {
             uData.push(fullCorrected);
             legend.push({ label: corrLabel, color: cf.corrected, dash: false, visible: true, seriesIdx: sIdx, category: "corrected" });
             sIdx++;
+            }
 
             // b141.77/78: measurement × the exported FIR = «Corrected» + what the
             // file does beyond the model (realized − requested, fir::band).
@@ -3287,12 +3289,14 @@ export default function FrequencyPlot() {
             if (firRes?.fir && firRes.fir.devMag.length > 0) {
               const dev = interpOnGrid(firRes.freq, firRes.fir.devMag, result.freq!, { logSpace: true, outside: "clamp" }) as number[];
               const nyq = firRes.fir.sampleRate / 2;
+              if (fullCorrected) {
               const firCorr = fullCorrected.map((c: number, k: number) =>
                 result.freq![k] < nyq && isFinite(c) ? c + dev[k] : NaN);
               uSeries.push({ label: "Corr FIR dB", stroke: cf.corrected, width: 1.5, dash: [2, 3], scale: "mag" });
               uData.push(firCorr);
               legend.push({ label: "Corr FIR", color: cf.corrected, dash: false, visible: true, seriesIdx: sIdx, category: "corrfir" });
               sIdx++;
+              }
 
               // b141.79: THE curve that goes into the file (the Export tab's
               // «FIR»): the realized filter response itself, placed on the
@@ -3353,7 +3357,7 @@ export default function FrequencyPlot() {
 
           // Save per-category data for snapshot capture (raw, pre-normalization)
           lastCorrData.freq = result.freq!;
-          lastCorrData.mag = [...fullCorrected];
+          lastCorrData.mag = fullCorrected ? [...fullCorrected] : [];
           lastCorrData.phase = fullCorrectedPhase ? wrapPhase(fullCorrectedPhase) : [];
         } catch (e) {
           console.warn("Correction computation failed:", e);

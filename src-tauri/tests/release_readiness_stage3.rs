@@ -3,19 +3,18 @@
 // Export sweep. For band 0 of the real 4-way project, renders the FIR
 // across the matrix of {sample_rate} × {taps} × {window} the user
 // could plausibly select in the Export tab. Writes each to a temp
-// WAV file via `export_wav_f32` / `export_wav_f64`, then parses the
+// WAV file via `export_wav_f64`, then parses the
 // RIFF/WAVE header back and asserts:
 //   - magic bytes RIFF / WAVE / fmt  / data
 //   - sample-rate field round-trips
-//   - bits-per-sample matches (32 / 64)
+//   - bits-per-sample matches (64)
 //   - data-chunk size matches num_samples * bytes-per-sample
-//   - no clipping (|sample| < 1.0 after f32 cast for the f32 path)
 //   - peak finite, > 0
 //
 // Skips when fixture missing.
 
 use phaseforge_lib::fir::band::evaluate_on;
-use phaseforge_lib::fir::{export_wav_f32, export_wav_f64, FirConfig, PhaseMode, WindowType};
+use phaseforge_lib::fir::{export_wav_f64, FirConfig, PhaseMode, WindowType};
 use phaseforge_lib::project::ProjectFile;
 
 use std::path::PathBuf;
@@ -100,7 +99,7 @@ fn release_readiness_stage3_export_sweep() {
     for &sr in sample_rates().iter() {
         for &taps in taps_list().iter() {
             for (win_name, win) in windows().iter() {
-                for &bits in &[32u16, 64u16] {
+                for &bits in &[64u16] {
                     total += 1;
                     let label = format!("sr={sr}/taps={taps}/{win_name}/bits={bits}");
                     let cfg = FirConfig {
@@ -129,11 +128,7 @@ fn release_readiness_stage3_export_sweep() {
                     let path = tmp_dir.join(format!(
                         "fir_{sr}_{taps}_{win_name}_{bits}.wav"
                     ));
-                    let write_res = if bits == 32 {
-                        export_wav_f32(&res.impulse, sr as f64, &path)
-                    } else {
-                        export_wav_f64(&res.impulse, sr as f64, &path)
-                    };
+                    let write_res = export_wav_f64(&res.impulse, sr as f64, &path);
                     if let Err(e) = write_res {
                         failures.push(format!("{label}: write err: {e}"));
                         continue;
@@ -183,11 +178,6 @@ fn release_readiness_stage3_export_sweep() {
                     if local_fail.is_none() && !(peak.is_finite() && peak > 0.0) {
                         local_fail =
                             Some(format!("{label}: peak {peak} invalid"));
-                    }
-                    if local_fail.is_none() && bits == 32 && peak >= 1.0 {
-                        local_fail = Some(format!(
-                            "{label}: peak {peak} >= 1.0 — would clip f32"
-                        ));
                     }
 
                     let _ = std::fs::remove_file(&path);

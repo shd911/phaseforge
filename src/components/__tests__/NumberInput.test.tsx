@@ -92,6 +92,26 @@ describe("NumberInput", () => {
     now.mockRestore(); vi.useRealTimers();
   });
 
+  // b141.124 (external audit 2026-10-29): leaving the field within 120 ms of the
+  // last notch lost the value when the click then unmounted the field.
+  it("leaving the field delivers the wheel's last value at once", () => {
+    vi.useFakeTimers();
+    const now = vi.spyOn(performance, "now");
+    let t = 1000; now.mockImplementation(() => t);
+    const onChange = vi.fn();
+    const input = mount(onChange);
+    input.focus();
+    const field = input.closest(".num-input")!;
+    const wheel = () => field.dispatchEvent(new WheelEvent("wheel", { deltaY: -WHEEL_PX_PER_STEP, bubbles: true, cancelable: true }));
+    wheel(); t += 10; wheel(); t += 10; wheel();  // 81 sent, 83 pending
+    input.blur();
+    expect(onChange.mock.calls.map((c) => c[0])).toEqual([81, 83]);
+    dispose?.(); dispose = undefined;
+    t += 200; vi.advanceTimersByTime(200);
+    expect(onChange).toHaveBeenCalledTimes(2);
+    now.mockRestore(); vi.useRealTimers();
+  });
+
   it("no wheel value reaches the parent after unmount", () => {
     vi.useFakeTimers();
     const now = vi.spyOn(performance, "now");

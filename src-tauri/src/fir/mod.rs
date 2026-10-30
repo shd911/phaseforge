@@ -21,7 +21,7 @@ pub mod section_ring;
 
 pub use types::*;
 pub use dispatch::{Route, route_for, route_for_target};
-pub use wav::{export_wav_f32, export_wav_f64};
+pub use wav::export_wav_f64;
 #[cfg(test)]
 pub use legacy::generate_fir;
 pub use cepstral::{generate_model_fir, generate_model_fir_with_sections};
@@ -71,7 +71,7 @@ pub fn section_realisable(freq_hz: f64, sample_rate: f64) -> bool {
 /// Recommend tap count based on lowest frequency and sample rate.
 ///
 
-// b140.13:   `export_wav_f32` / `export_wav_f64`  → `fir/wav.rs`
+// b140.13:   `export_wav_f64`  → `fir/wav.rs`
 // b140.13.1: `generate_fir` / `generate_hybrid_fir` → `fir/legacy.rs`
 // b140.13.2: `generate_model_fir`                  → `fir/cepstral.rs`
 // b140.13.3: in-file integration tests              → `fir/tests.rs`
