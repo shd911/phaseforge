@@ -74,6 +74,10 @@ export interface SumEvalOptions {
   /** b141.5 (audit): realization sample rate for PEQ biquads (= export
    *  sample rate). Threaded into every compute_peq_complex call. */
   sampleRate?: number;
+  /** b141.130 (external audit 2026-10-29): `targetCarriesDelay` of the WHOLE
+   *  project. The legend passes only the bands it shows, and hiding the band
+   *  with the measurement moved Σ target by DELAY. Default: decide on `bands`. */
+  targetDelayed?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -250,7 +254,7 @@ async function evaluateSumImpl(
   // reuse its target output → saves N evaluate_target round-trips per
   // SUM render. Per-band measurement case stays on the existing path
   // (intentional refLevel difference, Logic-#3 audit).
-  const targetDelayed = targetCarriesDelay(bands);
+  const targetDelayed = options?.targetDelayed ?? targetCarriesDelay(bands);
   const allBandsNoMeasurement = bands.every(
     b => !b.measurement || b.measurement.freq.length === 0,
   );

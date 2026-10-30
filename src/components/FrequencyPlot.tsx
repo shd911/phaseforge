@@ -36,7 +36,7 @@ import {
 } from "../lib/plot-helpers";
 import { hasActiveSubsonicProtect } from "../lib/types";
 import { evaluateBandFull, evaluateSum, reconstructTargetPhase } from "../lib/band-evaluator";
-import { coherentSum } from "../lib/band-evaluator/sum";
+import { coherentSum, targetCarriesDelay } from "../lib/band-evaluator/sum";
 import { buildCommonGrid, buildFirGrid, interpOnGrid, interpPhaseOnGrid, irTime, resampleOnLogGrid, type ImpulseIpc } from "../lib/band-evaluator/grid";
 import { bandRequestKey } from "../lib/band-evaluator/cache";
 import { computeAutoAlign } from "../lib/auto-align";
@@ -1913,6 +1913,7 @@ export default function FrequencyPlot() {
       // b141.69 (audit stage 2 A5): THE export request, not a hand-built copy
       // of it — a field added in one place would not reach the other and the
       // preview would drift from the WAV.
+      const targetLevelDb = band.target.reference_level_db ?? 0;
       const evalRes = await evaluateBandFull(firExportRequest(band));
       if (gen !== renderGen) return;
       if (!evalRes.fir || !evalRes.targetMag) {
@@ -1986,7 +1987,8 @@ export default function FrequencyPlot() {
       setExportMetrics({
         taps: firResult.taps, sampleRate: firResult.sample_rate, window: win,
         phaseLabel,
-        peqCount: peqBands.length, normDb: firResult.norm_db,
+        // b141.130: the file's own attenuation, «Уровень» is not in the WAV.
+        peqCount: peqBands.length, normDb: firResult.norm_db - targetLevelDb,
         causality: Math.round(firResult.causality * 100),
         preRingMs: Math.round(pre.preRingMs * 100) / 100,
         preRingThresholdDb: pre.thresholdDb, preRingLimited: pre.limited,
@@ -2172,6 +2174,7 @@ export default function FrequencyPlot() {
             : { ...b, measurement: null } as BandState)))
       : [];
     // Polarity / alignment delay of each Σ band, read before any await.
+    const targetDelayed = untrack(() => targetCarriesDelay(appState.bands as BandState[]));
     const sumMeta = untrack(() => sumBands.map((b) => ({
       sign: (b.inverted ? -1 : 1) as 1 | -1,
       delay: typeof b.alignmentDelay === "number" ? b.alignmentDelay : 0,
@@ -2255,7 +2258,7 @@ export default function FrequencyPlot() {
           // the SPL render), resampled onto the measurement GD grid so all
           // series share one x-axis.
           const sumRes = sumBands.length > 0
-            ? await evaluateSum(sumBands, { sampleRate: exportSampleRate() })
+            ? await evaluateSum(sumBands, { sampleRate: exportSampleRate(), targetDelayed })
               .catch((e) => { console.error("[GD] sum eval failed:", e); return null; })
             : null;
           if (gen !== renderGen) return;
@@ -2397,7 +2400,7 @@ export default function FrequencyPlot() {
         try {
           // b141.104 (audit 4.3): the legend's exclusions reach the Σ curves.
           const sumResult = sumBands.length > 0
-            ? await evaluateSum(sumBands, { includeIr: true, sampleRate: exportSampleRate() })
+            ? await evaluateSum(sumBands, { includeIr: true, sampleRate: exportSampleRate(), targetDelayed })
             : null;
           if (gen === renderGen && sumResult?.ir) {
             if (sumResult.ir.measurement) {
@@ -3556,7 +3559,10 @@ export default function FrequencyPlot() {
       ? evaluateBandFull(firExportRequest(b, { omitImpulse: true })).catch(() => null)
       : Promise.resolve(null));
     try {
-      const result = await evaluateSum(bands, { sampleRate: exportSampleRate() });
+      const result = await evaluateSum(bands, {
+        sampleRate: exportSampleRate(),
+        targetDelayed: untrack(() => targetCarriesDelay(appState.bands as BandState[])),
+      });
       if (gen !== renderGen) return;
 
       const freq = result.freq;
@@ -4284,7 +4290,7 @@ export default function FrequencyPlot() {
                       return (
                         <Show when={irE() || stE()}>
                           <tr>
-                            <td class="sum-row-header" onClick={() => toggleCategory(cat)} style={{ opacity: (irE()?.visible || stE()?.visible) ? 1 : 0.4 }}>{catLabels[cat]}</td>
+                            <td class={`sum-row-header ${(irE()?.visible || stE()?.visible) ? "" : "cat-off"}`} onClick={() => toggleCategory(cat)}>{catLabels[cat]}</td>
                             <td class="sum-cell">
                               <Show when={irE()}>{(e) => {
                                 const idx = () => legendEntries.findIndex(le => le.seriesIdx === e().seriesIdx);
@@ -4410,7 +4416,7 @@ export default function FrequencyPlot() {
             disabled={windowIsInert()}
             style={{ opacity: windowIsInert() ? 0.45 : 1 }}
             title={windowIsInert()
-              ? "Окно не применяется: полоса считается аналитическим каскадом (мин-фаза без subsonic и без гауссов). Импульс получается прогоном дельты через биквады, обрыва нет — сглаживать нечего. Окно влияет на линейной фазе, на гауссах/Бесселе, при subsonic и на измеренных таргетах."
+              ? "Окно не применяется: полоса считается аналитическим каскадом (мин-фаза без subsonic и без гауссов). Импульс получается прогоном дельты через биквады, а конец файла всегда плавно гасится на последних 5 %. Окно влияет на линейной фазе, на гауссах/Бесселе, при subsonic и на измеренных таргетах."
               : "Оконная функция. Заметна при коротких Taps и на резких переходах таргета: агрессивное окно укорачивает предзвон, но увеличивает отклонение от таргета."}
           >
             <optgroup label="Basic">
@@ -4826,7 +4832,7 @@ export default function FrequencyPlot() {
                     <For each={present()}>
                       {(cat) => {
                         const anyOn = () => legendEntries.some(e => e.category === cat && e.visible);
-                        return <th onClick={() => toggleCategory(cat)} style={{ opacity: anyOn() ? 1 : 0.4 }}>{catLabels[cat]}</th>;
+                        return <th class={anyOn() ? "" : "cat-off"} onClick={() => toggleCategory(cat)}>{catLabels[cat]}</th>;
                       }}
                     </For>
                   </tr>
@@ -4838,7 +4844,7 @@ export default function FrequencyPlot() {
                       const anyOn = () => legendEntries.some(e => inRow(e) && e.visible);
                       return (
                         <tr>
-                          <td class="sum-row-header" onClick={() => toggleEntries(inRow)} style={{ opacity: anyOn() ? 1 : 0.4 }}>{row.label}</td>
+                          <td class={`sum-row-header ${anyOn() ? "" : "cat-off"}`} onClick={() => toggleEntries(inRow)}>{row.label}</td>
                           <For each={present()}>
                             {(cat) => {
                               const ent = () => legendEntries.find(e => e.category === cat && isPhaseEntry(e) === row.phase);

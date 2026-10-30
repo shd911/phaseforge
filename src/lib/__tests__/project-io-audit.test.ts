@@ -23,7 +23,7 @@ vi.mock("../../components/MeasurementAnalysisDialog", () => ({ openMeasurementAn
 import {
   deriveProjectInfo, pathBaseName, copyMeasurementToProject, saveProjectAs, resolvePrompt,
   projectDir, setProjectDir, projectName, setProjectName, setCurrentProjectPath, currentProjectPath,
-  newProject,
+  newProject, restoreState, buildProjectData,
 } from "../project-io";
 import { appState, setBandMeasurement, isDirty, setIsDirty } from "../../stores/bands";
 import { toasts } from "../toast";
@@ -116,5 +116,22 @@ describe("a project name taken by an existing folder", () => {
     refused();
     expect(calls.some((c) => c.cmd === "copy_dir_contents")).toBe(false);
     expect(projectDir()).toBe("/old");
+  });
+});
+
+// b141.130 (external audit 2026-10-29): equal delays all become 0, in silence.
+describe("delay convention migration", () => {
+  const legacy = (delays: number[]) => {
+    const p = buildProjectData() as any;
+    p.bands = delays.map((d, i) => ({ ...p.bands[0], name: `b${i}`, alignment_delay: d, measurement_file: null }));
+    delete p.delay_positive_is_late;
+    p.version = 1;
+    return p;
+  };
+  const announced = () => toasts().some((t) => /конвенцию/.test(t.text));
+  it("announces equal non-zero delays reset to 0", async () => {
+    await restoreState(legacy([0.005, 0.005]), null);
+    expect(appState.bands.map((b) => b.alignmentDelay)).toEqual([0, 0]);
+    expect(announced()).toBe(true);
   });
 });

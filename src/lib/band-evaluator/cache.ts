@@ -92,6 +92,7 @@ export function sumRequestKey(bands: BandState[], options?: SumEvalOptions): str
     f: hashGrid(options?.freq),
     ir: options?.includeIr ?? false,
     sr: options?.sampleRate ?? null,
+    td: options?.targetDelayed ?? null,
   });
 }
 

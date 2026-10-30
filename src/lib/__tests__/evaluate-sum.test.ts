@@ -585,4 +585,15 @@ describe("passbandRange (b141.69)", () => {
   it("narrow band uses its crossover span", () => { expect(passbandRange(1000, 1400)).toEqual([1000, 1400]); });
   it("inverted pair keeps 200–2000", () => { expect(passbandRange(15000, 20)).toEqual([200, 2000]); });
   it("no filters", () => { expect(passbandRange(null, null)).toEqual([30, 14000]); });
+
+  // b141.130 (external audit 2026-10-29): the legend passes only visible bands;
+  // hiding the band with the measurement must not put DELAY on Σ target.
+  it("the caller's project-wide decision overrides the visible bands", async () => {
+    const noMeas = { ...flatBand("a", { alignmentDelay: 0.001 }), measurement: null } as BandState;
+    const r = await evaluateSum([noMeas], { targetDelayed: false });
+    expect(r.targetDelayed).toBe(false);
+    const idx = r.freq.findIndex((v) => v >= 100);
+    expect(r.sumTargetPhase![idx]).toBeCloseTo(0, 6);
+    expect((await evaluateSum([noMeas])).targetDelayed).toBe(true);
+  });
 });

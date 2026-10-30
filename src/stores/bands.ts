@@ -355,7 +355,7 @@ export function addBand() {
   const band = createBand(num);
   // b141.128 (external audit 2026-10-29): a band renamed to «Band 3» and the
   // third band added after it shared the name.
-  band.name = uniqueBandName(band.name, state.bands);
+  band.name = uniqueBandName(band.name, state.bands, band.id);
   batch(() => {
     // b141.121 (external audit 2026-10-29): only the new pair gets a link. Every
     // pair used to be relinked here, so a pair the user had unlinked was

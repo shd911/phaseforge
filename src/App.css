@@ -598,6 +598,8 @@ input[type="checkbox"]:focus-visible {
 .sum-vis-table .sum-row-header.row-partial {
   color: var(--text-secondary);
 }
+/* b141.130: an off row or column keeps a readable label, as the legend does. */
+.sum-vis-table .cat-off, .band-vis-table .cat-off { color: var(--text-muted); }
 .sum-row-swatch {
   display: inline-block;
   width: 8px;

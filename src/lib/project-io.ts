@@ -416,7 +416,8 @@ export async function restoreState(project: ProjectFile, projDir: string | null)
   // b141.10: legacy projects stored alignment delays under the inverted
   // (positive = advance) convention — convert preserving relative timing.
   if (!project.delay_positive_is_late) {
-    const migrated = migrateDelayConvention(bands.map(b => b.alignmentDelay ?? 0));
+    const legacy = bands.map(b => b.alignmentDelay ?? 0);
+    const migrated = migrateDelayConvention(legacy);
     bands.forEach((b, i) => { b.alignmentDelay = migrated[i]; });
     // b141.18 (audit): between b141.10 and b141.17 the marker was lost on save
     // (no field for it in the Rust ProjectFile), so files written by those
@@ -424,7 +425,8 @@ export async function restoreState(project: ProjectFile, projDir: string | null)
     // migration is an involution, so they flipped on every open. Nothing in the
     // file distinguishes them from a genuine legacy project, so say out loud
     // that the delays were converted instead of changing them silently.
-    if (migrated.some(d => d !== 0)) {
+    // Compared with the old values: equal delays all become 0 (b141.130).
+    if (migrated.some((d, i) => d !== legacy[i])) {
       showToast(
         "Задержки полос пересчитаны под конвенцию «плюс = позже» — проверьте значения на вкладке Сумма.",
         "info",
