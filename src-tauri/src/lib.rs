@@ -299,7 +299,7 @@ async fn compute_peq_complex(
 ) -> Result<(Vec<f64>, Vec<f64>), String> {
     let sr = sample_rate.unwrap_or(48000.0);
     info!("compute_peq_complex: {} points, {} bands, sr={}", freq.len(), bands.len(), sr);
-    Ok(peq::apply_peq_complex(&freq, &bands, sr))
+    Ok(fir::band::peq_response_as_exported(&freq, &bands, sr))
 }
 
 // ---------------------------------------------------------------------------
@@ -479,7 +479,7 @@ pub fn run() {
             .init();
     }
 
-    info!("PhaseForge b141.126 starting...");
+    info!("PhaseForge b141.127 starting...");
     info!("log file: {}", applog::log_path().map(|p| p.display().to_string()).unwrap_or_else(|| "—".into()));
 
     tauri::Builder::default()

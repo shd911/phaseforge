@@ -75,6 +75,18 @@ pub struct BandFirResult {
     pub warnings: Vec<String>,
 }
 
+/// The filters that reach the file: at or above SECTION_MAX_FRACTION·sr none do.
+fn realisable_peq(peq: &[PeqBand], sr: f64) -> Vec<PeqBand> {
+    peq.iter().filter(|p| super::section_realisable(p.freq_hz, sr)).cloned().collect()
+}
+
+/// PEQ response for the plot, the filters the file drops left out (b141.127,
+/// external audit 2026-10-29): 23.6 kHz +6 dB at 48 kHz drew 4.9 dB at 23.5 kHz
+/// on Corr FIR beside an impulse without it.
+pub fn peq_response_as_exported(freq: &[f64], peq: &[PeqBand], sr: f64) -> (Vec<f64>, Vec<f64>) {
+    apply_peq_complex(freq, &realisable_peq(peq, sr), sr)
+}
+
 /// b141.101 (audit 2026-10-23 1.1/1.4): sections at or above
 /// SECTION_MAX_FRACTION·sr. PEQ there is dropped on both routes (its RBJ
 /// biquad is unstable on the IIR route and only an aliased mirror on the
@@ -294,8 +306,7 @@ pub(crate) fn generate_band_fir_routed(
     let sr = s.sample_rate;
     let all_enabled: Vec<PeqBand> = peq.iter().filter(|p| p.enabled).cloned().collect();
     let warnings = nyquist_warnings(target_curve, &all_enabled, sr);
-    let enabled: Vec<PeqBand> = all_enabled.into_iter()
-        .filter(|p| super::section_realisable(p.freq_hz, sr)).collect();
+    let enabled = realisable_peq(&all_enabled, sr);
 
     let config = band_fir_config(target_curve, s);
     let freq_raw = fir_grid(sr);
@@ -656,5 +667,20 @@ mod tests {
         for (f, d) in r.freq.iter().zip(&r.dev_mag) {
             if *f >= 300.0 && *f <= 2000.0 { assert!(d.abs() < 0.05, "dev {d:.3} dB at {f:.0} Hz"); }
         }
+    }
+
+    #[test]
+    fn plot_peq_drops_what_the_file_drops() {
+        let peq = [PeqBand {
+            freq_hz: 23_600.0, gain_db: 6.0, q: 1.0, enabled: true,
+            filter_type: crate::peq::PeqFilterType::Peaking,
+        }];
+        let f = [20.0, 1000.0, 23_500.0];
+        let (raw, _) = apply_peq_complex(&f, &peq, 48_000.0);
+        assert!(raw[2] > 3.0, "the unstable biquad draws a boost: {}", raw[2]);
+        let (mag, phase) = peq_response_as_exported(&f, &peq, 48_000.0);
+        assert!(mag.iter().chain(&phase).all(|v| *v == 0.0), "{mag:?} {phase:?}");
+        let (at_96k, _) = peq_response_as_exported(&f, &peq, 96_000.0);
+        assert!(at_96k[2] > 3.0, "below the limit it stays: {}", at_96k[2]);
     }
 }
