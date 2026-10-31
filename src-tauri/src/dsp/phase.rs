@@ -50,6 +50,22 @@ pub fn minimum_phase_from_magnitude(mag_db: &[f64], n_fft: usize) -> Vec<f64> {
         .collect()
 }
 
+/// Magnitude (dB) at `f` below the first grid point `f0`, from its level `m0`
+/// and log-log slope there (dB/oct). A falling curve continues by the slope.
+/// b141.133: one rising toward DC (shelf, negative tilt) saturates as a shelf
+/// does, m0 + K·(1 − (f/f0)²) with the same slope at f0: by the slope, 12
+/// octaves down, a −1 dB/oct tilt ended 12 dB above 5 Hz and LS 8 Hz +12 dB
+/// had a 22 dB lift at DC. Under 1e-3 dB/oct (a passband: Bessel LP 500 Hz at
+/// 5 Hz) it is not a rise, ≤ 0.012 dB at DC.
+pub fn below_grid_db(m0: f64, slope: f64, f: f64, f0: f64) -> f64 {
+    if slope >= -1e-3 {
+        let oct = (f.max(f0 / 4096.0) / f0).log2(); // ≤ 0
+        return m0 + slope * oct;
+    }
+    let r = f / f0;
+    m0 - slope / (2.0 * std::f64::consts::LN_2) * (1.0 - r * r)
+}
+
 /// Minimum phase (degrees) of a magnitude curve (dB) given on a log grid,
 /// evaluated at the true Nyquist of `sample_rate` (see the Tauri command
 /// `compute_minimum_phase` for the history of this function).
@@ -95,8 +111,7 @@ pub fn minimum_phase_on_log_grid(
     for k in 0..n_bins {
         let f_lin = nyquist * k as f64 / (n_bins - 1) as f64;
         lin_mag[k] = if f_lin <= f_first {
-            let oct = (f_lin.max(f_first / 4096.0) / f_first).log2(); // ≤ 0
-            (clamped[0] + slope_lo * oct).max(mag_floor)
+            below_grid_db(clamped[0], slope_lo, f_lin, f_first).max(mag_floor)
         } else if f_lin >= f_last {
             let oct = (f_lin / f_last).log2(); // ≥ 0
             (clamped[n - 1] + slope_hi * oct).max(mag_floor)

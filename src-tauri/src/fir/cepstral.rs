@@ -349,8 +349,7 @@ pub fn generate_model_fir_with_sections(
 
     // 8. Passband normalization: shift so peak of realized magnitude = 0 dB
     //    This works for any filter shape (narrow band, wide band, HP, LP, BP).
-    let norm_db = realized_mag.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    let norm_db = if norm_db.is_finite() { norm_db } else { 0.0 };
+    let norm_db = super::helpers::file_peak_db(&realized_mag, freq[0], &lin_freq, &realized_mag_lin);
 
     info!("generate_model_fir: realized_max={:.2} dB → normalizing by {:.2} dB", norm_db, norm_db);
 
@@ -432,6 +431,7 @@ pub fn generate_model_fir_with_sections(
 /// 100 + subsonic) and moved the phase by 28° at 20 Hz against the same
 /// curve continued — the rule `dsp::minimum_phase_on_log_grid` already
 /// follows for the plot. The noise floor clip downstream bounds it.
+/// b141.133: a curve rising toward DC saturates, `dsp::below_grid_db`.
 fn extend_below_grid(lin_freq: &[f64], lin: &mut [f64], freq: &[f64], mag: &[f64]) {
     if freq.len() < 2 || freq[0] <= 0.0 { return; }
     let df = (freq[1] / freq[0]).log2();
@@ -439,7 +439,6 @@ fn extend_below_grid(lin_freq: &[f64], lin: &mut [f64], freq: &[f64], mag: &[f64
     let slope = (mag[1] - mag[0]) / df; // dB per octave
     for (v, &f) in lin.iter_mut().zip(lin_freq) {
         if f >= freq[0] { break; }
-        let oct = (f.max(freq[0] / 4096.0) / freq[0]).log2(); // ≤ 0
-        *v = mag[0] + slope * oct;
+        *v = crate::dsp::below_grid_db(mag[0], slope, f, freq[0]);
     }
 }

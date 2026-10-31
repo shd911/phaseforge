@@ -101,6 +101,19 @@ thread_local! {
     pub(crate) static ITER_STATS: std::cell::RefCell<Vec<IterStats>>
         = std::cell::RefCell::new(Vec::new());
 }
+/// The level a file is normalised by: the peak of its realised response on the
+/// grid or, b141.133, below the grid's first point (5 Hz) when it is higher
+/// there — LS 8 Hz +12 dB sat at +1.9 dB over full scale at DC on the IIR
+/// route. Under 0.01 dB it is not a peak but the realisation's own ripple and
+/// leaves the level alone.
+pub(crate) fn file_peak_db(grid_mag: &[f64], f_first: f64, lin_freq: &[f64], lin_mag: &[f64]) -> f64 {
+    let grid = grid_mag.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let below = lin_freq.iter().zip(lin_mag).take_while(|(&f, _)| f < f_first)
+        .map(|(_, &m)| m).fold(f64::NEG_INFINITY, f64::max);
+    let peak = if below > grid + 0.01 { below } else { grid };
+    if peak.is_finite() { peak } else { 0.0 }
+}
+
 #[cfg(test)]
 pub(crate) fn iter_stats_reset() {
     ITER_STATS.with(|s| s.borrow_mut().clear());

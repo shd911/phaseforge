@@ -174,6 +174,14 @@
   target with `reference_level_db = 0` — the level used to move «Макс.
   подъём», the noise floor and `peak_boost_db`. `norm_db` gets the level
   added back so `realized_mag + norm_db` = the requested response.
+- **The file peaks at 0 dB down to DC** (b141.133, `fir::helpers::file_peak_db`,
+  `dsp::below_grid_db`): the norm also reads the bins under the grid's 5 Hz, and
+  a curve still rising toward DC there saturates (a falling one still continues
+  by slope, b141.52). A tilt of −1 dB/oct ended +7.8 dB over full scale at DC,
+  LS 8 Hz +12 dB +12.3 dB (22 dB lift). A boost costs its full size in level:
+  a low shelf or Linkwitz transform +12 dB without an HP puts the band at −12 dB
+  — by design; an HP 20 Hz brings it back to about −4.5 dB (LT 30 Hz +12 dB).
+  Pinned by `tests/below_grid_peak.rs`.
 - **«Corrected» = measurement + PEQ + `filterSection`** (b141.48): HP/LP,
   tilt, shelves and the ultrasonic LP — the whole level-free section the FIR
   bakes in. One TS builder for band, band IR, Σ and Σ IR.

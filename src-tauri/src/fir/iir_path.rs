@@ -533,8 +533,7 @@ pub fn generate_min_phase_fir_iir(input: &IirPathInput) -> Result<FirModelResult
     //    magnitude is 0 dB. Same convention as the FFT path. Applied to
     //    BOTH the WAV impulse (so the file peaks at 0 dB) and the
     //    realised_mag display (so the plot peaks at 0 dB).
-    let norm_db = realized_mag.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    let norm_db = if norm_db.is_finite() { norm_db } else { 0.0 };
+    let norm_db = super::helpers::file_peak_db(&realized_mag, input.freq[0], &lin_freq, &realized_mag_lin);
     let norm_linear = 10f64.powf(-norm_db / 20.0);
     for v in wav_impulse.iter_mut() { *v *= norm_linear; }
     let realized_mag: Vec<f64> = realized_mag.iter().map(|&v| v - norm_db).collect();
