@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   appState, addBand, setBandHighPass, setBandLowPass, toggleBandLinked, setNestedCrossovers,
-  nestedCrossovers, removeBand, setBandTilt,
+  nestedCrossovers, removeBand, setBandTilt, bandsVersion,
 } from "../bands";
 import { peqStaleReason, captureOptimizedTarget } from "../peq-optimize";
 import { undo } from "../history";
@@ -68,6 +68,25 @@ describe("nested crossovers in the store", () => {
     setBandLowPass(ids[1], lr(500, { linear_phase: false }));
     expect(lpNested(0)).toEqual([]);
     expect(hpNested(3)).toEqual([]);
+  });
+
+  // b141.136: the plot redraws on bandsVersion only. The toggle changed the
+  // lists and the file, the curves stayed until some other edit.
+  it("the toggle redraws the plot when the lists change, and only then", () => {
+    fourBands();
+    let v = bandsVersion();
+    setNestedCrossovers(true);
+    expect(lpNested(0)).toEqual([500]);
+    expect(bandsVersion()).toBe(v + 1);
+    v = bandsVersion();
+    setNestedCrossovers(false);
+    expect(lpNested(0)).toEqual([]);
+    expect(bandsVersion()).toBe(v + 1);
+
+    setBandLowPass(appState.bands[1].id, lr(500, { linear_phase: false })); // no chain is left
+    v = bandsVersion();
+    setNestedCrossovers(true);
+    expect(bandsVersion()).toBe(v);
   });
 
   it("the toggle makes a fitted PEQ stale", () => {

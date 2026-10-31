@@ -264,7 +264,8 @@
   magnitude (`target::section_response`, linear sections only). `nested` is
   DERIVED: a `createComputed` in stores/bands.ts rewrites it from the crossovers
   and the flag (it reads `nested` too, so an undo gets re-derived) and does not
-  mark the project dirty. Absent when empty — keys, snapshots and golden stay
+  mark the project dirty. Changed lists bump `bandsVersion` (b141.136): the plot redraws on it
+  alone, and the flag's setter only marks settings dirty. Absent when empty — keys, snapshots and golden stay
   as they were. Only linear LR/Gaussian pairs qualify; «1 − H» (HP + LP − 1 as a
   whole) and other families split the chain. A nested HP below the band's own
   counts in `ringZone`. Pinned by `tests/nested_crossovers.rs`, the `LinNested`

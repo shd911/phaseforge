@@ -1062,20 +1062,6 @@ export const [exportHybridPhase, setExportHybridPhase] = settingSignal(false);
 /** b141.134: nested crossovers, off by default (lib/nested-crossovers.ts). */
 export const [nestedCrossovers, setNestedCrossovers] = settingSignal(false);
 
-// Every band's `nested` lists follow the crossovers and the flag. A computed:
-// it runs before any effect, so nothing evaluates a band with stale lists. It
-// reads `nested` too, so an undo that restores older lists gets them re-derived.
-createRoot(() => createComputed(() => {
-  const wanted = nestedCrossoverSections(state.bands, nestedCrossovers());
-  wanted.forEach((w, i) => {
-    for (const [key, list] of [["high_pass", w.hp], ["low_pass", w.lp]] as const) {
-      const section = state.bands[i].target[key];
-      if (!section || JSON.stringify(section.nested ?? []) === JSON.stringify(list)) continue;
-      setState("bands", i, "target", key, { nested: list.length ? list : undefined });
-    }
-  });
-}));
-
 // FIR optimization settings
 export const [firIterations, setFirIterations] = settingSignal(3);
 export const [firFreqWeighting, setFirFreqWeighting] = settingSignal(true);
@@ -1187,6 +1173,25 @@ export function markDirty() {
   markSettingsDirty();
   setBandsVersion(v => v + 1);
 }
+
+// Every band's `nested` lists follow the crossovers and the flag. A computed:
+// it runs before any effect, so nothing evaluates a band with stale lists. It
+// reads `nested` too, so an undo that restores older lists gets them re-derived.
+// b141.136: changed lists are band content, and the plot redraws on
+// `bandsVersion` only — the flag's own setter does not move it.
+createRoot(() => createComputed(() => {
+  const wanted = nestedCrossoverSections(state.bands, nestedCrossovers());
+  let changed = false;
+  wanted.forEach((w, i) => {
+    for (const [key, list] of [["high_pass", w.hp], ["low_pass", w.lp]] as const) {
+      const section = state.bands[i].target[key];
+      if (!section || JSON.stringify(section.nested ?? []) === JSON.stringify(list)) continue;
+      setState("bands", i, "target", key, { nested: list.length ? list : undefined });
+      changed = true;
+    }
+  });
+  if (changed) setBandsVersion((v) => v + 1);
+}));
 
 // ---------------------------------------------------------------------------
 // History snapshot helpers (b132): band content only (b141.103, audit 3.1 —
