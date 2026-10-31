@@ -314,8 +314,8 @@ interface FilterBlockProps {
 const NESTED_TITLE = "Вложенные кроссоверы: разветвление от центрального раздела. "
   + "Полоса получает ещё и ФНЧ/ФВЧ соседних разделов и не пролезает в полосу через одну, сумма остаётся ровной. "
   + "На весь проект.";
-const NESTED_NEEDS = "Нужна цепочка минимум из двух связанных разделов с Lin-φ, тип LR или Гаусс "
-  + "(не «1 − H» и не «Произвольный Q»: они не складываются в единицу как произведение).";
+const NESTED_NEEDS = "Нужна цепочка минимум из двух связанных разделов с Lin-φ, тип Linkwitz-Riley (от 12 дБ/окт) или Gaussian. "
+  + "Butterworth, Bessel, «Произвольный Q» и «1 − H» не складываются в единицу как произведение.";
 
 const COMPLEMENT = "Complement";
 const COMPLEMENT_TITLE = "1 − H: этот фильтр — дополнение связанного «Произвольного Q» (та же частота, порядок и Q), "
@@ -507,6 +507,10 @@ function FilterBlock(props: FilterBlockProps) {
                 <span class="fb-check-label">Вложенные</span>
               </span>
             </div>
+            {/* b141.135: left on after the chain broke, it would do nothing in silence */}
+            <Show when={nestedCrossovers() && !hasNestableRun(appState.bands)}>
+              <div class="fb-ring"><div class="warn">Не действует. {NESTED_NEEDS}</div></div>
+            </Show>
           </Show>
           <Show when={c()?.nested?.length}>
             <div class="fb-hint" title={NESTED_TITLE}>

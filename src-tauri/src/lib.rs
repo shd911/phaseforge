@@ -477,7 +477,7 @@ pub fn run() {
             .init();
     }
 
-    info!("PhaseForge b141.134 starting...");
+    info!("PhaseForge b141.135 starting...");
     info!("log file: {}", applog::log_path().map(|p| p.display().to_string()).unwrap_or_else(|| "—".into()));
 
     tauri::Builder::default()

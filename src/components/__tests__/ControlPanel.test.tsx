@@ -9,7 +9,8 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ ask: vi.fn(async () => true), open
 import ControlPanel from "../ControlPanel";
 import {
   appState, addBand, setActiveBand, setBandTilt, setBandMeasurement, addExclusionZone,
-  selectedPeqIdx, setSelectedPeqIdx, setExportHybridPhase, setBandHighPass,
+  selectedPeqIdx, setSelectedPeqIdx, setExportHybridPhase, setBandHighPass, setBandLowPass,
+  toggleBandLinked, setNestedCrossovers,
 } from "../../stores/bands";
 
 let dispose: (() => void) | undefined;
@@ -82,5 +83,34 @@ describe("ControlPanel", () => {
     expect(box.getAttribute("tabindex")).toBe("0");
     box.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
     expect(appState.bands[0].target.high_pass!.linear_phase).toBe(true);
+  });
+
+  it("«Вложенные» left on with nothing to nest says it does nothing", () => {
+    while (appState.bands.length < 3) addBand();
+    setActiveBand(a); // addBand activates the new band
+    const section = (filter_type: "LinkwitzRiley" | "Butterworth", order: number, freq_hz: number) =>
+      ({ filter_type, order, freq_hz, shape: null, linear_phase: true, q: null, subsonic_protect: null });
+    const crossovers = (filter_type: "LinkwitzRiley" | "Butterworth", order: number) => {
+      const [x, y, z] = appState.bands.map((band) => band.id);
+      setBandLowPass(x, section(filter_type, order, 220));
+      setBandHighPass(y, section(filter_type, order, 220));
+      setBandLowPass(y, section(filter_type, order, 800));
+      setBandHighPass(z, section(filter_type, order, 800));
+    };
+    appState.bands.slice(0, 2).forEach((band) => { if (!band.linkedToNext) toggleBandLinked(band.id); });
+    const warning = () => [...document.querySelectorAll(".fb-ring .warn")]
+      .some((el) => el.textContent!.startsWith("Не действует."));
+
+    crossovers("LinkwitzRiley", 1);
+    setNestedCrossovers(true);
+    expect(warning()).toBe(false);
+    expect(document.body.textContent).toContain("+ ФНЧ 800 Гц");
+
+    crossovers("Butterworth", 1); // 6 dB/oct: no such slope on Linkwitz-Riley
+    expect(warning()).toBe(true);
+    expect(document.body.textContent).not.toContain("+ ФНЧ 800 Гц");
+
+    setNestedCrossovers(false);
+    expect(warning()).toBe(false);
   });
 });
