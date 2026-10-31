@@ -311,6 +311,8 @@ export function peqStaleReason(b: BandState): string | null {
   return null;
 }
 
+const nestedKey = (f: FilterConfig) => (f.nested ?? []).map((n) => `${n.filter_type}/${n.order}/${n.shape}/${n.freq_hz}`).join();
+
 function filterEquals(a: FilterConfig | null, b: FilterConfig | null): boolean {
   if (a === null && b === null) return true;
   if (a === null || b === null) return false;
@@ -325,7 +327,9 @@ function filterEquals(a: FilterConfig | null, b: FilterConfig | null): boolean {
     // stale in silence.
     && a.linear_phase === b.linear_phase
     && (a.subsonic_protect ?? null) === (b.subsonic_protect ?? null)
-    && !!a.complementary === !!b.complementary;
+    && !!a.complementary === !!b.complementary
+    // b141.134: a nested section changes the target just as its own does.
+    && nestedKey(a) === nestedKey(b);
 }
 
 function exclusionZonesEquals(a: ExclusionZone[], b: ExclusionZone[]): boolean {

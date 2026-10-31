@@ -36,6 +36,13 @@ pub struct FilterConfig {
     /// only where [`complement_active`] says so.
     #[serde(default)]
     pub complementary: bool,
+    /// b141.134: sections of the same direction this one also carries — the
+    /// LPs/HPs of the crossovers around it in a tree of nested crossovers, so
+    /// that a band stops leaking past its neighbour. The tree itself is built
+    /// in lib/nested-crossovers.ts; here a section is just a product. Honoured
+    /// only on a linear-phase section: they add magnitude, no phase.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nested: Vec<FilterConfig>,
 }
 
 /// Highest «Произвольный Q» whose sections never rise above unity.
@@ -59,7 +66,13 @@ fn section_response(f: f64, fc: f64, cfg: &FilterConfig, is_lowpass: bool) -> (f
         let c = 1.0 - 10f64.powf(mirror_db / 20.0);
         return (if c > 1e-30 { 20.0 * c.log10() } else { -600.0 }, 0.0);
     }
-    if is_lowpass { filter_lp_response(f, fc, cfg) } else { filter_hp_response(f, fc, cfg) }
+    let (mut mag_db, phase) = if is_lowpass { filter_lp_response(f, fc, cfg) } else { filter_hp_response(f, fc, cfg) };
+    if cfg.linear_phase {
+        for n in cfg.nested.iter().filter(|n| n.freq_hz > 0.0) {
+            mag_db += if is_lowpass { filter_lp_response(f, n.freq_hz, n) } else { filter_hp_response(f, n.freq_hz, n) }.0;
+        }
+    }
+    (mag_db, phase)
 }
 
 /// b141.109: a band whose crossovers are both linear-phase and at least one
@@ -919,7 +932,7 @@ mod tests {
                 shape: None,
                 linear_phase: false,
                 q: None,
-                subsonic_protect: None, complementary: false,
+                subsonic_protect: None, complementary: false, nested: Vec::new(),
 }),
             low_pass: None,
             low_shelf: None,
@@ -960,7 +973,7 @@ mod tests {
                 shape: None,
                 linear_phase: false,
                 q: None,
-                subsonic_protect: None, complementary: false,
+                subsonic_protect: None, complementary: false, nested: Vec::new(),
 }),
             low_shelf: None,
             high_shelf: None,
@@ -986,7 +999,7 @@ mod tests {
             shape: None,
             linear_phase: false,
             q: None,
-            subsonic_protect: None, complementary: false,
+            subsonic_protect: None, complementary: false, nested: Vec::new(),
 };
         let lr = FilterConfig {
             filter_type: FilterType::LinkwitzRiley,
@@ -995,7 +1008,7 @@ mod tests {
             shape: None,
             linear_phase: false,
             q: None,
-            subsonic_protect: None, complementary: false,
+            subsonic_protect: None, complementary: false, nested: Vec::new(),
 };
         let (bw_db, _) = filter_hp_response(100.0, 100.0, &bw);
         let (lr_db, _) = filter_hp_response(100.0, 100.0, &lr);
@@ -1061,12 +1074,12 @@ mod tests {
         let hp = FilterConfig {
             filter_type: FilterType::LinkwitzRiley,
             order: 4, freq_hz: 200.0, shape: None,
-            linear_phase: false, q: None, subsonic_protect: None, complementary: false,
+            linear_phase: false, q: None, subsonic_protect: None, complementary: false, nested: Vec::new(),
         };
         let lp = FilterConfig {
             filter_type: FilterType::LinkwitzRiley,
             order: 4, freq_hz: 2000.0, shape: None,
-            linear_phase: false, q: None, subsonic_protect: None, complementary: false,
+            linear_phase: false, q: None, subsonic_protect: None, complementary: false, nested: Vec::new(),
         };
 
         // 512 log-spaced points 20..20k — matches the production SPL grid
@@ -1108,7 +1121,7 @@ mod tests {
         let cfg = FilterConfig {
             filter_type: FilterType::LinkwitzRiley,
             order: 4, freq_hz: fc, shape: None,
-            linear_phase: false, q: None, subsonic_protect: None, complementary: false,
+            linear_phase: false, q: None, subsonic_protect: None, complementary: false, nested: Vec::new(),
         };
         // Sweep finely around the cutoff where the BW wrap used to fire.
         let mut prev: Option<f64> = None;
@@ -1154,7 +1167,7 @@ mod tests {
                 shape: None,
                 linear_phase: false,
                 q: None,
-                subsonic_protect: None, complementary: false,
+                subsonic_protect: None, complementary: false, nested: Vec::new(),
 }),
             low_shelf: None,
             high_shelf: None,
@@ -1203,7 +1216,7 @@ mod tests {
                 low_pass: Some(FilterConfig {
                     filter_type: filter_type.clone(),
                     order, freq_hz: xo_freqs[0], shape, linear_phase, q: None,
-            subsonic_protect: None, complementary: false,
+            subsonic_protect: None, complementary: false, nested: Vec::new(),
 }),
                 low_shelf: None, high_shelf: None,
             },
@@ -1214,12 +1227,12 @@ mod tests {
                 high_pass: Some(FilterConfig {
                     filter_type: filter_type.clone(),
                     order, freq_hz: xo_freqs[0], shape, linear_phase, q: None,
-            subsonic_protect: None, complementary: false,
+            subsonic_protect: None, complementary: false, nested: Vec::new(),
 }),
                 low_pass: Some(FilterConfig {
                     filter_type: filter_type.clone(),
                     order, freq_hz: xo_freqs[1], shape, linear_phase, q: None,
-            subsonic_protect: None, complementary: false,
+            subsonic_protect: None, complementary: false, nested: Vec::new(),
 }),
                 low_shelf: None, high_shelf: None,
             },
@@ -1230,12 +1243,12 @@ mod tests {
                 high_pass: Some(FilterConfig {
                     filter_type: filter_type.clone(),
                     order, freq_hz: xo_freqs[1], shape, linear_phase, q: None,
-            subsonic_protect: None, complementary: false,
+            subsonic_protect: None, complementary: false, nested: Vec::new(),
 }),
                 low_pass: Some(FilterConfig {
                     filter_type: filter_type.clone(),
                     order, freq_hz: xo_freqs[2], shape, linear_phase, q: None,
-            subsonic_protect: None, complementary: false,
+            subsonic_protect: None, complementary: false, nested: Vec::new(),
 }),
                 low_shelf: None, high_shelf: None,
             },
@@ -1246,7 +1259,7 @@ mod tests {
                 high_pass: Some(FilterConfig {
                     filter_type: filter_type.clone(),
                     order, freq_hz: xo_freqs[2], shape, linear_phase, q: None,
-            subsonic_protect: None, complementary: false,
+            subsonic_protect: None, complementary: false, nested: Vec::new(),
 }),
                 low_pass: None,
                 low_shelf: None, high_shelf: None,
@@ -1413,7 +1426,7 @@ mod tests {
     }
 
     fn make_filter(ft: FilterType, order: u8, freq: f64, shape: Option<f64>, linear_phase: bool) -> FilterConfig {
-        FilterConfig { filter_type: ft, order, freq_hz: freq, shape, linear_phase, q: None, subsonic_protect: None, complementary: false }
+        FilterConfig { filter_type: ft, order, freq_hz: freq, shape, linear_phase, q: None, subsonic_protect: None, complementary: false, nested: Vec::new() }
     }
 
     fn gaussian_hp(freq_hz: f64, subsonic: Option<bool>) -> FilterConfig {
@@ -1424,7 +1437,7 @@ mod tests {
             shape: Some(2.0),
             linear_phase: false,
             q: None,
-            subsonic_protect: subsonic, complementary: false,
+            subsonic_protect: subsonic, complementary: false, nested: Vec::new(),
         }
     }
 
@@ -1857,14 +1870,14 @@ mod tests {
     fn b139_gauss_hp(lin: bool, sub: Option<bool>) -> FilterConfig {
         FilterConfig {
             filter_type: FilterType::Gaussian, order: 4, freq_hz: 632.0,
-            shape: Some(1.0), linear_phase: lin, q: None, subsonic_protect: sub, complementary: false,
+            shape: Some(1.0), linear_phase: lin, q: None, subsonic_protect: sub, complementary: false, nested: Vec::new(),
         }
     }
 
     fn b139_lr4_hp() -> FilterConfig {
         FilterConfig {
             filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: 80.0,
-            shape: None, linear_phase: false, q: None, subsonic_protect: None, complementary: false,
+            shape: None, linear_phase: false, q: None, subsonic_protect: None, complementary: false, nested: Vec::new(),
         }
     }
 
@@ -1990,7 +2003,7 @@ mod tests {
 
     fn xo(ft: FilterType, order: u8, fc: f64, q: Option<f64>, lin: bool, comp: bool) -> FilterConfig {
         FilterConfig { filter_type: ft, order, freq_hz: fc, shape: None, linear_phase: lin, q,
-            subsonic_protect: None, complementary: comp }
+            subsonic_protect: None, complementary: comp, nested: Vec::new() }
     }
 
     fn band(hp: Option<FilterConfig>, lp: Option<FilterConfig>) -> TargetCurve {
@@ -2044,7 +2057,7 @@ mod tests {
             (xo(FilterType::Custom, 2, 500.0, Some(0.707), true, true), true),
         ] {
             assert_eq!(complement_active(&cfg), active, "{cfg:?}");
-            let plain = FilterConfig { complementary: false, ..cfg.clone() };
+            let plain = FilterConfig { complementary: false, nested: Vec::new(), ..cfg.clone() };
             let (a, b) = (evaluate(&band(Some(cfg), None), &freq), evaluate(&band(Some(plain), None), &freq));
             assert_eq!(a.magnitude == b.magnitude && a.phase == b.phase, !active);
         }

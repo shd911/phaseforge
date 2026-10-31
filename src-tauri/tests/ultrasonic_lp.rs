@@ -68,7 +68,7 @@ fn gaussian(freq: f64, subsonic: bool) -> TargetFilterConfig {
         shape: Some(1.0),
         linear_phase: false,
         q: None,
-        subsonic_protect: Some(subsonic), complementary: false,
+        subsonic_protect: Some(subsonic), complementary: false, nested: Vec::new(),
     }
 }
 
@@ -80,7 +80,7 @@ fn bessel(freq: f64) -> TargetFilterConfig {
         shape: None,
         linear_phase: false,
         q: None,
-        subsonic_protect: None, complementary: false,
+        subsonic_protect: None, complementary: false, nested: Vec::new(),
     }
 }
 
@@ -92,7 +92,7 @@ fn lr4(freq: f64) -> TargetFilterConfig {
         shape: None,
         linear_phase: false,
         q: None,
-        subsonic_protect: None, complementary: false,
+        subsonic_protect: None, complementary: false, nested: Vec::new(),
     }
 }
 

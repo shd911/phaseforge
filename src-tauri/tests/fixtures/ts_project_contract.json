@@ -108,7 +108,7 @@
    },
    "target_enabled": true,
    "inverted": false,
-   "linked_to_next": false,
+   "linked_to_next": true,
    "peq_bands": [
     {
      "freq_hz": 40,
@@ -177,18 +177,145 @@
     "reference_level_db": 0,
     "measurement_key": "4:2d8e3dc8"
    }
+  },
+  {
+   "id": "band2",
+   "name": "Band 3",
+   "measurement": null,
+   "measurement_file": null,
+   "settings": null,
+   "target": {
+    "reference_level_db": 0,
+    "tilt_db_per_octave": 0,
+    "tilt_ref_freq": 1000,
+    "high_pass": {
+     "filter_type": "LinkwitzRiley",
+     "order": 4,
+     "freq_hz": 2500,
+     "shape": null,
+     "linear_phase": false,
+     "q": null,
+     "subsonic_protect": null,
+     "complementary": false
+    },
+    "low_pass": {
+     "filter_type": "LinkwitzRiley",
+     "order": 1,
+     "freq_hz": 200,
+     "shape": null,
+     "linear_phase": true,
+     "q": null,
+     "subsonic_protect": null,
+     "complementary": false,
+     "nested": [
+      {
+       "filter_type": "LinkwitzRiley",
+       "order": 1,
+       "freq_hz": 2000,
+       "shape": null,
+       "linear_phase": true,
+       "q": null,
+       "subsonic_protect": null,
+       "complementary": false
+      }
+     ]
+    },
+    "low_shelf": null,
+    "high_shelf": null
+   },
+   "target_enabled": true,
+   "inverted": false,
+   "linked_to_next": true,
+   "peq_bands": [],
+   "color": "#A855F7",
+   "alignment_delay": 0,
+   "peq_optimized_target": null
+  },
+  {
+   "id": "band3",
+   "name": "Band 4",
+   "measurement": null,
+   "measurement_file": null,
+   "settings": null,
+   "target": {
+    "reference_level_db": 0,
+    "tilt_db_per_octave": 0,
+    "tilt_ref_freq": 1000,
+    "high_pass": {
+     "filter_type": "LinkwitzRiley",
+     "order": 1,
+     "freq_hz": 200,
+     "shape": null,
+     "linear_phase": true,
+     "q": null,
+     "subsonic_protect": null,
+     "complementary": false
+    },
+    "low_pass": {
+     "filter_type": "LinkwitzRiley",
+     "order": 1,
+     "freq_hz": 2000,
+     "shape": null,
+     "linear_phase": true,
+     "q": null,
+     "subsonic_protect": null,
+     "complementary": false
+    },
+    "low_shelf": null,
+    "high_shelf": null
+   },
+   "target_enabled": true,
+   "inverted": false,
+   "linked_to_next": true,
+   "peq_bands": [],
+   "color": "#22C55E",
+   "alignment_delay": 0,
+   "peq_optimized_target": null
+  },
+  {
+   "id": "band4",
+   "name": "Band 5",
+   "measurement": null,
+   "measurement_file": null,
+   "settings": null,
+   "target": {
+    "reference_level_db": 0,
+    "tilt_db_per_octave": 0,
+    "tilt_ref_freq": 1000,
+    "high_pass": {
+     "filter_type": "LinkwitzRiley",
+     "order": 1,
+     "freq_hz": 2000,
+     "shape": null,
+     "linear_phase": true,
+     "q": null,
+     "subsonic_protect": null,
+     "complementary": false
+    },
+    "low_pass": null,
+    "low_shelf": null,
+    "high_shelf": null
+   },
+   "target_enabled": true,
+   "inverted": false,
+   "linked_to_next": false,
+   "peq_bands": [],
+   "color": "#F59E0B",
+   "alignment_delay": 0,
+   "peq_optimized_target": null
   }
  ],
- "active_band_id": "band1",
+ "active_band_id": "band4",
  "show_phase": true,
  "show_mag": true,
  "show_target": true,
- "next_band_num": 3,
+ "next_band_num": 6,
  "export_sample_rate": 48000,
  "export_taps": 65536,
  "export_window": "Blackman",
  "active_tab": "measurements",
  "export_hybrid_phase": false,
+ "nested_crossovers": true,
  "peq_tolerance": 1,
  "peq_max_bands": 20,
  "peq_gain_regularization": 0,

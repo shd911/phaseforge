@@ -159,7 +159,7 @@ mod tests {
         FilterConfig {
             filter_type: FilterType::LinkwitzRiley,
             order: 4, freq_hz: freq, shape: None,
-            linear_phase: false, q: None, subsonic_protect: None, complementary: false,
+            linear_phase: false, q: None, subsonic_protect: None, complementary: false, nested: Vec::new(),
         }
     }
 

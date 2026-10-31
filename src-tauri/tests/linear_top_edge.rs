@@ -16,7 +16,7 @@ fn db(x: f64) -> f64 { 20.0 * x.max(1e-30).log10() }
 
 fn lr4(fc: f64) -> FilterConfig {
     FilterConfig { filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: fc, shape: None, linear_phase: true,
-        q: None, subsonic_protect: None, complementary: false }
+        q: None, subsonic_protect: None, complementary: false, nested: Vec::new() }
 }
 
 /// (impulse at passband level, peak index)

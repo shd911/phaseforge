@@ -53,6 +53,8 @@ pub struct ProjectFile {
     #[serde(default)]
     pub export_hybrid_phase: Option<bool>,
     #[serde(default)]
+    pub nested_crossovers: Option<bool>,
+    #[serde(default)]
     pub peq_tolerance: Option<f64>,
     #[serde(default)]
     pub peq_max_bands: Option<u32>,

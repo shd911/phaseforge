@@ -1,7 +1,8 @@
 import { createStore, reconcile } from "solid-js/store";
-import { createSignal, batch, untrack, createRoot, createEffect, on, type Accessor } from "solid-js";
+import { createSignal, batch, untrack, createRoot, createEffect, createComputed, on, type Accessor } from "solid-js";
 import type { Measurement, TargetCurve, MergeConfig, PeqBand, FirResult, WindowType, ExclusionZone, AnalysisResult, PeqOptimizedTarget, FilterConfig } from "../lib/types";
 import { MEASUREMENT_COLORS, cloneFilterConfig, withCrossoverOf, F_MIN_WORK, F_MAX_WORK } from "../lib/types";
+import { nestedCrossoverSections } from "../lib/nested-crossovers";
 import {
   pushHistory,
   beginInteraction,
@@ -1058,6 +1059,22 @@ export const [exportSampleRate, setExportSampleRate] = settingSignal(48000);
 export const [exportTaps, setExportTaps] = settingSignal(65536);
 export const [exportWindow, setExportWindow] = settingSignal<WindowType>("Blackman");
 export const [exportHybridPhase, setExportHybridPhase] = settingSignal(false);
+/** b141.134: nested crossovers, off by default (lib/nested-crossovers.ts). */
+export const [nestedCrossovers, setNestedCrossovers] = settingSignal(false);
+
+// Every band's `nested` lists follow the crossovers and the flag. A computed:
+// it runs before any effect, so nothing evaluates a band with stale lists. It
+// reads `nested` too, so an undo that restores older lists gets them re-derived.
+createRoot(() => createComputed(() => {
+  const wanted = nestedCrossoverSections(state.bands, nestedCrossovers());
+  wanted.forEach((w, i) => {
+    for (const [key, list] of [["high_pass", w.hp], ["low_pass", w.lp]] as const) {
+      const section = state.bands[i].target[key];
+      if (!section || JSON.stringify(section.nested ?? []) === JSON.stringify(list)) continue;
+      setState("bands", i, "target", key, { nested: list.length ? list : undefined });
+    }
+  });
+}));
 
 // FIR optimization settings
 export const [firIterations, setFirIterations] = settingSignal(3);

@@ -17,7 +17,7 @@ const SR: f64 = 48_000.0;
 const TAPS: usize = 262_144;
 
 fn cfg(ft: FilterType, order: u8, fc: f64, lin: bool, shape: Option<f64>, q: Option<f64>) -> FilterConfig {
-    FilterConfig { filter_type: ft, order, freq_hz: fc, shape, linear_phase: lin, q, subsonic_protect: None, complementary: false }
+    FilterConfig { filter_type: ft, order, freq_hz: fc, shape, linear_phase: lin, q, subsonic_protect: None, complementary: false, nested: Vec::new() }
 }
 
 fn read_wav_f64(p: &std::path::Path) -> Vec<f64> {

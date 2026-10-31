@@ -18,7 +18,7 @@ fn grid(n: usize) -> Vec<f64> {
 fn gauss(fc: f64, subsonic: bool) -> FilterConfig {
     FilterConfig {
         filter_type: FilterType::Gaussian, order: 4, freq_hz: fc, shape: Some(1.0),
-        linear_phase: false, q: None, subsonic_protect: Some(subsonic), complementary: false,
+        linear_phase: false, q: None, subsonic_protect: Some(subsonic), complementary: false, nested: Vec::new(),
     }
 }
 
@@ -77,7 +77,7 @@ fn shelf_phase_of_the_plot_is_the_file_phase() {
     const SR: f64 = 48_000.0;
     let xo = |fc: f64, lin: bool| FilterConfig {
         filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: fc, shape: None,
-        linear_phase: lin, q: None, subsonic_protect: None, complementary: false,
+        linear_phase: lin, q: None, subsonic_protect: None, complementary: false, nested: Vec::new(),
     };
     let s = BandFirSettings {
         taps: 65_536, sample_rate: SR, window: WindowType::Blackman,

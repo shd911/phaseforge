@@ -135,7 +135,7 @@ fn lr4(freq: f64) -> TargetFilterConfig {
     TargetFilterConfig {
         filter_type: TargetFilterType::LinkwitzRiley,
         order: 4, freq_hz: freq, shape: None,
-        linear_phase: false, q: None, subsonic_protect: None, complementary: false,
+        linear_phase: false, q: None, subsonic_protect: None, complementary: false, nested: Vec::new(),
     }
 }
 
@@ -143,7 +143,7 @@ fn bw(order: u8, freq: f64) -> TargetFilterConfig {
     TargetFilterConfig {
         filter_type: TargetFilterType::Butterworth,
         order, freq_hz: freq, shape: None,
-        linear_phase: false, q: None, subsonic_protect: None, complementary: false,
+        linear_phase: false, q: None, subsonic_protect: None, complementary: false, nested: Vec::new(),
     }
 }
 
@@ -152,7 +152,7 @@ fn gaussian(freq: f64, shape: f64, subsonic: bool) -> TargetFilterConfig {
         filter_type: TargetFilterType::Gaussian,
         order: 4, freq_hz: freq, shape: Some(shape),
         linear_phase: false, q: None,
-        subsonic_protect: Some(subsonic), complementary: false,
+        subsonic_protect: Some(subsonic), complementary: false, nested: Vec::new(),
     }
 }
 
@@ -160,7 +160,7 @@ fn bessel(freq: f64) -> TargetFilterConfig {
     TargetFilterConfig {
         filter_type: TargetFilterType::Bessel,
         order: 4, freq_hz: freq, shape: None,
-        linear_phase: false, q: None, subsonic_protect: None, complementary: false,
+        linear_phase: false, q: None, subsonic_protect: None, complementary: false, nested: Vec::new(),
     }
 }
 
@@ -306,7 +306,7 @@ fn rust_routing_predicate_matches_js_decisions() {
     let cust = TargetFilterConfig {
         filter_type: TargetFilterType::Custom,
         order: 2, freq_hz: 1000.0, shape: None,
-        linear_phase: false, q: Some(0.707), subsonic_protect: None, complementary: false,
+        linear_phase: false, q: Some(0.707), subsonic_protect: None, complementary: false, nested: Vec::new(),
     };
     let gauss = gaussian(1000.0, 1.0, false);
     let bess = bessel(1000.0);

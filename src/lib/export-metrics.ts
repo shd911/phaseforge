@@ -58,8 +58,10 @@ export function ringPeriods(f: FilterConfig): number {
  *  filter, 4 periods of the bottom of the working range. */
 export function ringZone(band: BandState): RingZone {
   const filters = band.targetEnabled
-    ? [band.target?.high_pass, band.target?.low_pass].filter(
-        (f): f is FilterConfig => !!f && f.freq_hz > 0)
+    ? [band.target?.high_pass, band.target?.low_pass]
+        // b141.134: a nested HP sits below the band's own and rings longer.
+        .flatMap((f) => (f ? [f, ...(f.nested ?? [])] : []))
+        .filter((f): f is FilterConfig => f.freq_hz > 0)
     : [];
   const lin = filters.filter((f) => f.linear_phase === true);
   const pool = lin.length > 0 ? lin : filters;

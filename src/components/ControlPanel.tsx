@@ -1,5 +1,6 @@
 import { createSignal, createEffect, createResource, Show } from "solid-js";
 import type { FilterType, FilterConfig, PeqBand, PeqFilterType } from "../lib/types";
+import { hasNestableRun } from "../lib/nested-crossovers";
 import NumberInput from "./NumberInput";
 import { cloneFilterConfig, complementPartnerOk, F_MIN_WORK, F_MAX_WORK } from "../lib/types";
 import {
@@ -18,6 +19,8 @@ import {
   exportSampleRate,
   exportTaps,
   exportHybridPhase,
+  nestedCrossovers,
+  setNestedCrossovers,
   selectedPeqIdx,
   setSelectedPeqIdx,
   addPeqBand,
@@ -262,6 +265,7 @@ function FiltersTab() {
           partner={linked() ? cloneFilterConfig(appState.bands[bandIdx() + 1]?.target.high_pass) : null}
           canLink={!isLastBand()}
           onLinkToggle={() => { const id = bandId(); if (id) toggleBandLinked(id); }}
+          nestedRow={linked()}
           onToggle={() => {
             const id = bandId();
             if (!id) return;
@@ -303,8 +307,15 @@ interface FilterBlockProps {
   onChange: (c: import("../lib/types").FilterConfig) => void;
   isHighPass?: boolean; // b138: subsonic-protect UI for Gaussian HP; b141.111: ring of an HP
   partner?: import("../lib/types").FilterConfig | null; // b141.110: the linked filter on the other side
+  nestedRow?: boolean; // b141.134: the «Вложенные» checkbox, beside the link
 }
 
+
+const NESTED_TITLE = "Вложенные кроссоверы: разветвление от центрального раздела. "
+  + "Полоса получает ещё и ФНЧ/ФВЧ соседних разделов и не пролезает в полосу через одну, сумма остаётся ровной. "
+  + "На весь проект.";
+const NESTED_NEEDS = "Нужна цепочка минимум из двух связанных разделов с Lin-φ, тип LR или Гаусс "
+  + "(не «1 − H» и не «Произвольный Q»: они не складываются в единицу как произведение).";
 
 const COMPLEMENT = "Complement";
 const COMPLEMENT_TITLE = "1 − H: этот фильтр — дополнение связанного «Произвольного Q» (та же частота, порядок и Q), "
@@ -348,6 +359,10 @@ function FilterBlock(props: FilterBlockProps) {
       { config: src.config, isLowPass: src.isLowPass, sampleRate: src.sampleRate }).catch(() => null),
   );
   const halfFileMs = () => exportTaps() / 2 / exportSampleRate() * 1000;
+  // Off with nothing to nest: locked, with the reason. On: can always be turned off.
+  const nestedLocked = () => !nestedCrossovers() && !hasNestableRun(appState.bands);
+  const nestedTitle = () => (nestedLocked() ? `${NESTED_TITLE} ${NESTED_NEEDS}` : NESTED_TITLE);
+  const toggleNested = () => { if (!nestedLocked()) setNestedCrossovers(!nestedCrossovers()); };
   const ringTooLong = () => { const r = ring(); return !!r && ringTooLongFor(r, !!c()?.linear_phase, halfFileMs()); };
 
   return (
@@ -478,6 +493,24 @@ function FilterBlock(props: FilterBlockProps) {
                 <span class={`fb-check-box ${c()!.linear_phase ? "checked" : ""}`} />
                 <span class="fb-check-label">Lin-φ</span>
               </span>
+            </div>
+          </Show>
+          <Show when={props.nestedRow}>
+            <div class="fb-row">
+              <label class="fb-label"></label>
+              <span class="fb-checkbox" title={nestedTitle()} style={{ opacity: nestedLocked() ? 0.5 : 1 }}
+                role="checkbox" tabIndex={0} aria-checked={nestedCrossovers()} aria-disabled={nestedLocked()}
+                aria-label="Вложенные кроссоверы"
+                onKeyDown={checkboxKeys(toggleNested)}
+                onClick={toggleNested}>
+                <span class={`fb-check-box ${nestedCrossovers() ? "checked" : ""}`} />
+                <span class="fb-check-label">Вложенные</span>
+              </span>
+            </div>
+          </Show>
+          <Show when={c()?.nested?.length}>
+            <div class="fb-hint" title={NESTED_TITLE}>
+              + {props.title} {c()!.nested!.map((n) => Math.round(n.freq_hz)).join(", ")} Гц
             </div>
           </Show>
           <Show when={isComp()}>

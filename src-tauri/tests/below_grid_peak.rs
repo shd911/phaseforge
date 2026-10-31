@@ -10,7 +10,7 @@ use std::f64::consts::PI;
 
 fn lp(linear: bool) -> Option<FilterConfig> {
     Some(FilterConfig { filter_type: FilterType::LinkwitzRiley, order: 4, freq_hz: 80.0, shape: None,
-        linear_phase: linear, q: None, subsonic_protect: None, complementary: false })
+        linear_phase: linear, q: None, subsonic_protect: None, complementary: false, nested: Vec::new() })
 }
 
 fn shelf(freq_hz: f64, gain_db: f64) -> Option<ShelfConfig> {
@@ -98,7 +98,7 @@ fn a_shelf_keeps_its_own_lift_at_dc() {
 #[test]
 fn a_falling_curve_still_continues_by_slope() {
     let hp = FilterConfig { filter_type: FilterType::Gaussian, order: 4, freq_hz: 40.0, shape: Some(1.0),
-        linear_phase: true, q: None, subsonic_protect: None, complementary: false };
+        linear_phase: true, q: None, subsonic_protect: None, complementary: false, nested: Vec::new() };
     let t = TargetCurve { high_pass: Some(hp), ..target(true, 0.0, None) };
     let (sr, taps) = RATES[0];
     let r = generate_band_fir(&t, &[], &settings(sr, taps), false).unwrap();

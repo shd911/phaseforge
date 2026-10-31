@@ -144,7 +144,7 @@ mod tests {
 
     fn cfg(ft: FilterType, order: u8, fc: f64, lin: bool) -> FilterConfig {
         FilterConfig { filter_type: ft, order, freq_hz: fc, shape: None, linear_phase: lin, q: None,
-            subsonic_protect: None, complementary: false }
+            subsonic_protect: None, complementary: false, nested: Vec::new() }
     }
 
     /// A linear section is symmetric: as long before the peak as after.

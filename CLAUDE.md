@@ -256,6 +256,19 @@
   (`withCrossoverOf` clears the partner). Everything goes through
   `target::evaluate`, so plot, Corrected and FIR agree. Pinned by the
   `LinComp` rows of `export_matrix_4way.rs` (design ±0.01 dB, files ±0.05 dB).
+- **Nested crossovers** (b141.134, `lib/nested-crossovers.ts`, `FilterConfig::nested`,
+  `nestedCrossovers` setting, «Вложенные» beside the link): a tree of pairs that
+  sum to 1 sums to exactly 1, so a band also carries the LPs/HPs of other
+  crossovers and stops leaking past its neighbour. The tree branches from the
+  centre and lives in TS; Rust only multiplies `nested` into the section's
+  magnitude (`target::section_response`, linear sections only). `nested` is
+  DERIVED: a `createComputed` in stores/bands.ts rewrites it from the crossovers
+  and the flag (it reads `nested` too, so an undo gets re-derived) and does not
+  mark the project dirty. Absent when empty — keys, snapshots and golden stay
+  as they were. Only linear LR/Gaussian pairs qualify; «1 − H» (HP + LP − 1 as a
+  whole) and other families split the chain. A nested HP below the band's own
+  counts in `ringZone`. Pinned by `tests/nested_crossovers.rs`, the `LinNested`
+  rows of `export_matrix_4way.rs`, `nested-crossovers*.test.ts`.
 - **Bilinear digital cascade** (IIR path) has frequency-dependent
   deviation up to ~20° vs analog reference accumulated over 8 biquads.
   REPhase reference comparison gives tighter empirical bound (≤ 2.5° on

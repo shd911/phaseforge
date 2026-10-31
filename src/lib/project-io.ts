@@ -16,6 +16,8 @@ import {
   setExportWindow,
   exportHybridPhase,
   setExportHybridPhase,
+  nestedCrossovers,
+  setNestedCrossovers,
   isDirty,
   setIsDirty,
   dirtyGeneration,
@@ -186,6 +188,7 @@ export interface ProjectFile {
   export_window: string;
   active_tab: string;
   export_hybrid_phase?: boolean;
+  nested_crossovers?: boolean;
   peq_tolerance?: number;
   peq_max_bands?: number;
   peq_gain_regularization?: number;
@@ -323,6 +326,7 @@ export function buildProjectData(): ProjectFile {
     export_window: exportWindow(),
     active_tab: activeTab(),
     export_hybrid_phase: exportHybridPhase(),
+    nested_crossovers: nestedCrossovers(),
     peq_tolerance: tolerance(),
     peq_max_bands: maxBands(),
     peq_gain_regularization: gainRegularization(),
@@ -573,6 +577,7 @@ export async function restoreState(project: ProjectFile, projDir: string | null)
     setExportTaps(STANDARD_TAPS.includes(project.export_taps as number) ? project.export_taps : 65536);
     setExportWindow(isWindowType(project.export_window) ? project.export_window : "Blackman");
     setExportHybridPhase(project.export_hybrid_phase ?? false);
+    setNestedCrossovers(project.nested_crossovers ?? false);
     setTolerance(project.peq_tolerance ?? 1.0);
     setMaxBands(project.peq_max_bands ?? 20);
     setGainRegularization(project.peq_gain_regularization ?? 0.0);
@@ -779,6 +784,7 @@ export async function newProject(): Promise<void> {
   // b141.103 (audit 3.7): Standard/Hybrid is a project setting too — a new
   // project used to inherit Hybrid from the previous one.
   setExportHybridPhase(false);
+  setNestedCrossovers(false);
   // Reset FIR optimization signals to defaults
   setFirIterations(3);
   setFirFreqWeighting(true);

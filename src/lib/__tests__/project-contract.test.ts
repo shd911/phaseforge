@@ -17,6 +17,7 @@ const HERE = import.meta.url;
 import {
   appState, addBand, setBandMeasurement, setBandPeqBands, setBandPeqOptimizedTarget,
   setBandTilt, setAlignmentDelay, addExclusionZone, setBandHighPass, setBandLowPass,
+  setNestedCrossovers, toggleBandLinked,
 } from "../../stores/bands";
 import { captureOptimizedTarget } from "../../stores/peq-optimize";
 import { buildProjectData } from "../project-io";
@@ -42,6 +43,21 @@ describe("project schema contract (TS → Rust)", () => {
     addExclusionZone(b.id, { startHz: 300, endHz: 500 });
     setAlignmentDelay(b.id, 0.00123);
     setBandPeqOptimizedTarget(b.id, captureOptimizedTarget(appState.bands.find((x) => x.id === b.id)!));
+
+    // b141.134: three linked bands with a tree — a nested section in the file.
+    setNestedCrossovers(true);
+    const lr = (freq_hz: number) => ({ filter_type: "LinkwitzRiley" as const, order: 1, freq_hz, shape: null, linear_phase: true, q: null });
+    const tree = [addBand, addBand, addBand].map((add) => { add(); return appState.bands[appState.bands.length - 1].id; });
+    setBandLowPass(tree[0], lr(200));
+    setBandHighPass(tree[1], lr(200));
+    setBandLowPass(tree[1], lr(2000));
+    setBandHighPass(tree[2], lr(2000));
+    for (const id of tree.slice(0, 2)) {
+      if (!appState.bands.find((x) => x.id === id)!.linkedToNext) toggleBandLinked(id);
+    }
+    setBandHighPass(tree[1], lr(200));
+    setBandHighPass(tree[2], lr(2000));
+    expect(appState.bands.find((x) => x.id === tree[0])!.target.low_pass!.nested?.length).toBe(1);
 
     const project = buildProjectData();
     // Band ids are random per run — normalise so the fixture only changes

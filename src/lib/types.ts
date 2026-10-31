@@ -38,6 +38,10 @@ export interface FilterConfig {
    *  LP = 1 − HP); a linked band on a linear-phase pair sums exactly flat.
    *  Rust `target::complement_active` decides when it is honoured. */
   complementary?: boolean | null;
+  /** b141.134: sections of the same direction this one also carries in a tree
+   *  of nested crossovers (lib/nested-crossovers.ts). Derived in the store, not
+   *  edited; absent when empty. Rust honours it on a linear section only. */
+  nested?: FilterConfig[];
 }
 
 /** b141.10: single source of truth for the alignment-delay phase ramp.
@@ -97,6 +101,7 @@ export function cloneFilterConfig(f: FilterConfig | null | undefined): FilterCon
     q: f.q,
     subsonic_protect: f.subsonic_protect ?? null,
     complementary: f.complementary ?? false,
+    ...(f.nested?.length ? { nested: f.nested.map((n) => cloneFilterConfig(n)) } : {}),
   };
 }
 
