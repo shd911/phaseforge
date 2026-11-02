@@ -1,7 +1,7 @@
 // b141.104 (audit 2026-10-23, section 4): display rules of the plot.
 import { describe, it, expect } from "vitest";
 import {
-  polarityPhase, polarityAmplitude, peqHandleDb, peqGainAfterDrag,
+  polarityPhase, polarityAmplitude, peqHandleDb, peqGainAfterDrag, pointInBox,
   fitMagRange, fitExportMagRange, sumGroupDelayMs, phaseSlopeDegPerHz,
 } from "../plot-display";
 import { exportPhaseLabel } from "../export-metrics";
@@ -37,6 +37,16 @@ describe("PEQ handle (4.6)", () => {
     // Shelf handle at g/2: moving it by +1 dB means +2 dB of gain.
     expect(peqGainAfterDrag(6, 1, "LowShelf")).toBe(8);
     expect(peqGainAfterDrag(20, 10, "HighShelf")).toBe(24);
+  });
+  it("a filter outside the zoomed range has no handle (b141.137)", () => {
+    // wall 10x4 zoomed to 60 Hz: 42.7 Hz landed left of the plot, over the dB labels.
+    const box = { left: 175, top: 170, width: 1720, height: 830 };
+    expect(pointInBox(75, 303, box)).toBe(false);
+    expect(pointInBox(-40, 300, box)).toBe(false);
+    expect(pointInBox(736, 1100, box)).toBe(false);
+    expect(pointInBox(736, 260, box)).toBe(true);
+    expect(pointInBox(175, 170, box)).toBe(true);
+    expect(pointInBox(NaN, 260, box)).toBe(false);
   });
 });
 

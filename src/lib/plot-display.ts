@@ -37,6 +37,16 @@ export function peqHandleDb(pb: Pick<PeqBand, "gain_db" | "filter_type">): numbe
   return pb.filter_type === "Peaking" ? pb.gain_db : pb.gain_db / 2;
 }
 
+/** Whether a canvas point lies inside the plot area (uPlot's bbox, canvas
+ *  pixels). Handles of filters outside the zoomed range are not drawn. */
+export function pointInBox(
+  x: number, y: number, box: { left: number; top: number; width: number; height: number },
+): boolean {
+  return isFinite(x) && isFinite(y)
+    && x >= box.left && x <= box.left + box.width
+    && y >= box.top && y <= box.top + box.height;
+}
+
 export const PEQ_DRAG_GAIN_LIMIT_DB = 24;
 
 /** Gain after dragging the handle by `dyDb` (cursor Y now − at mousedown,

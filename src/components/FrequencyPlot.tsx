@@ -40,7 +40,7 @@ import { coherentSum, targetCarriesDelay } from "../lib/band-evaluator/sum";
 import { buildCommonGrid, buildFirGrid, interpOnGrid, interpPhaseOnGrid, irTime, resampleOnLogGrid, type ImpulseIpc } from "../lib/band-evaluator/grid";
 import { bandRequestKey } from "../lib/band-evaluator/cache";
 import { computeAutoAlign } from "../lib/auto-align";
-import { polarityPhase, polarityAmplitude, sumGroupDelayMs, fitMagRange, fitExportMagRange, peqHandleDb, peqGainAfterDrag, type FitSeries } from "../lib/plot-display";
+import { polarityPhase, polarityAmplitude, sumGroupDelayMs, fitMagRange, fitExportMagRange, peqHandleDb, peqGainAfterDrag, pointInBox, type FitSeries } from "../lib/plot-display";
 import { attachFieldWheel, newWheelAccumulator, wheelSteps } from "../lib/wheel-step";
 
 
@@ -1501,7 +1501,9 @@ export default function FrequencyPlot() {
               if (!pb.enabled) continue;
               const cx = u.valToPos(pb.freq_hz, "x", true);
               const cy = u.valToPos(peqHandleDb(pb), "mag", true);
-              if (!isFinite(cx) || !isFinite(cy)) continue;
+              // b141.137: a filter outside the zoomed range was drawn over the
+              // axis labels (42.7 Hz at a 60 Hz start).
+              if (!pointInBox(cx, cy, u.bbox)) continue;
               const isHighQ = highQ.has(bandIdx);
               const r = 4 * dpr;
               ctx.beginPath();
