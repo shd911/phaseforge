@@ -7,6 +7,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => { throw new E
 vi.mock("@tauri-apps/plugin-dialog", () => ({ ask: vi.fn(async () => true), open: vi.fn(), save: vi.fn() }));
 
 import ControlPanel from "../ControlPanel";
+import { invoke } from "@tauri-apps/api/core";
 import {
   appState, addBand, setActiveBand, setBandTilt, setBandMeasurement, addExclusionZone,
   selectedPeqIdx, setSelectedPeqIdx, setExportHybridPhase, setBandHighPass, setBandLowPass,
@@ -89,6 +90,33 @@ describe("ControlPanel", () => {
     expect(cell(rows[1]).classList.contains("peq-ring-bad")).toBe(true);
     expect(rows[1].classList.contains("peq-row-ring")).toBe(false);
     expect(rows[2].classList.contains("peq-row-ring")).toBe(true);
+  });
+
+  it("ring judged on the result with the measurement: a cut that shortens stays plain (b141.139)", async () => {
+    const nd = (ear: number, without: number, with_: number) =>
+      ({ freqHz: 0, earMs: [ear, ear], withoutMs: [without, without], withMs: [with_, with_] });
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd !== "compute_peq_net_decay") throw new Error("no backend");
+      return [nd(10, 10, 11), nd(10, 10, 15), null, nd(20, 60, 40), nd(20, 20, 45)];
+    });
+    try {
+      setExportSampleRate(176400); setExportTaps(131072);
+      const pk = (freq_hz: number, gain_db: number, q: number) => ({ freq_hz, gain_db, q, filter_type: "Peaking" as const, enabled: true });
+      setBandMeasurement(a, meas());
+      setBandPeqBands(a, [pk(1000, 3, 2), pk(500, 3, 2), pk(700, 3, 2), pk(40, -6, 4), pk(60, 4, 2)]);
+      await new Promise((r) => setTimeout(r, 0));
+      const rows = [...document.querySelectorAll(".peq-table:not(.peq-excl-table) tbody tr")];
+      const red = (r: Element) => r.querySelector("td.peq-ring")!.classList.contains("peq-ring-bad");
+      const redRow = (r: Element) => r.classList.contains("peq-row-ring");
+      expect(rows.map(red)).toEqual([false, true, false, false, true]);
+      expect(rows.map(redRow)).toEqual([false, false, false, false, true]);
+      // 40 Hz −6 dB Q 4 rings ×7 the ear alone (a red row by b141.138), but it
+      // shortens the room's decay.
+      expect(rows[3].querySelector("td.peq-ring")!.getAttribute("title")).toContain("Укорачивает на 100 %");
+      expect(rows[2].querySelector("td.peq-ring")!.getAttribute("title")).toContain("у края замера");
+    } finally {
+      vi.mocked(invoke).mockImplementation(async () => { throw new Error("no backend"); });
+    }
   });
 
   it("Lin-φ toggles from the keyboard", () => {

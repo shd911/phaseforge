@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { peqRingCost, peqRingVerdict, earRingMs } from "../peq-quality";
+import { peqRingCost, peqRingVerdict, earRingMs, peqNetVerdict, netLengthening, type NetDecay } from "../peq-quality";
 
 // b141.93: per-filter time cost shown in the PEQ table.
 const pk = (freq_hz: number, gain_db: number, q: number) => ({ freq_hz, gain_db, q, filter_type: "Peaking" as const });
@@ -55,3 +55,32 @@ describe("peqRingVerdict", () => {
     expect(v.earRatio).toBeCloseTo(v.ms60 / earRingMs(40 / Math.pow(10, 12 / 40)), 6);
   });
 });
+
+describe("peqNetVerdict (b141.139)", () => {
+  const pk = (freq_hz: number, gain_db: number, q: number, enabled = true) =>
+    ({ freq_hz, gain_db, q, filter_type: "Peaking" as const, enabled });
+  const nd = (ear: [number, number], without: [number, number], with_: [number, number]): NetDecay =>
+    ({ freqHz: 50, earMs: ear, withoutMs: without, withMs: with_ });
+
+  it("the worst level over the ear's decay at that level", () => {
+    // wall PK 54.7 Hz −2.3 dB Q 2: −2.4 ms at −20 dB, +6.2 ms at −30 dB.
+    expect(netLengthening(nd([20.7, 29.6], [57.0, 110.2], [54.6, 116.4]))).toBeCloseTo(0.21, 2);
+  });
+
+  it("two stages on the lengthening, not on the filter's own ring", () => {
+    const f = pk(42.7, 2.7, 1.1); // alone ×1.5 the ear: strict under b141.138
+    expect(peqRingVerdict(f, 176400, 371.5).level).toBe("strict");
+    expect(peqNetVerdict(f, nd([25.6, 36], [71.4, 251.1], [58.9, 247]), 176400, 371.5).level).toBe("");
+    expect(peqNetVerdict(f, nd([10, 10], [10, 10], [13, 12]), 176400, 371.5).level).toBe("strict");
+    expect(peqNetVerdict(f, nd([10, 10], [10, 10], [21, 12]), 176400, 371.5).level).toBe("tolerant");
+  });
+
+  it("no phase: the filter-alone law; past the measurement's edge: half-file only", () => {
+    const f = pk(100, 6, 3);
+    expect(peqNetVerdict(f, undefined, 176400, 371.5).level).toBe(peqRingVerdict(f, 176400, 371.5).level);
+    expect(peqNetVerdict(f, null, 176400, 371.5).level).toBe("");
+    expect(peqNetVerdict(f, null, 176400, 1).level).toBe("tolerant");
+    expect(peqNetVerdict(pk(100, 6, 3, false), nd([1, 1], [1, 1], [9, 9]), 176400, 371.5).level).toBe("");
+  });
+});
+

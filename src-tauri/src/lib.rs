@@ -416,6 +416,19 @@ async fn compute_section_ring(
     fir::section_ring::section_ring(&config, is_low_pass, sample_rate)
 }
 
+/// b141.139: what each PEQ filter does to the decay of measurement × PEQ,
+/// heard through the ear's filter at its frequency.
+#[tauri::command]
+async fn compute_peq_net_decay(
+    freq: Vec<f64>,
+    magnitude: Vec<f64>,
+    phase: Vec<f64>,
+    peq_bands: Vec<peq::PeqBand>,
+    sample_rate: f64,
+) -> Result<Vec<Option<peq::net_decay::NetDecay>>, String> {
+    peq::net_decay::net_decay(&freq, &magnitude, &phase, &peq_bands, sample_rate)
+}
+
 #[tauri::command]
 async fn export_fir_wav(impulse: Vec<f64>, sample_rate: f64, path: String) -> Result<(), String> {
     info!("export_fir_wav: {} samples, sr={}, path={}", impulse.len(), sample_rate, path);
@@ -477,7 +490,7 @@ pub fn run() {
             .init();
     }
 
-    info!("PhaseForge b141.138 starting...");
+    info!("PhaseForge b141.139 starting...");
     info!("log file: {}", applog::log_path().map(|p| p.display().to_string()).unwrap_or_else(|| "—".into()));
 
     tauri::Builder::default()
@@ -512,6 +525,7 @@ pub fn run() {
             generate_band_fir,
             compute_target_hilbert_phase,
             compute_section_ring,
+            compute_peq_net_decay,
             export_fir_wav,
             project::save_project,
             project::load_project,

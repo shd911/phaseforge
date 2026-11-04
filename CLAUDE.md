@@ -541,14 +541,20 @@ git diff --stat
   as one interaction (`peqDragging` + begin/commitInteraction) so Export/IR/GD
   rebuild once at the end.
 
-- **PEQ «мс» column is judged against the ear** (b141.138, `peqRingVerdict`,
-  `earRingMs` in lib/peq-quality.ts): ring to −60 dB over the ear's own
-  (gammatone 1.019·ERB) at the filter's resonance (fp for a Linkwitz
-  transform). > ×1 — the number is red, > ×2 or the −100 dB tail past half
-  the file — the whole row. In periods a PEQ rings ≈3·Q at any frequency, the
-  ear 1.2 periods at 30 Hz and ~10 at 3–10 kHz: below ~40 Hz almost any
-  filter reddens the number. UI only — the optimizer's rules are unchanged;
-  the Q stroke on plot dots is still `qWarnAt`.
+- **PEQ «мс» colour is judged on the result** (b141.139, Rust `peq::net_decay`,
+  Tauri `compute_peq_net_decay`, `peqNetVerdict` in lib/peq-quality.ts): the
+  decay of measurement × all PEQ with and without the filter, through a real
+  4th-order gammatone (1.019·ERB) at its resonance (fp for an LT), Schroeder
+  to −20/−30 dB. Lengthening over the ear's own decay > 0.25 — red number,
+  > 1 or the −100 dB tail past half the file — red row. The number is still
+  the filter's own ring. The filter-alone law (b141.138, `peqRingVerdict`)
+  over-flagged LF: a cut on a mode rings ×3–7 the ear alone yet shortens the
+  room. A boost into a MIN-phase dip (reflection weaker than the direct) is
+  its inverse and shortens too; only excess-phase dips or an off-centre boost
+  lengthen. Measurement held flat past its ends (a roll-off there rings).
+  Resonance < ½ oct inside the measurement → null (half-file rule only); no
+  phase → b141.138 law. UI only — the optimizer is unchanged.
+  Pinned by `tests/peq_net_decay.rs`, `peq-ring-cost.test.ts`.
 
 ## SolidJS Patterns
 - `batch()`: wrap multiple signal updates to prevent intermediate effects

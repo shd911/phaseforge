@@ -1,4 +1,5 @@
 import { createSignal, createEffect, createResource, Show } from "solid-js";
+import { unwrap } from "solid-js/store";
 import type { FilterType, FilterConfig, PeqBand, PeqFilterType } from "../lib/types";
 import { hasNestableRun } from "../lib/nested-crossovers";
 import NumberInput from "./NumberInput";
@@ -55,7 +56,7 @@ import {
 } from "../stores/peq-optimize";
 import { showToast } from "../lib/toast";
 import { pluralRu } from "../lib/plural";
-import { qWarnAt, peqRingVerdict } from "../lib/peq-quality";
+import { qWarnAt, peqNetVerdict, type NetDecay, type NetRingVerdict } from "../lib/peq-quality";
 import { isLinkwitz, linkwitzDefaults, linkwitzTargetHz } from "../lib/linkwitz";
 
 const LT_TITLE = "Трансформация Линквица (ЗЯ): Гц — f0 ящика, Q — его Qtc, дБ — подъём НЧ. Теоретическая правка по предполагаемому спаду 12 дБ/окт; оптимизатор её сохраняет и подгоняет остальное вокруг неё.";
@@ -104,6 +105,22 @@ function fmtPeqFreq(f: number): string {
 }
 
 /** b141.138: an HF ring of 0.6 ms read as «1» — tenths below 10 ms. */
+/** b141.139: the «мс» cell's tooltip — the filter's own ring, then what it
+ *  does to the corrected decay at its frequency. */
+function ringCellTitle(v: NetRingVerdict, halfMs: number): string {
+  const own = `Звон фильтра до −60 дБ: ${fmtRingMs(v.ms60)} мс, до −100 дБ: ${fmtRingMs(v.ms100)} мс.`;
+  const half = `Красная строка также, если хвост до −100 дБ длиннее половины файла (${Math.round(halfMs)} мс): экспорт сдвинет задержку полосы.`;
+  const pair = (a: [number, number]) => `${fmtRingMs(a[0])} / ${fmtRingMs(a[1])}`;
+  if (v.net === undefined) {
+    return `${own} ×${v.earRatio.toFixed(1)} от звона слуха на этой частоте (в замере нет фазы — итог не считается). Красная цифра — звенит дольше слуха, красная строка — вдвое дольше. ${half}`;
+  }
+  if (v.net === null) return `${own} Частота у края замера или вне его — влияние на итог не оценивается. ${half}`;
+  const n = v.net;
+  const pct = Math.round(v.lengthening! * 100);
+  return `${own}\nИтог с замером на ${n.freqHz < 1000 ? Math.round(n.freqHz) : (n.freqHz / 1000).toFixed(1) + " к"}Гц, затухание до −20 / −30 дБ: без фильтра ${pair(n.withoutMs)} мс, с ним ${pair(n.withMs)} мс; слух — ${pair(n.earMs)} мс. `
+    + `${pct > 0 ? `Удлиняет на ${pct} %` : pct < 0 ? `Укорачивает на ${-pct} %` : "Не меняет"} от звона слуха. Красная цифра — больше 25 %, красная строка — больше 100 %. ${half}`;
+}
+
 function fmtRingMs(ms: number): string {
   return ms < 10 ? ms.toFixed(1) : String(Math.round(ms));
 }
@@ -595,6 +612,29 @@ function PeqTab() {
     },
     (src) => peqRangeFor(src.b).catch(() => null),
   );
+  // b141.139: each filter's effect on the decay of measurement × PEQ, through
+  // the ear's filter (Rust). Held while a filter is dragged; tagged with the
+  // filter count so a stale answer is not read against a changed list.
+  const [netDecay] = createResource(
+    () => {
+      const b = band();
+      const m = b?.measurement;
+      if (!b || !m?.phase || peqDragging()) return false;
+      const raw = unwrap(m);
+      return {
+        freq: raw.freq, magnitude: raw.magnitude, phase: raw.phase!,
+        peqBands: b.peqBands.map((p) => ({ freq_hz: p.freq_hz, gain_db: p.gain_db, q: p.q, enabled: p.enabled, filter_type: p.filter_type ?? "Peaking" })),
+        sampleRate: exportSampleRate(),
+      };
+    },
+    (a) => invoke<(NetDecay | null)[]>("compute_peq_net_decay", a)
+      .then((r) => ({ n: a.peqBands.length, r }))
+      .catch((e) => { console.warn("[PEQ] net decay:", e); return undefined; }),
+  );
+  const netOf = (i: number): NetDecay | null | undefined => {
+    const nd = netDecay.latest;
+    return nd && nd.n === peqBands().length ? nd.r[i] : undefined;
+  };
   const [pendingPeqIdx, setPendingPeqIdx] = createSignal<number | null>(null);
 
   createEffect(() => { peqBands(); setPendingPeqIdx(null); });
@@ -845,15 +885,16 @@ function PeqTab() {
           <Show when={peqBands().length > 0}>
             <div class="peq-sidebar-table-scroll">
               <table class="peq-table">
-                <thead><tr><th></th><th>Тип</th><th>Гц</th><th>дБ</th><th>Q</th><th title="Время звона фильтра: за сколько мс его резонанс затухает до −60 дБ. Красная цифра — дольше, чем звенит сам слух на этой частоте; красная строка — вдвое дольше.">мс</th><th></th><th></th></tr></thead>
+                <thead><tr><th></th><th>Тип</th><th>Гц</th><th>дБ</th><th>Q</th><th title="Время звона фильтра: за сколько мс его резонанс затухает до −60 дБ. Цвет — по итогу с замером: красная цифра — фильтр заметно удлиняет затухание на своей частоте (больше чем на четверть звона слуха), красная строка — больше чем на весь звон слуха.">мс</th><th></th><th></th></tr></thead>
                 <tbody>
                   {peqBands().map((b, i) => {
                     const isPending = pendingPeqIdx() === i;
-                    // b141.138: ring against the ear's own at the filter's
-                    // frequency — longer: the number turns red; twice as long
-                    // or a tail past half the file: the whole row.
+                    // b141.139: judged on measurement × PEQ with and without
+                    // the filter — a small lengthening reddens the number, one
+                    // the size of the ear's own decay (or a tail past half
+                    // the file) the whole row.
                     const halfMs = () => exportTaps() / 2 / exportSampleRate() * 1000;
-                    const rv = () => peqRingVerdict(b, exportSampleRate(), halfMs());
+                    const rv = () => peqNetVerdict(b, netOf(i), exportSampleRate(), halfMs());
                     return (
                       <tr class={`${selectedPeqIdx() === i ? "peq-row-selected" : ""} ${isPending ? "peq-row-pending" : ""} ${!b.enabled ? "peq-row-disabled" : ""} ${rv().level === "tolerant" ? "peq-row-ring" : ""}`}
                         onClick={() => setSelectedPeqIdx(selectedPeqIdx() === i ? null : i)}>
@@ -863,7 +904,7 @@ function PeqTab() {
                         <td><input class={`peq-input ${b.gain_db > 0 ? "peq-boost" : "peq-cut"}`} type="number" value={b.gain_db.toFixed(1)} min={peqGainLimits().lo} max={peqGainLimits().hi} step={0.1} ref={peqWheel(() => i, "gain_db")} aria-label={`Фильтр ${i + 1}: усиление, дБ`} onChange={(e) => commitPeqField(e.currentTarget, i, "gain_db")} /></td>
                         <td><input class="peq-input" type="number" value={b.q.toFixed(2)} min={PEQ_Q_MIN} max={PEQ_Q_MAX} step={0.1} ref={peqWheel(() => i, "q")} aria-label={`Фильтр ${i + 1}: Q`} onChange={(e) => commitPeqField(e.currentTarget, i, "q")} /></td>
                         <td class={`peq-ring ${rv().level ? "peq-ring-bad" : ""}`}
-                          title={`Звон до −60 дБ: ${fmtRingMs(rv().ms60)} мс, до −100 дБ: ${fmtRingMs(rv().ms100)} мс — ×${rv().earRatio.toFixed(1)} от звона слуха на этой частоте. Красная цифра — звенит дольше слуха, красная строка — вдвое дольше или хвост до −100 дБ длиннее половины файла (${Math.round(halfMs())} мс): тогда экспорт сдвинет задержку полосы.`}>
+                          title={ringCellTitle(rv(), halfMs())}>
                           {Math.abs(b.gain_db) < 0.05 ? "" : fmtRingMs(rv().ms60)}
                         </td>
                         <td>{isLinkwitz(b) ? (

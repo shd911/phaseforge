@@ -104,3 +104,53 @@ export function peqRingVerdict(
     : earRatio > RING_STRICT_X ? "strict" : "";
   return { ...cost, earRatio, level };
 }
+
+/** b141.139 (Rust `peq::net_decay`): the decay of measurement × all PEQ
+ *  through the ear's filter at the filter's resonance, to −20 / −30 dB from
+ *  the energy peak — the ear alone, without this filter, with it. */
+export interface NetDecay {
+  freqHz: number;
+  earMs: [number, number];
+  withoutMs: [number, number];
+  withMs: [number, number];
+}
+
+/** Lengthening, in the ear's own decay, at which the number / the row turn red. */
+export const NET_STRICT = 0.25;
+export const NET_TOLERANT = 1;
+
+/** How much the filter lengthens the corrected decay, worst of the two
+ *  levels, over the ear's own decay at that level (negative: it shortens). */
+export function netLengthening(d: NetDecay): number {
+  return Math.max(...d.withMs.map((w, i) => (w - d.withoutMs[i]) / d.earMs[i]));
+}
+
+export interface NetRingVerdict extends RingVerdict {
+  /** undefined — not computed (no phase in the measurement): the filter-alone
+   *  law of b141.138 decides; null — the resonance is at or past the
+   *  measurement's edge, only the half-file limit applies. */
+  net?: NetDecay | null;
+  lengthening?: number;
+}
+
+/** b141.139: the PEQ table's two-stage ring warning, judged on the result.
+ *  A filter's own ring is not the defect — a cut on a resonance cancels the
+ *  resonance's ring, a boost into an excess-phase dip adds one nothing
+ *  cancels. Red number: the filter lengthens the corrected decay by more than
+ *  a quarter of the ear's; red row: by more than the ear's whole decay, or its
+ *  tail to −100 dB is longer than half the file. */
+export function peqNetVerdict(
+  b: Pick<PeqBand, "freq_hz" | "gain_db" | "q" | "filter_type" | "enabled">,
+  net: NetDecay | null | undefined, sampleRate: number, halfFileMs: number,
+): NetRingVerdict {
+  const alone = peqRingVerdict(b, sampleRate, halfFileMs);
+  if (net === undefined) return alone;
+  const off = !b.enabled || alone.ms60 === 0;
+  const pastHalf = alone.ms100 > halfFileMs;
+  if (net === null) return { ...alone, net, level: !off && pastHalf ? "tolerant" : "" };
+  const lengthening = netLengthening(net);
+  const level = off ? ""
+    : lengthening > NET_TOLERANT || pastHalf ? "tolerant"
+    : lengthening > NET_STRICT ? "strict" : "";
+  return { ...alone, net, lengthening, level };
+}

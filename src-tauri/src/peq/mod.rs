@@ -21,6 +21,7 @@ mod biquad;
 mod lma;
 mod greedy;
 pub mod q_envelope;
+pub mod net_decay;
 
 pub use types::*;
 pub use biquad::{apply_peq, peq_band_response, apply_peq_complex};
