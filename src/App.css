@@ -2379,5 +2379,10 @@ input[type="checkbox"]:focus-visible {
   text-align: right;
   white-space: nowrap;
 }
-.peq-table td.peq-ring.peq-ring-warn { color: var(--warn-amber); }
 .peq-table td.peq-ring.peq-ring-bad { color: var(--status-bad); font-weight: 600; }
+/* b141.138: twice the ear's ring (or past half the file) — the whole row. */
+.peq-table tbody tr.peq-row-ring {
+  background: rgba(239, 68, 68, 0.14);
+  box-shadow: inset 2px 0 0 var(--status-bad);
+}
+.peq-table tbody tr.peq-row-ring .peq-input { color: var(--status-bad); }

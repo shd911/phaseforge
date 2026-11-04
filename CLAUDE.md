@@ -541,6 +541,15 @@ git diff --stat
   as one interaction (`peqDragging` + begin/commitInteraction) so Export/IR/GD
   rebuild once at the end.
 
+- **PEQ «мс» column is judged against the ear** (b141.138, `peqRingVerdict`,
+  `earRingMs` in lib/peq-quality.ts): ring to −60 dB over the ear's own
+  (gammatone 1.019·ERB) at the filter's resonance (fp for a Linkwitz
+  transform). > ×1 — the number is red, > ×2 or the −100 dB tail past half
+  the file — the whole row. In periods a PEQ rings ≈3·Q at any frequency, the
+  ear 1.2 periods at 30 Hz and ~10 at 3–10 kHz: below ~40 Hz almost any
+  filter reddens the number. UI only — the optimizer's rules are unchanged;
+  the Q stroke on plot dots is still `qWarnAt`.
+
 ## SolidJS Patterns
 - `batch()`: wrap multiple signal updates to prevent intermediate effects
 - PEQ drag: debounce via `peqDragging` signal + `setTimeout(150ms)`

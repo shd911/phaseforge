@@ -63,3 +63,44 @@ export function peqRingCost(b: Pick<PeqBand, "freq_hz" | "gain_db" | "q" | "filt
   const t = (budget: number) => Math.max(0, budget + start) / dbPerS * 1000;
   return { ms60: t(60), ms100: t(100) };
 }
+
+/** b141.138: how long the ear's own filter at `freqHz` rings down by
+ *  `budgetDb` — a 4th-order gammatone of bandwidth 1.019·ERB (Glasberg &
+ *  Moore 1990), envelope decay 20·log10(e)·2π·1.019·ERB dB/s. A filter that
+ *  rings no longer than this is not told apart from the ear's own ringing.
+ *  In periods it grows with frequency (1.2 at 30 Hz, 8 at 1 kHz, ~10 at
+ *  3–10 kHz) while a PEQ's ring in periods does not (≈3·Q at +6 dB), so the
+ *  same Q is harmless at HF and long at LF. */
+export function earRingMs(freqHz: number, budgetDb = 60): number {
+  const erb = 24.7 * (4.37 * freqHz / 1000 + 1);
+  return budgetDb / (20 * Math.LOG10E * 2 * Math.PI * 1.019 * erb) * 1000;
+}
+
+/** Strict: the number turns red. Tolerant: the whole row does. */
+export const RING_STRICT_X = 1;
+export const RING_TOLERANT_X = 2;
+
+export interface RingVerdict extends RingCost {
+  /** Ring to −60 dB over the ear's at the filter's resonance. */
+  earRatio: number;
+  /** "" — fine; "strict" — longer than the ear; "tolerant" — twice as long,
+   *  or the tail to −100 dB is longer than half the file. */
+  level: "" | "strict" | "tolerant";
+}
+
+/** b141.138: the PEQ table's two-stage ring warning. The ring is compared
+ *  at the filter's resonance — f for peaking/shelves, fp for a Linkwitz
+ *  transform (its own poles). The half-file limit stays: past it the export
+ *  shifts the band's delay. */
+export function peqRingVerdict(
+  b: Pick<PeqBand, "freq_hz" | "gain_db" | "q" | "filter_type" | "enabled">,
+  sampleRate: number, halfFileMs: number,
+): RingVerdict {
+  const cost = peqRingCost(b, sampleRate);
+  const fRes = b.filter_type === "LinkwitzTransform" ? b.freq_hz / Math.pow(10, b.gain_db / 40) : b.freq_hz;
+  const earRatio = cost.ms60 / earRingMs(fRes);
+  const level = !b.enabled || cost.ms60 === 0 ? ""
+    : earRatio > RING_TOLERANT_X || cost.ms100 > halfFileMs ? "tolerant"
+    : earRatio > RING_STRICT_X ? "strict" : "";
+  return { ...cost, earRatio, level };
+}

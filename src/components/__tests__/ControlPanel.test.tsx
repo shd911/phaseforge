@@ -10,7 +10,7 @@ import ControlPanel from "../ControlPanel";
 import {
   appState, addBand, setActiveBand, setBandTilt, setBandMeasurement, addExclusionZone,
   selectedPeqIdx, setSelectedPeqIdx, setExportHybridPhase, setBandHighPass, setBandLowPass,
-  toggleBandLinked, setNestedCrossovers,
+  toggleBandLinked, setNestedCrossovers, setBandPeqBands, setExportSampleRate, setExportTaps,
 } from "../../stores/bands";
 
 let dispose: (() => void) | undefined;
@@ -75,6 +75,20 @@ describe("ControlPanel", () => {
     commitInput(gain, "30");
     expect(appState.bands[0].peqBands[0].gain_db).toBe(6);
     expect(gain.value).toBe("6.0");
+  });
+
+  it("ring: longer than the ear reddens the number, twice as long the row (b141.138)", () => {
+    setBandMeasurement(a, meas()); // the PEQ table shows with a measurement
+    setExportSampleRate(176400); setExportTaps(131072);
+    const pk = (freq_hz: number, gain_db: number, q: number) => ({ freq_hz, gain_db, q, filter_type: "Peaking" as const, enabled: true });
+    setBandPeqBands(a, [pk(10000, 6, 2.5), pk(1000, 6, 3), pk(100, 6, 3)]);
+    const rows = [...document.querySelectorAll(".peq-table:not(.peq-excl-table) tbody tr")];
+    const cell = (r: Element) => r.querySelector("td.peq-ring")!;
+    expect(cell(rows[0]).classList.contains("peq-ring-bad")).toBe(false);
+    expect(cell(rows[0]).textContent).toBe("0.8");
+    expect(cell(rows[1]).classList.contains("peq-ring-bad")).toBe(true);
+    expect(rows[1].classList.contains("peq-row-ring")).toBe(false);
+    expect(rows[2].classList.contains("peq-row-ring")).toBe(true);
   });
 
   it("Lin-φ toggles from the keyboard", () => {

@@ -55,7 +55,7 @@ import {
 } from "../stores/peq-optimize";
 import { showToast } from "../lib/toast";
 import { pluralRu } from "../lib/plural";
-import { qWarnAt, peqRingCost } from "../lib/peq-quality";
+import { qWarnAt, peqRingVerdict } from "../lib/peq-quality";
 import { isLinkwitz, linkwitzDefaults, linkwitzTargetHz } from "../lib/linkwitz";
 
 const LT_TITLE = "Трансформация Линквица (ЗЯ): Гц — f0 ящика, Q — его Qtc, дБ — подъём НЧ. Теоретическая правка по предполагаемому спаду 12 дБ/окт; оптимизатор её сохраняет и подгоняет остальное вокруг неё.";
@@ -101,6 +101,11 @@ const lastLP = new Map<string, import("../lib/types").FilterConfig>();
  *  rounding them to 21 in the table hid the real value. */
 function fmtPeqFreq(f: number): string {
   return f < 100 ? f.toFixed(1) : String(Math.round(f));
+}
+
+/** b141.138: an HF ring of 0.6 ms read as «1» — tenths below 10 ms. */
+function fmtRingMs(ms: number): string {
+  return ms < 10 ? ms.toFixed(1) : String(Math.round(ms));
 }
 
 export default function ControlPanel(props: { rightPanel?: boolean }) {
@@ -840,32 +845,27 @@ function PeqTab() {
           <Show when={peqBands().length > 0}>
             <div class="peq-sidebar-table-scroll">
               <table class="peq-table">
-                <thead><tr><th></th><th>Тип</th><th>Гц</th><th>дБ</th><th>Q</th><th title="Время звона фильтра: за сколько мс его резонанс затухает до −60 дБ">мс</th><th></th><th></th></tr></thead>
+                <thead><tr><th></th><th>Тип</th><th>Гц</th><th>дБ</th><th>Q</th><th title="Время звона фильтра: за сколько мс его резонанс затухает до −60 дБ. Красная цифра — дольше, чем звенит сам слух на этой частоте; красная строка — вдвое дольше.">мс</th><th></th><th></th></tr></thead>
                 <tbody>
                   {peqBands().map((b, i) => {
                     const isPending = pendingPeqIdx() === i;
+                    // b141.138: ring against the ear's own at the filter's
+                    // frequency — longer: the number turns red; twice as long
+                    // or a tail past half the file: the whole row.
+                    const halfMs = () => exportTaps() / 2 / exportSampleRate() * 1000;
+                    const rv = () => peqRingVerdict(b, exportSampleRate(), halfMs());
                     return (
-                      <tr class={`${selectedPeqIdx() === i ? "peq-row-selected" : ""} ${isPending ? "peq-row-pending" : ""} ${!b.enabled ? "peq-row-disabled" : ""}`}
+                      <tr class={`${selectedPeqIdx() === i ? "peq-row-selected" : ""} ${isPending ? "peq-row-pending" : ""} ${!b.enabled ? "peq-row-disabled" : ""} ${rv().level === "tolerant" ? "peq-row-ring" : ""}`}
                         onClick={() => setSelectedPeqIdx(selectedPeqIdx() === i ? null : i)}>
                         <td><input type="checkbox" class="peq-toggle" checked={b.enabled} aria-label={`Фильтр ${i + 1} включён`} onChange={(e) => { e.stopPropagation(); const bd = band(); if (bd) updatePeqBand(bd.id, i, { enabled: !b.enabled }); }} onClick={(e) => e.stopPropagation()} /></td>
                         <td><select class="peq-type-select" value={b.filter_type ?? "Peaking"} aria-label={`Фильтр ${i + 1}: тип`} onChange={(e) => { e.stopPropagation(); setPeqType(i, e.currentTarget.value as PeqFilterType); }} onClick={(e) => e.stopPropagation()}><option value="Peaking">PK</option><option value="LowShelf">LS</option><option value="HighShelf">HS</option><option value="LinkwitzTransform" title={LT_TITLE}>LT</option></select></td>
                         <td><input class="peq-input" type="number" value={fmtPeqFreq(b.freq_hz)} min={20} max={F_MAX_WORK} step={1} ref={peqWheel(() => i, "freq_hz")} aria-label={`Фильтр ${i + 1}: частота, Гц`} onChange={(e) => commitPeqField(e.currentTarget, i, "freq_hz")} /></td>
                         <td><input class={`peq-input ${b.gain_db > 0 ? "peq-boost" : "peq-cut"}`} type="number" value={b.gain_db.toFixed(1)} min={peqGainLimits().lo} max={peqGainLimits().hi} step={0.1} ref={peqWheel(() => i, "gain_db")} aria-label={`Фильтр ${i + 1}: усиление, дБ`} onChange={(e) => commitPeqField(e.currentTarget, i, "gain_db")} /></td>
                         <td><input class="peq-input" type="number" value={b.q.toFixed(2)} min={PEQ_Q_MIN} max={PEQ_Q_MAX} step={0.1} ref={peqWheel(() => i, "q")} aria-label={`Фильтр ${i + 1}: Q`} onChange={(e) => commitPeqField(e.currentTarget, i, "q")} /></td>
-                        {(() => {
-                          // b141.93: time cost of this filter — its ringing to −60 dB.
-                          // Red when the tail to −100 dB is longer than half the file:
-                          // the export then shifts the band's delay.
-                          const rc = () => peqRingCost(b, exportSampleRate());
-                          const halfMs = () => exportTaps() / 2 / exportSampleRate() * 1000;
-                          const cls = () => !b.enabled ? "" : rc().ms100 > halfMs() ? "peq-ring-bad" : rc().ms60 >= 150 ? "peq-ring-warn" : "";
-                          return (
-                            <td class={`peq-ring ${cls()}`}
-                              title={`Звон до −60 дБ: ${Math.round(rc().ms60)} мс, до −100 дБ: ${Math.round(rc().ms100)} мс. Половина файла: ${Math.round(halfMs())} мс — если хвост длиннее, экспорт сдвинет задержку полосы.`}>
-                              {Math.abs(b.gain_db) < 0.05 ? "" : Math.round(rc().ms60)}
-                            </td>
-                          );
-                        })()}
+                        <td class={`peq-ring ${rv().level ? "peq-ring-bad" : ""}`}
+                          title={`Звон до −60 дБ: ${fmtRingMs(rv().ms60)} мс, до −100 дБ: ${fmtRingMs(rv().ms100)} мс — ×${rv().earRatio.toFixed(1)} от звона слуха на этой частоте. Красная цифра — звенит дольше слуха, красная строка — вдвое дольше или хвост до −100 дБ длиннее половины файла (${Math.round(halfMs())} мс): тогда экспорт сдвинет задержку полосы.`}>
+                          {Math.abs(b.gain_db) < 0.05 ? "" : fmtRingMs(rv().ms60)}
+                        </td>
                         <td>{isLinkwitz(b) ? (
                           <span class="peq-theory" title={`Теоретическая правка: трансформация Линквица по предполагаемому спаду ЗЯ 12 дБ/окт (f0 ${b.freq_hz.toFixed(1)} Гц, Q0 ${b.q.toFixed(2)}) → ${linkwitzTargetHz(b).toFixed(1)} Гц, Q 0,71. Нижний край замера не учитывается.`}
                             aria-label="Теоретическая правка">≈</span>
