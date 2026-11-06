@@ -182,6 +182,10 @@
   a low shelf or Linkwitz transform +12 dB without an HP puts the band at −12 dB
   — by design; an HP 20 Hz brings it back to about −4.5 dB (LT 30 Hz +12 dB).
   Pinned by `tests/below_grid_peak.rs`.
+- **Band SPL tab «FIR» and «PEQ» are at the file's level** (b141.140): FIR =
+  `realizedMag` itself (peak ≤ 0 dB, as on the Export tab), PEQ shifted by the
+  file's normalization (`peqFileShiftDb` = level − normDb, handles too). Do not
+  lift them onto «target + PEQ» — the file never carries +20 dB of shelf.
 - **«Corrected» = measurement + PEQ + `filterSection`** (b141.48): HP/LP,
   tilt, shelves and the ultrasonic LP — the whole level-free section the FIR
   bakes in. One TS builder for band, band IR, Σ and Σ IR.

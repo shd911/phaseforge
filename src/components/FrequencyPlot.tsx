@@ -178,6 +178,10 @@ export default function FrequencyPlot() {
 
   // PEQ dot markers — mutable, updated during drag
   let activePeqDots: { seriesIdx: number; dataIndices: Set<number> } | null = null;
+  /** b141.140: the export file's normalization gain (dB) applied to the PEQ
+   *  curve and its handles — the PEQ as it ends up in the file, which peaks at
+   *  0 dB. Set on each full render of the band chart; held during a drag. */
+  let peqFileShiftDb = 0;
   /** b141.104 (audit 4.25): the band whose SPL chart is on screen (null for
    *  Σ and the other tabs). The PEQ fast path edits that chart in place, so
    *  it must never run for another band. */
@@ -1389,7 +1393,7 @@ export default function FrequencyPlot() {
               // users can SEE that PEQ points are grabbable (was an invisible
               // hit-zone). Mirrors the crossover-marker style below.
               let cy: number | null = null;
-              if (peqSi >= 0) cy = u.valToPos(peqHandleDb(pb), "mag", true);
+              if (peqSi >= 0) cy = u.valToPos(peqHandleDb(pb) + peqFileShiftDb, "mag", true);
               if (cy != null && cy >= plotTop && cy <= plotBottom) {
                 const r = (isSel ? 5 : 3.5) * dpr;
                 ctx.setLineDash([]);
@@ -1500,7 +1504,7 @@ export default function FrequencyPlot() {
               const pb = peqBands[bandIdx];
               if (!pb.enabled) continue;
               const cx = u.valToPos(pb.freq_hz, "x", true);
-              const cy = u.valToPos(peqHandleDb(pb), "mag", true);
+              const cy = u.valToPos(peqHandleDb(pb) + peqFileShiftDb, "mag", true);
               // b141.137: a filter outside the zoomed range was drawn over the
               // axis labels (42.7 Hz at a 60 Hz start).
               if (!pointInBox(cx, cy, u.bbox)) continue;
@@ -1700,7 +1704,7 @@ export default function FrequencyPlot() {
       if (!chart || gen !== peqFastGen) return;
 
       const newData = [...chart.data];
-      newData[peqSi] = pm;
+      newData[peqSi] = pm.map((v) => v + peqFileShiftDb);
 
       // Also update corrected = meas + peq + xs (xs stays constant during drag)
       const label = (s: uPlot.Series) => (typeof s.label === "string" ? s.label : "");
@@ -1720,7 +1724,7 @@ export default function FrequencyPlot() {
           const corrData = new Array(freq.length);
           for (let i = 0; i < freq.length; i++) {
             const xs = (oldCorr[i] ?? 0) - (measData[i] ?? 0) - (oldPeq[i] ?? 0);
-            corrData[i] = (measData[i] ?? 0) + pm[i] + xs;
+            corrData[i] = (measData[i] ?? 0) + (newData[peqSi] as number[])[i] + xs;
           }
           newData[corrSi] = corrData;
         }
@@ -3215,8 +3219,16 @@ export default function FrequencyPlot() {
 
             // PEQ-only response curve (0 dB baseline) with dots at PEQ band frequencies
             if (showMag) {
-              // Shift PEQ response to sit at the zoomCenter baseline (will be normalized later)
-              const peqOnly = pm.map((v: number) => v + zoomCenter);
+              // b141.140: at the level it has in the exported file — the file
+              // is normalized to peak at 0 dB, so a +20 dB shelf does not put
+              // +20 dB into the signal. Shift = the FIR's normalization gain
+              // (level-free); 0 dBr baseline otherwise (normalized later).
+              const firForShift = await firPromise;
+              if (gen !== renderGen) return;
+              peqFileShiftDb = firForShift?.fir
+                ? (band.target.reference_level_db ?? 0) - firForShift.fir.normDb
+                : 0;
+              const peqOnly = pm.map((v: number) => v + zoomCenter + peqFileShiftDb);
               // Collect dot indices for PEQ band markers
               const enabledBands = band.peqBands!.filter((b: PeqBand) => b.enabled);
               const dotIndices = new Set<number>();
@@ -3306,20 +3318,13 @@ export default function FrequencyPlot() {
               }
 
               // b141.79: THE curve that goes into the file (the Export tab's
-              // «FIR»): the realized filter response itself, placed on the
-              // target level by matching «target + PEQ» in the passband.
-              const model = evalRes.combinedTargetMag ?? evalRes.targetMag;
-              if (model) {
+              // «FIR»): the realized filter response itself. b141.140: at the
+              // file's own level, on the 0 dBr baseline like PEQ — the file
+              // peaks at 0 dB, so this curve never rises above 0. Lifting it
+              // onto «target + PEQ» drew a band with a +20 dB shelf at +16 dB.
+              {
                 const rMag = resampleOnLogGrid(firRes.freq, firRes.fir.realizedMag, result.freq!);
-                const [pL, pH] = passbandRange(band.target.high_pass?.freq_hz, band.target.low_pass?.freq_hz);
-                let dS = 0, dN = 0;
-                for (let k = 0; k < result.freq!.length; k++) {
-                  const f = result.freq![k];
-                  if (f < pL || f > pH || !isFinite(model[k]) || !isFinite(rMag[k])) continue;
-                  dS += model[k] - rMag[k]; dN++;
-                }
-                const lift = dN > 0 ? dS / dN : 0;
-                const fileMag = rMag.map((v, k) => result.freq![k] < nyq ? v + lift : NaN);
+                const fileMag = rMag.map((v, k) => result.freq![k] < nyq ? v + zoomCenter : NaN);
                 uSeries.push({ label: "FIR dB", stroke: cf.target, width: 1.5, scale: "mag" });
                 uData.push(fileMag);
                 legend.push({ label: "FIR", color: cf.target, dash: false, visible: true, seriesIdx: sIdx, category: "fir" });
@@ -3928,7 +3933,7 @@ export default function FrequencyPlot() {
       if (!pb.enabled) continue;
       const cx = chart.valToPos(pb.freq_hz, "x");
       // b141.104 (audit 4.6): the handle, as drawn — the filter's own level.
-      const cy = chart.valToPos(peqHandleDb(pb), "mag");
+      const cy = chart.valToPos(peqHandleDb(pb) + peqFileShiftDb, "mag");
       const dist = Math.hypot(mx - cx, my - cy);
       if (dist < hitRadius && dist < bestDist) { bestDist = dist; bestIdx = i; }
     }
