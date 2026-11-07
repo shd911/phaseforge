@@ -7,7 +7,7 @@ You load your measurements, design every band of the speaker in one project (tar
 crossover, PEQ, phase), see what the bands do together, and export one FIR filter
 (WAV) per band for your convolver — HQPlayer, CamillaDSP, Equalizer APO and the like.
 
-> **Non-commercial hobby project. No warranty. Use at your own risk.**
+> **Non-commercial hobby project ([PolyForm Noncommercial](LICENSE.md)). No warranty. Use at your own risk.**
 > Always check the generated filters before playing music through them: load the WAV
 > into REW (or similar) and look at magnitude, phase and impulse, then start at low
 > volume. A wrong filter — a tweeter without its high-pass, a big boost, a polarity or
@@ -97,6 +97,12 @@ cargo tauri build    # release bundle
 Tests: `npx vitest run`, `npx tsc --noEmit`, and `cargo test` in `src-tauri/`.
 
 Stack: Tauri 2, Rust (DSP), SolidJS + uPlot (UI).
+
+## License
+
+[PolyForm Noncommercial 1.0.0](LICENSE.md) — free for personal, hobby, research and other
+noncommercial use, including changes and redistribution under the same terms. Commercial
+use is not permitted. The software comes as is, without any warranty.
 
 ## Feedback
 
