@@ -1,111 +1,104 @@
-# PhaseForge — Modern DSP Room/Speaker Correction Tool
+# PhaseForge
 
-> Offline macOS-native successor to [RePhase](http://www.rephase.org), built with Tauri 2 + Rust + SolidJS.
+**Free FIR crossover and correction designer for active multi-way loudspeakers.**
+macOS (Apple Silicon) and Windows. Beta. English and Russian UI.
 
-## Vision
+You load your measurements, design every band of the speaker in one project (target,
+crossover, PEQ, phase), see what the bands do together, and export one FIR filter
+(WAV) per band for your convolver — HQPlayer, CamillaDSP, Equalizer APO and the like.
 
-A precision tool for audiophiles and acoustic engineers to generate PEQ and FIR correction filters for loudspeaker/room systems. Combines the parametric EQ workflow of RePhase with modern auto-alignment, mixed-phase correction, and multi-point measurement support.
+> **Non-commercial hobby project. No warranty. Use at your own risk.**
+> Always check the generated filters before playing music through them: load the WAV
+> into REW (or similar) and look at magnitude, phase and impulse, then start at low
+> volume. A wrong filter — a tweeter without its high-pass, a big boost, a polarity or
+> delay mistake — can damage drivers and ears. Much of the code was written with an AI
+> coding assistant under the author's direction; that is one more reason to verify
+> the output rather than trust it.
 
-## Core Capabilities
+## Why
 
-| Feature | Description |
-|---------|-------------|
-| **Measurement Import** | REW `.txt`, `.frd`, `.mdat`, ARTA, HolmImpulse |
-| **Auto PEQ Alignment** | Greedy iterative → pruning → optional joint L-BFGS optimization |
-| **Target Curve Designer** | Crossovers (Bessel/Butterworth/LR), tilt, shelves, Super-Gaussian rolloff |
-| **FIR Generation** | Correction spectrum → phase strategy → IFFT → windowing → WAV export |
-| **Phase Strategies** | Linear phase, minimum phase, mixed phase (freq-dependent) |
-| **Multi-point Averaging** | Spatially-weighted measurement fusion |
-| **WAV Export** | IEEE Float 64-bit |
+Doing a multi-way speaker in REPhase means one filter per band, a separate tool for PEQ,
+a spreadsheet for delays, and no view of the sum until the files are loaded and measured
+again. PhaseForge keeps all of it in one place:
 
-## Architecture
+- target, crossover, PEQ and phase of every band are designed together;
+- the sum of all bands (SPL, phase, impulse, step, group delay) is visible live;
+- what the plot shows is what the exported WAV contains — the plot and the file are
+  built by the same code.
 
-```
-┌─────────────────────────────────┐
-│   Frontend (Tauri WebView)      │
-│   SolidJS + uPlot/Canvas        │
-│   ├── FR/Phase plot (interactive)│
-│   ├── PEQ band editor           │
-│   ├── Target curve designer     │
-│   ├── FIR config panel          │
-│   └── Import / Export UI        │
-└──────────┬──────────────────────┘
-           │  Tauri IPC (invoke / events)
-┌──────────▼──────────────────────┐
-│   Rust Core (src-tauri/)        │
-│   ├── io/                       │  Measurement & project I/O
-│   ├── target/                   │  Target curve engine
-│   ├── peq/                      │  Parametric EQ engine
-│   ├── fir/                      │  FIR correction engine
-│   ├── phase/                    │  Phase analysis & correction
-│   ├── dsp/                      │  Shared DSP primitives
-│   └── export/                   │  WAV / config export
-└─────────────────────────────────┘
-```
+## Features
 
-## Tech Stack
+**Measurements**
+- REW `.txt` and `.frd` import, with phase when present; propagation-delay removal.
+- Near-field / far-field merge, baffle-step helper.
+- Measurement analysis: noise floor, low-frequency roll-off and high-frequency cliff
+  detection, with suggested optimization limits.
 
-| Layer | Choice | Rationale |
-|-------|--------|-----------|
-| Shell | Tauri 2 | Native macOS binary, ~5MB, no Electron bloat |
-| Backend | Rust | FFT performance on 64k–256k taps, memory safety |
-| Frontend | SolidJS | Fine-grained reactivity for real-time slider updates |
-| Plots | uPlot + Canvas | 10k+ points at 60fps, interactive filter dragging |
-| FFT | `rustfft` / `realfft` | Real-to-complex optimization (2× memory savings) |
-| WAV I/O | `hound` | f32/f64 IEEE float support |
-| Optimization | `argmin` | L-BFGS for joint PEQ optimization |
-| Serialization | `serde` + JSON | Project save/load |
+**Target per band**
+- High-pass / low-pass: Linkwitz-Riley, Butterworth, Bessel, Gaussian, custom Q.
+- Tilt, low/high shelves, Linkwitz transform.
+- Complementary «1 − H» sections and nested crossovers for linear-phase splits that
+  sum flat.
+- Phase per section: minimum, linear or mixed (e.g. min-phase HP + linear-phase LP).
 
-## Project Structure
+**PEQ**
+- Manual filters or automatic optimization against the measurement.
+- The optimizer limits Q and ringing; every filter shows its ringing time, and filters
+  that lengthen the measured decay beyond what the ear masks are flagged.
 
-```
-phaseforge/
-├── README.md
-├── plans/                        # Detailed planning docs
-│   ├── 00-milestones.md          # Milestone roadmap
-│   ├── 01-measurement-io.md      # Measurement import/parsing
-│   ├── 02-target-curve.md        # Target curve engine
-│   ├── 03-peq-engine.md          # Auto PEQ alignment
-│   ├── 04-fir-engine.md          # FIR correction generation
-│   ├── 05-phase-engine.md        # Phase strategies
-│   ├── 06-ui-architecture.md     # Frontend & interaction design
-│   └── 07-export.md              # Export formats & pipeline
-├── src-tauri/                    # Rust backend
-│   ├── Cargo.toml
-│   └── src/
-│       ├── main.rs
-│       ├── io/
-│       ├── target/
-│       ├── peq/
-│       ├── fir/
-│       ├── phase/
-│       ├── dsp/
-│       └── export/
-├── src/                          # SolidJS frontend
-│   ├── App.tsx
-│   ├── components/
-│   ├── stores/
-│   └── lib/
-├── package.json
-└── tauri.conf.json
-```
+**FIR export**
+- 44.1–384 kHz, 4K to 1M taps, 20 window types, one WAV per band.
+- Minimum-phase bands are built as an exact digital IIR cascade; everything else via a
+  cepstral / FFT route. Above 88.2 kHz a zero-phase ultrasonic low-pass is applied.
+- Per-band metrics: pre-ringing, pre-peak noise floor, energy after the peak, and the
+  exact delay to enter in the convolver.
+- Polarity is written into the file; level and alignment delay stay host-side settings.
 
-## Quick Start (Development)
+**Sum view**
+- Level, delay (positive = plays later, as in HQPlayer) and polarity per band.
+- Summed measurement, target and corrected response: SPL, phase, IR/step, GD.
+
+**Projects**
+- Save/open, versions, undo/redo.
+
+## How it is checked
+
+The DSP is covered by automated tests (Rust and TypeScript), among them:
+
+- comparison against REPhase reference filters and analytic filter responses;
+- a 4-way export matrix — every filter family × phase mode × sample rate × tap count ×
+  window: the WAVs are written, read back from disk, FFT'd and compared with the
+  design, including the sum of the four bands;
+- a release gate on a real 4-way project.
+
+That catches a lot, not everything. See `CHANGELOG.md` for what changed and why.
+
+## Download
+
+[Releases](https://github.com/shd911/phaseforge/releases) — macOS `.dmg`
+(Apple Silicon) and Windows `.exe` / `.msi`.
+
+The builds are not code-signed. On macOS, if the app is reported as damaged or from an
+unidentified developer, right-click → Open, or run
+`xattr -dr com.apple.quarantine /Applications/PhaseForge.app`. On Windows, SmartScreen
+may ask you to confirm («More info» → «Run anyway»).
+
+## Building from source
+
+Prerequisites: Rust (stable), Node.js 20+, Tauri CLI.
 
 ```bash
-# Prerequisites: Rust toolchain, Node.js 20+
 cargo install tauri-cli
 npm install
-cargo tauri dev
+cargo tauri dev      # development
+cargo tauri build    # release bundle
 ```
 
-## License
+Tests: `npx vitest run`, `npx tsc --noEmit`, and `cargo test` in `src-tauri/`.
 
-TBD
+Stack: Tauri 2, Rust (DSP), SolidJS + uPlot (UI).
 
-## See Also
+## Feedback
 
-- `plans/00-milestones.md` — Development roadmap
-- `plans/01-measurement-io.md` — Measurement format specs
-- `plans/03-peq-engine.md` — Auto-alignment algorithm details
-- `plans/04-fir-engine.md` — FIR generation pipeline
+Bug reports are welcome — ideally with the measurement files or the project
+(File → Save As…) and the PhaseForge version from the window title.
