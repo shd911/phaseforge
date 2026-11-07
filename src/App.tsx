@@ -96,10 +96,17 @@ function App() {
 
   // Window close confirmation: backend prevents close, emits this event;
   // we delegate to confirmIfDirty (same flow as New/Open), then ack the close.
+  // b141.143: Dock Quit / ⌘Q come here too — a second request while the
+  // question is open must not stack a second dialog.
+  let closeAsking = false;
   const unlistenClose = listen("request-close-confirm", async () => {
-    if (await confirmIfDirty()) {
-      await invoke("close_window_now").catch((e) => console.error("close_window_now:", e));
-    }
+    if (closeAsking) return;
+    closeAsking = true;
+    try {
+      if (await confirmIfDirty()) {
+        await invoke("close_window_now").catch((e) => console.error("close_window_now:", e));
+      }
+    } finally { closeAsking = false; }
   });
   onCleanup(() => { unlistenClose.then((u) => u()).catch(() => {}); });
 

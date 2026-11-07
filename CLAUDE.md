@@ -311,6 +311,10 @@
   a real change. New global setting → `settingSignal`, never `createSignal`.
 - **Dirty vs save:** `doSave` clears the flag only if `dirtyGeneration()` did
   not move during the write.
+- **Quit goes through the close confirmation** (b141.143, `quit_guard.rs`): Dock
+  Quit and ⌘Q are `terminate:`, which tao never asks about — the delegate gets an
+  `applicationShouldTerminate:` that cancels and emits `request-close-confirm`
+  unless `allow_close` is set. Any new exit path must end in `close_window_now`.
 - **Band IR/Step, Σ IR and the FIR use the RAW measurement**; screen
   smoothing applies to SPL only.
 - **Measurement copies into the project** go through Rust

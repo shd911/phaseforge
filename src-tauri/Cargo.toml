@@ -35,3 +35,6 @@ sha2 = "0.10"
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"

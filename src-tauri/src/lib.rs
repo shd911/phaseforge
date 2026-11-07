@@ -9,6 +9,7 @@ pub mod io;
 pub mod peq;
 pub mod phase;
 pub mod project;
+mod quit_guard;
 pub mod recent;
 pub mod snapshots;
 pub mod target;
@@ -491,12 +492,13 @@ pub fn run() {
             .init();
     }
 
-    info!("PhaseForge b141.142 starting...");
+    info!("PhaseForge b141.143 starting...");
     info!("log file: {}", applog::log_path().map(|p| p.display().to_string()).unwrap_or_else(|| "—".into()));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppCloseState { allow_close: AtomicBool::new(false) })
+        .setup(|app| { quit_guard::install(app.handle()); Ok(()) })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let state: tauri::State<AppCloseState> = window.state();

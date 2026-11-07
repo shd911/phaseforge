@@ -2160,6 +2160,7 @@ dependencies = [
  "chrono",
  "dirs 5.0.1",
  "num-complex",
+ "objc2",
  "rayon",
  "rustfft",
  "serde",
