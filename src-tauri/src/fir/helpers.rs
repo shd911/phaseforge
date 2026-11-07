@@ -275,11 +275,12 @@ pub(crate) fn iterative_refine(
             let correction = err * weights[k] * 0.7;
             // b141.51: with a digital section the stopband legitimately sits
             // below the noise floor (true zeros) — never lift it to the floor.
-            let floor = if section.is_some() {
-                config.noise_floor_db.min(target_correction_db[k])
-            } else {
-                config.noise_floor_db
-            };
+            // b141.141: nor a request under it on any route. A PEQ cut under
+            // the floor lifted to the floor made the correction an inverted
+            // cut, and its own Hilbert (mixed phase) took the cut's phase out
+            // of the passband: 8° at 1 kHz, 18° at 2 kHz, 94° at the floor's
+            // knee on a Gaussian 750 Hz woofer.
+            let floor = config.noise_floor_db.min(target_correction_db[k]);
             refined_db[k] = (refined_db[k] + correction)
                 .max(floor)
                 .min(config.max_boost_db);

@@ -207,6 +207,15 @@
   −97 dB after. Mixed phase (HP min + LP lin, b141.86): the correction gets
   its own Hilbert on top of the fixed model phase (−52 → −97 dB). Pinned by
   `tests/refine_no_prering.rs`.
+- **Refinement never lifts a request under the noise floor to it** (b141.141,
+  `iterative_refine`, floor = min(noise floor, request) on every route, as the
+  digital section had since b141.51): clamping a PEQ cut under the floor up made
+  the correction an inverted cut whose Hilbert (mixed phase) stripped the cut's
+  phase from the passband (8° at 1 kHz, 94° at the knee). Invariant: the
+  refinement never grows the phase error vs the model by > 0.5° above 100 Hz
+  (3° at the LF edge, where it restores window-cut PEQ tails), wherever the
+  band is above −140 dB. Pinned by `tests/refine_phase_invariant.rs`
+  (phase modes × families × PEQ placement × 48k/176.4k).
 - **Optimizer PEQ rules** (b141.92–95, manual filters exempt — only flagged
   in the «мс» column): boosts only where the target is within «Подъём до»
   of its reference (`PeqConfig::boost_range`); boosts and cuts shallower than
