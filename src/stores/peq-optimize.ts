@@ -22,6 +22,7 @@ import type { BandState } from "./bands";
 import { pushHistory, historyEpoch } from "./history";
 import { passbandRange } from "../lib/band-evaluator/extension";
 import { showToast } from "../lib/toast";
+import { L } from "../lib/i18n";
 import { isLinkwitz, measurementWithTransforms } from "../lib/linkwitz";
 
 // --- Signals ---
@@ -135,7 +136,8 @@ async function resolveRange(inp: RangeInputs) {
   // the cap and came back from Rust as «invalid freq_range».
   if (!(range[0] < range[1])) {
     throw new PeqRangeError(
-      `заданный диапазон ${Math.round(inp.directLow)}–${Math.round(inp.directHigh)} Hz пуст: при экспорте ${inp.sampleRate} Hz оптимизатор работает до ${Math.round(fMax)} Hz`,
+      L(`заданный диапазон ${Math.round(inp.directLow)}–${Math.round(inp.directHigh)} Hz пуст: при экспорте ${inp.sampleRate} Hz оптимизатор работает до ${Math.round(fMax)} Hz`,
+        `range ${Math.round(inp.directLow)}–${Math.round(inp.directHigh)} Hz is empty: at a ${inp.sampleRate} Hz export the optimizer works up to ${Math.round(fMax)} Hz`),
     );
   }
   // b141.84: the floor trims BOTH modes — in direct mode it used to be
@@ -150,8 +152,10 @@ async function resolveRange(inp: RangeInputs) {
     // it. Nothing in the range is worth correcting: say so.
     if (!(range[0] < range[1])) {
       throw new PeqRangeError(
-        `в диапазоне ${Math.round(requested[0])}–${Math.round(requested[1])} Hz цель ниже порога ` +
-        `«Порог dB» (${inp.floorDb} dB) — расширьте диапазон или уменьшите порог`,
+        L(`в диапазоне ${Math.round(requested[0])}–${Math.round(requested[1])} Hz цель ниже порога ` +
+          `«Порог dB» (${inp.floorDb} dB) — расширьте диапазон или уменьшите порог`,
+          `in ${Math.round(requested[0])}–${Math.round(requested[1])} Hz the target is below the ` +
+          `“Floor, dB” threshold (${inp.floorDb} dB) — widen the range or lower the floor`),
       );
     }
   }
@@ -210,8 +214,10 @@ async function optimizeBand(b: BandState): Promise<{ result: PeqResult; frozenBa
   const activeBandBudget = bandBudget - frozenBands.length;
   if (activeBandBudget < 1) {
     throw new Error(
-      `лимит «Макс. полос» (${bandBudget}) занят сохраняемыми фильтрами — выключенными и трансформацией Линквица (${frozenBands.length}) — ` +
-      `увеличьте лимит или удалите выключенные`,
+      L(`лимит «Макс. полос» (${bandBudget}) занят сохраняемыми фильтрами — выключенными и трансформацией Линквица (${frozenBands.length}) — ` +
+        `увеличьте лимит или удалите выключенные`,
+        `the “Max filters” limit (${bandBudget}) is taken by kept filters — disabled ones and Linkwitz transforms (${frozenBands.length}) — ` +
+        `raise the limit or delete the disabled ones`),
     );
   }
   const config: PeqConfig = {
@@ -290,23 +296,23 @@ export function peqStaleReason(b: BandState): string | null {
   if (!b.peqBands || b.peqBands.length === 0 || !b.peqOptimizedTarget) return null;
   const snap = b.peqOptimizedTarget;
   if (!filterEquals(b.target.high_pass, snap.high_pass) || !filterEquals(b.target.low_pass, snap.low_pass)) {
-    return "кроссовер изменён";
+    return L("кроссовер изменён", "crossover changed");
   }
   if (snap.shaping && JSON.stringify(snap.shaping) !== JSON.stringify(currentShaping(b))) {
-    return "наклон или полки цели изменены";
+    return L("наклон или полки цели изменены", "target tilt or shelves changed");
   }
   if (snap.reference_level_db !== undefined && snap.reference_level_db !== b.target.reference_level_db) {
-    return "уровень цели изменён";
+    return L("уровень цели изменён", "target level changed");
   }
-  if (!exclusionZonesEquals(b.exclusionZones, snap.exclusion_zones)) return "зоны исключения изменены";
+  if (!exclusionZonesEquals(b.exclusionZones, snap.exclusion_zones)) return L("зоны исключения изменены", "exclusion zones changed");
   // b141.103 (audit 3.18): fitted to another measurement.
   if (snap.measurement_key !== undefined && measKeyOf(b) !== snap.measurement_key) {
-    return "замер заменён";
+    return L("замер заменён", "measurement replaced");
   }
   // b141.22: a fit made at another export rate no longer describes the biquads
   // that will ship. Snapshots from before b141.22 carry no rate — "unknown".
   if (snap.sample_rate !== undefined && snap.sample_rate !== exportSampleRate()) {
-    return "частота дискретизации экспорта изменена";
+    return L("частота дискретизации экспорта изменена", "export sample rate changed");
   }
   return null;
 }
@@ -351,7 +357,8 @@ export function peqStale(b: BandState): boolean {
 /** b141.103 (audit 3.10): Undo (or an open / new project) during a run —
  *  the result would land on the restored state with no history entry. */
 function droppedAfterUndo() {
-  showToast("Результат оптимизации отброшен: во время расчёта была отмена или смена проекта.", "info");
+  showToast(L("Результат оптимизации отброшен: во время расчёта была отмена или смена проекта.",
+    "Optimization result dropped: an undo or project change happened during the run."), "info");
 }
 
 // --- Main actions ---
@@ -373,11 +380,12 @@ export async function handleOptimizePeq() {
     setBandStats(b.id, { maxErr: result.max_error_db, iters: result.iterations });
     setSelectedPeqIdx(null);
     showToast(
-      `PEQ оптимизирован · фильтров: ${result.bands.length} · макс. ошибка ${result.max_error_db.toFixed(2)} dB`,
+      L(`PEQ оптимизирован · фильтров: ${result.bands.length} · макс. ошибка ${result.max_error_db.toFixed(2)} dB`,
+        `PEQ optimized · filters: ${result.bands.length} · max error ${result.max_error_db.toFixed(2)} dB`),
     );
   } catch (e) {
     setPeqError(String(e));
-    showToast(`Ошибка оптимизации PEQ: ${String(e)}`, "warn");
+    showToast(L(`Ошибка оптимизации PEQ: ${String(e)}`, `PEQ optimization error: ${String(e)}`), "warn");
   } finally {
     setComputing(false);
   }
@@ -414,7 +422,7 @@ export async function handleOptimizeAll() {
           target,
         };
       } catch (e) {
-        throw new Error(`«${name}»: ${e instanceof Error ? e.message : String(e)}`);
+        throw new Error(L(`«${name}»: `, `“${name}”: `) + (e instanceof Error ? e.message : String(e)));
       }
     }));
     if (historyEpoch() !== epoch) { droppedAfterUndo(); return; }
@@ -433,17 +441,19 @@ export async function handleOptimizeAll() {
     if (failures.length > 0) {
       setPeqError(failures.join("; "));
       showToast(
-        `Оптимизировано полос: ${results.length} из ${settled.length}. Не удалось: ${failures.join("; ")}`,
+        L(`Оптимизировано полос: ${results.length} из ${settled.length}. Не удалось: ${failures.join("; ")}`,
+          `Bands optimized: ${results.length} of ${settled.length}. Failed: ${failures.join("; ")}`),
         "warn", 12000,
       );
     } else {
       showToast(
-        `Оптимизировано полос: ${results.length} · макс. ошибка ${Math.max(...results.map(r => r.maxErr)).toFixed(2)} дБ`,
+        L(`Оптимизировано полос: ${results.length} · макс. ошибка ${Math.max(...results.map(r => r.maxErr)).toFixed(2)} дБ`,
+          `Bands optimized: ${results.length} · max error ${Math.max(...results.map(r => r.maxErr)).toFixed(2)} dB`),
       );
     }
   } catch (e) {
     setPeqError(String(e));
-    showToast(`Ошибка оптимизации: ${String(e)}`, "warn");
+    showToast(L(`Ошибка оптимизации: ${String(e)}`, `Optimization error: ${String(e)}`), "warn");
   } finally {
     setComputing(false);
   }

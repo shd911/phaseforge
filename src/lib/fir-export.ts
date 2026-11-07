@@ -10,6 +10,7 @@ import { projectDir, sanitize } from "./project-io";
 import { evaluateBandFull } from "./band-evaluator";
 import { buildFirGrid } from "./band-evaluator/grid";
 import { showToast } from "./toast";
+import { L } from "./i18n";
 
 export function driverName(b: BandState): string {
   let name = b.measurement?.name ?? b.name;
@@ -56,7 +57,8 @@ async function generateBandImpulse(req: ReturnType<typeof firExportRequest>): Pr
   const result = await evaluateBandFull(req);
   if (!result.fir) {
     // The evaluator builds no FIR only for a band with its target off.
-    throw new Error(`у полосы «${req.band.name}» выключена цель — включите её, чтобы экспортировать FIR`);
+    throw new Error(L(`у полосы «${req.band.name}» выключена цель — включите её, чтобы экспортировать FIR`,
+      `band “${req.band.name}” has its target off — turn it on to export the FIR`));
   }
   return {
     impulse: result.fir.impulse,
@@ -90,11 +92,15 @@ export function offCenterWavWarning(
   // 64 samples ≈ 1.3 ms @ 48k — below that the desync is inaudible.
   if (delaySamples >= half - 64) return null;
   const offsetSamples = half - delaySamples;
-  return `Внимание: полоса «${bandName}» экспортирована с задержкой ` +
+  return L(`Внимание: полоса «${bandName}» экспортирована с задержкой ` +
     `${delaySamples} отсчётов вместо ${half} — хвост фильтра не уместился в ` +
     `половину файла. В конвольвере он заиграет на ${offsetSamples} отсчётов ` +
     `раньше остальных: увеличьте число тапов или скомпенсируйте разницу ` +
-    `задержкой в конвольвере (в WAV задержка полосы не запекается).`;
+    `задержкой в конвольвере (в WAV задержка полосы не запекается).`,
+    `Warning: band “${bandName}” exported with a ${delaySamples}-sample delay ` +
+    `instead of ${half} — the filter tail did not fit in half the file. ` +
+    `In the convolver it plays ${offsetSamples} samples early: raise the taps ` +
+    `or compensate with convolver delay (the WAV does not carry band delay).`);
 }
 
 /** b141.61: the delay to type into the convolver for a band (seconds) — its
@@ -125,17 +131,21 @@ export function hostSettingsNote(
   if (Math.abs(total) >= 1e-7) {
     const ms = (v: number) => (v * 1000).toFixed(2);
     const why = shortfallS >= 1e-7
-      ? ` (выравнивание ${ms(alignmentDelayS)} + нехватка ведущих нулей в WAV ${ms(shortfallS)} — ` +
-        `хвост фильтра не уместился в половину файла)`
+      ? L(` (выравнивание ${ms(alignmentDelayS)} + нехватка ведущих нулей в WAV ${ms(shortfallS)} — ` +
+        `хвост фильтра не уместился в половину файла)`,
+        ` (alignment ${ms(alignmentDelayS)} + WAV leading-zero shortfall ${ms(shortfallS)} — ` +
+        `the filter tail did not fit in half the file)`)
       : "";
-    parts.push(`задержку ${ms(total)} ms${why}`);
+    parts.push(L(`задержку ${ms(total)} ms${why}`, `a delay of ${ms(total)} ms${why}`));
   }
-  if (inverted) parts.push("инверсию полярности");
+  if (inverted) parts.push(L("инверсию полярности", "inverted polarity"));
   if (parts.length === 0) return null;
   // «задержка» and «инверсия» are both feminine.
-  const what = parts.length > 1 ? "Они не записаны" : "Она не записана";
-  return `Полоса «${bandName}»: в конвольвере задайте ${parts.join(" и ")}. ` +
-    `${what} в WAV — иначе сумма будет не такой, как на графике Σ.`;
+  const what = parts.length > 1 ? L("Они не записаны", "They are not written") : L("Она не записана", "It is not written");
+  return L(`Полоса «${bandName}»: в конвольвере задайте ${parts.join(" и ")}. ` +
+    `${what} в WAV — иначе сумма будет не такой, как на графике Σ.`,
+    `Band “${bandName}”: set ${parts.join(" and ")} in the convolver. ` +
+    `${what} to the WAV — otherwise the sum will differ from the Σ plot.`);
 }
 
 /** b141.53 (audit 2026-10-01 M2): «Макс. подъём» caps target + PEQ on the
@@ -145,9 +155,12 @@ export function boostLimitNote(
   route: "iir" | "cepstral", peakBoostDb: number, maxBoostDb: number, bandName: string,
 ): string | null {
   if (route !== "iir" || !(peakBoostDb > maxBoostDb + 0.05)) return null;
-  return `Полоса «${bandName}»: подъём ${peakBoostDb.toFixed(1)} дБ выше лимита ` +
+  return L(`Полоса «${bandName}»: подъём ${peakBoostDb.toFixed(1)} дБ выше лимита ` +
     `${maxBoostDb.toFixed(1)} дБ — на аналитическом пути фильтр строится биквадами ` +
-    `точно и лимит не применяется. Уменьшите усиление PEQ или полок.`;
+    `точно и лимит не применяется. Уменьшите усиление PEQ или полок.`,
+    `Band “${bandName}”: boost ${peakBoostDb.toFixed(1)} dB exceeds the ` +
+    `${maxBoostDb.toFixed(1)} dB limit — the analytic route builds exact biquads ` +
+    `and cannot apply it. Reduce the PEQ or shelf gain.`);
 }
 
 /** b141.100: the samples that go into the WAV — an inverted band's file is
@@ -190,11 +203,11 @@ export async function exportBandWav(b: BandState): Promise<boolean> {
   const boost = boostLimitNote(route, peakBoostDb, maxBoostDb, name);
   const saved = path.split(/[\\/]/).pop() ?? path;
   // b141.101: sections the FIR could not realise (at/above 0.49·sr).
-  const fit = warnings.length ? `Полоса «${name}»: ${warnings.join(" ")}` : null;
+  const fit = warnings.length ? L(`Полоса «${name}»: ${warnings.join(" ")}`, `Band “${name}”: ${warnings.join(" ")}`) : null;
   const msg = [host, boost, fit].filter(Boolean).join(" ");
   // A note carries the number to type into the convolver — it stays until
   // clicked. Without one, a short confirmation (there was none at all).
-  if (msg) showToast(`Сохранено: ${saved}. ${msg}`, "warn", 0);
-  else showToast(`Сохранено: ${saved}`, "info", 4000);
+  if (msg) showToast(L(`Сохранено: ${saved}. ${msg}`, `Saved: ${saved}. ${msg}`), "warn", 0);
+  else showToast(L(`Сохранено: ${saved}`, `Saved: ${saved}`), "info", 4000);
   return true;
 }

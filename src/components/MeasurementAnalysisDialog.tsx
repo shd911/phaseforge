@@ -1,6 +1,6 @@
 import { createSignal, Show, For } from "solid-js";
 import Modal from "./Modal";
-import { pluralRu } from "../lib/plural";
+import { L, plural } from "../lib/i18n";
 import type { AnalysisFinding, AnalysisRecommendation, AnalysisResult } from "../lib/types";
 import { applyRecommendation } from "../lib/analysis-actions";
 import { setBandAnalysisDismissed } from "../stores/bands";
@@ -86,25 +86,25 @@ export default function MeasurementAnalysisDialog() {
         return (
           <Modal overlayClass="pn-overlay" dialogClass="pn-dialog"
             dialogStyle={{ "min-width": "520px", "max-width": "640px" }} titleId="analysis-dlg-title" onEscape={close}>
-              <div class="pn-title" id="analysis-dlg-title">Анализ замера: {req().fileName}</div>
+              <div class="pn-title" id="analysis-dlg-title">{L("Анализ замера:", "Measurement analysis:")} {req().fileName}</div>
 
               <Show
                 when={findings().length > 0}
                 fallback={
                   <div style={{ padding: "32px 0", "text-align": "center" }}>
                     <div style={{ "font-size": "32px", color: "#7c7", "margin-bottom": "12px" }}>✓</div>
-                    <div style={{ "font-size": "16px", "margin-bottom": "6px" }}>Замер выглядит чисто</div>
-                    <div style={{ color: "#aaa", "font-size": "13px" }}>Анализ не выявил подозрительных участков.</div>
+                    <div style={{ "font-size": "16px", "margin-bottom": "6px" }}>{L("Замер выглядит чисто", "The measurement looks clean")}</div>
+                    <div style={{ color: "#aaa", "font-size": "13px" }}>{L("Анализ не выявил подозрительных участков.", "No suspicious regions found.")}</div>
                   </div>
                 }
               >
                 <div style={{ "margin-bottom": "8px", "font-size": "13px" }}>
-                  Выберите рекомендации, которые применить. Можно по одной или сразу все.
+                  {L("Выберите рекомендации, которые применить. Можно по одной или сразу все.", "Choose recommendations to apply, one by one or all at once.")}
                 </div>
                 <div style={{ "margin-bottom": "12px", color: "#aaa", "font-size": "12px" }}>
-                  Найдено: {counts().warn} {pluralRu(counts().warn, "предупреждение", "предупреждения", "предупреждений")},{" "}
-                  {counts().info} {pluralRu(counts().info, "заметка", "заметки", "заметок")}
-                  {counts().err > 0 ? `, ${counts().err} ${pluralRu(counts().err, "ошибка", "ошибки", "ошибок")}` : ""}
+                  {L("Найдено:", "Found:")} {counts().warn} {plural(counts().warn, ["предупреждение", "предупреждения", "предупреждений"], ["warning", "warnings"])},{" "}
+                  {counts().info} {plural(counts().info, ["заметка", "заметки", "заметок"], ["note", "notes"])}
+                  {counts().err > 0 ? `, ${counts().err} ${plural(counts().err, ["ошибка", "ошибки", "ошибок"], ["error", "errors"])}` : ""}
                 </div>
 
                 <div style={{ "max-height": "420px", "overflow-y": "auto", "border-top": "1px solid #333" }}>
@@ -117,7 +117,7 @@ export default function MeasurementAnalysisDialog() {
                             {severityIcon(f.severity)} {f.title}
                             <Show when={isApplied()}>
                               <span style={{ "margin-left": "8px", color: "#7c7", "font-weight": 400 }}>
-                                ✓ применено
+                                {L("✓ применено", "✓ applied")}
                               </span>
                             </Show>
                           </div>
@@ -131,7 +131,7 @@ export default function MeasurementAnalysisDialog() {
                                 style={{ "margin-right": "6px" }}
                                 disabled={isApplied()}
                                 onClick={() => applyFinding(req(), f, rec)}
-                              >{isApplied() ? `✓ Установлено: ${rec.label}` : rec.label}</button>
+                              >{isApplied() ? L(`✓ Установлено: ${rec.label}`, `✓ Set: ${rec.label}`) : rec.label}</button>
                             )}
                           </For>
                         </div>
@@ -142,17 +142,17 @@ export default function MeasurementAnalysisDialog() {
               </Show>
 
               <div class="pn-buttons" style={{ "margin-top": "16px" }}>
-                <button class="dlg-btn" onClick={close}>Закрыть</button>
+                <button class="dlg-btn" onClick={close}>{L("Закрыть", "Close")}</button>
                 <Show when={findings().length > 0}>
                   <button
                     class="dlg-btn dlg-btn-primary"
                     onClick={applyAll}
                     disabled={allApplied()}
                   >{allApplied()
-                    ? "Все применены"
+                    ? L("Все применены", "All applied")
                     : remainingCount() === findings().length
-                      ? "Применить все"
-                      : `Применить оставшиеся (${remainingCount()})`}</button>
+                      ? L("Применить все", "Apply all")
+                      : L(`Применить оставшиеся (${remainingCount()})`, `Apply remaining (${remainingCount()})`)}</button>
                 </Show>
               </div>
           </Modal>

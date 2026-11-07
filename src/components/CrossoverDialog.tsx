@@ -4,10 +4,11 @@ import type { FilterConfig, FilterType } from "../lib/types";
 import { appState, setBandLowPass } from "../stores/bands";
 import {
   availableSlopes, orderToSlope, slopeToOrder, clampNum,
-  FILTER_TYPE_ORDER, FILTER_TYPE_LABEL, CUSTOM_Q_MIN, CUSTOM_Q_MAX, GAUSS_M_MIN, GAUSS_M_MAX, CUSTOM_Q_HINT,
+  FILTER_TYPE_ORDER, FILTER_TYPE_LABEL, CUSTOM_Q_MIN, CUSTOM_Q_MAX, GAUSS_M_MIN, GAUSS_M_MAX, customQHint,
 } from "../lib/slope";
 import NumField from "./NumField";
 import Modal from "./Modal";
+import { L } from "../lib/i18n";
 
 export interface CrossoverDialogData {
   bandIndex: number;   // index of band with LP filter
@@ -103,23 +104,23 @@ export default function CrossoverDialog() {
         <Modal overlayClass="xo-overlay" dialogClass="xo-dialog" titleId="xo-dlg-title"
           onEnter={handleApply} onEscape={handleCancel}>
             <div class="xo-title" id="xo-dlg-title">
-              Кроссовер: {data().bandName} / {data().nextBandName}
+              {L("Кроссовер:", "Crossover:")} {data().bandName} / {data().nextBandName}
             </div>
 
             <div class="xo-row">
-              <label class="xo-label" for="xo-freq">Частота</label>
+              <label class="xo-label" for="xo-freq">{L("Частота", "Frequency")}</label>
               <NumField id="xo-freq" autofocus value={freq()} onChange={setFreq} invalidAsNaN
                 min={F_MIN_WORK} max={F_MAX_WORK} step={1} />
-              <span class="xo-unit">Гц</span>
+              <span class="xo-unit">{L("Гц", "Hz")}</span>
             </div>
             <Show when={!freqValid()}>
               <div class="xo-hint" style={{ color: "var(--warn-amber-text)" }}>
-                Частота: {F_MIN_WORK}–{F_MAX_WORK} Гц
+                {L("Частота:", "Frequency:")} {F_MIN_WORK}–{F_MAX_WORK} {L("Гц", "Hz")}
               </div>
             </Show>
 
             <div class="xo-row">
-              <label class="xo-label" for="xo-type">Тип</label>
+              <label class="xo-label" for="xo-type">{L("Тип", "Type")}</label>
               <select
                 id="xo-type"
                 class="xo-select"
@@ -142,14 +143,14 @@ export default function CrossoverDialog() {
                   }
                 }}
               >
-                {FILTER_TYPE_ORDER.map((t) => <option value={t}>{FILTER_TYPE_LABEL[t]}</option>)}
+                {FILTER_TYPE_ORDER.map((t) => <option value={t}>{t === "Custom" ? L(FILTER_TYPE_LABEL[t], "Custom Q") : FILTER_TYPE_LABEL[t]}</option>)}
               </select>
             </div>
 
             {/* Order — for non-Gaussian types */}
             <Show when={!isGaussian()}>
               <div class="xo-row">
-                <label class="xo-label" for="xo-slope">Крутизна</label>
+                <label class="xo-label" for="xo-slope">{L("Крутизна", "Slope")}</label>
                 <select
                   id="xo-slope"
                   class="xo-select"
@@ -157,7 +158,7 @@ export default function CrossoverDialog() {
                   onChange={(e) => setOrder(slopeToOrder(filterType(), parseInt(e.currentTarget.value, 10)))}
                 >
                   {availableSlopes(filterType()).map((s) => (
-                    <option value={s}>{`${s} дБ/окт`}</option>
+                    <option value={s}>{L(`${s} дБ/окт`, `${s} dB/oct`)}</option>
                   ))}
                 </select>
               </div>
@@ -179,7 +180,7 @@ export default function CrossoverDialog() {
                 <NumField id="xo-q" value={customQ()} onChange={setCustomQ}
                   min={CUSTOM_Q_MIN} max={CUSTOM_Q_MAX} step={0.01} />
               </div>
-              <div class="xo-hint">{CUSTOM_Q_HINT}</div>
+              <div class="xo-hint">{customQHint()}</div>
             </Show>
 
             <div class="xo-checkbox">
@@ -190,13 +191,13 @@ export default function CrossoverDialog() {
                 onChange={(e) => setLinearPhase(e.currentTarget.checked)}
               />
               <label class="xo-checkbox-label" for="xo-lin-phase">
-                Линейная фаза
+                {L("Линейная фаза", "Linear phase")}
               </label>
             </div>
 
             <div class="xo-buttons">
-              <button class="dlg-btn" onClick={handleCancel}>Отмена</button>
-              <button class="dlg-btn dlg-btn-primary" onClick={handleApply} disabled={!freqValid()}>Применить</button>
+              <button class="dlg-btn" onClick={handleCancel}>{L("Отмена", "Cancel")}</button>
+              <button class="dlg-btn dlg-btn-primary" onClick={handleApply} disabled={!freqValid()}>{L("Применить", "Apply")}</button>
             </div>
         </Modal>
       )}

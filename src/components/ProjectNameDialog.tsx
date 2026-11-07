@@ -2,6 +2,7 @@ import { createSignal, Show } from "solid-js";
 import { promptVisible, promptMode, resolvePrompt } from "../lib/project-io";
 import type { ProjectPromptResult } from "../lib/project-io";
 import Modal from "./Modal";
+import { L } from "../lib/i18n";
 
 export default function ProjectNameDialog() {
   const [name, setName] = createSignal("");
@@ -29,9 +30,9 @@ export default function ProjectNameDialog() {
     <Show when={promptVisible()}>
       <Modal overlayClass="pn-overlay" dialogClass="pn-dialog" titleId="pn-dlg-title"
         onEnter={handleCreate} onEscape={handleCancel}>
-          <div class="pn-title" id="pn-dlg-title">{isSaveAs() ? "Сохранить как" : "Новый проект"}</div>
+          <div class="pn-title" id="pn-dlg-title">{isSaveAs() ? L("Сохранить как", "Save As") : L("Новый проект", "New project")}</div>
 
-          <label class="pn-label" for="pn-name">Название проекта</label>
+          <label class="pn-label" for="pn-name">{L("Название проекта", "Project name")}</label>
           <input
             ref={(el) => {
               requestAnimationFrame(() => el.focus());
@@ -39,27 +40,27 @@ export default function ProjectNameDialog() {
             id="pn-name"
             class="pn-input"
             type="text"
-            placeholder="Мой проект"
+            placeholder={L("Мой проект", "My project")}
             value={name()}
             onInput={(e) => setName(e.currentTarget.value)}
           />
 
           <Show when={!isSaveAs()}>
-            <label class="pn-label" id="pn-band-count">Количество полос</label>
+            <label class="pn-label" id="pn-band-count">{L("Количество полос", "Number of bands")}</label>
             <div class="pn-band-count" role="group" aria-labelledby="pn-band-count">
-              <button class="pn-bc-btn" onClick={decBands} disabled={bandCount() <= 1} aria-label="Меньше полос">−</button>
+              <button class="pn-bc-btn" onClick={decBands} disabled={bandCount() <= 1} aria-label={L("Меньше полос", "Fewer bands")}>−</button>
               <span class="pn-bc-value">{bandCount()}</span>
-              <button class="pn-bc-btn" onClick={incBands} disabled={bandCount() >= 8} aria-label="Больше полос">+</button>
+              <button class="pn-bc-btn" onClick={incBands} disabled={bandCount() >= 8} aria-label={L("Больше полос", "More bands")}>+</button>
             </div>
           </Show>
 
           <div class="pn-buttons">
-            <button class="dlg-btn" onClick={handleCancel}>Отмена</button>
+            <button class="dlg-btn" onClick={handleCancel}>{L("Отмена", "Cancel")}</button>
             <button
               class="dlg-btn dlg-btn-primary"
               onClick={handleCreate}
               disabled={!name().trim()}
-            >{isSaveAs() ? "Сохранить" : "Создать"}</button>
+            >{isSaveAs() ? L("Сохранить", "Save") : L("Создать", "Create")}</button>
           </div>
       </Modal>
     </Show>

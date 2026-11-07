@@ -4,6 +4,7 @@ pub mod error;
 pub mod export;
 pub mod applog;
 pub mod fir;
+pub mod i18n;
 pub mod io;
 pub mod peq;
 pub mod phase;
@@ -490,7 +491,7 @@ pub fn run() {
             .init();
     }
 
-    info!("PhaseForge b141.141 starting...");
+    info!("PhaseForge b141.142 starting...");
     info!("log file: {}", applog::log_path().map(|p| p.display().to_string()).unwrap_or_else(|| "—".into()));
 
     tauri::Builder::default()
@@ -506,6 +507,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            i18n::set_ui_language,
             applog::log_frontend,
             applog::reveal_log_file,
             import_measurement,

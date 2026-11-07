@@ -11,6 +11,7 @@ import {
 import { isDirty } from "../stores/bands";
 import { openVersionsDialog } from "./VersionsDialog";
 import { showToast } from "../lib/toast";
+import { L } from "../lib/i18n";
 
 export default function FileMenu() {
   const [isOpen, setIsOpen] = createSignal(false);
@@ -115,18 +116,18 @@ export default function FileMenu() {
         class={`tb-btn file-menu-trigger ${isOpen() ? "active" : ""}`}
         onClick={toggleMenu}
       >
-        Файл{isDirty() ? " \u2022" : ""}
+        {L("Файл", "File")}{isDirty() ? " \u2022" : ""}
       </button>
 
       <Show when={isOpen()}>
         <div class="file-menu">
           <button class="file-menu-item" onClick={handleNew}>
-            <span class="file-menu-label">Новый проект</span>
+            <span class="file-menu-label">{L("Новый проект", "New project")}</span>
             <span class="file-menu-shortcut">{"\u2318"}N</span>
           </button>
 
           <button class="file-menu-item" onClick={handleOpen}>
-            <span class="file-menu-label">Открыть…</span>
+            <span class="file-menu-label">{L("Открыть…", "Open…")}</span>
             <span class="file-menu-shortcut">{"\u2318"}O</span>
           </button>
 
@@ -155,7 +156,7 @@ export default function FileMenu() {
               }
             }}
           >
-            <span class="file-menu-label">Недавние проекты</span>
+            <span class="file-menu-label">{L("Недавние проекты", "Recent projects")}</span>
             <span class="file-menu-arrow">{"\u25B6"}</span>
 
             <Show when={showRecent()}>
@@ -165,7 +166,7 @@ export default function FileMenu() {
                 onMouseLeave={onRecentLeave}
               >
                 <Show when={recentPaths().length > 0} fallback={
-                  <span class="file-menu-item file-menu-disabled">Нет недавних проектов</span>
+                  <span class="file-menu-item file-menu-disabled">{L("Нет недавних проектов", "No recent projects")}</span>
                 }>
                   <For each={recentPaths()}>
                     {(path) => (
@@ -180,7 +181,7 @@ export default function FileMenu() {
                   </For>
                   <div class="file-menu-sep" />
                   <button class="file-menu-item" onClick={handleClearRecent}>
-                    Очистить список
+                    {L("Очистить список", "Clear list")}
                   </button>
                 </Show>
               </div>
@@ -192,18 +193,18 @@ export default function FileMenu() {
           <button
             class="file-menu-item"
             onClick={handleSave}
-            title="Сохранить проект (⌘S)"
+            title={L("Сохранить проект (⌘S)", "Save project (⌘S)")}
           >
-            <span class="file-menu-label">Сохранить</span>
+            <span class="file-menu-label">{L("Сохранить", "Save")}</span>
             <span class="file-menu-shortcut">{"\u2318"}S</span>
           </button>
 
           <button
             class="file-menu-item"
             onClick={handleSaveAs}
-            title="Сохранить проект под новым именем (⇧⌘S)"
+            title={L("Сохранить проект под новым именем (⇧⌘S)", "Save project under a new name (⇧⌘S)")}
           >
-            <span class="file-menu-label">Сохранить как…</span>
+            <span class="file-menu-label">{L("Сохранить как…", "Save As…")}</span>
             <span class="file-menu-shortcut">{"\u21E7\u2318"}S</span>
           </button>
 
@@ -214,10 +215,10 @@ export default function FileMenu() {
             onClick={() => { closeMenu(); openVersionsDialog(); }}
             disabled={projectDir() === null}
             title={projectDir() === null
-              ? "Сохраните проект через «Сохранить как…», чтобы создавать версии"
-              : "Управление именованными версиями проекта (⇧⌘V)"}
+              ? L("Сохраните проект через «Сохранить как…», чтобы создавать версии", "Use “Save As…” first to create versions")
+              : L("Управление именованными версиями проекта (⇧⌘V)", "Manage named project versions (⇧⌘V)")}
           >
-            <span class="file-menu-label">Версии…</span>
+            <span class="file-menu-label">{L("Версии…", "Versions…")}</span>
             <span class="file-menu-shortcut">{"\u21E7\u2318"}V</span>
           </button>
 
@@ -225,14 +226,14 @@ export default function FileMenu() {
 
           <button
             class="file-menu-item"
-            title="Журнал работы программы: ошибки, предупреждения, диагностика"
+            title={L("Журнал работы программы: ошибки, предупреждения, диагностика", "App log: errors, warnings, diagnostics")}
             onClick={async () => {
               closeMenu();
               try { await invoke("reveal_log_file"); }
-              catch (e) { showToast(`Не удалось открыть журнал: ${e}`, "warn"); }
+              catch (e) { showToast(L(`Не удалось открыть журнал: ${e}`, `Could not open the log: ${e}`), "warn"); }
             }}
           >
-            <span class="file-menu-label">Показать журнал…</span>
+            <span class="file-menu-label">{L("Показать журнал…", "Show log…")}</span>
           </button>
         </div>
       </Show>

@@ -40,6 +40,7 @@ import { isWindowType, STANDARD_SAMPLE_RATES, STANDARD_TAPS, F_MIN_WORK, F_MAX_W
 import { isSmoothingMode } from "../stores/bands";
 import { clearHistory } from "../stores/history";
 import { showToast } from "./toast";
+import { L } from "./i18n";
 import { openMeasurementAnalysis } from "../components/MeasurementAnalysisDialog";
 
 // ---------------------------------------------------------------------------
@@ -432,7 +433,8 @@ export async function restoreState(project: ProjectFile, projDir: string | null)
     // Compared with the old values: equal delays all become 0 (b141.130).
     if (migrated.some((d, i) => d !== legacy[i])) {
       showToast(
-        "Задержки полос пересчитаны под конвенцию «плюс = позже» — проверьте значения на вкладке Сумма.",
+        L("Задержки полос пересчитаны под конвенцию «плюс = позже» — проверьте значения на вкладке Сумма.",
+          "Band delays converted to the “plus = later” convention — check them on the Sum tab."),
         "info",
       );
     }
@@ -598,9 +600,10 @@ export async function restoreState(project: ProjectFile, projDir: string | null)
     setIsDirty(false);
   });
   if (missingMeasurements.length > 0) {
-    const list = missingMeasurements.map((n) => `«${n}»`).join(", ");
+    const list = missingMeasurements.map((n) => L(`«${n}»`, `“${n}”`)).join(", ");
     showToast(
-      `Не найдены измерения: ${list}. Полосы загружены без измерений, переимпортируйте файлы вручную.`,
+      L(`Не найдены измерения: ${list}. Полосы загружены без измерений, переимпортируйте файлы вручную.`,
+        `Measurements not found: ${list}. Bands loaded without them — re-import the files manually.`),
       "warn",
       10000,
     );
@@ -697,8 +700,9 @@ async function createFreshProjectFolder(parentPath: string, name: string): Promi
     console.error("Cannot create project folder:", e);
     const exists = await invoke<boolean>("check_path_exists", { path: `${parentPath}/${name}` }).catch(() => false);
     showToast(exists
-      ? `Папка «${name}» здесь уже есть, в ней может лежать другой проект. Выберите другое имя или место.`
-      : `Не удалось создать папку проекта «${name}»: ${e}`, "warn", 12000);
+      ? L(`Папка «${name}» здесь уже есть, в ней может лежать другой проект. Выберите другое имя или место.`,
+        `Folder “${name}” already exists here and may hold another project. Choose another name or place.`)
+      : L(`Не удалось создать папку проекта «${name}»: ${e}`, `Could not create project folder “${name}”: ${e}`), "warn", 12000);
     return null;
   }
 }
@@ -831,14 +835,14 @@ export async function newProject(): Promise<void> {
 export function reportProjectError(what: "открыть" | "сохранить", e: unknown): void {
   const raw = String(e);
   let why = raw;
-  if (/newer than supported/i.test(raw)) why = "проект создан в более новой версии PhaseForge — обновите программу";
-  else if (/Parse error/i.test(raw)) why = "файл проекта повреждён или имеет неверный формат";
-  else if (/Read error/i.test(raw)) why = "файл не найден или недоступен для чтения";
-  else if (/Write error/i.test(raw)) why = "не удалось записать файл (нет прав или места на диске)";
-  else if (/hidden files|traversal|not allowed/i.test(raw)) why = "путь недопустим для записи";
-  else if (/export_taps|export_sample_rate|measurement/i.test(raw)) why = "в проекте недопустимые данные: " + raw;
+  if (/newer than supported/i.test(raw)) why = L("проект создан в более новой версии PhaseForge — обновите программу", "the project was made by a newer PhaseForge — update the app");
+  else if (/Parse error/i.test(raw)) why = L("файл проекта повреждён или имеет неверный формат", "the project file is damaged or has a wrong format");
+  else if (/Read error/i.test(raw)) why = L("файл не найден или недоступен для чтения", "the file is missing or cannot be read");
+  else if (/Write error/i.test(raw)) why = L("не удалось записать файл (нет прав или места на диске)", "could not write the file (no permission or disk space)");
+  else if (/hidden files|traversal|not allowed/i.test(raw)) why = L("путь недопустим для записи", "the path is not allowed for writing");
+  else if (/export_taps|export_sample_rate|measurement/i.test(raw)) why = L("в проекте недопустимые данные: ", "the project holds invalid data: ") + raw;
   console.error(`Project ${what} failed:`, e);
-  showToast(`Не удалось ${what} проект: ${why}`, "warn", 12000);
+  showToast(L(`Не удалось ${what} проект: ${why}`, `Could not ${what === "открыть" ? "open" : "save"} the project: ${why}`), "warn", 12000);
 }
 
 /** Save to current path, or show Save As dialog if no path yet. */

@@ -546,7 +546,14 @@ git diff --stat
   || default` and per-keystroke clamping both make a field uneditable.
 - **CSS tokens must not reference themselves** — a cyclic custom property is
   invalid and silently drops the colour (--warn-amber was dead b141.4→b141.38).
-- Plurals via `pluralRu` (lib/plural.ts), never `n === 1 ? "" : "а"`.
+- **UI language RU | EN** (b141.142, `lib/i18n.ts`, top-bar switch): every
+  user-visible string is an inline pair `L("…", "…")` — Russian first and
+  verbatim (tests query it). A string in a module-level constant does not switch:
+  make it a function or call `L` at the render site. Code keys (plot series
+  labels, `===`/`startsWith` targets, saved values) stay untranslated. Plurals
+  via `plural(n, [ru×3], [en×2])`, never `n === 1 ? "" : "а"`. Backend messages:
+  `crate::tr!(ru, en, args)` / `i18n::l` (Rust `i18n.rs`, set by `set_ui_language`).
+  The choice is an app preference (localStorage), not a project setting.
 - **Scroll-wheel adjustment goes through `lib/wheel-step.ts`** (b141.43):
   active only after the field is clicked (never preventDefault an inactive
   field — it freezes panel scrolling), steps from `wheelSteps` (macOS mouse

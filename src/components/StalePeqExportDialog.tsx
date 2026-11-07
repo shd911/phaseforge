@@ -1,5 +1,6 @@
 import { createSignal, Show, For } from "solid-js";
 import Modal from "./Modal";
+import { L } from "../lib/i18n";
 
 interface PendingState {
   bandNames: string[];
@@ -35,21 +36,22 @@ export default function StalePeqExportDialog() {
         <Modal overlayClass="pn-overlay" dialogClass="pn-dialog"
           dialogStyle={{ "min-width": "440px", "max-width": "560px" }} titleId="stale-dlg-title"
           onEnter={() => resolveAndClose(true)} onEscape={() => resolveAndClose(false)}>
-            <div class="pn-title" id="stale-dlg-title">Экспорт устаревшего PEQ</div>
+            <div class="pn-title" id="stale-dlg-title">{L("Экспорт устаревшего PEQ", "Export stale PEQ")}</div>
             <div class="pn-label" style={{ "margin-bottom": "8px" }}>
-              На следующих полосах PEQ устарел:
+              {L("На следующих полосах PEQ устарел:", "PEQ is stale on these bands:")}
             </div>
             <ul style={{ margin: "0 0 12px 0", padding: "0 0 0 18px" }}>
               <For each={p().bandNames}>{(n) => <li>{n}</li>}</For>
             </ul>
             <div class="pn-label" style={{ "margin-bottom": "16px", color: "#aaa" }}>
-              Цель изменена после последней оптимизации. Экспорт даст коррекцию,
-              не соответствующую текущей цели.
+              {L("Цель изменена после последней оптимизации. Экспорт даст коррекцию, " +
+                "не соответствующую текущей цели.",
+                "The target changed after the last optimization. The export will not match the current target.")}
             </div>
             <div class="pn-buttons">
-              <button class="dlg-btn" onClick={() => resolveAndClose(false)}>Отмена</button>
+              <button class="dlg-btn" onClick={() => resolveAndClose(false)}>{L("Отмена", "Cancel")}</button>
               <button class="dlg-btn dlg-btn-primary" onClick={() => resolveAndClose(true)}>
-                Экспортировать всё равно
+                {L("Экспортировать всё равно", "Export anyway")}
               </button>
             </div>
         </Modal>

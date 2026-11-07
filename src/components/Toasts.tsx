@@ -1,5 +1,6 @@
 import { For } from "solid-js";
 import { toasts, dismissToast } from "../lib/toast";
+import { L } from "../lib/i18n";
 
 export default function Toasts() {
   return (
@@ -36,7 +37,7 @@ export default function Toasts() {
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " " || e.key === "Escape") { e.preventDefault(); dismissToast(t.id); }
             }}
-            title="Скрыть (Enter)"
+            title={L("Скрыть (Enter)", "Dismiss (Enter)")}
           >
             {t.text}
           </div>

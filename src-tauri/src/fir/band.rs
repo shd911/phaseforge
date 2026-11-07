@@ -96,26 +96,32 @@ fn nyquist_warnings(target_curve: &TargetCurve, peq: &[PeqBand], sr: f64) -> Vec
     let lim = super::SECTION_MAX_FRACTION * sr;
     let ok = |f: f64| super::section_realisable(f, sr);
     let mut out = Vec::new();
-    for (f, what) in [(target_curve.high_pass.as_ref(), "ФВЧ"), (target_curve.low_pass.as_ref(), "ФНЧ")] {
+    for (f, what) in [(target_curve.high_pass.as_ref(), ("ФВЧ", "High-pass")), (target_curve.low_pass.as_ref(), ("ФНЧ", "Low-pass"))] {
         if let Some(f) = f.filter(|f| !ok(f.freq_hz)) {
-            out.push(format!(
-                "{what} {:.0} Гц не ниже предела {:.0} Гц для частоты экспорта {:.0} Гц — \
-                 в FIR только его спад ниже Найквиста.", f.freq_hz, lim, sr));
+            out.push(if crate::i18n::en() { format!(
+                "{} {:.0} Hz is not below the {:.0} Hz limit for the {:.0} Hz export rate — \
+                 the FIR carries only its roll-off below Nyquist.", what.1, f.freq_hz, lim, sr) } else { format!(
+                "{} {:.0} Гц не ниже предела {:.0} Гц для частоты экспорта {:.0} Гц — \
+                 в FIR только его спад ниже Найквиста.", what.0, f.freq_hz, lim, sr) });
         }
     }
-    for (s, what) in [(target_curve.low_shelf.as_ref(), "Нижняя полка"), (target_curve.high_shelf.as_ref(), "Верхняя полка")] {
+    for (s, what) in [(target_curve.low_shelf.as_ref(), ("Нижняя полка", "Low shelf")), (target_curve.high_shelf.as_ref(), ("Верхняя полка", "High shelf"))] {
         if let Some(s) = s.filter(|s| !ok(s.freq_hz)) {
-            out.push(format!(
-                "{what} {:.0} Гц не ниже предела {:.0} Гц для частоты экспорта {:.0} Гц — \
-                 в FIR только её часть ниже Найквиста.", s.freq_hz, lim, sr));
+            out.push(if crate::i18n::en() { format!(
+                "{} {:.0} Hz is not below the {:.0} Hz limit for the {:.0} Hz export rate — \
+                 the FIR carries only its part below Nyquist.", what.1, s.freq_hz, lim, sr) } else { format!(
+                "{} {:.0} Гц не ниже предела {:.0} Гц для частоты экспорта {:.0} Гц — \
+                 в FIR только её часть ниже Найквиста.", what.0, s.freq_hz, lim, sr) });
         }
     }
     let dropped: Vec<String> = peq.iter().filter(|p| !ok(p.freq_hz))
-        .map(|p| format!("{:.0} Гц", p.freq_hz)).collect();
+        .map(|p| format!("{:.0} {}", p.freq_hz, crate::i18n::l("Гц", "Hz"))).collect();
     if !dropped.is_empty() {
-        out.push(format!(
+        out.push(if crate::i18n::en() { format!(
+            "PEQ {} is not below the {:.0} Hz limit for the {:.0} Hz export rate — left out of the FIR.",
+            dropped.join(", "), lim, sr) } else { format!(
             "PEQ {} не ниже предела {:.0} Гц для частоты экспорта {:.0} Гц — не включено в FIR.",
-            dropped.join(", "), lim, sr));
+            dropped.join(", "), lim, sr) });
     }
     out
 }

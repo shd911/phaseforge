@@ -1,5 +1,6 @@
 import { createSignal, Show } from "solid-js";
 import Modal from "./Modal";
+import { L } from "../lib/i18n";
 import type { PeqBand } from "../lib/types";
 import { qWarnAt } from "../lib/peq-quality";
 
@@ -23,23 +24,26 @@ export default function HighQWarningPopup() {
       {(ctx) => (
         <Modal overlayClass="pn-overlay" dialogClass="pn-dialog"
           dialogStyle={{ "min-width": "420px", "max-width": "520px" }} titleId="highq-dlg-title" onEscape={close}>
-            <div class="pn-title" id="highq-dlg-title">Высокая добротность</div>
+            <div class="pn-title" id="highq-dlg-title">{L("Высокая добротность", "High Q")}</div>
             <div class="pn-label" style={{ "margin-bottom": "8px" }}>
-              Фильтр PEQ {ctx().index + 1}: {Math.round(ctx().band.freq_hz)} Гц
+              {L(`Фильтр PEQ ${ctx().index + 1}: ${Math.round(ctx().band.freq_hz)} Гц`, `PEQ filter ${ctx().index + 1}: ${Math.round(ctx().band.freq_hz)} Hz`)}
             </div>
             <div class="pn-label" style={{ "margin-bottom": "4px" }}>
               Q = {ctx().band.q.toFixed(2)}
             </div>
             <div class="pn-label" style={{ "margin-bottom": "16px", color: "#aaa", "font-size": "12px" }}>
-              Порог предупреждения: Q ≤ {qWarnAt(ctx().band.freq_hz).toFixed(1)}
+              {L("Порог предупреждения", "Warning threshold")}: Q ≤ {qWarnAt(ctx().band.freq_hz).toFixed(1)}
             </div>
             <div style={{ "margin-bottom": "16px", "font-size": "13px", "line-height": "1.5" }}>
-              Узкая полоса с высокой добротностью даёт заметный звон на импульсе и
-              часто корректирует артефакт замера, а не реальную особенность системы.
-              Рекомендуется уменьшить Q вручную или применить notch с более широкой полосой.
+              {L("Узкая полоса с высокой добротностью даёт заметный звон на импульсе и " +
+                "часто корректирует артефакт замера, а не реальную особенность системы. " +
+                "Рекомендуется уменьшить Q вручную или применить notch с более широкой полосой.",
+                "A narrow high-Q filter rings visibly in the impulse and often corrects " +
+                "a measurement artifact rather than a real system feature. " +
+                "Lower Q by hand or use a wider notch.")}
             </div>
             <div class="pn-buttons">
-              <button class="dlg-btn" onClick={close}>Закрыть</button>
+              <button class="dlg-btn" onClick={close}>{L("Закрыть", "Close")}</button>
             </div>
         </Modal>
       )}

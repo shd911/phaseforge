@@ -1,5 +1,7 @@
 /** b141.111/115: reading of the ФВЧ/ФНЧ section ring (Rust
  *  `fir::section_ring::SectionRing`) for the FilterBlock line. */
+import { L } from "./i18n";
+
 export interface SectionRing { post60Ms: number; post100Ms: number; pre60Ms: number; pre100Ms: number; lowerBound: boolean }
 
 export const fmtRingMs = (ms: number) => (ms < 10 ? ms.toFixed(1) : String(Math.round(ms)));
@@ -10,7 +12,8 @@ const fmtPair = (a: number, b: number) =>
   Math.min(a, b) < 10 ? `${a.toFixed(1)} / ${b.toFixed(1)}` : `${Math.round(a)} / ${Math.round(b)}`;
 
 export const ringWarning = (halfFileMs: number) =>
-  `⚠ Хвост длиннее ½ файла (${fmtRingMs(halfFileMs)} мс): звон обрежется или сдвинется задержка — увеличьте число отсчётов`;
+  L(`⚠ Хвост длиннее ½ файла (${fmtRingMs(halfFileMs)} мс): звон обрежется или сдвинется задержка — увеличьте число отсчётов`,
+    `⚠ Tail longer than ½ file (${fmtRingMs(halfFileMs)} ms): ringing gets cut or the delay shifts — raise the taps`);
 
 /** A linear Gaussian HP with subsonic protection is not symmetric (the
  *  protection is min-phase): then before and after are shown apart. */
@@ -32,16 +35,20 @@ export function ringLabel(r: SectionRing, linear: boolean): string {
   const lb = r.lowerBound ? "≥ " : "";
   const pair = fmtPair;
   if (linear && !ringSymmetric(r)) {
-    return `Звон −60/−100 дБ: ${lb}до пика ${pair(r.pre60Ms, r.pre100Ms)}, после ${pair(r.post60Ms, r.post100Ms)} мс`;
+    return L(`Звон −60/−100 дБ: ${lb}до пика ${pair(r.pre60Ms, r.pre100Ms)}, после ${pair(r.post60Ms, r.post100Ms)} мс`,
+      `Ringing −60/−100 dB: ${lb}pre ${pair(r.pre60Ms, r.pre100Ms)}, post ${pair(r.post60Ms, r.post100Ms)} ms`);
   }
-  return `Звон −60/−100 дБ: ${linear ? "до и после пика " : ""}${lb}${pair(r.post60Ms, r.post100Ms)} мс`;
+  return L(`Звон −60/−100 дБ: ${linear ? "до и после пика " : ""}${lb}${pair(r.post60Ms, r.post100Ms)} мс`,
+    `Ringing −60/−100 dB: ${linear ? "each side " : ""}${lb}${pair(r.post60Ms, r.post100Ms)} ms`);
 }
 
 export function ringTitle(r: SectionRing, linear: boolean, sampleRate: number, halfFileMs: number): string {
   const how = !linear
-    ? "минимальная фаза звенит только после пика"
+    ? L("минимальная фаза звенит только после пика", "min phase rings only after the peak")
     : ringSymmetric(r)
-      ? "линейная фаза звенит симметрично — столько же до пика, сколько после"
-      : "линейная фаза звенит в обе стороны, минимально-фазовая защита от инфразвука добавляет хвост после пика";
-  return `Звон фильтра на частоте экспорта ${sampleRate / 1000} кГц: ${how}. Половина файла экспорта: ${fmtRingMs(halfFileMs)} мс.`;
+      ? L("линейная фаза звенит симметрично — столько же до пика, сколько после", "lin phase rings symmetrically — as long before the peak as after")
+      : L("линейная фаза звенит в обе стороны, минимально-фазовая защита от инфразвука добавляет хвост после пика",
+        "lin phase rings both ways; the min-phase subsonic protection adds a tail after the peak");
+  return L(`Звон фильтра на частоте экспорта ${sampleRate / 1000} кГц: ${how}. Половина файла экспорта: ${fmtRingMs(halfFileMs)} мс.`,
+    `Filter ringing at the ${sampleRate / 1000} kHz export rate: ${how}. Half the export file: ${fmtRingMs(halfFileMs)} ms.`);
 }

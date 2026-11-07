@@ -1,6 +1,6 @@
 import { createSignal, Show, For } from "solid-js";
 import Modal from "./Modal";
-import { pluralRu } from "../lib/plural";
+import { L, plural } from "../lib/i18n";
 import { ask } from "@tauri-apps/plugin-dialog";
 import {
   snapshotsList,
@@ -63,7 +63,7 @@ export default function VersionsDialog() {
       if (`${e}`.includes("INDEX_CORRUPTED")) {
         setCreating(false);
         void refreshSnapshots();
-      } else setStatusMsg(`Не удалось сохранить: ${e}`);
+      } else setStatusMsg(L(`Не удалось сохранить: ${e}`, `Could not save: ${e}`));
     } finally {
       setBusy(false);
     }
@@ -74,17 +74,18 @@ export default function VersionsDialog() {
     setStatusMsg(null);
     try {
       const n = await rebuildSnapshotIndex();
-      setStatusMsg(`Индекс перестроен: ${pluralRu(n, "найдена", "найдено", "найдено")} ${n} ${pluralRu(n, "версия", "версии", "версий")}.`);
+      setStatusMsg(L(`Индекс перестроен: ${plural(n, ["найдена", "найдено", "найдено"], ["found", "found"])} ${n} ${plural(n, ["версия", "версии", "версий"], ["version", "versions"])}.`,
+        `Index rebuilt: ${n} ${plural(n, ["версия", "версии", "версий"], ["version", "versions"])} found.`));
     } catch (e) {
-      setStatusMsg(`Перестроить не удалось: ${e}`);
+      setStatusMsg(L(`Перестроить не удалось: ${e}`, `Rebuild failed: ${e}`));
     } finally {
       setBusy(false);
     }
   }
 
   async function handleDelete(s: SnapshotEntry) {
-    const ok = await ask(`Удалить версию «${s.description}»? Это действие необратимо.`, {
-      title: "Удаление версии", kind: "warning", okLabel: "Удалить", cancelLabel: "Отмена",
+    const ok = await ask(L(`Удалить версию «${s.description}»? Это действие необратимо.`, `Delete version “${s.description}”? This cannot be undone.`), {
+      title: L("Удаление версии", "Delete version"), kind: "warning", okLabel: L("Удалить", "Delete"), cancelLabel: L("Отмена", "Cancel"),
     });
     if (!ok) return;
     setBusy(true);
@@ -92,7 +93,7 @@ export default function VersionsDialog() {
     try {
       await deleteSnapshotById(s.id);
     } catch (e) {
-      setStatusMsg(`Не удалось удалить: ${e}`);
+      setStatusMsg(L(`Не удалось удалить: ${e}`, `Could not delete: ${e}`));
     } finally {
       setBusy(false);
     }
@@ -113,11 +114,11 @@ export default function VersionsDialog() {
     try {
       const now = new Date();
       const stamp = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-      const auto = `Авто-снимок · ${stamp} · перед загрузкой «${s.description}»`;
+      const auto = L(`Авто-снимок · ${stamp} · перед загрузкой «${s.description}»`, `Auto-snapshot · ${stamp} · before loading “${s.description}”`);
       await restoreSnapshot(s.id, savePrevious, auto);
       close();
     } catch (e) {
-      setStatusMsg(`Восстановление не удалось: ${e}`);
+      setStatusMsg(L(`Восстановление не удалось: ${e}`, `Restore failed: ${e}`));
     } finally {
       setBusy(false);
     }
@@ -145,7 +146,7 @@ export default function VersionsDialog() {
       <Modal overlayClass="pn-overlay" dialogClass="pn-dialog"
         dialogStyle={{ "min-width": "480px", "max-width": "640px" }} titleId="versions-dlg-title"
         onEscape={onEscape} onBackdrop={close}>
-          <div class="pn-title" id="versions-dlg-title">Версии проекта</div>
+          <div class="pn-title" id="versions-dlg-title">{L("Версии проекта", "Project versions")}</div>
 
           <Show when={!creating()}>
             <div class="pn-buttons" style={{ "justify-content": "flex-start", "margin-bottom": "12px" }}>
@@ -154,52 +155,52 @@ export default function VersionsDialog() {
                 onClick={() => { setCreating(true); setDraft(""); setStatusMsg(null); }}
                 disabled={busy() || snapshotsError() === "INDEX_CORRUPTED"}
                 title={snapshotsError() === "INDEX_CORRUPTED"
-                  ? "Сначала перестройте индекс версий"
-                  : "Создать версию текущего состояния с описанием"}
-              >+ Сохранить версию</button>
+                  ? L("Сначала перестройте индекс версий", "Rebuild the version index first")
+                  : L("Создать версию текущего состояния с описанием", "Save the current state as a described version")}
+              >{L("+ Сохранить версию", "+ Save version")}</button>
             </div>
           </Show>
 
           <Show when={creating()}>
             <div style={{ "margin-bottom": "12px" }}>
-              <label class="pn-label">Описание версии</label>
+              <label class="pn-label">{L("Описание версии", "Version description")}</label>
               <textarea
                 class="pn-input"
                 style={{ "min-height": "60px", "width": "100%", "resize": "vertical" }}
-                placeholder="Что изменилось?"
+                placeholder={L("Что изменилось?", "What changed?")}
                 maxlength="1000"
                 value={draft()}
                 onInput={(e) => setDraft(e.currentTarget.value)}
                 ref={(el) => requestAnimationFrame(() => el.focus())}
               />
               <div class="pn-buttons" style={{ "margin-top": "8px" }}>
-                <button class="dlg-btn" onClick={() => { setCreating(false); setDraft(""); }} disabled={busy()}>Отмена</button>
+                <button class="dlg-btn" onClick={() => { setCreating(false); setDraft(""); }} disabled={busy()}>{L("Отмена", "Cancel")}</button>
                 <button
                   class="dlg-btn dlg-btn-primary"
                   onClick={handleCreate}
                   disabled={busy() || !draft().trim()}
-                >Сохранить</button>
+                >{L("Сохранить", "Save")}</button>
               </div>
             </div>
           </Show>
 
           <Show when={snapshotsError() === "INDEX_CORRUPTED"}>
             <div style={{ padding: "12px", border: "1px solid #c66", "border-radius": "4px", "margin-bottom": "12px" }}>
-              <div style={{ "margin-bottom": "8px" }}>Индекс версий повреждён.</div>
-              <button class="dlg-btn" onClick={handleRebuild} disabled={busy()}>Перестроить индекс</button>
+              <div style={{ "margin-bottom": "8px" }}>{L("Индекс версий повреждён.", "The version index is corrupted.")}</div>
+              <button class="dlg-btn" onClick={handleRebuild} disabled={busy()}>{L("Перестроить индекс", "Rebuild index")}</button>
             </div>
           </Show>
 
           <Show when={snapshotsError() && snapshotsError() !== "INDEX_CORRUPTED"}>
             <div style={{ padding: "8px", color: "#c66", "margin-bottom": "12px" }}>
-              Ошибка: {snapshotsError()}
+              {L("Ошибка:", "Error:")} {snapshotsError()}
             </div>
           </Show>
 
           <Show when={!snapshotsError()}>
             <Show
               when={snapshotsList().length > 0}
-              fallback={<div style={{ padding: "12px", color: "var(--text-secondary)" }}>Версий ещё нет.</div>}
+              fallback={<div style={{ padding: "12px", color: "var(--text-secondary)" }}>{L("Версий ещё нет.", "No versions yet.")}</div>}
             >
               <div class="versions-list" style={{ "max-height": "320px", "overflow-y": "auto", border: "1px solid #444", "border-radius": "4px" }}>
                 <For each={snapshotsList()}>
@@ -217,23 +218,23 @@ export default function VersionsDialog() {
                             "font-style": s.description ? "normal" : "italic",
                             "color": s.description ? undefined : "var(--text-secondary)",
                           }}
-                          title={s.description || "Описание не сохранилось при перестроении индекса"}
+                          title={s.description || L("Описание не сохранилось при перестроении индекса", "Description lost when the index was rebuilt")}
                         >
-                          {s.description || "(описание утеряно)"}
+                          {s.description || L("(описание утеряно)", "(description lost)")}
                         </div>
                       </div>
                       <button
                         class="dlg-btn"
                         onClick={() => startRestore(s)}
                         disabled={busy()}
-                        title="Загрузить состояние этой версии в текущий проект"
-                      >Восстановить</button>
+                        title={L("Загрузить состояние этой версии в текущий проект", "Load this version's state into the current project")}
+                      >{L("Восстановить", "Restore")}</button>
                       <button
                         class="dlg-btn"
                         onClick={() => handleDelete(s)}
                         disabled={busy()}
-                        aria-label="Удалить версию"
-                        title="Удалить эту версию (файл будет удалён с диска)"
+                        aria-label={L("Удалить версию", "Delete version")}
+                        title={L("Удалить эту версию (файл будет удалён с диска)", "Delete this version (the file is removed from disk)")}
                       >×</button>
                     </div>
                   )}
@@ -247,21 +248,22 @@ export default function VersionsDialog() {
           </Show>
 
           <div class="pn-buttons" style={{ "margin-top": "16px" }}>
-            <button class="dlg-btn" onClick={close} disabled={busy()}>Закрыть</button>
+            <button class="dlg-btn" onClick={close} disabled={busy()}>{L("Закрыть", "Close")}</button>
           </div>
 
           <Show when={pendingRestore()}>
             <Modal overlayClass="pn-overlay pn-overlay-nested" dialogClass="pn-dialog"
               dialogStyle={{ "max-width": "420px" }} titleId="versions-restore-title"
               onEscape={() => pendingResolve("cancel")}>
-                <div class="pn-title" id="versions-restore-title">Сохранить текущее состояние?</div>
+                <div class="pn-title" id="versions-restore-title">{L("Сохранить текущее состояние?", "Save the current state?")}</div>
                 <div class="pn-label" style={{ "margin-bottom": "16px" }}>
-                  Сохранить текущее состояние как версию перед восстановлением «{pendingRestore()!.description}»?
+                  {L(`Сохранить текущее состояние как версию перед восстановлением «${pendingRestore()!.description}»?`,
+                    `Save the current state as a version before restoring “${pendingRestore()!.description}”?`)}
                 </div>
                 <div class="pn-buttons">
-                  <button class="dlg-btn" onClick={() => pendingResolve("cancel")}>Отмена</button>
-                  <button class="dlg-btn" onClick={() => pendingResolve("no")}>Нет</button>
-                  <button class="dlg-btn dlg-btn-primary" onClick={() => pendingResolve("yes")}>Да</button>
+                  <button class="dlg-btn" onClick={() => pendingResolve("cancel")}>{L("Отмена", "Cancel")}</button>
+                  <button class="dlg-btn" onClick={() => pendingResolve("no")}>{L("Нет", "No")}</button>
+                  <button class="dlg-btn dlg-btn-primary" onClick={() => pendingResolve("yes")}>{L("Да", "Yes")}</button>
                 </div>
             </Modal>
           </Show>

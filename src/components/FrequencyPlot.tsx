@@ -40,6 +40,7 @@ import { coherentSum, targetCarriesDelay } from "../lib/band-evaluator/sum";
 import { buildCommonGrid, buildFirGrid, interpOnGrid, interpPhaseOnGrid, irTime, resampleOnLogGrid, type ImpulseIpc } from "../lib/band-evaluator/grid";
 import { bandRequestKey } from "../lib/band-evaluator/cache";
 import { computeAutoAlign } from "../lib/auto-align";
+import { L } from "../lib/i18n";
 import { polarityPhase, polarityAmplitude, sumGroupDelayMs, fitMagRange, fitExportMagRange, peqHandleDb, peqGainAfterDrag, pointInBox, type FitSeries } from "../lib/plot-display";
 import { attachFieldWheel, newWheelAccumulator, wheelSteps } from "../lib/wheel-step";
 
@@ -4104,12 +4105,12 @@ export default function FrequencyPlot() {
   return (
     <div class="plot-wrapper">
       <div class="plot-tabs-strip">
-        <button class={`plot-tab ${plotTab() === "freq" ? "active" : ""}`} onClick={() => setPlotTab("freq")} title="АЧХ + фаза (магнитуда и фаза по частоте)">SPL</button>
-        <button class={`plot-tab ${plotTab() === "ir" ? "active" : ""}`} onClick={() => setPlotTab("ir")} title="Импульсная и переходная характеристика">IR/Step</button>
-        <button class={`plot-tab ${plotTab() === "gd" ? "active" : ""}`} onClick={() => setPlotTab("gd")} title="Групповая задержка (мс)">GD</button>
+        <button class={`plot-tab ${plotTab() === "freq" ? "active" : ""}`} onClick={() => setPlotTab("freq")} title={L("АЧХ + фаза (магнитуда и фаза по частоте)", "Magnitude + phase vs frequency")}>SPL</button>
+        <button class={`plot-tab ${plotTab() === "ir" ? "active" : ""}`} onClick={() => setPlotTab("ir")} title={L("Импульсная и переходная характеристика", "Impulse and step response")}>IR/Step</button>
+        <button class={`plot-tab ${plotTab() === "gd" ? "active" : ""}`} onClick={() => setPlotTab("gd")} title={L("Групповая задержка (мс)", "Group delay (ms)")}>GD</button>
         {/* b141.11: экспорт по-полосный — в режиме «Сумма» вкладка скрыта */}
         <Show when={!isSum()}>
-          <button class={`plot-tab ${plotTab() === "export" ? "active" : ""}`} onClick={() => setPlotTab("export")} title="Предпросмотр модели и FIR + экспорт WAV">Export</button>
+          <button class={`plot-tab ${plotTab() === "export" ? "active" : ""}`} onClick={() => setPlotTab("export")} title={L("Предпросмотр модели и FIR + экспорт WAV", "Model and FIR preview + WAV export")}>Export</button>
         </Show>
       </div>
       <div class="cursor-readout">
@@ -4128,7 +4129,7 @@ export default function FrequencyPlot() {
             )}
           </For>
           <Show when={cursorValues().length > 12}>
-            <span class="readout-item readout-curve-val" title="Показаны первые 12 кривых">
+            <span class="readout-item readout-curve-val" title={L("Показаны первые 12 кривых", "First 12 curves shown")}>
               <span class="readout-value">+{cursorValues().length - 12}</span>
             </span>
           </Show>
@@ -4146,7 +4147,7 @@ export default function FrequencyPlot() {
         {/* Snapshot SNAP/CLR buttons (band mode only) */}
         <Show when={!isSum()}>
           <span class="readout-sep" />
-          <button class="tb-btn" onClick={takeSnapshot} title="Снимок текущей кривой для сравнения">SNAP</button>
+          <button class="tb-btn" onClick={takeSnapshot} title={L("Снимок текущей кривой для сравнения", "Snapshot the current curve for comparison")}>SNAP</button>
           {(() => {
             const b = activeBand();
             const tab = plotTab();
@@ -4156,7 +4157,7 @@ export default function FrequencyPlot() {
             return (
               <>
                 {snaps.length > 0 && (
-                  <button class="tb-btn" onClick={clearSnapshots} title="Удалить все снимки">CLR</button>
+                  <button class="tb-btn" onClick={clearSnapshots} title={L("Удалить все снимки", "Delete all snapshots")}>CLR</button>
                 )}
                 {snaps.length > 0 && (
                   <span style={{ "font-size": "var(--fs-xs)", "color": "#8b8b96", "margin-left": "var(--space-xs)" }}>
@@ -4206,7 +4207,7 @@ export default function FrequencyPlot() {
                   markBandDelayRemoved(id, newPhase);
                 } catch (e) {
                   console.error("[delay] remove failed:", e);
-                  showToast(`Не удалось снять задержку: ${e}`, "warn");
+                  showToast(L(`Не удалось снять задержку: ${e}`, `Could not remove delay: ${e}`), "warn");
                 }
               }
             }
@@ -4216,34 +4217,34 @@ export default function FrequencyPlot() {
                 {/* Import + Merge — SPL tab only */}
                 <Show when={plotTab() === "freq"}>
                   <span class="readout-sep" />
-                  <button class="tb-btn tb-btn-xs primary" onClick={handleImportMeasurement} title="Импортировать файл измерения">Импорт</button>
-                  <button class="tb-btn tb-btn-xs" onClick={() => setShowMergeDialog(true)} title="Слияние NF + FF">Слияние</button>
+                  <button class="tb-btn tb-btn-xs primary" onClick={handleImportMeasurement} title={L("Импортировать файл измерения", "Import a measurement file")}>{L("Импорт", "Import")}</button>
+                  <button class="tb-btn tb-btn-xs" onClick={() => setShowMergeDialog(true)} title={L("Слияние NF + FF", "Merge NF + FF")}>{L("Слияние", "Merge")}</button>
                 </Show>
 
                 {/* Smooth — all tabs except Export */}
                 <Show when={plotTab() !== "export"}>
                   <span class="readout-sep" />
-                  <span class="readout-label">Сглаж.</span>
+                  <span class="readout-label">{L("Сглаж.", "Smooth")}</span>
                   <select
                     class="tb-select tb-select-xs"
                     value={s()?.smoothing ?? "off"}
                     onChange={(e) => setBandSmoothing(b().id, e.currentTarget.value as SmoothingMode)}
-                    title="Сглаживание"
+                    title={L("Сглаживание", "Smoothing")}
                   >
-                    <option value="off">Выкл</option>
+                    <option value="off">{L("Выкл", "Off")}</option>
                     <option value="1/3">1/3</option>
                     <option value="1/6">1/6</option>
                     <option value="1/12">1/12</option>
                     <option value="1/24">1/24</option>
-                    <option value="var">Перем.</option>
+                    <option value="var">{L("Перем.", "Var")}</option>
                   </select>
                 </Show>
 
                 {/* Delay toggle — all tabs except Export, only if phase available */}
                 <Show when={plotTab() !== "export" && m()?.phase}>
                   <span class="readout-sep" />
-                  <span class="readout-label">Задержка</span>
-                  <label class="tb-inline-label" title="Компенсировать задержку распространения">
+                  <span class="readout-label">{L("Задержка", "Delay")}</span>
+                  <label class="tb-inline-label" title={L("Компенсировать задержку распространения", "Compensate propagation delay")}>
                     <input
                       type="checkbox"
                       checked={s()?.delay_removed ?? false}
@@ -4338,8 +4339,9 @@ export default function FrequencyPlot() {
                         return preRingZoneMs([b] as BandState[]);
                       };
                       const zoneTitle = () => zone() != null
-                        ? `Зона предзвона: ${zone()!.toFixed(2)} ms — 2 периода нижнего linear-phase кроссовера`
-                        : "Нет linear-phase кроссоверов — предзвон не ожидается";
+                        ? L(`Зона предзвона: ${zone()!.toFixed(2)} ms — 2 периода нижнего linear-phase кроссовера`,
+                            `Pre-ring zone: ${zone()!.toFixed(2)} ms — 2 periods of the lowest linear-phase crossover`)
+                        : L("Нет linear-phase кроссоверов — предзвон не ожидается", "No linear-phase crossovers — no pre-ringing expected");
                       return (
                         <>
                           <td class="sum-row-header" title={zoneTitle()} onClick={() => { if (zone() == null) return; setIrShowMasking(!irShowMasking()); irToggleRedraw(); }}>ZONES</td>
@@ -4400,7 +4402,7 @@ export default function FrequencyPlot() {
             class="tb-select tb-select-xs"
             value={exportSampleRate()}
             onChange={(e) => setExportSampleRate(Number(e.currentTarget.value))}
-            title="Частота дискретизации"
+            title={L("Частота дискретизации", "Sample rate")}
           >
             {STANDARD_SAMPLE_RATES.map((sr) => (
               <option value={sr}>{sr >= 1000 ? (sr / 1000) + "k" : sr}</option>
@@ -4411,7 +4413,7 @@ export default function FrequencyPlot() {
             class="tb-select tb-select-xs"
             value={exportTaps()}
             onChange={(e) => setExportTaps(Number(e.currentTarget.value))}
-            title="Длина FIR-фильтра (отсчётов)"
+            title={L("Длина FIR-фильтра (отсчётов)", "FIR length (taps)")}
           >
             {STANDARD_TAPS.map((t) => (
               <option value={t}>{t >= 1024 ? (t / 1024) + "K" : t}</option>
@@ -4425,8 +4427,10 @@ export default function FrequencyPlot() {
             disabled={windowIsInert()}
             style={{ opacity: windowIsInert() ? 0.45 : 1 }}
             title={windowIsInert()
-              ? "Окно не применяется: полоса считается аналитическим каскадом (мин-фаза без subsonic и без гауссов). Импульс получается прогоном дельты через биквады, а конец файла всегда плавно гасится на последних 5 %. Окно влияет на линейной фазе, на гауссах/Бесселе, при subsonic и на измеренных таргетах."
-              : "Оконная функция. Заметна при коротких Taps и на резких переходах таргета: агрессивное окно укорачивает предзвон, но увеличивает отклонение от таргета."}
+              ? L("Окно не применяется: полоса считается аналитическим каскадом (мин-фаза без subsonic и без гауссов). Импульс получается прогоном дельты через биквады, а конец файла всегда плавно гасится на последних 5 %. Окно влияет на линейной фазе, на гауссах/Бесселе, при subsonic и на измеренных таргетах.",
+                "Window not applied: the band is an analytical cascade (min phase, no subsonic, no Gaussian). The impulse is a delta run through biquads, and the file end is always faded over the last 5 %. The window matters on linear phase, Gaussian/Bessel, subsonic and measured targets.")
+              : L("Оконная функция. Заметна при коротких Taps и на резких переходах таргета: агрессивное окно укорачивает предзвон, но увеличивает отклонение от таргета.",
+                "Window function. Noticeable at short taps and sharp target transitions: an aggressive window shortens pre-ringing but raises the deviation from the target.")}
           >
             <optgroup label="Basic">
               <option value="Rectangular">Rectangular</option>
@@ -4460,15 +4464,16 @@ export default function FrequencyPlot() {
           <Show when={windowIsInert()}>
             <span
               style={{ color: "var(--text-muted)", "font-size": "var(--fs-sm)", "white-space": "nowrap" }}
-              title="Аналитический каскад строит импульс через биквады и гасит только последние 5 % отсчётов собственным спадом."
+              title={L("Аналитический каскад строит импульс через биквады и гасит только последние 5 % отсчётов собственным спадом.", "The analytical cascade builds the impulse through biquads and fades only the last 5 % of taps with its own taper.")}
             >
-              не применяется
+              {L("не применяется", "not applied")}
             </span>
           </Show>
           {/* b141.100: the band's polarity (same flag as its NOR/INV button);
               the WAV is written with it, the preview shows it. */}
           <span class="fb-checkbox" style={{ "margin-left": "var(--space-md)", opacity: activeBand() ? 1 : 0.45 }}
-            title="Инверсия полярности полосы (то же, что кнопка NOR/INV у полосы). Записывается в WAV, к имени файла добавляется _INV; фаза на графике сдвигается на 180°, в Σ полоса суммируется инвертированной."
+            title={L("Инверсия полярности полосы (то же, что кнопка NOR/INV у полосы). Записывается в WAV, к имени файла добавляется _INV; фаза на графике сдвигается на 180°, в Σ полоса суммируется инвертированной.",
+              "Invert band polarity (same as the band's NOR/INV button). Written to the WAV, _INV is added to the file name; plot phase shifts by 180°, the band enters Σ inverted.")}
             onClick={() => { const b = activeBand(); if (b) toggleBandInverted(b.id); }}>
             <span class={`fb-check-box ${activeBand()?.inverted ? "checked" : ""}`} />
             <span class="fb-check-label">INV</span>
@@ -4481,9 +4486,9 @@ export default function FrequencyPlot() {
               class="tb-btn primary"
               disabled={exportingWav() || !activeBand()}
               onClick={handleExportWav}
-              title={!activeBand() ? "Выберите полосу для экспорта" : "Экспортировать FIR в WAV"}
+              title={!activeBand() ? L("Выберите полосу для экспорта", "Select a band to export") : L("Экспортировать FIR в WAV", "Export the FIR to WAV")}
             >
-              {exportingWav() ? "Экспорт…" : "Экспорт WAV"}
+              {exportingWav() ? L("Экспорт…", "Exporting…") : L("Экспорт WAV", "Export WAV")}
             </button>
           </div>
         </div>
@@ -4579,7 +4584,7 @@ export default function FrequencyPlot() {
                           <span
                             class="opt-dot"
                             style={{ background: hasPeq() ? "var(--status-good)" : "var(--status-bad)" }}
-                            title={hasPeq() ? "PEQ оптимизирован" : "PEQ не оптимизирован"}
+                            title={hasPeq() ? L("PEQ оптимизирован", "PEQ optimized") : L("PEQ не оптимизирован", "PEQ not optimized")}
                           />
                         </Show>
                       </th>
@@ -4619,7 +4624,7 @@ export default function FrequencyPlot() {
                                               <span class={`legend-swatch ${e().dash ? "legend-swatch-dash" : ""}`} style={{ "background-color": e().dash ? "transparent" : e().color, "border-color": e().color }} />
                                             </button>
                                             <Show when={noPeq()}>
-                                              <span title="PEQ не оптимизирован" style={{ color: STATUS_BAD, "font-size": "var(--fs-xs)", "font-weight": "bold", "margin-left": "1px" }}>!</span>
+                                              <span title={L("PEQ не оптимизирован", "PEQ not optimized")} style={{ color: STATUS_BAD, "font-size": "var(--fs-xs)", "font-weight": "bold", "margin-left": "1px" }}>!</span>
                                             </Show>
                                           </td>
                                         );
@@ -4662,7 +4667,7 @@ export default function FrequencyPlot() {
                                             }}
                                           </Show>
                                           <Show when={noPeqIr()}>
-                                            <span title="PEQ не оптимизирован" style={{ color: STATUS_BAD, "font-size": "var(--fs-xs)", "font-weight": "bold", "margin-left": "1px" }}>!</span>
+                                            <span title={L("PEQ не оптимизирован", "PEQ not optimized")} style={{ color: STATUS_BAD, "font-size": "var(--fs-xs)", "font-weight": "bold", "margin-left": "1px" }}>!</span>
                                           </Show>
                                         </td>
                                       </Show>
@@ -4740,9 +4745,12 @@ export default function FrequencyPlot() {
                                   <span
                                     class="delay-conv"
                                     style={{ visibility: (convDelays()[b().id] ?? 0) >= 5e-6 ? "visible" : "hidden" }}
-                                    title={"Добавьте к задержке в конвольвере: хвост фильтра этой полосы не уместился " +
+                                    title={L("Добавьте к задержке в конвольвере: хвост фильтра этой полосы не уместился " +
                                       "в половину файла, и его WAV начинается раньше остальных на это время. " +
-                                      `В конвольвер: ${(((b().alignmentDelay ?? 0) + (convDelays()[b().id] ?? 0)) * 1000).toFixed(2)} ms.`}
+                                      `В конвольвер: ${(((b().alignmentDelay ?? 0) + (convDelays()[b().id] ?? 0)) * 1000).toFixed(2)} ms.`,
+                                      "Add to the convolver delay: this band's filter tail did not fit " +
+                                      "in half the file, so its WAV starts this much earlier than the others. " +
+                                      `Convolver: ${(((b().alignmentDelay ?? 0) + (convDelays()[b().id] ?? 0)) * 1000).toFixed(2)} ms.`)}
                                   >+{((convDelays()[b().id] ?? 0) * 1000).toFixed(2)}</span>
                                   </>
                                 )}
@@ -4764,8 +4772,8 @@ export default function FrequencyPlot() {
                             <button
                               class="auto-align-btn"
                               title={allPeqReady()
-                                ? "Автоматически подобрать задержки полос"
-                                : "Нужна PEQ-оптимизация всех полос кроссовера"}
+                                ? L("Автоматически подобрать задержки полос", "Auto-fit band delays")
+                                : L("Нужна PEQ-оптимизация всех полос кроссовера", "All crossover bands need PEQ optimization")}
                               disabled={!allPeqReady() || autoAligning()}
                               aria-busy={autoAligning()}
                               onClick={async () => {
@@ -4885,29 +4893,29 @@ export default function FrequencyPlot() {
           <div ref={containerRef} class="frequency-plot" />
           <Show when={exportComputing() && plotTab() === "export"}>
             <div class="plot-computing-overlay">
-              <span class="plot-computing-text">Расчёт FIR…</span>
+              <span class="plot-computing-text">{L("Расчёт FIR…", "Computing FIR…")}</span>
             </div>
           </Show>
           <div class="axis-controls axis-controls-y axis-controls-y-left">
-            <button class="axis-btn" onClick={() => zoomY(0.6)} aria-label="Приблизить (dB)" title="Приблизить (dB)">+</button>
-            <button class="axis-btn" onClick={() => scrollY(1)} aria-label="Сдвинуть вверх (dB)" title="Сдвинуть вверх (dB)">▲</button>
-            <button class="axis-btn" onClick={() => scrollY(-1)} aria-label="Сдвинуть вниз (dB)" title="Сдвинуть вниз (dB)">▼</button>
-            <button class="axis-btn" onClick={() => zoomY(1.6)} aria-label="Отдалить (dB)" title="Отдалить (dB)">−</button>
-            <button class="axis-btn fit-btn" onClick={fitData} aria-label="Вписать данные в окно" title="Вписать данные в окно">FIT</button>
+            <button class="axis-btn" onClick={() => zoomY(0.6)} aria-label={L("Приблизить (dB)", "Zoom in (dB)")} title={L("Приблизить (dB)", "Zoom in (dB)")}>+</button>
+            <button class="axis-btn" onClick={() => scrollY(1)} aria-label={L("Сдвинуть вверх (dB)", "Scroll up (dB)")} title={L("Сдвинуть вверх (dB)", "Scroll up (dB)")}>▲</button>
+            <button class="axis-btn" onClick={() => scrollY(-1)} aria-label={L("Сдвинуть вниз (dB)", "Scroll down (dB)")} title={L("Сдвинуть вниз (dB)", "Scroll down (dB)")}>▼</button>
+            <button class="axis-btn" onClick={() => zoomY(1.6)} aria-label={L("Отдалить (dB)", "Zoom out (dB)")} title={L("Отдалить (dB)", "Zoom out (dB)")}>−</button>
+            <button class="axis-btn fit-btn" onClick={fitData} aria-label={L("Вписать данные в окно", "Fit data to view")} title={L("Вписать данные в окно", "Fit data to view")}>FIT</button>
           </div>
           <Show when={plotTab() === "freq" || plotTab() === "export"}>
             <div class="axis-controls axis-controls-y axis-controls-y-right">
-              <button class="axis-btn" onClick={() => zoomPhase(0.6)} aria-label="Приблизить (фаза)" title="Приблизить (фаза)">+</button>
-              <button class="axis-btn" onClick={() => scrollPhase(1)} aria-label="Сдвинуть вверх (фаза)" title="Сдвинуть вверх (фаза)">▲</button>
-              <button class="axis-btn" onClick={() => scrollPhase(-1)} aria-label="Сдвинуть вниз (фаза)" title="Сдвинуть вниз (фаза)">▼</button>
-              <button class="axis-btn" onClick={() => zoomPhase(1.6)} aria-label="Отдалить (фаза)" title="Отдалить (фаза)">−</button>
+              <button class="axis-btn" onClick={() => zoomPhase(0.6)} aria-label={L("Приблизить (фаза)", "Zoom in (phase)")} title={L("Приблизить (фаза)", "Zoom in (phase)")}>+</button>
+              <button class="axis-btn" onClick={() => scrollPhase(1)} aria-label={L("Сдвинуть вверх (фаза)", "Scroll up (phase)")} title={L("Сдвинуть вверх (фаза)", "Scroll up (phase)")}>▲</button>
+              <button class="axis-btn" onClick={() => scrollPhase(-1)} aria-label={L("Сдвинуть вниз (фаза)", "Scroll down (phase)")} title={L("Сдвинуть вниз (фаза)", "Scroll down (phase)")}>▼</button>
+              <button class="axis-btn" onClick={() => zoomPhase(1.6)} aria-label={L("Отдалить (фаза)", "Zoom out (phase)")} title={L("Отдалить (фаза)", "Zoom out (phase)")}>−</button>
             </div>
           </Show>
           <div class="axis-controls axis-controls-x">
-            <button class="axis-btn" onClick={() => zoomX(1.6)} aria-label="Отдалить (частота)" title="Отдалить (частота)">−</button>
-            <button class="axis-btn" onClick={() => scrollX(-1)} aria-label="Сдвинуть влево" title="Сдвинуть влево">◀</button>
-            <button class="axis-btn" onClick={() => scrollX(1)} aria-label="Сдвинуть вправо" title="Сдвинуть вправо">▶</button>
-            <button class="axis-btn" onClick={() => zoomX(0.6)} aria-label="Приблизить (частота)" title="Приблизить (частота)">+</button>
+            <button class="axis-btn" onClick={() => zoomX(1.6)} aria-label={L("Отдалить (частота)", "Zoom out (freq)")} title={L("Отдалить (частота)", "Zoom out (freq)")}>−</button>
+            <button class="axis-btn" onClick={() => scrollX(-1)} aria-label={L("Сдвинуть влево", "Scroll left")} title={L("Сдвинуть влево", "Scroll left")}>◀</button>
+            <button class="axis-btn" onClick={() => scrollX(1)} aria-label={L("Сдвинуть вправо", "Scroll right")} title={L("Сдвинуть вправо", "Scroll right")}>▶</button>
+            <button class="axis-btn" onClick={() => zoomX(0.6)} aria-label={L("Приблизить (частота)", "Zoom in (freq)")} title={L("Приблизить (частота)", "Zoom in (freq)")}>+</button>
           </div>
         </div>
       </div>

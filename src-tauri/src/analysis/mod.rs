@@ -175,15 +175,16 @@ fn detect_noise_floor_low(freq: &[f64], magnitude: &[f64]) -> Option<Finding> {
     Some(Finding {
         id: "noise_floor_low".into(),
         severity: Severity::Warning,
-        title: format!("Шумовой пол ниже {:.0} Гц", f_round),
-        description: format!(
+        title: crate::tr!("Шумовой пол ниже {:.0} Гц", "Noise floor below {:.0} Hz", f_round),
+        description: crate::tr!(
             "SPL стабилизируется около {:.1} дБ — ниже этой частоты данные не несут полезной информации.",
+            "SPL stays near {:.1} dB — below this frequency the data carry no useful information.",
             mean
         ),
         freq_range: Some((f_min, f_low)),
         recommendations: vec![Recommendation {
             action: ActionType::SetOptLowerBound(f_round),
-            label: format!("Установить нижнюю границу оптимизации = {:.0} Гц", f_round),
+            label: crate::tr!("Установить нижнюю границу оптимизации = {:.0} Гц", "Set the optimization lower bound = {:.0} Hz", f_round),
         }],
     })
 }
@@ -221,15 +222,16 @@ fn detect_noise_floor_high(freq: &[f64], magnitude: &[f64]) -> Option<Finding> {
     Some(Finding {
         id: "noise_floor_high".into(),
         severity: Severity::Warning,
-        title: format!("Шумовой пол выше {:.0} Гц", f_round),
-        description: format!(
+        title: crate::tr!("Шумовой пол выше {:.0} Гц", "Noise floor above {:.0} Hz", f_round),
+        description: crate::tr!(
             "SPL стабилизируется около {:.1} дБ — выше этой частоты данные не несут полезной информации.",
+            "SPL stays near {:.1} dB — above this frequency the data carry no useful information.",
             mean
         ),
         freq_range: Some((f_high, f_max)),
         recommendations: vec![Recommendation {
             action: ActionType::SetOptUpperBound(f_round),
-            label: format!("Установить верхнюю границу оптимизации = {:.0} Гц", f_round),
+            label: crate::tr!("Установить верхнюю границу оптимизации = {:.0} Гц", "Set the optimization upper bound = {:.0} Hz", f_round),
         }],
     })
 }
@@ -333,15 +335,16 @@ pub fn detect_lf_rolloff(measurement: &Measurement, noise_floor_low: Option<f64>
     Some(Finding {
         id: "lf_rolloff_window".into(),
         severity: Severity::Warning,
-        title: format!("Низкочастотный спад до {:.0} Гц", f_round),
-        description: format!(
+        title: crate::tr!("Низкочастотный спад до {:.0} Гц", "Low-frequency roll-off below {:.0} Hz", f_round),
+        description: crate::tr!(
             "Скорость спада {:.0} дБ/окт без резонансных особенностей — вероятно, ограничение окна замера.",
+            "A {:.0} dB/oct roll-off with no resonant features — probably the limit of the measurement window.",
             slope
         ),
         freq_range: Some((f_lo, f_hi)),
         recommendations: vec![Recommendation {
             action: ActionType::SetOptLowerBound(f_round),
-            label: format!("Установить нижнюю границу оптимизации = {:.0} Гц", f_round),
+            label: crate::tr!("Установить нижнюю границу оптимизации = {:.0} Гц", "Set the optimization lower bound = {:.0} Hz", f_round),
         }],
     })
 }
@@ -394,12 +397,12 @@ pub fn detect_hf_cliff(freq: &[f64], magnitude: &[f64], sample_rate: f64) -> Opt
     Some(Finding {
         id: "hf_cliff".into(),
         severity: Severity::Info,
-        title: format!("Высокочастотный обрыв на {:.0} Гц", f_round),
-        description: "Резкий монотонный спад без резонансов — типичная anti-aliasing или микрофонная характеристика.".into(),
+        title: crate::tr!("Высокочастотный обрыв на {:.0} Гц", "High-frequency cliff at {:.0} Hz", f_round),
+        description: crate::i18n::l("Резкий монотонный спад без резонансов — типичная anti-aliasing или микрофонная характеристика.", "A steep monotonic roll-off without resonances — typical of an anti-aliasing filter or the microphone."),
         freq_range: Some((f_cliff, f_max)),
         recommendations: vec![Recommendation {
             action: ActionType::SetOptUpperBound(f_round),
-            label: format!("Установить верхнюю границу оптимизации = {:.0} Гц", f_round),
+            label: crate::tr!("Установить верхнюю границу оптимизации = {:.0} Гц", "Set the optimization upper bound = {:.0} Hz", f_round),
         }],
     })
 }

@@ -12,6 +12,7 @@ import {
 } from "../stores/bands";
 import { peqStale } from "../stores/peq-optimize";
 import { projectName } from "../lib/project-io";
+import { L } from "../lib/i18n";
 
 export default function BandTabs() {
   const [dragIdx, setDragIdx] = createSignal<number | null>(null);
@@ -41,7 +42,7 @@ export default function BandTabs() {
   }
 
   async function confirmRemove(id: string, name: string) {
-    const confirmed = await ask(`Удалить полосу «${name}»?`, { title: "Удаление полосы", kind: "warning" });
+    const confirmed = await ask(L(`Удалить полосу «${name}»?`, `Delete band “${name}”?`), { title: L("Удаление полосы", "Delete band"), kind: "warning" });
     if (confirmed) removeBand(id);
   }
 
@@ -105,14 +106,14 @@ export default function BandTabs() {
   // b141.105 (§5.20): a band tab is a role="tab" element, not a <button> —
   // the «×» inside is a real button now, and a button may not contain one.
   return (
-    <div class="band-tabs" ref={containerRef} role="tablist" aria-label="Полосы">
+    <div class="band-tabs" ref={containerRef} role="tablist" aria-label={L("Полосы", "Bands")}>
       <button
         class={`band-tab band-tab-sum ${isSum() ? "active" : ""}`}
         role="tab"
         aria-selected={isSum()}
         onClick={setActiveBandSum}
-        title="Сумма всех полос"
-      >{projectName() ?? "Сумма"}</button>
+        title={L("Сумма всех полос", "Sum of all bands")}
+      >{projectName() ?? L("Сумма", "Sum")}</button>
       <For each={appState.bands}>
         {(band, idx) => (
           <div
@@ -158,7 +159,7 @@ export default function BandTabs() {
               <>
                 <span class="band-tab-label">{band.name}</span>
                 <Show when={peqStale(band)}>
-                  <span class="band-tab-stale-dot" title="PEQ устарел">●</span>
+                  <span class="band-tab-stale-dot" title={L("PEQ устарел", "PEQ is stale")}>●</span>
                 </Show>
               </>
             )}
@@ -166,20 +167,20 @@ export default function BandTabs() {
               <button
                 type="button"
                 class="band-tab-close"
-                aria-label={`Удалить полосу ${band.name}`}
+                aria-label={L(`Удалить полосу ${band.name}`, `Delete band ${band.name}`)}
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
                   e.preventDefault();
                   confirmRemove(band.id, band.name);
                 }}
-                title={`Удалить полосу ${band.name}`}
+                title={L(`Удалить полосу ${band.name}`, `Delete band ${band.name}`)}
               >×</button>
             </Show>
           </div>
         )}
       </For>
-      <button class="band-tab band-tab-add" onClick={addBand} title="Добавить полосу" aria-label="Добавить полосу">+</button>
+      <button class="band-tab band-tab-add" onClick={addBand} title={L("Добавить полосу", "Add band")} aria-label={L("Добавить полосу", "Add band")}>+</button>
     </div>
   );
 }

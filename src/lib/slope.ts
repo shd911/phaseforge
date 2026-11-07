@@ -4,6 +4,8 @@
 // — matches `target/mod.rs::filter_lp_response::LinkwitzRiley` which
 // doubles both magnitude (dB) and phase relative to BU-N.
 
+import { L } from "./i18n";
+
 const LR_SLOPES = [12, 24, 36, 48, 60, 72, 84, 96];
 const STD_SLOPES = [6, 12, 18, 24, 30, 36, 42, 48];
 
@@ -36,7 +38,8 @@ export const FILTER_TYPE_LABEL: Record<string, string> = {
   Butterworth: "Butterworth",
   Bessel: "Bessel",
   Gaussian: "Gaussian",
-  Custom: "Произвольный Q",
+  // A getter: read at the render site, it follows the UI language.
+  get Custom() { return L("Произвольный Q", "Custom Q"); },
 };
 /** Q of a «Произвольный Q» section. */
 export const CUSTOM_Q_MIN = 0.1;
@@ -45,6 +48,9 @@ export const CUSTOM_Q_MAX = 5;
 export const GAUSS_M_MIN = 0.5;
 export const GAUSS_M_MAX = 10;
 export const CUSTOM_Q_HINT = "0.5 = LR · 0.577 = Bessel · 0.707 = BW · > 0.707 — резонанс";
+/** CUSTOM_Q_HINT in the UI language — call it at the render site. */
+export const customQHint = (): string =>
+  L(CUSTOM_Q_HINT, "0.5 = LR · 0.577 = Bessel · 0.707 = BW · > 0.707 — resonance");
 
 export const clampNum = (v: number, min: number, max: number): number => Math.min(max, Math.max(min, v));
 

@@ -5,14 +5,16 @@ import { createSignal, For, Show, onCleanup, onMount, type JSX } from "solid-js"
 import type { ExportMetrics } from "../stores/bands";
 import { STATUS_GOOD, STATUS_WARN, STATUS_BAD } from "../lib/plot-helpers";
 import { FLOOR_BAD_DB, FLOOR_GOOD_DB, FLOOR_MARGIN_DB, PRE_RING_DB } from "../lib/export-metrics";
-import { pluralRu } from "../lib/plural";
+import { L, isEn, plural } from "../lib/i18n";
 
 const POPOVER_W = 340;
 /** Below this much room under the label the popover opens upward. */
 const POPOVER_MIN_H = 240;
 
 function fmtHz(hz: number): string {
-  return hz >= 1000 ? `${(hz / 1000).toFixed(hz >= 10000 ? 1 : 2)} кГц` : `${Math.round(hz)} Гц`;
+  return hz >= 1000
+    ? `${(hz / 1000).toFixed(hz >= 10000 ? 1 : 2)} ${L("кГц", "kHz")}`
+    : `${Math.round(hz)} ${L("Гц", "Hz")}`;
 }
 const fmtDb = (db: number) => (db <= -150 ? "≤ −150" : db.toFixed(0).replace("-", "−"));
 
@@ -21,7 +23,7 @@ interface Item {
   label: () => JSX.Element;
   color?: () => string | undefined;
   show?: () => boolean;
-  title: string;
+  title: () => string;
   body: () => JSX.Element;
 }
 
@@ -70,8 +72,10 @@ export default function ExportMetricsBar(props: { m: ExportMetrics }) {
     return f <= FLOOR_GOOD_DB ? STATUS_GOOD : f <= FLOOR_BAD_DB ? STATUS_WARN : STATUS_BAD;
   };
   const zoneText = () => m().ringZoneHz == null
-    ? `${m().ringZoneMs.toFixed(0)} мс (у полосы нет ФВЧ/ФНЧ)`
-    : `${m().ringZoneMs.toFixed(1)} мс — по ${m().ringZoneLinear ? "linear-phase " : ""}фильтру ${fmtHz(m().ringZoneHz!)} и его крутизне`;
+    ? L(`${m().ringZoneMs.toFixed(0)} мс (у полосы нет ФВЧ/ФНЧ)`,
+        `${m().ringZoneMs.toFixed(0)} ms (band has no HP/LP)`)
+    : L(`${m().ringZoneMs.toFixed(1)} мс — по ${m().ringZoneLinear ? "linear-phase " : ""}фильтру ${fmtHz(m().ringZoneHz!)} и его крутизне`,
+        `${m().ringZoneMs.toFixed(1)} ms — from the ${m().ringZoneLinear ? "linear-phase " : ""}filter at ${fmtHz(m().ringZoneHz!)} and its slope`);
   const band = () => `${fmtHz(m().passbandLoHz)} – ${fmtHz(m().passbandHiHz)}`;
 
   const items: Item[] = [
@@ -80,9 +84,17 @@ export default function ExportMetricsBar(props: { m: ExportMetrics }) {
       // b141.123 (external audit 2026-10-29): no traffic light at all. b141.119
       // graded min-phase bands against ~100 %, but a steep section's peak comes
       // after its rise: a correct LR4 band reads 42–72 %, and it went red.
-      label: () => <>После пика: {m().causality}%</>,
-      title: "Энергия на пике и после него",
-      body: () => <>
+      label: () => <>{L("После пика", "After peak")}: {m().causality}%</>,
+      title: () => L("Энергия на пике и после него", "Energy at and after the peak"),
+      body: () => isEn() ? <>
+        <p>The share of the impulse energy at the peak and after it.</p>
+        <p>A reference number, not colour-graded. Linear-phase — about 50%: the impulse
+          is symmetric. Min-phase — 40 to 100%: a steep filter peaks after its rise
+          begins, and part of the energy rightly falls before the peak
+          (LR4 in its passband — 40–70%, HP at 30 Hz — 100%).</p>
+        <p>Pre-ringing and floor, which also put energy before the peak, are shown
+          separately: “Pre-ring” and “Floor”.</p>
+      </> : <>
         <p>Доля энергии импульса, которая приходится на пик и время после него.</p>
         <p>Справочное число, цветом не оценивается. Linear-phase — около 50%: импульс
           симметричен. Min-phase — от 40 до 100%: у крутого фильтра пик наступает позже
@@ -95,10 +107,23 @@ export default function ExportMetricsBar(props: { m: ExportMetrics }) {
     {
       id: "prering",
       show: () => m().preRingMs > 0 || m().preRingLimited,
-      label: () => <>Предзвон: {m().preRingLimited ? "≥ " : ""}{m().preRingMs} мс</>,
+      label: () => <>{L("Предзвон", "Pre-ring")}: {m().preRingLimited ? "≥ " : ""}{m().preRingMs} {L("мс", "ms")}</>,
       color: () => m().preRingLimited ? STATUS_WARN : undefined,
-      title: "Предзвон",
-      body: () => <>
+      title: () => L("Предзвон", "Pre-ringing"),
+      body: () => isEn() ? <>
+        <p>Time from the moment the impulse first rises above {PRE_RING_DB} dB
+          re the peak, to the peak itself.</p>
+        <p>It comes from the band's linear-phase HP/LP and is set by their frequency and
+          slope. It does not depend on the tap count: a longer filter does not shorten it.
+          Min-phase bands do not ring before the peak — here they show only their rise time.</p>
+        <p>Ringing zone: {zoneText()}. Anything farther from the peak is floor, not ringing.</p>
+        <Show when={m().preRingLimited}>
+          <p style={{ color: STATUS_WARN }}>The floor ({fmtDb(m().floorDb!)} dB) is louder than the threshold,
+            so the threshold is raised to {fmtDb(m().preRingThresholdDb)} dB (floor + {FLOOR_MARGIN_DB} dB).
+            Part of the ringing hides under the floor — the true pre-ringing is at least the value shown.
+            Increase taps until the “≥” goes away.</p>
+        </Show>
+      </> : <>
         <p>Время от момента, когда импульс впервые поднимается выше {PRE_RING_DB} дБ
           от пика, до самого пика.</p>
         <p>Его создают linear-phase ФВЧ/ФНЧ полосы, и он определяется их частотой и
@@ -115,10 +140,28 @@ export default function ExportMetricsBar(props: { m: ExportMetrics }) {
     },
     {
       id: "floor",
-      label: () => <>Фон: {m().floorDb == null ? "—" : `${fmtDb(m().floorDb!)} дБ`}</>,
+      label: () => <>{L("Фон", "Floor")}: {m().floorDb == null ? "—" : `${fmtDb(m().floorDb!)} ${L("дБ", "dB")}`}</>,
       color: floorColor,
-      title: "Фон до пика",
-      body: () => <>
+      title: () => L("Фон до пика", "Floor before the peak"),
+      body: () => isEn() ? <>
+        <p>The loudest level of the impulse before the peak outside the ringing zone
+          (more than {m().ringZoneMs.toFixed(1)} ms from the peak), in dB re the peak.</p>
+        <p>The band's filters no longer ring there. What remains did not fit the FIR length:
+          long tails of LF correction and narrow PEQ. Not fitting after the peak, they
+          wrap to the start of the filter and land before the peak. This floor is written to the WAV.</p>
+        <p>
+          <span style={{ color: STATUS_GOOD }}>below {FLOOR_GOOD_DB} dB</span> — the tails fit;{" "}
+          <span style={{ color: STATUS_WARN }}>{FLOOR_GOOD_DB}…{FLOOR_BAD_DB} dB</span> — borderline;{" "}
+          <span style={{ color: STATUS_BAD }}>above {FLOOR_BAD_DB} dB</span> — the filter is too short for
+          this correction.
+        </p>
+        <p>Fixed by more taps. Time matters, not the count: at 352.8 kHz you need
+          7.35 times more taps than at 48 kHz.</p>
+        <Show when={m().floorDb == null}>
+          <p style={{ color: STATUS_WARN }}>The filter has less than {m().ringZoneMs.toFixed(1)} ms before the peak —
+            the floor cannot be told from ringing. Increase taps.</p>
+        </Show>
+      </> : <>
         <p>Самый громкий уровень импульса до пика за пределами зоны звона
           (дальше {m().ringZoneMs.toFixed(1)} мс от пика), в дБ от пика.</p>
         <p>Фильтры полосы там уже не звенят. Остаётся то, что не уместилось в длину FIR:
@@ -140,10 +183,15 @@ export default function ExportMetricsBar(props: { m: ExportMetrics }) {
     },
     {
       id: "magerr",
-      label: () => <>Ошибка АЧХ: {m().maxMagErr} дБ</>,
+      label: () => <>{L("Ошибка АЧХ", "Mag error")}: {m().maxMagErr} {L("дБ", "dB")}</>,
       color: () => m().maxMagErr <= 0.5 ? STATUS_GOOD : m().maxMagErr <= 1.5 ? STATUS_WARN : STATUS_BAD,
-      title: "Ошибка АЧХ",
-      body: () => <>
+      title: () => L("Ошибка АЧХ", "Magnitude error"),
+      body: () => isEn() ? <>
+        <p>The largest magnitude deviation of the finished FIR from the model (target + PEQ)
+          in the passband {band()}.</p>
+        <p>Grows when the filter is too short for steep slopes and LF correction.
+          Guide: up to 0.5 dB — good, up to 1.5 dB — acceptable.</p>
+      </> : <>
         <p>Наибольшее расхождение АЧХ готового FIR с моделью (цель + PEQ) в полосе
           пропускания {band()}.</p>
         <p>Растёт, когда длины фильтра не хватает на крутые склоны и НЧ-коррекцию.
@@ -153,9 +201,15 @@ export default function ExportMetricsBar(props: { m: ExportMetrics }) {
     {
       id: "gd",
       // b141.119 (UI audit §4): a span, not an error — no traffic light.
-      label: () => <>Размах ГЗ: {m().gdRippleMs} мс</>,
-      title: "Размах групповой задержки",
-      body: () => <>
+      label: () => <>{L("Размах ГЗ", "GD span")}: {m().gdRippleMs} {L("мс", "ms")}</>,
+      title: () => L("Размах групповой задержки", "Group delay span"),
+      body: () => isEn() ? <>
+        <p>The difference between the largest and smallest group delay of the FIR in the
+          passband {band()}.</p>
+        <p>Min-phase correction and PEQ rightly raise the delay toward low frequencies — that
+          counts too. So the metric is more useful for comparing variants of one
+          band (taps, window) than as an absolute score.</p>
+      </> : <>
         <p>Разница между наибольшей и наименьшей групповой задержкой FIR в полосе
           пропускания {band()}.</p>
         <p>Min-phase коррекция и PEQ законно дают рост задержки к низким частотам — это
@@ -166,9 +220,19 @@ export default function ExportMetricsBar(props: { m: ExportMetrics }) {
     {
       id: "uslp",
       show: () => m().ultrasonicLpHz != null,
-      label: () => <>УЗ-ФНЧ: {fmtHz(m().ultrasonicLpHz ?? 0)}</>,
-      title: "Ультразвуковой ФНЧ",
-      body: () => <>
+      label: () => <>{L("УЗ-ФНЧ", "US LP")}: {fmtHz(m().ultrasonicLpHz ?? 0)}</>,
+      title: () => L("Ультразвуковой ФНЧ", "Ultrasonic low-pass"),
+      body: () => isEn() ? <>
+        <p>At export rates from 88.2 kHz every FIR has a built-in 8th-order Butterworth
+          low-pass (48 dB/oct) at {fmtHz(m().ultrasonicLpHz ?? 0)} with zero phase.</p>
+        <p>It limits ultrasound that would otherwise reach the tweeter and amplifier:
+          noise bandwidth above 24 kHz is 6.6 kHz vs 17 kHz for the old 40 kHz cutoff
+          and 161 kHz for the unlimited analytical route (at 352.8 kHz). The worst output
+          peak is ~4 dB lower, and the 40 kHz cutoff's ringing no longer enters the pre-ringing.</p>
+        <p>Zero phase adds no delay: no band shifts, summation
+          and alignment are unchanged. Loss up to 20 kHz is 0.007 dB; on the plot the FIR
+          rolls off smoothly at the right edge (−3 dB at {fmtHz(m().ultrasonicLpHz ?? 0)}).</p>
+      </> : <>
         <p>При частоте экспорта от 88.2 кГц в каждый FIR встроен ФНЧ Баттерворта
           8-го порядка (48 дБ/окт) на {fmtHz(m().ultrasonicLpHz ?? 0)} с нулевой фазой.</p>
         <p>Он ограничивает ультразвук, который иначе уходит в твитер и усилитель:
@@ -182,9 +246,15 @@ export default function ExportMetricsBar(props: { m: ExportMetrics }) {
     },
     {
       id: "norm",
-      label: () => <>Нормировка: {m().normDb.toFixed(1)} дБ</>,
-      title: "Нормировка",
-      body: () => <>
+      label: () => <>{L("Нормировка", "Norm")}: {m().normDb.toFixed(1)} {L("дБ", "dB")}</>,
+      title: () => L("Нормировка", "Normalization"),
+      body: () => isEn() ? <>
+        <p>How much the filter is attenuated so the file's magnitude peaks at 0 dB: target
+          and PEQ boosts alone do not drive the file past full scale. This does not replace
+          input headroom.</p>
+        <p>Each band is normalized separately, by design. Levels between bands
+          are set in the player or DSP host.</p>
+      </> : <>
         <p>Насколько ослаблен фильтр, чтобы максимум АЧХ файла был 0 дБ: подъёмы
           цели и PEQ сами по себе не выводят файл за полную шкалу. Запас по уровню
           на входе сигнала это не заменяет.</p>
@@ -200,8 +270,8 @@ export default function ExportMetricsBar(props: { m: ExportMetrics }) {
       padding: "3px 8px", "font-size": "var(--fs-sm)", color: "#b0b0bc",
       "border-top": "1px solid #2a2a35",
     }}>
-      <span>{m().taps} {pluralRu(m().taps, "отсчёт", "отсчёта", "отсчётов")}</span>
-      <span>{m().sampleRate / 1000} кГц</span>
+      <span>{m().taps} {plural(m().taps, ["отсчёт", "отсчёта", "отсчётов"], ["tap", "taps"])}</span>
+      <span>{m().sampleRate / 1000} {L("кГц", "kHz")}</span>
       <span>{m().window}</span>
       <span>{m().phaseLabel}</span>
       <For each={items.slice(0, -2)}>{(it) => <MetricItem it={it} />}</For>
@@ -244,7 +314,7 @@ export default function ExportMetricsBar(props: { m: ExportMetrics }) {
               color: "var(--text-primary)", "font-size": "12px", "line-height": "1.45",
               "white-space": "normal",
             }}>
-              <div style={{ "font-weight": 600, "margin-bottom": "6px" }}>{it.title}</div>
+              <div style={{ "font-weight": 600, "margin-bottom": "6px" }}>{it.title()}</div>
               <div class="metric-popover-body">{it.body()}</div>
             </div>
           </Show>

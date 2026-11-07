@@ -1,6 +1,7 @@
 import { createSignal, Show, For, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import Modal from "./Modal";
+import { L } from "../lib/i18n";
 import { currentProjectPath, newProject, loadProject, loadProjectFromPath, pathBaseName } from "../lib/project-io";
 
 interface RecentProject {
@@ -30,20 +31,20 @@ export default function WelcomeDialog() {
         onBackdrop={false}>
           <img src="/logo.png" class="welcome-logo-img" alt="ClearWave Systems" />
           <div class="welcome-logo" id="welcome-dlg-title">PhaseForge</div>
-          <div class="welcome-subtitle">DSP-коррекция АС и помещения</div>
+          <div class="welcome-subtitle">{L("DSP-коррекция АС и помещения", "Speaker and room DSP correction")}</div>
 
           <div class="welcome-actions">
             <button class="dlg-btn dlg-btn-lg dlg-btn-primary" onClick={() => newProject()}>
-              Новый проект
+              {L("Новый проект", "New project")}
             </button>
             <button class="dlg-btn dlg-btn-lg" onClick={() => loadProject()}>
-              Открыть проект
+              {L("Открыть проект", "Open project")}
             </button>
           </div>
 
           <Show when={recentProjects().length > 0}>
             <div class="welcome-recent">
-              <div class="welcome-recent-title">Недавние проекты</div>
+              <div class="welcome-recent-title">{L("Недавние проекты", "Recent projects")}</div>
               <For each={recentProjects()}>
                 {(proj) => (
                   <button

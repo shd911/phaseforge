@@ -12,7 +12,7 @@ import {
   setExportHybridPhase,
 } from "./stores/bands";
 import { handleOptimizePeq, handleOptimizeAll, computing } from "./stores/peq-optimize";
-import { pluralRu } from "./lib/plural";
+import { L, plural, lang, setLang } from "./lib/i18n";
 import {
   saveProject,
   saveProjectAs,
@@ -76,7 +76,7 @@ function App() {
     if (e.shiftKey && k === "v") {
       e.preventDefault();
       if (projectDir() !== null) openVersionsDialog();
-      else showToast("Сохраните проект через «Сохранить как…», чтобы создавать версии", "info");
+      else showToast(L("Сохраните проект через «Сохранить как…», чтобы создавать версии", "Save the project with “Save As…” to create versions"), "info");
       return;
     }
     if (k === "s") {
@@ -107,7 +107,7 @@ function App() {
     const pName = projectName();
     const path = currentProjectPath();
     const dirty = isDirty();
-    const name = pName ?? (path ? pathBaseName(path) : "Без названия");
+    const name = pName ?? (path ? pathBaseName(path) : L("Без названия", "Untitled"));
     document.title = `PhaseForge — ${name}${dirty ? " •" : ""}`;
   });
 
@@ -122,8 +122,8 @@ function App() {
     const hasPeq = appState.bands.some((b) => (b.peqBands?.length ?? 0) > 0);
     if (hasPeq) {
       const ok = await ask(
-        "Переключение режима переоптимизирует все полосы и перезапишет ручные правки PEQ. Продолжить?",
-        { title: toHybrid ? "Перейти в режим Hybrid" : "Перейти в режим Standard", kind: "warning" },
+        L("Переключение режима переоптимизирует все полосы и перезапишет ручные правки PEQ. Продолжить?", "Switching the mode re-optimizes every band and overwrites manual PEQ edits. Continue?"),
+        { title: toHybrid ? L("Перейти в режим Hybrid", "Switch to Hybrid") : L("Перейти в режим Standard", "Switch to Standard"), kind: "warning" },
       );
       if (!ok) return;
     }
@@ -145,23 +145,23 @@ function App() {
           class="tb-btn"
           onClick={() => undo()}
           disabled={!canUndo()}
-          aria-label="Откатить"
-          title={canUndo() ? `Откатить: ${lastUndoLabel()}` : "Откатить (нет действий)"}
+          aria-label={L("Откатить", "Undo")}
+          title={canUndo() ? L(`Откатить: ${lastUndoLabel()}`, `Undo: ${lastUndoLabel()}`) : L("Откатить (нет действий)", "Undo (nothing to undo)")}
         >↶</button>
         <button
           class="tb-btn"
           onClick={() => redo()}
           disabled={!canRedo()}
-          aria-label="Повторить"
-          title={canRedo() ? `Повторить: ${lastRedoLabel()}` : "Повторить (нет действий)"}
+          aria-label={L("Повторить", "Redo")}
+          title={canRedo() ? L(`Повторить: ${lastRedoLabel()}`, `Redo: ${lastRedoLabel()}`) : L("Повторить (нет действий)", "Redo (nothing to redo)")}
         >↷</button>
-        <span class="top-project-name" title={currentProjectPath() ?? "Без названия"}>
+        <span class="top-project-name" title={currentProjectPath() ?? L("Без названия", "Untitled")}>
           {projectName() ?? (currentProjectPath()
             ? pathBaseName(currentProjectPath()!)
-            : "Без названия")}
+            : L("Без названия", "Untitled"))}
         </span>
         <Show when={isDirty()}>
-          <span class="top-project-dirty">(изменён)</span>
+          <span class="top-project-dirty">{L("(изменён)", "(modified)")}</span>
         </Show>
         <div class="top-sep" />
         <div class="strategy-toggle">
@@ -169,35 +169,41 @@ function App() {
             class={`strategy-btn ${!exportHybridPhase() ? "active" : ""}`}
             onClick={() => switchStrategy(false)}
             disabled={computing()}
-            title="Стандартная коррекция (мин./лин. фаза). Переключение переоптимизирует все полосы."
+            title={L("Стандартная коррекция (мин./лин. фаза). Переключение переоптимизирует все полосы.", "Standard correction (min/lin phase). Switching re-optimizes every band.")}
           >Standard</button>
           <button
             class={`strategy-btn ${exportHybridPhase() ? "active" : ""}`}
             onClick={() => switchStrategy(true)}
             disabled={computing()}
-            title="Гибридная фаза экспорта. Переключение переоптимизирует все полосы."
+            title={L("Гибридная фаза экспорта. Переключение переоптимизирует все полосы.", "Hybrid export phase. Switching re-optimizes every band.")}
           >Hybrid</button>
         </div>
         <button
           class="tb-btn"
           onClick={openFirSettings}
-          title="Настройки оптимизации и FIR"
-        >Настройки</button>
+          title={L("Настройки оптимизации и FIR", "Optimization and FIR settings")}
+        >{L("Настройки", "Settings")}</button>
         <button
           class="tb-btn primary"
           onClick={handleOptimizeAll}
           disabled={computing()}
-          title="Оптимизировать PEQ для всех полос"
+          title={L("Оптимизировать PEQ для всех полос", "Optimize PEQ for every band")}
           aria-busy={computing()}
         >
           {/* b141.38: both labels share one grid cell — the button keeps its
               width while computing instead of shrinking to "..." */}
           <span class="btn-label-stack">
-            <span classList={{ "btn-label-off": computing() }}>Оптимизировать все</span>
-            <span classList={{ "btn-label-off": !computing() }}>Оптимизация…</span>
+            <span classList={{ "btn-label-off": computing() }}>{L("Оптимизировать все", "Optimize all")}</span>
+            <span classList={{ "btn-label-off": !computing() }}>{L("Оптимизация…", "Optimizing…")}</span>
           </span>
         </button>
         <div class="top-sep" />
+        <div class="lang-toggle" role="group" aria-label={L("Язык интерфейса", "Interface language")}>
+          <button class={`lang-btn ${lang() === "ru" ? "active" : ""}`} aria-pressed={lang() === "ru"}
+            onClick={() => setLang("ru")} title="Русский">RU</button>
+          <button class={`lang-btn ${lang() === "en" ? "active" : ""}`} aria-pressed={lang() === "en"}
+            onClick={() => setLang("en")} title="English">EN</button>
+        </div>
       </div>
 
       {/* Band Tabs */}
@@ -223,10 +229,10 @@ function App() {
           fallback={
             <div class="right-panel">
               <div class="sum-hint">
-                <div class="sum-hint-title">Режим «Сумма»</div>
-                <p>Это обзор суммарного отклика всех полос — только для просмотра.</p>
-                <p>Чтобы редактировать цель и PEQ, выберите вкладку полосы сверху.</p>
-                <p>Двойной клик по линии раздела на графике — настройка кроссовера.</p>
+                <div class="sum-hint-title">{L("Режим «Сумма»", "Sum view")}</div>
+                <p>{L("Это обзор суммарного отклика всех полос — только для просмотра.", "An overview of the summed response of all bands — view only.")}</p>
+                <p>{L("Чтобы редактировать цель и PEQ, выберите вкладку полосы сверху.", "To edit the target and PEQ, pick a band tab above.")}</p>
+                <p>{L("Двойной клик по линии раздела на графике — настройка кроссовера.", "Double-click a crossover line on the plot to set it up.")}</p>
               </div>
             </div>
           }
@@ -239,8 +245,8 @@ function App() {
 
       {/* Status bar */}
       <footer class="status-bar">
-        {appState.bands.length} {pluralRu(appState.bands.length, "полоса", "полосы", "полос")}
-        {isSum() ? " — режим Сумма" : ""}
+        {appState.bands.length} {plural(appState.bands.length, ["полоса", "полосы", "полос"], ["band", "bands"])}
+        {isSum() ? L(" — режим Сумма", " — Sum view") : ""}
       </footer>
 
       {/* Modal dialogs */}

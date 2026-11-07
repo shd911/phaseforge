@@ -5,6 +5,7 @@ import { freqAxisTicks } from "../lib/plot-helpers";
 import type { BaffleConfig, BaffleStepPreview } from "../lib/types";
 import NumberInput from "./NumberInput";
 import Modal from "./Modal";
+import { L } from "../lib/i18n";
 
 interface BaffleStepDialogProps {
   config: BaffleConfig;
@@ -15,8 +16,8 @@ interface BaffleStepDialogProps {
 const PREVIEW_FREQS = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000];
 
 function formatFreq(hz: number): string {
-  if (hz >= 1000) return (hz / 1000).toFixed(hz >= 10000 ? 0 : 1) + " кГц";
-  return hz.toFixed(0) + " Гц";
+  if (hz >= 1000) return (hz / 1000).toFixed(hz >= 10000 ? 0 : 1) + L(" кГц", " kHz");
+  return hz.toFixed(0) + L(" Гц", " Hz");
 }
 
 export default function BaffleStepDialog(props: BaffleStepDialogProps) {
@@ -48,7 +49,7 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
       series: [
         {},
         {
-          label: "дБ",
+          label: L("дБ", "dB"),
           stroke: "#4A9EFF",
           width: 1.5,
           scale: "db",
@@ -173,8 +174,8 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
       onEscape={props.onClose}>
         {/* Header */}
         <div class="merge-header">
-          <span class="merge-title" id="baffle-dlg-title">Коррекция baffle step</span>
-          <button class="merge-close" onClick={props.onClose} aria-label="Закрыть" title="Закрыть">
+          <span class="merge-title" id="baffle-dlg-title">{L("Коррекция baffle step", "Baffle step correction")}</span>
+          <button class="merge-close" onClick={props.onClose} aria-label={L("Закрыть", "Close")} title={L("Закрыть", "Close")}>
             ×
           </button>
         </div>
@@ -183,51 +184,51 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
         <div class="merge-body">
           {/* Dimension inputs */}
           <div class="merge-param-row">
-            <label class="merge-label">Ширина панели</label>
+            <label class="merge-label">{L("Ширина панели", "Baffle width")}</label>
             <NumberInput
-              label="Ширина панели"
+              label={L("Ширина панели", "Baffle width")}
               value={width()}
               onChange={setWidth}
               min={0.05}
               max={2.0}
               step={0.01}
-              unit="м"
+              unit={L("м", "m")}
             />
           </div>
           <div class="merge-param-row">
-            <label class="merge-label">Высота панели</label>
+            <label class="merge-label">{L("Высота панели", "Baffle height")}</label>
             <NumberInput
-              label="Высота панели"
+              label={L("Высота панели", "Baffle height")}
               value={height()}
               onChange={setHeight}
               min={0.05}
               max={2.0}
               step={0.01}
-              unit="м"
+              unit={L("м", "m")}
             />
           </div>
           <div class="merge-param-row">
-            <label class="merge-label">Динамик X</label>
+            <label class="merge-label">{L("Динамик X", "Driver X")}</label>
             <NumberInput
-              label="Динамик X"
+              label={L("Динамик X", "Driver X")}
               value={offsetX()}
               onChange={setOffsetX}
               min={0.01}
               max={width() - 0.01}
               step={0.01}
-              unit="м"
+              unit={L("м", "m")}
             />
           </div>
           <div class="merge-param-row">
-            <label class="merge-label">Динамик Y</label>
+            <label class="merge-label">{L("Динамик Y", "Driver Y")}</label>
             <NumberInput
-              label="Динамик Y"
+              label={L("Динамик Y", "Driver Y")}
               value={offsetY()}
               onChange={setOffsetY}
               min={0.01}
               max={height() - 0.01}
               step={0.01}
-              unit="м"
+              unit={L("м", "m")}
             />
           </div>
 
@@ -245,22 +246,22 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
               <div class="baffle-preview">
                 <div class="baffle-info">
                   <span class="baffle-info-label">f3: </span>
-                  <span>{p().f3_hz.toFixed(0)} Гц</span>
+                  <span>{p().f3_hz.toFixed(0)} {L("Гц", "Hz")}</span>
                 </div>
                 <div class="baffle-info">
-                  <span class="baffle-info-label">Края: </span>
+                  <span class="baffle-info-label">{L("Края: ", "Edges: ")}</span>
                   <span>
                     L {p().edge_frequencies[0].toFixed(0)}{" "}
                     R {p().edge_frequencies[1].toFixed(0)}{" "}
                     T {p().edge_frequencies[2].toFixed(0)}{" "}
-                    B {p().edge_frequencies[3].toFixed(0)} Гц
+                    B {p().edge_frequencies[3].toFixed(0)} {L("Гц", "Hz")}
                   </span>
                 </div>
                 <div class="baffle-preview-table">
                   {PREVIEW_FREQS.map((f) => (
                     <div class="baffle-preview-row">
                       <span class="freq">{formatFreq(f)}</span>
-                      <span class="value">{getCorrectionAtFreq(f)} дБ</span>
+                      <span class="value">{getCorrectionAtFreq(f)} {L("дБ", "dB")}</span>
                     </div>
                   ))}
                 </div>
@@ -270,7 +271,7 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
 
           {/* b141.105 (§5.19): the chart used to vanish without a word. */}
           <Show when={!isValid()}>
-            <div class="merge-error">Динамик должен находиться внутри панели — график и «Применить» недоступны.</div>
+            <div class="merge-error">{L("Динамик должен находиться внутри панели — график и «Применить» недоступны.", "The driver must lie inside the baffle; chart and “Apply” are unavailable.")}</div>
           </Show>
           <Show when={error()}>
             <div class="merge-error">{error()}</div>
@@ -280,14 +281,14 @@ export default function BaffleStepDialog(props: BaffleStepDialogProps) {
         {/* Footer */}
         <div class="merge-footer">
           <button class="dlg-btn" onClick={props.onClose}>
-            Отмена
+            {L("Отмена", "Cancel")}
           </button>
           <button
             class="dlg-btn dlg-btn-primary"
             disabled={!isValid()}
             onClick={handleSave}
           >
-            Применить
+            {L("Применить", "Apply")}
           </button>
         </div>
     </Modal>

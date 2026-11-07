@@ -2,6 +2,7 @@ import { createSignal, Show } from "solid-js";
 import Modal from "./Modal";
 import NumField from "./NumField";
 import { clampNum } from "../lib/slope";
+import { L } from "../lib/i18n";
 import {
   firIterations, setFirIterations,
   firFreqWeighting, setFirFreqWeighting,
@@ -57,15 +58,15 @@ export default function FirSettingsDialog() {
     <Show when={(() => { const v = visible(); if (v) initFromStore(); return v; })()}>
       <Modal overlayClass="xo-overlay" dialogClass="xo-dialog" dialogStyle={{ "min-width": "360px" }}
         titleId="fir-dlg-title" onEnter={handleApply} onEscape={handleCancel}>
-          <div class="xo-title" id="fir-dlg-title">Настройки оптимизации</div>
+          <div class="xo-title" id="fir-dlg-title">{L("Настройки оптимизации", "Optimization settings")}</div>
 
           {/* Iterations */}
           <div class="xo-row">
-            <label class="xo-label" for="fir-iter">Итерации (WLS)</label>
+            <label class="xo-label" for="fir-iter">{L("Итерации (WLS)", "Iterations (WLS)")}</label>
             <NumField id="fir-iter" autofocus integer value={iterations()} onChange={setIterations}
               min={ITER.min} max={ITER.max} step={1} />
           </div>
-          <div class="xo-hint">Проходы итеративной коррекции ошибки. 0 = выкл, 3–5 оптимально</div>
+          <div class="xo-hint">{L("Проходы итеративной коррекции ошибки. 0 = выкл, 3–5 оптимально", "Iterative error-correction passes. 0 = off, 3–5 is best")}</div>
 
           {/* Freq weighting */}
           <div class="xo-checkbox">
@@ -75,32 +76,32 @@ export default function FirSettingsDialog() {
               onChange={(e) => setFreqWeight(e.currentTarget.checked)}
             />
             <label class="xo-checkbox-label" for="fir-freq-weight">
-              Частотно-зависимое взвешивание
+              {L("Частотно-зависимое взвешивание", "Frequency weighting")}
             </label>
           </div>
-          <div class="xo-hint">Приоритет зонам кроссовера и речи (200 Гц – 4 кГц)</div>
+          <div class="xo-hint">{L("Приоритет зонам кроссовера и речи (200 Гц – 4 кГц)", "Favours crossover and speech regions (200 Hz – 4 kHz)")}</div>
 
           {/* Max boost */}
           <div class="xo-row">
-            <label class="xo-label" for="fir-max-boost">Макс. подъём</label>
+            <label class="xo-label" for="fir-max-boost">{L("Макс. подъём", "Max boost")}</label>
             <NumField id="fir-max-boost" value={maxBoost()} onChange={setMaxBoost}
               min={BOOST.min} max={BOOST.max} step={1} />
-            <span class="xo-unit">дБ</span>
+            <span class="xo-unit">{L("дБ", "dB")}</span>
           </div>
-          <div class="xo-hint">Ограничивает подъём цели и PEQ. Не действует на полосы, которые строятся аналитическим каскадом (мин-фаза без subsonic и гауссов) — экспорт об этом предупредит</div>
+          <div class="xo-hint">{L("Ограничивает подъём цели и PEQ. Не действует на полосы, которые строятся аналитическим каскадом (мин-фаза без subsonic и гауссов) — экспорт об этом предупредит", "Caps target and PEQ boost. Not applied to bands built by the analytical cascade (min phase, no subsonic or Gaussian); export warns about it")}</div>
 
           {/* Noise floor */}
           <div class="xo-row">
-            <label class="xo-label" for="fir-noise-floor">Шумовой порог</label>
+            <label class="xo-label" for="fir-noise-floor">{L("Шумовой порог", "Noise floor")}</label>
             <NumField id="fir-noise-floor" value={noiseFloor()} onChange={setNoiseFloor}
               min={FLOOR.min} max={FLOOR.max} step={5} />
-            <span class="xo-unit">дБ</span>
+            <span class="xo-unit">{L("дБ", "dB")}</span>
           </div>
-          <div class="xo-hint">Коррекция ниже этого уровня игнорируется. Поднимите при шумном измерении</div>
+          <div class="xo-hint">{L("Коррекция ниже этого уровня игнорируется. Поднимите при шумном измерении", "Correction below this level is ignored. Raise it for a noisy measurement")}</div>
 
           <div class="xo-buttons">
-            <button class="dlg-btn" onClick={handleCancel}>Отмена</button>
-            <button class="dlg-btn dlg-btn-primary" onClick={handleApply}>Применить</button>
+            <button class="dlg-btn" onClick={handleCancel}>{L("Отмена", "Cancel")}</button>
+            <button class="dlg-btn dlg-btn-primary" onClick={handleApply}>{L("Применить", "Apply")}</button>
           </div>
       </Modal>
     </Show>

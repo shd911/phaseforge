@@ -90,16 +90,22 @@ pub fn merge_nf_ff(
     // NF above the FF end) are not reported.
     let mut warnings: Vec<String> = Vec::new();
     if nf.freq[0] < f_min * 0.99 {
-        warnings.push(format!(
+        warnings.push(if crate::i18n::en() { format!(
+            "Near field below {f_min:.0} Hz dropped: the merge runs over the common range, \
+             and the far field starts at {:.0} Hz (near field at {:.1} Hz).",
+            ff.freq[0], nf.freq[0]
+        ) } else { format!(
             "Ближнее поле ниже {f_min:.0} Гц отброшено: слияние идёт в общем диапазоне, \
              а дальнее поле начинается с {:.0} Гц (ближнее — с {:.1} Гц).",
             ff.freq[0], nf.freq[0]
-        ));
+        ) });
     }
     if ff_last > f_max * 1.01 {
-        warnings.push(format!(
+        warnings.push(if crate::i18n::en() { format!(
+            "Far field above {f_max:.0} Hz dropped: the near field ends at {nf_last:.0} Hz."
+        ) } else { format!(
             "Дальнее поле выше {f_max:.0} Гц отброшено: ближнее поле заканчивается на {nf_last:.0} Гц."
-        ));
+        ) });
     }
 
     let n_points = 2048;

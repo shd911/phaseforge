@@ -9,6 +9,7 @@ import type { Measurement, AnalysisResult } from "./types";
 import type { MergeSource } from "../stores/bands";
 import { openMeasurementAnalysis } from "../components/MeasurementAnalysisDialog";
 import { showToast } from "./toast";
+import { L } from "./i18n";
 
 export const [showMergeDialog, setShowMergeDialog] = createSignal(false);
 
@@ -45,7 +46,7 @@ export async function handleImportMeasurement() {
     await runAnalysis(b.id, measurement, b.name);
   } catch (e) {
     console.error("Import failed:", e);
-    showToast(`Не удалось импортировать измерение: ${String(e)}`, "warn", 12000);
+    showToast(L(`Не удалось импортировать измерение: ${String(e)}`, `Could not import the measurement: ${String(e)}`), "warn", 12000);
   }
 }
 
