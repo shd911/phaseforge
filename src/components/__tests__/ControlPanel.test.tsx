@@ -119,6 +119,35 @@ describe("ControlPanel", () => {
     }
   });
 
+  it("a manual filter is added to the list even when a decay value is missing (b141.144)", async () => {
+    // The backend sent a decay it could not reach as null; the «мс» tooltip
+    // threw on it inside the ✓ click, the filter stayed on top and the plot froze.
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd !== "compute_peq_net_decay") throw new Error("no backend");
+      return args.peqBands.map(() => ({ freqHz: 1000, earMs: [4.6, 6.3], withoutMs: [0.9, null], withMs: [0.9, null] }));
+    });
+    try {
+      const pk = (freq_hz: number) => ({ freq_hz, gain_db: -2, q: 1, filter_type: "Peaking" as const, enabled: true });
+      setBandMeasurement(a, meas());
+      setBandPeqBands(a, [pk(500), pk(3000)]);
+      (document.querySelector(".peq-manual-section .peq-add-btn") as HTMLButtonElement).click();
+      const pending = () => document.querySelectorAll(".peq-manual-section .peq-row-pending");
+      const [f, g] = pending()[0].querySelectorAll("input.peq-input") as NodeListOf<HTMLInputElement>;
+      commitInput(f, "2000");
+      commitInput(g, "-3");
+      await new Promise((r) => setTimeout(r, 0));
+      (pending()[0].querySelector(".peq-commit") as HTMLButtonElement).click();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(appState.bands[0].peqBands.map((p) => p.freq_hz)).toEqual([500, 2000, 3000]);
+      expect(pending().length).toBe(0);
+      const title = document.querySelectorAll(".peq-table:not(.peq-excl-table) tbody tr")[1]
+        .querySelector("td.peq-ring")!.getAttribute("title")!;
+      expect(title).toContain("0.9 / —");
+    } finally {
+      vi.mocked(invoke).mockImplementation(async () => { throw new Error("no backend"); });
+    }
+  });
+
   it("Lin-φ toggles from the keyboard", () => {
     setBandHighPass(a, { filter_type: "Butterworth", order: 2, freq_hz: 80, shape: null, linear_phase: false, q: null, subsonic_protect: null });
     const box = document.querySelector('[role="checkbox"][aria-label="ФВЧ: линейная фаза"]') as HTMLElement;
