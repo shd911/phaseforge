@@ -107,15 +107,20 @@ fn decay_ms(fft: &mut FftEngine, h: &[Complex64], f: &[f64], fc: f64) -> [f64; 2
     fft.fft_inverse(&mut buf);
     let e: Vec<f64> = buf.iter().map(|c| c.re * c.re).collect();
     let ipk = e.iter().enumerate().fold(0, |b, (i, &v)| if v > e[b] { i } else { b });
-    // The half after the peak: the other half is the wrapped pre-response.
-    let tail = &e[ipk..(ipk + N / 2).min(N)];
+    // The half after the peak, read circularly: the other half is the wrapped
+    // pre-response. b141.144: a measurement whose delay removal overshot puts
+    // the peak before t = 0, i.e. at the end of the buffer — cut at N, the
+    // tail was 99 samples and the −30 dB decay came back as infinity (JSON
+    // null), which threw in the «мс» tooltip and froze the plot.
+    let tail: Vec<f64> = (0..N / 2).map(|i| e[(ipk + i) % N]).collect();
     let mut edc = vec![0.0; tail.len()];
     let mut acc = 0.0;
     for i in (0..tail.len()).rev() { acc += tail[i]; edc[i] = acc; }
     let total = edc[0].max(f64::MIN_POSITIVE);
     LEVELS_DB.map(|db| {
         let lim = total * 10f64.powf(-db / 10.0);
-        edc.iter().position(|&v| v < lim).map_or(f64::INFINITY, |i| i as f64 / SR * 1000.0)
+        // Not reached in half the window: at least that long — never infinity.
+        edc.iter().position(|&v| v < lim).map_or(tail.len() as f64 / SR * 1000.0, |i| i as f64 / SR * 1000.0)
     })
 }
 

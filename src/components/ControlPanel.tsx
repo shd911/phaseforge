@@ -130,7 +130,10 @@ function ringCellTitle(v: NetRingVerdict, halfMs: number): string {
     + `${pct > 0 ? `Lengthens by ${pct}%` : pct < 0 ? `Shortens by ${-pct}%` : "No change"} of the ear's ringing. Red number — over 25%, red row — over 100%. ${half}`);
 }
 
-function fmtRingMs(ms: number): string {
+function fmtRingMs(ms: number | null): string {
+  // b141.144: a non-finite value from the backend arrives as null — a tooltip
+  // that throws stops Solid's update and froze the plot on band switches.
+  if (ms == null || !Number.isFinite(ms)) return "—";
   return ms < 10 ? ms.toFixed(1) : String(Math.round(ms));
 }
 

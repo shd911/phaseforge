@@ -578,6 +578,9 @@ git diff --stat
   lengthen. Measurement held flat past its ends (a roll-off there rings).
   Resonance < ½ oct inside the measurement → null (half-file rule only); no
   phase → b141.138 law. UI only — the optimizer is unchanged.
+  The tail after the energy peak is read CIRCULARLY (b141.144): a measurement
+  starting before t = 0 (overshot delay removal) peaks at the buffer end — cut
+  there, −30 dB came back as ∞ → JSON null → the tooltip threw and froze the plot.
   Pinned by `tests/peq_net_decay.rs`, `peq-ring-cost.test.ts`.
 
 ## SolidJS Patterns

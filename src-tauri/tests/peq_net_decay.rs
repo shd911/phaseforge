@@ -88,3 +88,25 @@ fn a_linkwitz_transform_is_judged_at_its_new_corner() {
     let d = net_decay(&f, &mag, &ph, &[lt], SR).unwrap()[0].clone().unwrap();
     assert!((d.freq_hz - 60.0 / 10f64.powf(0.3)).abs() < 1e-9, "{d:?}");
 }
+
+/// b141.144: a measurement whose delay removal overshot (response starts
+/// before t = 0 — a real tweeter, residual GD −5 ms) puts the energy peak at
+/// the END of the analysis buffer. The tail must be read circularly: cut at
+/// the buffer end it was ~1 ms (the ear filter adds ~3.5 ms of its own delay, so 6 ms early is past zero), the −30 dB decay came back as infinity, JSON
+/// wrote null and the «мс» tooltip threw — the plot froze on band switches.
+#[test]
+fn a_measurement_starting_before_zero_decays_as_if_it_did_not() {
+    let f: Vec<f64> = (0..50_000).map(|i| 500.0 + i as f64 * 0.02).collect();
+    let mag = vec![0.0; f.len()];
+    let run = |tau: f64| {
+        let ph: Vec<f64> = f.iter().map(|&x| -360.0 * x * tau).collect();
+        net_decay(&f, &mag, &ph, &[pk(1_000.0, -3.0, 2.0)], SR).unwrap()[0].clone().unwrap()
+    };
+    let (early, on_time) = (run(-0.006), run(0.0));
+    let all = [early.ear_ms, early.without_ms, early.with_ms].concat();
+    assert!(all.iter().all(|v| v.is_finite()), "{early:?}");
+    for (a, b) in early.with_ms.iter().zip(&on_time.with_ms).chain(early.without_ms.iter().zip(&on_time.without_ms)) {
+        assert!((a - b).abs() < 0.05, "a 6 ms early start changed the decay: {early:?} vs {on_time:?}");
+    }
+    assert!(!serde_json::to_string(&early).unwrap().contains("null"));
+}
