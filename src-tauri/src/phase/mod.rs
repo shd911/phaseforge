@@ -198,16 +198,31 @@ pub fn estimate_delay(freq: &[f64], magnitude: &[f64], phase: &[f64], sample_rat
     // The excess-phase fit is unbiased and sub-sample; the impulse estimate
     // is quantised to a sample (12.5 µs off at 1.2 ms / 48 kHz = 54° at
     // 12 kHz), so it only stands in when the fit was rejected.
-    // A negative time of flight is not physical (seen on a merged NF+FF
-    // curve whose phase is synthetic) — treat it as a rejected fit too.
     if ls_delay > 0.0 {
         info!("estimate_delay: excess-phase LS {:.4}ms (range {:.0}-{:.0} Hz)", ls_delay * 1000.0, f_lo, f_hi);
         return ls_delay;
     }
     let ir_delay = compute_ir_delay(freq, magnitude, phase, sr);
-    info!("estimate_delay: LS fit rejected ({:.4}ms), IR={:.4}ms (sr={sr}{})",
-        ls_delay * 1000.0, ir_delay * 1000.0, if sample_rate.is_none() { ", assumed" } else { "" });
-    ir_delay
+    let assumed = if sample_rate.is_none() { ", assumed" } else { "" };
+    // b141.145: a measurement can start BEFORE t = 0 — REW with an acoustic
+    // timing reference writes its offset into the phase (a real tweeter:
+    // «Delay −4.0848 ms … timing offset −3.2456 ms», LS −4.1 ms). Removing a
+    // negative delay shifts it later, to its true start. Taken only when the
+    // impulse peak (read circularly) sits before zero too and agrees with the
+    // fit — a merged NF+FF curve's synthetic phase can fit negative while its
+    // impulse peak does not. Before, the negative fit was always rejected and
+    // the impulse searched only after zero: a stray +1.33 ms, residual −5.1 ms.
+    if ls_delay < 0.0 && ir_delay < 0.0
+        && (ls_delay - ir_delay).abs() <= (0.1 * ls_delay.abs()).max(1e-4)
+    {
+        info!("estimate_delay: measurement starts before t = 0 — LS {:.4}ms, IR {:.4}ms (sr={sr}{assumed}); shifted later",
+            ls_delay * 1000.0, ir_delay * 1000.0);
+        return ls_delay;
+    }
+    info!("estimate_delay: LS fit rejected ({:.4}ms), IR={:.4}ms (sr={sr}{assumed})",
+        ls_delay * 1000.0, ir_delay * 1000.0);
+    // A negative impulse estimate without a fit to back it is not trusted.
+    ir_delay.max(0.0)
 }
 
 /// Select delay estimation range based on measurement bandwidth.
@@ -327,6 +342,11 @@ pub fn compute_ir_delay(
     if n < 2 {
         return 0.0;
     }
+    // b141.145: interpolated linearly, a WRAPPED phase cut every ±180° jump
+    // into a ramp through 0° — the impulse lost its peak (a real REW file,
+    // −4.08 ms: peak read at +0.02 ms). Unwrap first.
+    let unwrapped = unwrap_phase(phase_deg);
+    let phase_deg: &[f64] = &unwrapped;
 
     // FFT size: large enough for good time resolution
     let fft_size = {
@@ -372,9 +392,11 @@ pub fn compute_ir_delay(
     let norm = 1.0 / fft_size as f64;
     let impulse: Vec<f64> = spectrum.iter().map(|c| c.re * norm).collect();
 
-    // Find peak in first half (causal part)
+    // Peak over the whole buffer, read circularly (b141.145): a response that
+    // starts before t = 0 has its peak at the END of the buffer — it is a
+    // negative delay. Searched in the first half only, a stray later peak won.
     let half = fft_size / 2;
-    let peak_idx = impulse[..half]
+    let peak_idx = impulse
         .iter()
         .enumerate()
         .max_by(|(_, a), (_, b)| {
@@ -386,7 +408,8 @@ pub fn compute_ir_delay(
         .unwrap_or(0);
 
     let dt = 1.0 / sample_rate;
-    peak_idx as f64 * dt
+    let signed = if peak_idx >= half { peak_idx as f64 - fft_size as f64 } else { peak_idx as f64 };
+    signed * dt
 }
 
 /// Simple linear interpolation of magnitude and phase at frequency `f`.
@@ -606,17 +629,41 @@ mod tests {
         assert_eq!(assumed_sample_rate(2000.0), 48000.0);
     }
 
-    /// A negative fitted time of flight is not physical: on the None path it
-    /// must fall back to the impulse estimate as on the Some path.
+    /// b141.145: a measurement that starts before t = 0 (REW acoustic timing
+    /// reference) is shifted later when the fit and the circular impulse peak
+    /// agree — on both sample-rate paths. (Until b141.144 a negative delay was
+    /// always rejected and the impulse searched after zero only.)
     #[test]
-    fn negative_fit_falls_back_without_sample_rate() {
+    fn a_measurement_starting_before_zero_is_shifted_later() {
         let freq = log_grid_20_20k();
-        // A pure advance: LS reads −0.3 ms, the impulse peak sits at t = 0
-        // (the advanced part wraps to the end of the buffer).
+        for tau in [-0.0003, -0.004] {
+            let mag = vec![0.0; freq.len()];
+            let ph: Vec<f64> = freq.iter().map(|&f| -360.0 * f * tau).collect();
+            for sr in [None, Some(48000.0)] {
+                let d = estimate_delay(&freq, &mag, &ph, sr);
+                assert!((d - tau).abs() < 1e-5, "τ={tau} sr={sr:?}: {:.4} ms", d * 1e3);
+                let ir = compute_ir_delay(&freq, &mag, &ph, 48000.0);
+                assert!((ir - tau).abs() <= 1.0 / 48000.0 + 1e-12, "IR τ={tau}: {:.4} ms", ir * 1e3);
+            }
+            let (mag, ph) = bw2_tweeter(&freq, tau);
+            { let (lo,hi)=smart_delay_range(20.0, freq[freq.len()-1]); let mp=crate::dsp::minimum_phase_on_log_grid(&freq,&mag,Some(48000.0),None).unwrap(); let ex:Vec<f64>=ph.iter().zip(&mp).map(|(p,m)|p-m).collect();
+              eprintln!("DBG tau={tau} range {lo}-{hi} ls={} ir={}", compute_average_delay(&freq,&ex,lo,hi)*1e3, compute_ir_delay(&freq,&mag,&ph,48000.0)*1e3); }
+            let d = estimate_delay(&freq, &mag, &ph, None);
+            assert!((d - tau).abs() < 1e-5, "tweeter τ={tau}: {:.4} ms", d * 1e3);
+        }
+    }
+
+    /// A negative fit the impulse does not back (its peak after zero) is not
+    /// applied: the impulse estimate stands, never below zero.
+    #[test]
+    fn a_negative_fit_without_a_negative_impulse_is_not_applied() {
+        let freq = log_grid_20_20k();
         let mag = vec![0.0; freq.len()];
-        let ph: Vec<f64> = freq.iter().map(|&f| 360.0 * f * 0.0003).collect();
+        // Phase rising (LS < 0) only above 2 kHz — a synthetic curve; the
+        // impulse peak stays at t = 0.
+        let ph: Vec<f64> = freq.iter().map(|&f| if f > 2000.0 { 360.0 * (f - 2000.0) * 0.0003 } else { 0.0 }).collect();
         let d = estimate_delay(&freq, &mag, &ph, None);
-        assert!(d >= 0.0, "negative time of flight applied: {:.4} ms", d * 1e3);
+        assert!(d >= 0.0, "unbacked negative delay applied: {:.4} ms", d * 1e3);
     }
 
     /// Audit 2026-10-23 2.15: the response above the grid is continued by

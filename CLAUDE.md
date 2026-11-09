@@ -322,6 +322,11 @@
   `_2`, `_3`…). Paths: split on both «/» and «\\» (`pathBaseName`).
 - **Measurement delay estimate without a sample rate** assumes the smallest
   standard rate ≥ 2·f_last (≥ 48 kHz) — the parsed file never carries one.
+  A NEGATIVE delay (measurement starts before t = 0 — REW acoustic timing
+  reference) is removed, i.e. shifted later (b141.145), only when the
+  excess-phase fit and the impulse peak (read circularly, phase unwrapped
+  first) agree; an unbacked negative fit falls back to the impulse, ≥ 0.
+  Pinned by `phase::tests::a_measurement_starting_before_zero_is_shifted_later`.
 - **Modals:** every dialog renders through `components/Modal.tsx`; the stack
   in `lib/dialog-keys.ts` lets Escape/backdrop close only the top one and
   turns app hotkeys off while any modal is open. NumberInput fires onChange
