@@ -22,6 +22,13 @@ import {
 const ITER = { min: 0, max: 20 };
 const BOOST = { min: 0, max: 60 };
 const FLOOR = { min: -200, max: -40 };
+// b141.148: the noise floor is also shown and typed as a word length —
+// 1 bit = 20·log10(2) dB. Both fields edit the one dB value.
+const DB_PER_BIT = 20 * Math.log10(2);
+const round1 = (v: number) => Math.round(v * 10) / 10;
+const dbToBits = (db: number) => round1(-db / DB_PER_BIT);
+const bitsToDb = (bits: number) => clampNum(round1(-bits * DB_PER_BIT), FLOOR.min, FLOOR.max);
+const BITS = { min: dbToBits(FLOOR.max), max: dbToBits(FLOOR.min) };
 
 const [visible, setVisible] = createSignal(false);
 
@@ -96,8 +103,12 @@ export default function FirSettingsDialog() {
             <NumField id="fir-noise-floor" value={noiseFloor()} onChange={setNoiseFloor}
               min={FLOOR.min} max={FLOOR.max} step={5} />
             <span class="xo-unit">{L("дБ", "dB")}</span>
+            <NumField id="fir-noise-floor-bits" label={L("Шумовой порог в битах", "Noise floor in bits")}
+              value={dbToBits(noiseFloor())} onChange={(b) => setNoiseFloor(bitsToDb(b))}
+              min={BITS.min} max={BITS.max} step={0.1} />
+            <span class="xo-unit">{L("бит", "bit")}</span>
           </div>
-          <div class="xo-hint">{L("Коррекция ниже этого уровня игнорируется. Поднимите при шумном измерении", "Correction below this level is ignored. Raise it for a noisy measurement")}</div>
+          <div class="xo-hint">{L("Коррекция ниже этого уровня игнорируется. Поднимите при шумном измерении. 1 бит = 6,02 дБ: 16 бит ≈ −96 дБ, 24 бита ≈ −144,5 дБ", "Correction below this level is ignored. Raise it for a noisy measurement. 1 bit = 6.02 dB: 16 bit ≈ −96 dB, 24 bit ≈ −144.5 dB")}</div>
 
           <div class="xo-buttons">
             <button class="dlg-btn" onClick={handleCancel}>{L("Отмена", "Cancel")}</button>
