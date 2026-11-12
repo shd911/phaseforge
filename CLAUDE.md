@@ -224,6 +224,14 @@
   UI column, `q_envelope::ring_ms` ↔ `peqRingCost`). Narrow LF boosts chased
   position-made dips and rang (+43 ms of decay at 91 Hz on a real woofer).
   Pinned by `tests/peq_boost_floor.rs`, `peq_ring_limit.rs`, `peq_q_rules.rs`.
+  b141.149: one Q ceiling, `q_envelope::q_cap(freq, gain)` — the low-pass is not
+  part of it. «Q ≤ 2.5 above the low-pass» (five copies, plus a penalty from
+  Q 1.5 on every filter there) left a break-up peak beyond the crossover
+  half-cut: +15 dB Q 6 → +6 dB left, a real sub's peak 1.5 dB HIGHER after the
+  PEQ. Above the low-pass only boosts and shallow cuts stay wide
+  (`q_envelope::wide_only`). The optimizer does NOT read the FIR noise floor
+  (−150 dB): its reach into the stopband is «Порог, дБ» (60). Pinned by
+  `tests/peq_breakup_cut.rs`.
   b141.101: the ring limit is a guarantee — `q_envelope::fit_ring` lowers Q
   no further than Q_MIN (0.5) and then lowers the gain; a boosting shelf
   promotion may not lift outside `boost_range` more than the peaking band it

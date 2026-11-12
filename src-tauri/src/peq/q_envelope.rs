@@ -39,7 +39,35 @@ pub const Q_MAX_WIDE: f64 = 2.0;
 pub const NARROW_CUT_MIN_DB: f64 = 3.0;
 
 pub fn q_cap_for_gain(gain_db: f64) -> f64 {
-    if gain_db > -NARROW_CUT_MIN_DB { Q_MAX_WIDE } else { f64::INFINITY }
+    if narrow_cut(gain_db) { f64::INFINITY } else { Q_MAX_WIDE }
+}
+
+/// A cut of 3 dB and more: the only filter the optimizer may make narrow.
+pub fn narrow_cut(gain_db: f64) -> bool {
+    gain_db <= -NARROW_CUT_MIN_DB
+}
+
+/// The optimizer's Q ceiling for a filter at `freq_hz` with `gain_db` — the
+/// one rule for the greedy start, the solver's bounds and added bands.
+///
+/// b141.149: the band's low-pass no longer enters it. «Q ≤ 2.5 above the
+/// low-pass» (plus a penalty from Q 1.5 growing with the gain) kept a cut on
+/// a break-up peak beyond the crossover at Q 1.6: a wide filter cannot take a
+/// narrow peak out, and the fit settled on half its depth (a +15 dB Q 6 peak
+/// was left +6 dB over the line; on a real sub the peak ended 1.5 dB HIGHER
+/// than before the PEQ). A break-up is a resonance of the driver, minimum
+/// phase — the cut that fits it also removes its ringing. Boosts and shallow
+/// cuts stay wide everywhere (`q_cap_for_gain`).
+pub fn q_cap(freq_hz: f64, gain_db: f64) -> f64 {
+    q_cap_at(freq_hz).min(q_cap_for_gain(gain_db))
+}
+
+/// Above the band's low-pass everything but a narrow cut stays a WIDE
+/// filter: the solver penalises Q over 1.5 there and a band added there
+/// starts at Q 1. Filling the driver's own roll-off beyond the crossover with
+/// a narrow boost adds level for nothing.
+pub fn wide_only(freq_hz: f64, gain_db: f64, lp_freq: f64) -> bool {
+    freq_hz > lp_freq && !narrow_cut(gain_db)
 }
 
 /// b141.94: how long a PEQ filter rings (ms) until its resonance is

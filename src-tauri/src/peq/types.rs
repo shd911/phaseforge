@@ -140,12 +140,10 @@ pub struct PeqResult {
 pub(crate) const MIN_BAND_DISTANCE_OCT: f64 = 0.333; // 1/3 octave
 /// Q limits
 pub(crate) const Q_MIN: f64 = 0.5;
-// Q_MAX removed in b140.16.2: had no callers, replaced by Q_MAX_ABOVE_LP
-// for the LMA-specific use case.
+// The ceilings live in q_envelope.rs (`q_cap`). b141.149: Q_MAX_ABOVE_LP
+// (2.5 above the low-pass) is gone — a break-up peak needs a narrow cut.
 
 // LMA-specific constants
-/// Maximum Q above LP crossover (phase-safe wide filters)
-pub(crate) const Q_MAX_ABOVE_LP: f64 = 2.5;
 /// Maximum LMA iterations per optimization round. b141.55: 50 → 150 — three
 /// of four bands of the real 4-way fixture ended on the cap, and a restart
 /// from the result still cut the weighted cost by up to 47 %.

@@ -237,13 +237,9 @@ impl<'a> LmaSolver<'a> {
             params[i * 3] = params[i * 3].clamp(self.config.freq_range.0, self.config.freq_range.1);
             let freq = params[i * 3];
             params[i * 3 + 1] = params[i * 3 + 1].clamp(-self.config.max_cut_db, self.config.max_boost_at(freq));
-            let q_max = if freq > self.lp_freq {
-                Q_MAX_ABOVE_LP
-            } else {
-                crate::peq::q_cap_at(freq)
-            };
-            // b141.95: boosts and small cuts stay wide.
-            let q_max = q_max.min(crate::peq::q_envelope::q_cap_for_gain(params[i * 3 + 1]));
+            // b141.95: boosts and small cuts stay wide. b141.149: the same
+            // ceiling above the low-pass as below it.
+            let q_max = crate::peq::q_envelope::q_cap(freq, params[i * 3 + 1]);
             params[i * 3 + 2] = params[i * 3 + 2].clamp(Q_MIN, q_max);
             // b141.94: no filter that rings past half the export file.
             // b141.101: Q stays ≥ Q_MIN; when no Q fits, the gain gives way.
@@ -291,7 +287,9 @@ impl<'a> LmaSolver<'a> {
         // b141.8 (audit): Q penalties as virtual residuals — one row per band
         // (fixed count so Jacobian columns stay aligned; 0 below threshold).
         // Squaring reproduces the former compute_cost terms exactly:
-        //   above LP:  (q-1.5)²·|gain|·0.5·m   for q > 1.5
+        //   above LP:  (q-1.5)²·|gain|·0.5·m   for q > 1.5 — boosts and
+        //              shallow cuts only (b141.149, `wide_only`); a cut of
+        //              3 dB+ there is judged like one inside the band
         //   in band:   (q-warn(f))²·0.1·m      for q > warn(f)
         // Living in the residual vector makes them visible to the Jacobian /
         // gradient, so the solver steps AWAY from penalty growth instead of
@@ -302,7 +300,7 @@ impl<'a> LmaSolver<'a> {
             let freq = params[i * 3];
             let gain = params[i * 3 + 1];
             let q = params[i * 3 + 2];
-            let r = if freq > self.lp_freq {
+            let r = if crate::peq::q_envelope::wide_only(freq, gain, self.lp_freq) {
                 (q - 1.5).max(0.0) * (gain.abs() * 0.5 * m).sqrt()
             } else {
                 let warn = crate::peq::q_warn_at(freq);

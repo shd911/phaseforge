@@ -189,15 +189,10 @@ pub fn auto_peq_lma(
 
     let mut bands = greedy_fit_adaptive(freq, &smoothed_error, config, exclusion_zones);
 
-    // Enforce Q constraints: Q <= 2.5 above LP, frequency-dependent envelope inside passband.
+    // Q ceiling: the frequency envelope, boosts and shallow cuts wide (b141.149:
+    // one rule, `q_envelope::q_cap` — the low-pass is no longer part of it).
     for b in &mut bands {
-        if b.freq_hz > lp_freq && b.q > Q_MAX_ABOVE_LP {
-            b.q = Q_MAX_ABOVE_LP;
-        } else if b.freq_hz <= lp_freq {
-            let cap = q_envelope::q_cap_at(b.freq_hz);
-            if b.q > cap { b.q = cap; }
-        }
-        b.q = b.q.min(q_envelope::q_cap_for_gain(b.gain_db));
+        b.q = b.q.min(q_envelope::q_cap(b.freq_hz, b.gain_db));
     }
 
     info!("auto_peq_lma: greedy init -> {} bands", bands.len());
@@ -276,8 +271,8 @@ pub fn auto_peq_lma(
         // Add a new band at worst residual
         let new_fc = freq[worst_idx];
         let new_gain = (-raw_err).clamp(-config.max_cut_db, config.max_boost_at(new_fc));
-        let new_q = if new_fc > lp_freq {
-            1.0_f64 // wide filter above LP
+        let new_q = if q_envelope::wide_only(new_fc, new_gain, lp_freq) {
+            1.0_f64 // above the low-pass only a cut of 3 dB+ may be narrow
         } else {
             estimate_q_from_peak_width(freq, &{
                 let c = apply_peq(freq, &bands, config.sample_rate);
@@ -308,7 +303,7 @@ pub fn auto_peq_lma(
     // extracted to polish_bands (b141.8) so the no-overshoot property is
     // testable in isolation.
     total_iterations += polish_bands(
-        &mut bands, &solver, lp_freq, merge_dist,
+        &mut bands, &solver, merge_dist,
     );
 
     // b141.94: final guard — every returned filter rings within the limit
@@ -357,7 +352,6 @@ pub fn auto_peq_lma(
 pub(crate) fn polish_bands(
     bands: &mut Vec<PeqBand>,
     solver: &LmaSolver,
-    lp_freq: f64,
     merge_dist: f64,
 ) -> u32 {
     // Merge nearby bands that LMA may have pushed together
@@ -401,11 +395,7 @@ pub(crate) fn polish_bands(
 
     // Final Q enforcement (frequency-dependent cap inside passband; b137).
     for b in bands.iter_mut() {
-        if b.freq_hz > lp_freq {
-            b.q = b.q.clamp(Q_MIN, Q_MAX_ABOVE_LP);
-        } else {
-            b.q = b.q.clamp(Q_MIN, q_envelope::q_cap_at(b.freq_hz));
-        }
+        b.q = b.q.clamp(Q_MIN, q_envelope::q_cap_at(b.freq_hz));
     }
 
     // Shelf promotion: try converting edge bands to LowShelf / HighShelf
@@ -543,7 +533,7 @@ mod tests {
         let err_before = compute_max_error_in_range(&freq, &meas, &target, &corr0, config.freq_range);
         assert!(err_before < 0.01, "fixture: pre-polish correction must be exact, got {err_before:.3} dB");
 
-        polish_bands(&mut bands, &solver, 15000.0, MIN_BAND_DISTANCE_OCT);
+        polish_bands(&mut bands, &solver, MIN_BAND_DISTANCE_OCT);
 
         let corr = apply_peq(&freq, &bands, config.sample_rate);
         let err_after = compute_max_error_in_range(&freq, &meas, &target, &corr, config.freq_range);
@@ -1300,13 +1290,16 @@ mod tests {
         let target: Vec<f64> = freq.iter().map(|_| 80.0).collect();
         let result = auto_peq_lma(&meas, Some(&target), &freq, &config, 80.0, 3000.0, &[]).unwrap();
 
-        // All bands above LP should have Q <= 2.5
+        // b141.149: above the low-pass the ceiling is the one of the band
+        // itself — the frequency envelope, and wide unless it cuts 3 dB+.
+        // (It was a flat Q ≤ 2.5 there, which left narrow peaks half-cut.)
         for b in &result.bands {
             if b.freq_hz > 3000.0 {
+                let cap = q_envelope::q_cap(b.freq_hz, b.gain_db);
                 assert!(
-                    b.q <= Q_MAX_ABOVE_LP + 0.01,
-                    "Band at {:.0} Hz above LP should have Q <= {}, got Q={:.2}",
-                    b.freq_hz, Q_MAX_ABOVE_LP, b.q
+                    b.q <= cap + 0.01,
+                    "Band at {:.0} Hz ({:+.1} dB) above LP should have Q <= {}, got Q={:.2}",
+                    b.freq_hz, b.gain_db, cap, b.q
                 );
             }
         }
