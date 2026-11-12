@@ -40,7 +40,6 @@ import HighQWarningPopup from "./components/HighQWarningPopup";
 import Toasts from "./components/Toasts";
 import { showToast } from "./lib/toast";
 import WelcomeDialog from "./components/WelcomeDialog";
-import CrossoverDialog from "./components/CrossoverDialog";
 import FirSettingsDialog from "./components/FirSettingsDialog";
 import { openFirSettings } from "./components/FirSettingsDialog";
 // PeqSidebar removed — PEQ controls now in ControlPanel PEQ tab
@@ -252,7 +251,6 @@ function App() {
       <MeasurementAnalysisDialog />
       <StalePeqExportDialog />
       <HighQWarningPopup />
-      <CrossoverDialog />
       <FirSettingsDialog />
       <Toasts />
     </div>

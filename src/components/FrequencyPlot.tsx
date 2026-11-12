@@ -3,11 +3,10 @@ import { createStore } from "solid-js/store";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { invoke } from "@tauri-apps/api/core";
-import type { Measurement, TargetResponse, FilterType, PeqBand, WindowType } from "../lib/types";
+import type { Measurement, TargetResponse, PeqBand, WindowType } from "../lib/types";
 import { appState, activeBand, isSum, activeTab, plotTab, setPlotTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, setPeqDragging, updatePeqBand, commitPeqBand, bandsVersion, exportSampleRate, setExportSampleRate, exportTaps, setExportTaps, exportWindow, setExportWindow, toggleBandInverted, firIterations, firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess, firMaxBoost, firNoiseFloor, exportMetrics, setExportMetrics, plotSnapshots, addPlotSnapshot, clearPlotSnapshots, setBandSmoothing, beginInteraction, commitInteraction, needAutoFit, setNeedAutoFit } from "../stores/bands";
 import type { SmoothingMode, BandState, FreqSnapshot } from "../stores/bands";
 import { computeFloorBounce } from "../lib/floor-bounce";
-import { openCrossoverDialog, type CrossoverDialogData } from "./CrossoverDialog";
 import { handleImportMeasurement, handleMergeComplete, setShowMergeDialog, showMergeDialog } from "../lib/measurement-actions";
 import { setBandDelayInfo, markBandDelayRemoved, restoreBandDelay } from "../stores/bands";
 import MergeDialog from "./MergeDialog";
@@ -34,7 +33,7 @@ import {
   keptLogXRange,
   freqAxisTicks,
 } from "../lib/plot-helpers";
-import { hasActiveSubsonicProtect } from "../lib/types";
+import { hasActiveSubsonicProtect, cloneFilterConfig } from "../lib/types";
 import { evaluateBandFull, evaluateSum, reconstructTargetPhase } from "../lib/band-evaluator";
 import { coherentSum, targetCarriesDelay } from "../lib/band-evaluator/sum";
 import { buildCommonGrid, buildFirGrid, interpOnGrid, interpPhaseOnGrid, irTime, resampleOnLogGrid, type ImpulseIpc } from "../lib/band-evaluator/grid";
@@ -51,14 +50,7 @@ import { newWheelAccumulator, wheelSteps } from "../lib/wheel-step";
 interface CrossoverPoint {
   bandIndex: number;   // index of band with LP
   bandId: string;
-  bandName: string;
-  nextBandName: string;
   freq: number;        // LP freq_hz
-  filterType: FilterType;
-  order: number;
-  linearPhase: boolean;
-  shape: number | null; // Gaussian M coefficient
-  q: number | null;    // Custom Q factor
   dbLevel: number;     // dB at crossover freq (for Y position on chart)
 }
 
@@ -71,14 +63,7 @@ function getCrossovers(): CrossoverPoint[] {
       pts.push({
         bandIndex: i,
         bandId: b.id,
-        bandName: b.name,
-        nextBandName: bands[i + 1].name,
         freq: b.target.low_pass.freq_hz,
-        filterType: b.target.low_pass.filter_type,
-        order: b.target.low_pass.order,
-        linearPhase: b.target.low_pass.linear_phase,
-        shape: b.target.low_pass.shape ?? null,
-        q: b.target.low_pass.q ?? null,
         dbLevel: 0, // enriched later in renderSumMode
       });
     }
@@ -3872,16 +3857,11 @@ export default function FrequencyPlot() {
       // Apply final frequency to store (triggers full re-render once)
       if (xi != null && finalFreq != null) {
         const xo = currentCrossovers[xi];
-        if (xo) {
-          setBandLowPass(xo.bandId, {
-            filter_type: xo.filterType,
-            order: xo.order,
-            freq_hz: finalFreq,
-            shape: xo.shape,
-            linear_phase: xo.linearPhase,
-            q: xo.q,
-          });
-        }
+        // b141.147: the section as the store holds it, with a new frequency.
+        // Rebuilt from six fields, a dragged «1 − H» low-pass lost its flag
+        // and became the plain mirror of its neighbour.
+        const lp = xo ? cloneFilterConfig(appState.bands.find((b) => b.id === xo.bandId)?.target.low_pass) : null;
+        if (xo && lp) setBandLowPass(xo.bandId, { ...lp, freq_hz: finalFreq });
       }
       if (chart?.over) chart.over.style.cursor = "";
     };
@@ -3898,19 +3878,15 @@ export default function FrequencyPlot() {
     e.preventDefault();
     e.stopPropagation();
 
+    // b141.147: the crossover is edited in its card under the plot (the
+    // separate window is gone) — a double-click puts the caret in the card's
+    // frequency field.
     const xo = currentCrossovers[hit];
-    openCrossoverDialog({
-      bandIndex: xo.bandIndex,
-      bandId: xo.bandId,
-      bandName: xo.bandName,
-      nextBandName: xo.nextBandName,
-      freq: xo.freq,
-      filterType: xo.filterType,
-      order: xo.order,
-      linearPhase: xo.linearPhase,
-      shape: xo.shape,
-      q: xo.q,
-    });
+    const card = document.querySelector<HTMLElement>(`[data-xo-band="${xo.bandId}"]`);
+    const field = card?.querySelector<HTMLInputElement>("input.num-field");
+    card?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    field?.focus();
+    field?.select();
   }
 
   // Double-click on chart → add PEQ band at cursor frequency (align tab only)

@@ -1,2 +1,2 @@
 // Bumped per release; matches src-tauri/tauri.conf.json title.
-export const APP_VERSION = "b141.146";
+export const APP_VERSION = "b141.147";

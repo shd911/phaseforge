@@ -574,6 +574,10 @@ git diff --stat
   old Σ matrix above the plot is gone, IR/Step switches sit in the toolbar.
   Leader lines: the crossover draw hook publishes each point's client X
   (`publishXoX`), the strip measures its cards. Pinned by `SumStrip.test.tsx`.
+  b141.147: the separate crossover window is removed — a double-click on a
+  point puts the caret in its card's frequency field; a dragged point writes
+  the store's own section with a new frequency (never rebuild a FilterConfig
+  from picked fields — the drag used to drop «1 − H»).
 - **Scroll-wheel adjustment goes through `lib/wheel-step.ts`** (b141.43):
   active only after the field is clicked (never preventDefault an inactive
   field — it freezes panel scrolling), steps from `wheelSteps` (macOS mouse
