@@ -229,21 +229,9 @@ function App() {
           {/* Bottom panel removed (b126) — controls moved to plot toolbar */}
         </div>
 
-        {/* Right panel: Target + PEQ — editing surface (replaced by a hint in
-            SUM, where the view is a read-only overview). */}
-        <Show
-          when={!isSum()}
-          fallback={
-            <div class="right-panel">
-              <div class="sum-hint">
-                <div class="sum-hint-title">{L("Режим «Сумма»", "Sum view")}</div>
-                <p>{L("Это обзор суммарного отклика всех полос — только для просмотра.", "An overview of the summed response of all bands — view only.")}</p>
-                <p>{L("Чтобы редактировать цель и PEQ, выберите вкладку полосы сверху.", "To edit the target and PEQ, pick a band tab above.")}</p>
-                <p>{L("Двойной клик по линии раздела на графике — настройка кроссовера.", "Double-click a crossover line on the plot to set it up.")}</p>
-              </div>
-            </div>
-          }
-        >
+        {/* Right panel: Target + PEQ of the active band. b141.146: none in the
+            Σ view — its editing surface is the strip under the plot. */}
+        <Show when={!isSum()}>
           <div class="right-panel">
             <ControlPanel rightPanel={true} />
           </div>

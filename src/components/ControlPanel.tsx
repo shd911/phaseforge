@@ -196,16 +196,6 @@ function FiltersTab() {
     }
   }
 
-  // Индекс текущей полосы и кол-во полос (для отображения Link)
-  const bandIdx = () => {
-    const id = bandId();
-    return id ? appState.bands.findIndex((b) => b.id === id) : -1;
-  };
-  const isLastBand = () => bandIdx() >= appState.bands.length - 1;
-  const linked = () => band()?.linkedToNext ?? false;
-  // HP текущей полосы связан с LP предыдущей?
-  const hpLinked = () => { const id = bandId(); return id ? isBandLinkedFromPrev(id) : false; };
-
   return (
     <Show when={band()} fallback={<p class="meas-empty">{L("Нет активной полосы. Выберите вкладку полосы выше.", "No active band. Select a band tab above.")}</p>}>
       <div class="filters-row">
@@ -270,50 +260,9 @@ function FiltersTab() {
           </div>
         </div>
 
-        {/* High-Pass (🔗 индикатор, если связан с LP предыдущей) */}
-        <FilterBlock
-          title={L("ФВЧ", "HP")}
-          isHighPass={true}
-          config={cloneFilterConfig(target()?.high_pass)}
-          linked={hpLinked()}
-          partner={hpLinked() ? cloneFilterConfig(appState.bands[bandIdx() - 1]?.target.low_pass) : null}
-          onToggle={() => {
-            const id = bandId();
-            if (!id) return;
-            const cur = cloneFilterConfig(target()?.high_pass);
-            if (cur) {
-              lastHP.set(id, cur);
-              setBandHighPass(id, null);
-            } else {
-              setBandHighPass(id, lastHP.get(id) ?? { filter_type: "Butterworth", order: 2, freq_hz: 80, shape: null, linear_phase: false, q: null, subsonic_protect: null });
-            }
-          }}
-          onChange={(c) => { const id = bandId(); if (id) setBandHighPass(id, c); }}
-        />
-
-        {/* Low-Pass (🔗 кнопка, если не последняя полоса) */}
-        <FilterBlock
-          title={L("ФНЧ", "LP")}
-          config={cloneFilterConfig(target()?.low_pass)}
-          linked={linked()}
-          partner={linked() ? cloneFilterConfig(appState.bands[bandIdx() + 1]?.target.high_pass) : null}
-          canLink={!isLastBand()}
-          onLinkToggle={() => { const id = bandId(); if (id) toggleBandLinked(id); }}
-          nestedRow={linked()}
-          onToggle={() => {
-            const id = bandId();
-            if (!id) return;
-            const cur = cloneFilterConfig(target()?.low_pass);
-            if (cur) {
-              lastLP.set(id, cur);
-              setBandLowPass(id, null);
-            } else {
-              setBandLowPass(id, lastLP.get(id) ?? { filter_type: "Butterworth", order: 2, freq_hz: 15000, shape: null, linear_phase: false, q: null });
-            }
-          }}
-          onChange={(c) => { const id = bandId(); if (id) setBandLowPass(id, c); }}
-        />
-
+        {/* b141.146: the same wired block the Σ cards render */}
+        <BandFilterBlock bandId={bandId()!} side="hp" />
+        <BandFilterBlock bandId={bandId()!} side="lp" />
 
         {/* Export Target — rightmost in the row */}
         <button class="tb-btn tb-btn-sm" style={{ "align-self": "flex-start", "margin-left": "auto" }} onClick={handleExportTarget}
@@ -322,6 +271,55 @@ function FiltersTab() {
         </button>
       </div>
     </Show>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// BandFilterBlock — one band's HP or LP, wired to the store
+// ---------------------------------------------------------------------------
+
+/** b141.146: a band's high-pass or low-pass section with its link, partner
+ *  and store setters. The band panel and the Σ cards under the plot render
+ *  this one block, so a crossover has a single editor and a single rule set. */
+export function BandFilterBlock(props: { bandId: string; side: "hp" | "lp"; title?: string }) {
+  const idx = () => appState.bands.findIndex((b) => b.id === props.bandId);
+  const band = () => appState.bands[idx()];
+  const isHp = () => props.side === "hp";
+  const isLast = () => idx() >= appState.bands.length - 1;
+  const config = () => (isHp() ? band()?.target.high_pass : band()?.target.low_pass);
+  // HP: linked when the previous band links to this one; LP: this band links on.
+  const linked = () => (isHp() ? isBandLinkedFromPrev(props.bandId) : band()?.linkedToNext ?? false);
+  const partner = () => {
+    if (!linked()) return null;
+    return cloneFilterConfig(isHp() ? appState.bands[idx() - 1]?.target.low_pass : appState.bands[idx() + 1]?.target.high_pass);
+  };
+  const memo = () => (isHp() ? lastHP : lastLP);
+  const set = (c: FilterConfig | null) => (isHp() ? setBandHighPass(props.bandId, c) : setBandLowPass(props.bandId, c));
+  const fresh = (): FilterConfig => (isHp()
+    ? { filter_type: "Butterworth", order: 2, freq_hz: 80, shape: null, linear_phase: false, q: null, subsonic_protect: null }
+    : { filter_type: "Butterworth", order: 2, freq_hz: 15000, shape: null, linear_phase: false, q: null });
+
+  return (
+    <FilterBlock
+      title={props.title ?? (isHp() ? L("ФВЧ", "HP") : L("ФНЧ", "LP"))}
+      isHighPass={isHp()}
+      config={cloneFilterConfig(config())}
+      linked={linked()}
+      partner={partner()}
+      canLink={!isHp() && !isLast()}
+      onLinkToggle={isHp() ? undefined : () => toggleBandLinked(props.bandId)}
+      nestedRow={!isHp() && linked()}
+      onToggle={() => {
+        const cur = cloneFilterConfig(config());
+        if (cur) {
+          memo().set(props.bandId, cur);
+          set(null);
+        } else {
+          set(memo().get(props.bandId) ?? fresh());
+        }
+      }}
+      onChange={(c) => set(c)}
+    />
   );
 }
 

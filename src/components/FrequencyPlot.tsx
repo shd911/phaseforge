@@ -1,10 +1,10 @@
-import { createEffect, createSignal, onCleanup, onMount, For, Show, untrack, batch } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount, For, Show, untrack } from "solid-js";
 import { createStore } from "solid-js/store";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { invoke } from "@tauri-apps/api/core";
 import type { Measurement, TargetResponse, FilterType, PeqBand, WindowType } from "../lib/types";
-import { appState, activeBand, isSum, activeTab, plotTab, setPlotTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, setPeqDragging, updatePeqBand, commitPeqBand, bandsVersion, exportSampleRate, setExportSampleRate, exportTaps, setExportTaps, exportWindow, setExportWindow, toggleBandInverted, firIterations, firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess, firMaxBoost, firNoiseFloor, exportMetrics, setExportMetrics, plotSnapshots, addPlotSnapshot, clearPlotSnapshots, setAlignmentDelay, setBandSmoothing, beginInteraction, commitInteraction, needAutoFit, setNeedAutoFit } from "../stores/bands";
+import { appState, activeBand, isSum, activeTab, plotTab, setPlotTab, sharedXScale, setSharedXScale, suppressXScaleSync, selectedPeqIdx, setSelectedPeqIdx, setBandLowPass, setBandCrossNormDb, plotShowOnly, setPlotShowOnly, addPeqBand, exportHybridPhase, freqSnapshots, setFreqSnapshots, peqDragging, setPeqDragging, updatePeqBand, commitPeqBand, bandsVersion, exportSampleRate, setExportSampleRate, exportTaps, setExportTaps, exportWindow, setExportWindow, toggleBandInverted, firIterations, firFreqWeighting, firNarrowbandLimit, firNbSmoothingOct, firNbMaxExcess, firMaxBoost, firNoiseFloor, exportMetrics, setExportMetrics, plotSnapshots, addPlotSnapshot, clearPlotSnapshots, setBandSmoothing, beginInteraction, commitInteraction, needAutoFit, setNeedAutoFit } from "../stores/bands";
 import type { SmoothingMode, BandState, FreqSnapshot } from "../stores/bands";
 import { computeFloorBounce } from "../lib/floor-bounce";
 import { openCrossoverDialog, type CrossoverDialogData } from "./CrossoverDialog";
@@ -39,10 +39,10 @@ import { evaluateBandFull, evaluateSum, reconstructTargetPhase } from "../lib/ba
 import { coherentSum, targetCarriesDelay } from "../lib/band-evaluator/sum";
 import { buildCommonGrid, buildFirGrid, interpOnGrid, interpPhaseOnGrid, irTime, resampleOnLogGrid, type ImpulseIpc } from "../lib/band-evaluator/grid";
 import { bandRequestKey } from "../lib/band-evaluator/cache";
-import { computeAutoAlign } from "../lib/auto-align";
+import SumStrip from "./SumStrip";
 import { L } from "../lib/i18n";
 import { polarityPhase, polarityAmplitude, sumGroupDelayMs, fitMagRange, fitExportMagRange, peqHandleDb, peqGainAfterDrag, pointInBox, type FitSeries } from "../lib/plot-display";
-import { attachFieldWheel, newWheelAccumulator, wheelSteps } from "../lib/wheel-step";
+import { newWheelAccumulator, wheelSteps } from "../lib/wheel-step";
 
 
 // ---------------------------------------------------------------------------
@@ -248,7 +248,6 @@ export default function FrequencyPlot() {
   let zoomBoxEl: HTMLDivElement | null = null;
 
   const [cursorFreq, setCursorFreq] = createSignal("—");
-  const [autoAligning, setAutoAligning] = createSignal(false);
 
   // b141.61: what each band's WAV lacks of the N/2 leading zeros (a tail that
   // did not fit), seconds. The delay IN THE CONVOLVER is this + the alignment,
@@ -539,6 +538,33 @@ export default function FrequencyPlot() {
   const [draggingXo, setDraggingXo] = createSignal<number | null>(null);
   const [dragFreq, setDragFreq] = createSignal<number | null>(null); // visual override during drag
   let currentCrossovers: CrossoverPoint[] = []; // cached for mouse handlers
+
+  // b141.146: the Σ strip under the plot ties each crossover card to its point.
+  // Client X of every point drawn, by the id of the band whose low-pass it is;
+  // published from the draw hook, so zoom, pan, drag and resize all update it.
+  const [xoX, setXoX] = createSignal<Record<string, number>>({});
+  function publishXoX(next: Record<string, number>) {
+    const cur = untrack(xoX);
+    const a = Object.keys(cur), b = Object.keys(next);
+    if (a.length === b.length && b.every((k) => cur[k] != null && Math.abs(cur[k] - next[k]) < 0.5)) return;
+    setXoX(next);
+  }
+  // Only the SPL chart of the Σ view draws the points.
+  createEffect(() => { if (!isSum() || plotTab() !== "freq") setXoX({}); });
+  /** The crossover hovered or dragged on the plot, as the id of its band. */
+  const hotXoBand = (): string | null => {
+    const i = draggingXo() ?? hoveredXo();
+    return i == null ? null : currentCrossovers[i]?.bandId ?? null;
+  };
+  /** A card of the strip is hovered: light its line on the plot. */
+  function hoverXoBand(bandId: string | null) {
+    if (draggingXo() != null) return;
+    const i = bandId == null ? -1 : currentCrossovers.findIndex((x) => x.bandId === bandId);
+    const next = i >= 0 ? i : null;
+    if (next === hoveredXo()) return;
+    setHoveredXo(next);
+    if (chart && plotTab() === "freq") chart.redraw(false, false);
+  }
 
   function zoomY(factor: number) {
     if (!chart) return;
@@ -1425,7 +1451,9 @@ export default function FrequencyPlot() {
           // Crossover markers (SUM mode)
           (u: uPlot) => {
             const xoList = input.crossovers;
-            if (!xoList || xoList.length === 0) return;
+            if (!xoList || xoList.length === 0) { publishXoX({}); return; }
+            const xoPos: Record<string, number> = {};
+            const overLeft = u.over.getBoundingClientRect().left;
 
             const ctx = u.ctx;
             const dpr = devicePixelRatio || 1;
@@ -1444,6 +1472,7 @@ export default function FrequencyPlot() {
               const f = (drg === xi && dragFreq() != null) ? dragFreq()! : xo.freq;
               const cx = u.valToPos(f, "x", true);
               if (cx < plotLeft || cx > plotRight) continue;
+              xoPos[xo.bandId] = overLeft + u.valToPos(f, "x", false);
 
               const isHov = hov === xi;
               const isDrg = drg === xi;
@@ -1480,6 +1509,7 @@ export default function FrequencyPlot() {
               ctx.fillText(fmtCrossoverFreq(f), cx, cy - radius - 6 * dpr);
             }
             ctx.restore();
+            publishXoX(xoPos);
           },
           // PEQ band dots on PEQ response curve (reads mutable activePeqDots)
           (u: uPlot) => {
@@ -4178,6 +4208,19 @@ export default function FrequencyPlot() {
             // refit for the new one; the zoom history is in the old unit.
             setIrDbMode(!irDbMode()); zoomStacks["ir"] = []; irToggleRedrawAutoY();
           }}>{irDbMode() ? "dB" : "Lin"}</button>
+          {/* b141.146: was the «VIEW» row of the Σ matrix */}
+          <Show when={isSum()}>
+            <button
+              class={`tb-btn tb-btn-xs ${legendEntries.some(e => e.label.endsWith(" IR") && e.visible) ? "active" : ""}`}
+              title={L("Показать/скрыть импульсные характеристики", "Show/hide impulse responses")}
+              onClick={() => toggleAllIrOrStep("IR")}
+            >IR</button>
+            <button
+              class={`tb-btn tb-btn-xs ${legendEntries.some(e => e.label.endsWith(" Step") && e.visible) ? "active" : ""}`}
+              title={L("Показать/скрыть переходные характеристики", "Show/hide step responses")}
+              onClick={() => toggleAllIrOrStep("Step")}
+            >Step</button>
+          </Show>
         </Show>
 
         {/* Compact controls for active band (b126) — replaces bottom panel */}
@@ -4552,277 +4595,7 @@ export default function FrequencyPlot() {
           {(m) => <ExportMetricsBar m={m()} />}
         </Show>
       </Show>
-      <Show when={isSum() && legendEntries.length > 0 && plotTab() !== "gd" && plotTab() !== "export"}>
-        {/* SUM matrix */}
-        <div class="sum-vis-table">
-          {(() => {
-            const bandNames = () => appState.bands.map(b => b.name);
-            const cols = () => [...bandNames(), "\u03A3"];
-            // b141.78: «FIR» row (exported filters) on the SPL tab only.
-            const categories = (): ("target" | "measurement" | "corrected" | "corrfir")[] =>
-              plotTab() === "ir" ? ["target", "measurement", "corrected"] : ["target", "measurement", "corrected", "corrfir"];
-            const catLabels: Record<string, string> = { target: "TARGETS", measurement: "MEAS", corrected: "CORR+XO", corrfir: "CORR FIR" };
-            const catColors: Record<string, string> = { target: SUM_TARGET_COLOR, measurement: SUM_MEAS_COLOR, corrected: SUM_CORRECTED_COLOR, corrfir: SUM_CORRECTED_COLOR };
-            return (
-              <table>
-                <thead><tr>
-                  <th class="sum-corner" />
-                  <For each={cols()}>{(col) => {
-                    const band = () => col === "\u03A3" ? null : appState.bands.find(b => b.name === col);
-                    const hasPeq = () => {
-                      const b = band();
-                      return b ? (b.peqBands && b.peqBands.length > 0) : false;
-                    };
-                    const hasXo = () => {
-                      const b = band();
-                      return b ? (b.target.high_pass || b.target.low_pass) : false;
-                    };
-                    return (
-                      <th onClick={() => toggleColumn(col)} title={`Toggle all ${col}`}>
-                        {col}
-                        <Show when={band() && hasXo()}>
-                          <span
-                            class="opt-dot"
-                            style={{ background: hasPeq() ? "var(--status-good)" : "var(--status-bad)" }}
-                            title={hasPeq() ? L("PEQ оптимизирован", "PEQ optimized") : L("PEQ не оптимизирован", "PEQ not optimized")}
-                          />
-                        </Show>
-                      </th>
-                    );
-                  }}</For>
-                </tr></thead>
-                <tbody>
-                  <For each={categories()}>
-                    {(cat) => {
-                      const catEnts = () => legendEntries.filter(e => e.category === cat);
-                      const allOn = () => { const ce = catEnts(); return ce.length > 0 && ce.every(e => e.visible); };
-                      const anyOn = () => catEnts().some(e => e.visible);
-                      return (
-                        <tr>
-                          <td class={`sum-row-header ${allOn() ? "row-on" : anyOn() ? "row-partial" : ""}`} onClick={() => toggleCategory(cat)} title={`Toggle all ${catLabels[cat]}`}>
-                            <span class="sum-row-swatch" style={{ "border-color": catColors[cat] }} />{catLabels[cat]}
-                          </td>
-                          <For each={cols()}>
-                            {(col) => {
-                              const isIrTab = () => plotTab() === "ir";
-                              return (
-                                <Show when={isIrTab()} fallback={(() => {
-                                  // SPL: single swatch per cell
-                                  const entry = () => findCellEntry(col, cat);
-                                  const noPeq = () => {
-                                    if (cat !== "corrected" || col === "\u03A3") return false;
-                                    const b = appState.bands.find(bb => bb.name === col);
-                                    return b ? (!b.peqBands || b.peqBands.length === 0) : false;
-                                  };
-                                  return (
-                                    <Show when={entry()} fallback={<td class="sum-cell-empty" />}>
-                                      {(e) => {
-                                        const idx = () => legendEntries.findIndex(le => le.seriesIdx === e().seriesIdx);
-                                        return (
-                                          <td class="sum-cell">
-                                            <button class={`legend-item ${e().visible ? "" : "legend-off"}`} onClick={() => { const i = idx(); if (i >= 0) toggleLegendEntry(i); }}>
-                                              <span class={`legend-swatch ${e().dash ? "legend-swatch-dash" : ""}`} style={{ "background-color": e().dash ? "transparent" : e().color, "border-color": e().color }} />
-                                            </button>
-                                            <Show when={noPeq()}>
-                                              <span title={L("PEQ не оптимизирован", "PEQ not optimized")} style={{ color: STATUS_BAD, "font-size": "var(--fs-xs)", "font-weight": "bold", "margin-left": "1px" }}>!</span>
-                                            </Show>
-                                          </td>
-                                        );
-                                      }}
-                                    </Show>
-                                  );
-                                })()}>
-                                  {/* IR/Step: two swatches per cell (IR + Step) */}
-                                  {(() => {
-                                    const pair = () => findCellEntryPair(col, cat);
-                                    const irE = () => pair().ir;
-                                    const stE = () => pair().step;
-                                    const hasAny = () => irE() || stE();
-                                    const noPeqIr = () => {
-                                      if (cat !== "corrected" || col === "\u03A3") return false;
-                                      const b = appState.bands.find(bb => bb.name === col);
-                                      return b ? (!b.peqBands || b.peqBands.length === 0) : false;
-                                    };
-                                    return (
-                                      <Show when={hasAny()} fallback={<td class="sum-cell-empty" />}>
-                                        <td class="sum-cell" style={{ "white-space": "nowrap" }}>
-                                          <Show when={irE()}>
-                                            {(e) => {
-                                              const idx = () => legendEntries.findIndex(le => le.seriesIdx === e().seriesIdx);
-                                              return (
-                                                <button class={`legend-item ${e().visible ? "" : "legend-off"}`} onClick={() => { const i = idx(); if (i >= 0) toggleLegendEntry(i); }} style={{ padding: "1px var(--space-xxs)" }}>
-                                                  <span class="legend-swatch" style={{ "background-color": e().visible ? e().color : "transparent", "border-color": e().color }} />
-                                                </button>
-                                              );
-                                            }}
-                                          </Show>
-                                          <Show when={stE()}>
-                                            {(e) => {
-                                              const idx = () => legendEntries.findIndex(le => le.seriesIdx === e().seriesIdx);
-                                              return (
-                                                <button class={`legend-item ${e().visible ? "" : "legend-off"}`} onClick={() => { const i = idx(); if (i >= 0) toggleLegendEntry(i); }} style={{ padding: "1px var(--space-xxs)" }}>
-                                                  <span class="legend-swatch legend-swatch-dash" style={{ "border-color": e().color }} />
-                                                </button>
-                                              );
-                                            }}
-                                          </Show>
-                                          <Show when={noPeqIr()}>
-                                            <span title={L("PEQ не оптимизирован", "PEQ not optimized")} style={{ color: STATUS_BAD, "font-size": "var(--fs-xs)", "font-weight": "bold", "margin-left": "1px" }}>!</span>
-                                          </Show>
-                                        </td>
-                                      </Show>
-                                    );
-                                  })()}
-                                </Show>
-                              );
-                            }}
-                          </For>
-                        </tr>
-                      );
-                    }}
-                  </For>
-                  <Show when={plotTab() === "ir"}>
-                    <tr>
-                      <td class="sum-row-header">VIEW</td>
-                      <td colspan={cols().length} style={{ "text-align": "center" }}>
-                        <button
-                          class={`tb-btn tb-btn-sm ${legendEntries.some(e => e.label.endsWith(" IR") && e.visible) ? "active" : ""}`}
-                          onClick={() => toggleAllIrOrStep("IR")}
-                          style={{ "margin-right": "var(--space-xs)" }}
-                        >IR</button>
-                        <button
-                          class={`tb-btn tb-btn-sm ${legendEntries.some(e => e.label.endsWith(" Step") && e.visible) ? "active" : ""}`}
-                          onClick={() => toggleAllIrOrStep("Step")}
-                        >Step</button>
-                      </td>
-                    </tr>
-                  </Show>
-                  <Show when={plotTab() === "freq" || plotTab() === "ir"}>
-                    <tr>
-                      <td class="sum-row-header">DELAY <span style={{ "font-size": "var(--fs-xs)", "font-weight": "normal", color: "var(--text-muted)" }}>ms</span></td>
-                      <For each={bandNames()}>
-                        {(bName) => {
-                          const band = () => appState.bands.find(b => b.name === bName);
-                          let dlTimer: ReturnType<typeof setTimeout> | null = null;
-                          const commitDelay = (id: string, ms: number) => {
-                            if (dlTimer) clearTimeout(dlTimer);
-                            dlTimer = setTimeout(() => setAlignmentDelay(id, ms / 1000), 250);
-                          };
-                          return (
-                            <td class="sum-cell">
-                              <Show when={band()} fallback={<span />}>
-                                {(b) => (
-                                  <>
-                                  <input
-                                    type="number"
-                                    class="delay-input"
-                                    step="0.01"
-                                    placeholder="0.00"
-                                    value={((b().alignmentDelay ?? 0) * 1000).toFixed(2)}
-                                    onChange={(e) => {
-                                      const v = parseFloat(e.currentTarget.value);
-                                      if (!isNaN(v)) commitDelay(b().id, v);
-                                    }}
-                                    // b141.43: shared wheel model — active after a click,
-                                    // steps accumulate; the field shows every step, the
-                                    // store is written 250 ms after the last (commitDelay).
-                                    ref={(el) => {
-                                      let draftMs: number | null = null;
-                                      attachFieldWheel(el, {
-                                        onSteps: (steps, coarse) => {
-                                          const base = draftMs ?? (b().alignmentDelay ?? 0) * 1000;
-                                          draftMs = Math.round((base + steps * (coarse ? 0.1 : 0.01)) * 100) / 100;
-                                          el.value = draftMs.toFixed(2);
-                                          commitDelay(b().id, draftMs);
-                                        },
-                                        onEnd: () => { draftMs = null; },
-                                      });
-                                    }}
-                                  />
-                                  {/* b141.77: the WAV shortfall sits in the same cell as
-                                      «+X», in a slot that is always reserved — a line that
-                                      appeared and vanished made the table jump. */}
-                                  <span
-                                    class="delay-conv"
-                                    style={{ visibility: (convDelays()[b().id] ?? 0) >= 5e-6 ? "visible" : "hidden" }}
-                                    title={L("Добавьте к задержке в конвольвере: хвост фильтра этой полосы не уместился " +
-                                      "в половину файла, и его WAV начинается раньше остальных на это время. " +
-                                      `В конвольвер: ${(((b().alignmentDelay ?? 0) + (convDelays()[b().id] ?? 0)) * 1000).toFixed(2)} ms.`,
-                                      "Add to the convolver delay: this band's filter tail did not fit " +
-                                      "in half the file, so its WAV starts this much earlier than the others. " +
-                                      `Convolver: ${(((b().alignmentDelay ?? 0) + (convDelays()[b().id] ?? 0)) * 1000).toFixed(2)} ms.`)}
-                                  >+{((convDelays()[b().id] ?? 0) * 1000).toFixed(2)}</span>
-                                  </>
-                                )}
-                              </Show>
-                            </td>
-                          );
-                        }}
-                      </For>
-                      {(() => {
-                        const allPeqReady = () => {
-                          const xoBands = appState.bands.filter(
-                            b => b.measurement?.phase && b.measurement.phase.length > 0
-                              && b.targetEnabled && (b.target.high_pass || b.target.low_pass)
-                          );
-                          return xoBands.length >= 2 && xoBands.every(b => b.peqBands && b.peqBands.length > 0);
-                        };
-                        return (
-                          <td class="sum-cell-empty" style={{ "text-align": "center" }}>
-                            <button
-                              class="auto-align-btn"
-                              title={allPeqReady()
-                                ? L("Автоматически подобрать задержки полос", "Auto-fit band delays")
-                                : L("Нужна PEQ-оптимизация всех полос кроссовера", "All crossover bands need PEQ optimization")}
-                              disabled={!allPeqReady() || autoAligning()}
-                              aria-busy={autoAligning()}
-                              onClick={async () => {
-                                if (!allPeqReady() || autoAligning()) {
-                                  console.warn("Auto-align requires PEQ optimization on all bands");
-                                  return;
-                                }
-                                const bands = appState.bands.filter(
-                                  b => b.measurement?.phase && b.measurement.phase.length > 0
-                                );
-                                if (bands.length < 2) return;
-                                // b141.47: store bands go straight to evaluateSum (it snapshots;
-                                // a JSON clone would only miss the eval cache).
-                                // b141.38: busy flag — the button gave no sign of
-                                // work and a second click started a parallel run.
-                                setAutoAligning(true);
-                                try {
-                                  const result = await computeAutoAlign(bands, exportSampleRate());
-                                  batch(() => {
-                                    for (const [id, delay] of Object.entries(result.delays)) {
-                                      setAlignmentDelay(id, delay);
-                                    }
-                                  });
-                                } finally {
-                                  setAutoAligning(false);
-                                }
-                              }}
-                              style={{
-                                cursor: autoAligning() ? "progress" : allPeqReady() ? "pointer" : "not-allowed",
-                                opacity: allPeqReady() ? 1 : 0.4,
-                              }}
-                            >
-                              <span class="btn-label-stack">
-                                <span classList={{ "btn-label-off": autoAligning() }}>AUTO</span>
-                                <span classList={{ "btn-label-off": !autoAligning() }}>…</span>
-                              </span>
-                            </button>
-                          </td>
-                        );
-                      })()}
-                    </tr>
-                  </Show>
-                </tbody>
-              </table>
-            );
-          })()}
-        </div>
-      </Show>
-      {/* IR-specific matrix removed — now using standard SUM matrix above */}
+      {/* b141.146: the Σ matrix moved under the plot — SumStrip (bands + crossover cards) */}
       <Show when={!isSum() && showLegend() && legendEntries.length > 0 && plotTab() === "freq"}>
         {/* Freq band matrix — checkboxes like IR/Step */}
         <div class="sum-vis-table">
@@ -4919,7 +4692,24 @@ export default function FrequencyPlot() {
           </div>
         </div>
       </div>
-      {/* Old band-legend removed — all modes use matrix above */}
+      <Show when={isSum()}>
+        <SumStrip
+          visEnabled={() => legendEntries.length > 0 && (plotTab() === "freq" || plotTab() === "ir")}
+          pairMode={() => plotTab() === "ir"}
+          cell={(col, cat) => findCellEntry(col, cat)}
+          cellPair={(col, cat) => findCellEntryPair(col, cat)}
+          toggleCell={(e) => {
+            const i = legendEntries.findIndex((le) => le.seriesIdx === (e as LegendEntry).seriesIdx);
+            if (i >= 0) toggleLegendEntry(i);
+          }}
+          toggleColumn={toggleColumn}
+          toggleCategory={toggleCategory}
+          convDelays={convDelays}
+          xoX={xoX}
+          hotXo={hotXoBand}
+          onHoverXo={hoverXoBand}
+        />
+      </Show>
     </div>
   );
 }

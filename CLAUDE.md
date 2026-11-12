@@ -563,6 +563,17 @@ git diff --stat
   via `plural(n, [ru×3], [en×2])`, never `n === 1 ? "" : "а"`. Backend messages:
   `crate::tr!(ru, en, args)` / `i18n::l` (Rust `i18n.rs`, set by `set_ui_language`).
   The choice is an app preference (localStorage), not a project setting.
+- **Σ view edits under the plot** (b141.146, `components/SumStrip.tsx`): left to
+  right in frequency order — a column per band (curve visibility, level,
+  polarity, delay, PEQ state) and between two bands the card of their
+  crossover; the right panel is absent in Σ. The cards ARE the band panel's
+  filter block (`BandFilterBlock` in ControlPanel.tsx — one wired HP/LP editor
+  for both places; do not write a second one). A linked pair with both sections
+  is one card, anything else two blocks side by side. Curve cells are the plot's
+  own legend entries (`findCellEntry`/`toggleLegendEntry` passed as props) — the
+  old Σ matrix above the plot is gone, IR/Step switches sit in the toolbar.
+  Leader lines: the crossover draw hook publishes each point's client X
+  (`publishXoX`), the strip measures its cards. Pinned by `SumStrip.test.tsx`.
 - **Scroll-wheel adjustment goes through `lib/wheel-step.ts`** (b141.43):
   active only after the field is clicked (never preventDefault an inactive
   field — it freezes panel scrolling), steps from `wheelSteps` (macOS mouse
