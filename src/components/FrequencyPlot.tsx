@@ -182,6 +182,10 @@ export default function FrequencyPlot() {
   // GD scale persistence across rebuilds (toggle redraw)
   let gdUserYMin: number | null = null;
   let gdUserYMax: number | null = null;
+  // b141.150: GD mutable Y scale. A static uPlot range array is a constant
+  // function — setScale was ignored, so ± / ▲▼ / FIT did nothing on GD.
+  let gdCurYMin = -5;
+  let gdCurYMax = 20;
 
   // Zoom history for undo (right-click). b141.104 (audit 4.11): one stack
   // per tab — a shared one restored the ms range of IR on the log-Hz SPL
@@ -222,6 +226,7 @@ export default function FrequencyPlot() {
       irCurYMin = prev.yMin;
       irCurYMax = prev.yMax;
     }
+    if (pTab === "gd") { gdCurYMin = prev.yMin; gdCurYMax = prev.yMax; }
     chart.setScale("x", { min: prev.xMin, max: prev.xMax });
     chart.setScale("y", { min: prev.yMin, max: prev.yMax });
   }
@@ -574,6 +579,7 @@ export default function FrequencyPlot() {
     }
     if (pTab === "freq" || pTab === "export") { curMagMin = newMin; curMagMax = newMax; }
     else if (pTab === "ir") { irCurYMin = newMin; irCurYMax = newMax; }
+    else if (pTab === "gd") { gdCurYMin = newMin; gdCurYMax = newMax; }
     chart.setScale(yKey, { min: newMin, max: newMax });
   }
 
@@ -589,6 +595,7 @@ export default function FrequencyPlot() {
     const newMax = s.max + step;
     if (pTab === "freq" || pTab === "export") { curMagMin = newMin; curMagMax = newMax; }
     else if (pTab === "ir") { irCurYMin = newMin; irCurYMax = newMax; }
+    else if (pTab === "gd") { gdCurYMin = newMin; gdCurYMax = newMax; }
     chart.setScale(yKey, { min: newMin, max: newMax });
   }
 
@@ -668,7 +675,8 @@ export default function FrequencyPlot() {
       }
       if (isFinite(gdMin) && isFinite(gdMax)) {
         const pad = Math.max(0.5, (gdMax - gdMin) * 0.1);
-        chart.setScale("y", { min: gdMin - pad, max: gdMax + pad });
+        gdCurYMin = gdMin - pad; gdCurYMax = gdMax + pad;
+        chart.setScale("y", { min: gdCurYMin, max: gdCurYMax });
       }
     } else {
       // IR/Step — fit ±30ms around peak
@@ -798,6 +806,7 @@ export default function FrequencyPlot() {
     if (isFinite(magMin2) && isFinite(magMax2) && magMax2 > magMin2) {
       if (yKey === "mag") { curMagMin = magMin2; curMagMax = magMax2; }
       else if (pTab === "ir") { irCurYMin = magMin2; irCurYMax = magMax2; }
+      else if (pTab === "gd") { gdCurYMin = magMin2; gdCurYMax = magMax2; }
       chart.setScale(yKey, { min: magMin2, max: magMax2 });
     }
   }
@@ -3035,6 +3044,7 @@ export default function FrequencyPlot() {
     } else {
       yMin -= pad; yMax += pad;
     }
+    gdCurYMin = yMin; gdCurYMax = yMax;
 
     if (!isSum()) setShowLegend(false);
     setCursorValues([]);
@@ -3044,7 +3054,7 @@ export default function FrequencyPlot() {
       series: uSeries,
       scales: {
         x: { ...keptLogXRange(persistedXMin, persistedXMax, F_MIN_WORK, F_MAX_WORK), distr: 3 },
-        y: { auto: false, range: [yMin, yMax] as uPlot.Range.MinMax },
+        y: { auto: false, range: () => [gdCurYMin, gdCurYMax] as uPlot.Range.MinMax },
       },
       axes: [
         { stroke: "#9b9ba6", grid: { stroke: "rgba(255,255,255,0.12)" }, ticks: { stroke: "rgba(255,255,255,0.20)" }, ...(freqAxisTicks as Partial<uPlot.Axis>) },
