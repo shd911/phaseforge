@@ -35,26 +35,34 @@ describe("section ring line (b141.115)", () => {
   });
 });
 
-describe("pre-ring audibility (b141.153)", () => {
-  // relDb = M − L for LR 48 dB/oct linear at 300 Hz (Rust prering_audibility).
-  const lr48: SectionRing = { ...bw8Lin, preLobeDb: -17.43, audibility: { relDb: [-82.3, -88.6, -107.4], channelHz: 345 } };
+describe("pre-ring audibility (b141.153, windows from the main lobe's edge b141.155)", () => {
+  // relDb = M − L for LR 48 dB/oct linear at 400 Hz (Rust prering_audibility).
+  const lr48: SectionRing = { ...bw8Lin, preLobeDb: -17.43, audibility: { relDb: [-95.9, -104.3, -129.3], channelHz: 477, edgeMs: 1.23 } };
   it("adds the listening level and colours by the 1 ms and 5 ms windows", () => {
-    expect(preRingMargin(lr48, 105)!.verdict).toBe("maybe");   // M1 +22.7, M5 −2.4
-    expect(preRingMargin(lr48, 110)!.verdict).toBe("loud");    // M5 +2.6
-    expect(preRingMargin(lr48, 76)!.verdict).toBe("ok");       // M1 −6.3
-    expect(preRingLabel(preRingMargin(lr48, 105)!)).toBe("Предзвон на грани: +16.4 дБ к порогу (2 мс)");
+    expect(preRingMargin(lr48, 105)!.verdict).toBe("maybe");   // M1 +9.1, M5 −24.3
+    expect(preRingMargin(lr48, 130)!.verdict).toBe("loud");    // M5 +0.7
+    expect(preRingMargin(lr48, 80)!.verdict).toBe("ok");       // M1 −15.9
+    expect(preRingLabel(preRingMargin(lr48, 105)!)).toBe("Предзвон на грани: +0.7 дБ к порогу (2 мс после края главного лепестка, 3.2 мс от пика)");
   });
   it("flags a verdict decided below 300 Hz as unvalidated", () => {
-    const lf: SectionRing = { ...lr48, audibility: { relDb: [-75, -78, -85], channelHz: 136 } };
+    // LR 24 dB/oct at 95 Hz: «audible» (+14.9) when counted from the peak.
+    const lf: SectionRing = { ...lr48, audibility: { relDb: [-105.6, -109.5, -121.7], channelHz: 175, edgeMs: 5.56 } };
     const m = preRingMargin(lf, 105)!;
-    expect(m.verdict).toBe("loud");
+    expect(m.verdict).toBe("maybe");
     expect(m.unvalidated).toBe(true);
-    expect(preRingLabel(m)).toBe("Предзвон слышен: +27.0 дБ к порогу (2 мс) *");
+    expect(preRingLabel(m)).toBe("Предзвон на грани: −4.5 дБ к порогу (2 мс после края главного лепестка, 7.6 мс от пика) *");
+  });
+  it("no pre-lobe means no pre-ring: the attack belongs to group delay", () => {
+    const m = preRingMargin({ ...bw8Lin, audibility: { relDb: [-200, -200, -200], channelHz: 95, edgeMs: null } }, 105)!;
+    expect(m.verdict).toBe("none");
+    expect(m.unvalidated).toBe(false);
+    expect(preRingLabel(m)).toBe("Предзвона нет: атака → групповая задержка");
   });
   it("min phase has no verdict, a numerically clean pre-ring prints < −60", () => {
     expect(preRingMargin({ ...bw8Lin, audibility: null }, 105)).toBeNull();
-    const clean = preRingMargin({ ...bw8Lin, audibility: { relDb: [-200, -200, -200], channelHz: 3000 } }, 105)!;
+    const clean = preRingMargin({ ...bw8Lin, audibility: { relDb: [-200, -200, -200], channelHz: 3000, edgeMs: 0.2 } }, 105)!;
     expect(clean.verdict).toBe("ok");
-    expect(preRingLabel(clean)).toBe("Предзвон не слышен: < −60 дБ к порогу (2 мс)");
+    expect(preRingLabel(clean)).toBe("Предзвон не слышен: < −60 дБ к порогу (2 мс после края главного лепестка, 2.2 мс от пика)");
   });
 });
+

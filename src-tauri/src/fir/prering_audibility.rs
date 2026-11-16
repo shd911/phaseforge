@@ -13,6 +13,13 @@
 //! channel the energy of the envelope that arrives earlier than τ before the
 //! event is compared with the threshold tone's energy over 200 ms (temporal
 //! integration):  X_k(τ) = 10·lg(E_k(τ) / 0.2 s) − ATH(f_k).
+//!
+//! b141.155: the event is the EDGE of the main lobe (first sign change back
+//! from the peak), not the peak. The main lobe lasts ~0.5/fc: at 95 Hz a 2 ms
+//! window from the peak sat inside it (the impulse still at −4.3 dB) and read
+//! the smeared attack as pre-ring — LR 24 dB/oct at 95 Hz +14.9 dB «audible»,
+//! −4.5 dB from the edge. The attack's smear belongs to group delay. Without a
+//! sign change (LR 12 dB/oct, Gaussian M ≤ ~1.4) there is no pre-ring at all.
 //! The margin over threshold at a peak level L (dB SPL at the listener) is
 //! L + max_k X_k(τ) — the level is added in the UI.
 use rustfft::{num_complex::Complex64, FftPlanner};
@@ -30,6 +37,9 @@ pub struct PreRingAudibility {
     pub rel_db: [f64; 3],
     /// Channel that decides X at τ = 2 ms, Hz.
     pub channel_hz: f64,
+    /// Edge of the main lobe → peak, ms; the windows start there. None: the
+    /// impulse has no pre-lobe — no pre-ring (`rel_db` all −200).
+    pub edge_ms: Option<f64>,
 }
 
 /// ISO 226:2003 hearing threshold Tf, dB SPL.
@@ -66,10 +76,14 @@ pub fn channels(fc: f64, nyquist: f64) -> Vec<f64> {
 }
 
 /// `h`: the section's impulse at `sr`, any scale (normalised to its peak
-/// here), the event at its absolute peak.
-pub fn pre_ring_audibility(h: &[f64], sr: f64, fc: f64) -> PreRingAudibility {
+/// here); `edge`: first sample of its main lobe (`section_ring::first_pre_lobe`),
+/// None when it has no pre-lobe.
+pub fn pre_ring_audibility(h: &[f64], sr: f64, fc: f64, edge: Option<usize>) -> PreRingAudibility {
     let n = h.len();
     let (p, peak) = h.iter().enumerate().fold((0, 0.0f64), |(i, m), (k, v)| if v.abs() > m { (k, v.abs()) } else { (i, m) });
+    let Some(edge) = edge.filter(|&e| e <= p) else {
+        return PreRingAudibility { rel_db: [NONE_DB; 3], channel_hz: fc, edge_ms: None };
+    };
     let mut planner = FftPlanner::new();
     let mut spec: Vec<Complex64> = h.iter().map(|&v| Complex64::new(v / peak, 0.0)).collect();
     planner.plan_fft_forward(n).process(&mut spec);
@@ -91,7 +105,7 @@ pub fn pre_ring_audibility(h: &[f64], sr: f64, fc: f64) -> PreRingAudibility {
         ifft.process(&mut y);
         let ath = hearing_threshold_db(fk);
         for (i, tau) in TAUS_MS.iter().enumerate() {
-            let end = p.saturating_sub((tau * 1e-3 * sr).round() as usize);
+            let end = edge.saturating_sub((tau * 1e-3 * sr).round() as usize);
             // e²/2 = the tone's mean square; ∫ dt = Σ / sr.
             let e: f64 = y[..end].iter().map(|v| (2.0 * v.norm() / n as f64).powi(2) / 2.0).sum::<f64>() / sr;
             let x = if e > 0.0 { (10.0 * (e / 0.2).log10() - ath).max(NONE_DB) } else { NONE_DB };
@@ -99,7 +113,7 @@ pub fn pre_ring_audibility(h: &[f64], sr: f64, fc: f64) -> PreRingAudibility {
             if i == 1 && x > best2.0 { best2 = (x, fk); }
         }
     }
-    PreRingAudibility { rel_db, channel_hz: best2.1 }
+    PreRingAudibility { rel_db, channel_hz: best2.1, edge_ms: Some((p - edge) as f64 / sr * 1000.0) }
 }
 
 #[cfg(test)]
@@ -123,26 +137,30 @@ mod tests {
         for w in c.windows(2) { assert!((cam(w[1]) - cam(w[0]) - 0.5).abs() < 1e-9); }
     }
 
-    /// Calibration against the «5 полос» table (16.11.2026, L = 105 dB SPL),
-    /// +6.0 dB: their envelope was |h ⊗ g| = A/2 (confirmed and corrected
-    /// there the same day). Their LR4/LR8 are the textbook ones = PhaseForge
-    /// LR order 2/4 (24/48 dB/oct).
+    /// Calibration against the «5 полос» table (16.11.2026, L = 105 dB SPL,
+    /// windows from the main lobe's edge — their Python replication of this
+    /// module, which matched the UI directly). Their LR 24/48 are PhaseForge
+    /// LR order 2/4. Values under −60 are left out (floor-sensitive).
     #[test]
     fn matches_the_reference_table() {
         use crate::fir::section_ring::section_ring;
         use crate::target::{FilterConfig, FilterType};
         let c = |ft: FilterType, order: u8, fc: f64, shape: Option<f64>| FilterConfig { filter_type: ft, order, freq_hz: fc,
             shape, linear_phase: true, q: None, subsonic_protect: None, complementary: false, nested: Vec::new() };
-        // (name, config, [M1, M2, M5] at 105 dB; NaN = not given / < −60)
         let n = f64::NAN;
-        let cases = [
-            ("LR24 100", c(FilterType::LinkwitzRiley, 2, 100.0, None), [n, 8.5, -2.3]),
-            ("LR24 300", c(FilterType::LinkwitzRiley, 2, 300.0, None), [-1.4, -12.2, n]),
-            ("LR24 1000", c(FilterType::LinkwitzRiley, 2, 1000.0, None), [-37.0, n, n]),
-            ("LR48 100", c(FilterType::LinkwitzRiley, 4, 100.0, None), [n, 21.3, 15.0]),
-            ("LR48 300", c(FilterType::LinkwitzRiley, 4, 300.0, None), [16.9, 10.6, -8.2]),
-            ("LR48 1000", c(FilterType::LinkwitzRiley, 4, 1000.0, None), [-6.4, -27.0, n]),
-            ("Gauss M1.7 400", c(FilterType::Gaussian, 1, 400.0, Some(1.7)), [0.0, -20.0, n]),
+        // (name, config, Some([M1, M2, M5]) at 105 dB from the edge, edge→peak ms) | None = no pre-ring
+        let cases: [(&str, FilterConfig, Option<([f64; 3], f64)>); 11] = [
+            ("LR24 95", c(FilterType::LinkwitzRiley, 2, 95.0, None), Some(([-0.6, -4.5, -16.7], 5.56))),
+            ("LR48 95", c(FilterType::LinkwitzRiley, 4, 95.0, None), Some(([18.8, 16.8, 11.0], 5.21))),
+            ("Gauss M1.7 95", c(FilterType::Gaussian, 1, 95.0, Some(1.7)), Some(([4.1, -1.3, -16.2], 5.27))),
+            ("Gauss M1.8 95", c(FilterType::Gaussian, 1, 95.0, Some(1.8)), Some(([7.2, 2.6, -10.8], 5.27))),
+            ("Gauss M2.0 95", c(FilterType::Gaussian, 1, 95.0, Some(2.0)), Some(([11.9, 8.3, -2.6], 5.27))),
+            ("Gauss M3.0 95", c(FilterType::Gaussian, 1, 95.0, Some(3.0)), Some(([22.9, 21.1, 15.5], 5.31))),
+            ("Gauss M1.0 95", c(FilterType::Gaussian, 1, 95.0, Some(1.0)), None),
+            ("LR12 95", c(FilterType::LinkwitzRiley, 1, 95.0, None), None),
+            ("LR24 400", c(FilterType::LinkwitzRiley, 2, 400.0, None), Some(([-21.5, -36.2, n], 1.31))),
+            ("Gauss M1.7 400", c(FilterType::Gaussian, 1, 400.0, Some(1.7)), Some(([-19.4, -44.0, n], 1.25))),
+            ("LR48 400", c(FilterType::LinkwitzRiley, 4, 400.0, None), Some(([9.1, 0.7, -24.3], 1.23))),
         ];
         let mut fails = Vec::new();
         for (name, cfg, want) in cases {
@@ -150,9 +168,19 @@ mod tests {
                 let r = section_ring(&cfg, lp, 48_000.0).unwrap();
                 let a = r.audibility.unwrap();
                 let got: Vec<f64> = a.rel_db.iter().map(|x| x + 105.0).collect();
-                println!("{name} {}: M1 {:.1} M2 {:.1} M5 {:.1} @ {:.0} Hz (want {want:?})", if lp { "LP" } else { "HP" }, got[0], got[1], got[2], a.channel_hz);
-                for i in 0..3 {
-                    if want[i].is_finite() && (got[i] - want[i] - 6.0).abs() > 1.0 { fails.push(format!("{name} lp={lp} M{} {:.1} vs {}", TAUS_MS[i], got[i], want[i])); }
+                println!("{name} {}: M1 {:.1} M2 {:.1} M5 {:.1} @ {:.0} Hz, edge {:?} ms (want {want:?})",
+                    if lp { "LP" } else { "HP" }, got[0], got[1], got[2], a.channel_hz, a.edge_ms);
+                match want {
+                    None => if a.edge_ms.is_some() || a.rel_db != [NONE_DB; 3] { fails.push(format!("{name} lp={lp}: pre-ring where none")); },
+                    Some((m, edge)) => {
+                        match a.edge_ms {
+                            Some(e) if (e - edge).abs() <= 0.05 => {}
+                            e => fails.push(format!("{name} lp={lp} edge {e:?} vs {edge}")),
+                        }
+                        for i in 0..3 {
+                            if m[i].is_finite() && (got[i] - m[i]).abs() > 1.0 { fails.push(format!("{name} lp={lp} M{} {:.1} vs {}", TAUS_MS[i], got[i], m[i])); }
+                        }
+                    }
                 }
             }
         }

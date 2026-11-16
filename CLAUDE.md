@@ -271,8 +271,13 @@
   t_peak − τ (1/2/5 ms) vs ISO 226 over 200 ms; the UI adds «Пик у слушателя»
   (project setting, 105 dB SPL). Envelope = 2·|y| on EVERY bin, negative
   frequencies included — an analytic signal is not causal (LP DC through the
-  skirt, −8 instead of −37 dB). Green M(1 ms) ≤ −6, red M(5 ms) > 0. Pinned by
-  `prering_audibility::matches_the_reference_table`.
+  skirt, −8 instead of −37 dB). Green M(1 ms) ≤ −6, red M(5 ms) > 0.
+  b141.155: τ counts from the main lobe's EDGE (`section_ring::first_pre_lobe`,
+  first sign change back from the peak), never from the peak: the main lobe
+  lasts ~0.5/fc, so at 95 Hz a 2 ms window from the peak read the attack's own
+  front (−4.3 dB) as pre-ring (LR 24 dB/oct +14.9 → −4.5 dB). The attack's smear
+  is group delay. No pre-lobe (LR 12 dB/oct, Gaussian M ≤ ~1.4) = no pre-ring.
+  Pinned by `prering_audibility::matches_the_reference_table` («5 полос» values).
 - **Complementary crossover «1 − H»** (b141.109, `FilterConfig::complementary`,
   `target::complement_active`): a section = 1 − |its mirror| (same type/order/
   Q/freq). Honoured only on linear phase and not for Custom Q > 0.708

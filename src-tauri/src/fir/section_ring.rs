@@ -55,6 +55,13 @@ const LOBE_FLOOR_DB: f64 = -150.0;
 /// sign change and the lobe runs to the next one. None when there is no lobe
 /// or it is under `LOBE_FLOOR_DB`.
 pub fn first_pre_lobe_db(h: &[f64]) -> Option<f64> {
+    first_pre_lobe(h).map(|(_, db)| db)
+}
+
+/// b141.155: (first sample of the main lobe, first pre-lobe dB). The edge is
+/// where the pre-ring ends and the attack begins — the masking window of
+/// `prering_audibility` is counted from it. None: no lobe above the floor.
+pub fn first_pre_lobe(h: &[f64]) -> Option<(usize, f64)> {
     let (p, peak) = h.iter().enumerate().fold((0, 0.0f64), |(i, m), (k, v)| if v.abs() > m { (k, v.abs()) } else { (i, m) });
     if !(peak > 0.0) { return None; }
     let s = h[p].signum();
@@ -69,7 +76,7 @@ pub fn first_pre_lobe_db(h: &[f64]) -> Option<f64> {
         j -= 1;
     }
     let db = 20.0 * (lobe / peak).log10();
-    (db > LOBE_FLOOR_DB).then_some(db)
+    (db > LOBE_FLOOR_DB).then_some((i, db))
 }
 
 /// Envelope reading of an impulse (any scale): (pre60, pre100, post60,
@@ -110,8 +117,9 @@ pub fn section_ring(cfg: &FilterConfig, is_low_pass: bool, sample_rate: f64) -> 
         let fits = b100 < n * 3 / 8 && a100 < n * 3 / 8 && edge <= peak * 1e-7;
         if fits || n >= N_MAX {
             let ms = |s: usize| s as f64 / sample_rate * 1000.0;
-            let pre_lobe_db = if cfg.linear_phase { first_pre_lobe_db(&h) } else { None };
-            let audibility = cfg.linear_phase.then(|| pre_ring_audibility(&h, sample_rate, cfg.freq_hz));
+            let lobe = if cfg.linear_phase { first_pre_lobe(&h) } else { None };
+            let pre_lobe_db = lobe.map(|(_, db)| db);
+            let audibility = cfg.linear_phase.then(|| pre_ring_audibility(&h, sample_rate, cfg.freq_hz, lobe.map(|(e, _)| e)));
             return Ok(SectionRing { post_60_ms: ms(a60), post_100_ms: ms(a100), pre_60_ms: ms(b60),
                 pre_100_ms: ms(b100), lower_bound: !fits, pre_lobe_db, audibility });
         }
