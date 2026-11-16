@@ -408,7 +408,7 @@ async fn compute_target_hilbert_phase(
     fir::band::target_hilbert_phase(&freq, high_pass.as_ref(), low_pass.as_ref(), tilt, sample_rate)
 }
 
-/// b141.112: ring time of one crossover section at the export rate.
+/// b141.112: ring time of one crossover section at the export rate (b141.152: + first pre-ring lobe).
 #[tauri::command]
 async fn compute_section_ring(
     config: target::FilterConfig,
@@ -492,7 +492,7 @@ pub fn run() {
             .init();
     }
 
-    info!("PhaseForge b141.151 starting...");
+    info!("PhaseForge b141.152 starting...");
     info!("log file: {}", applog::log_path().map(|p| p.display().to_string()).unwrap_or_else(|| "—".into()));
 
     tauri::Builder::default()

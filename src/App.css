@@ -2321,6 +2321,7 @@ input[type="checkbox"]:focus-visible {
 .peq-auto-section .peq-sidebar-header { margin-bottom: 4px; }
 .fb-hint { font-size: var(--fs-xs); color: var(--text-secondary); padding: 2px 0 0; text-align: center; } /* b141.105: opacity 0.7 gave 3.10:1 */
 .fb-ring { font-size: var(--fs-xs); color: var(--text-primary); padding: 5px 0 0; text-align: center; font-variant-numeric: tabular-nums; } /* b141.111; b141.116: apart from .fb-hint, steady digits */
+.fb-ring .fb-prelobe.loud { color: var(--danger); font-weight: 600; } /* b141.152 */
 .fb-ring .warn { color: var(--warn-amber-text); text-align: left; line-height: 1.35; border-left: 2px solid var(--warn-amber); padding: 1px 0 1px 6px; margin-top: 3px; }
 
 /* b141.146: Σ strip under the plot — a column per band, and between two

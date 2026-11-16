@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ringLabel, ringSymmetric, ringTooLong, type SectionRing } from "../section-ring";
+import { ringLabel, ringSymmetric, ringTooLong, preLobeLabel, preLobeLoud, type SectionRing } from "../section-ring";
 
 // Measured by Rust section_ring at 48 kHz (b141.115 audit probe).
 const gaussLinSub: SectionRing = { pre60Ms: 8.2, pre100Ms: 169.9, post60Ms: 53.0, post100Ms: 399.6, lowerBound: false };
@@ -32,5 +32,21 @@ describe("section ring line (b141.115)", () => {
     expect(ringTooLong(r, false, 43.5)).toBe(false);
     expect(ringTooLong(r, true, 42)).toBe(false);   // max(3, 40) fits each half
     expect(ringTooLong(gaussLinSub, true, 341)).toBe(true); // 64K @ 48 kHz: 341 ms
+  });
+});
+
+describe("first pre-ring lobe (b141.152)", () => {
+  // Rust section_ring at 48 kHz: LR4 linear −17.4 dB, Gaussian M1 none.
+  const lr4: SectionRing = { ...bw8Lin, preLobeDb: -17.43 };
+  it("prints the level and turns red above −60 dB", () => {
+    expect(preLobeLabel(lr4)).toBe("Предзвон: 1-й лепесток −17.4 дБ");
+    expect(preLobeLoud(lr4)).toBe(true);
+    expect(preLobeLoud({ ...lr4, preLobeDb: -60 })).toBe(false);
+    expect(preLobeLoud({ ...lr4, preLobeDb: -99.4 })).toBe(false);
+  });
+  it("a section without lobes is quiet", () => {
+    const g: SectionRing = { ...bw8Lin, preLobeDb: null };
+    expect(preLobeLabel(g)).toBe("Предзвон: боковых лепестков нет");
+    expect(preLobeLoud(g)).toBe(false);
   });
 });

@@ -65,7 +65,7 @@ import { openHighQPopup } from "./HighQWarningPopup";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { projectDir, sanitize } from "../lib/project-io";
-import { type SectionRing, ringWarning, ringLabel, ringTitle, ringTooLong as ringTooLongFor } from "../lib/section-ring";
+import { type SectionRing, ringWarning, ringLabel, ringTitle, ringTooLong as ringTooLongFor, preLobeLabel, preLobeLoud, preLobeTitle } from "../lib/section-ring";
 
 /** b141.38: an out-of-range PEQ entry used to be dropped silently while the
  *  field kept showing it — the table and the model disagreed with no hint.
@@ -571,6 +571,9 @@ function FilterBlock(props: FilterBlockProps) {
           {(r) => (
             <div class="fb-ring" title={ringTitle(r(), c()!.linear_phase, exportSampleRate(), halfFileMs())}>
               {ringLabel(r(), c()!.linear_phase)}
+              <Show when={c()!.linear_phase}>
+                <div class={`fb-prelobe ${preLobeLoud(r()) ? "loud" : ""}`} title={preLobeTitle()}>{preLobeLabel(r())}</div>
+              </Show>
               <Show when={ringTooLong()}>
                 <div class="warn">{ringWarning(halfFileMs())}</div>
               </Show>

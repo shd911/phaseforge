@@ -8,7 +8,7 @@
 // is read on 1 − HP, as `section_ring` does) and the envelope is read with the same −60 / −100 dB rule.
 // Pre-ring is compared on linear sections only.
 use phaseforge_lib::fir::band::{generate_band_fir, BandFirSettings};
-use phaseforge_lib::fir::section_ring::{ring_samples, section_ring};
+use phaseforge_lib::fir::section_ring::{first_pre_lobe_db, ring_samples, section_ring};
 use phaseforge_lib::fir::{export_wav_f64, WindowType};
 use phaseforge_lib::target::{FilterConfig, FilterType, TargetCurve};
 use std::path::PathBuf;
@@ -52,7 +52,7 @@ fn exported(c: &FilterConfig, is_lp: bool, tag: &str) -> (Vec<f64>, usize) {
     (h, r.fir.wav_delay_samples)
 }
 
-fn measured(c: &FilterConfig, is_lp: bool, tag: &str) -> (f64, f64, f64, f64) {
+fn measured(c: &FilterConfig, is_lp: bool, tag: &str) -> (f64, f64, f64, f64, Option<f64>) {
     let (mut h, d) = exported(c, is_lp, tag);
     if !is_lp { h[d] -= 1.0; }
     // The last 1/32 of the file is left out: a min-phase cepstral FIR wraps
@@ -60,7 +60,7 @@ fn measured(c: &FilterConfig, is_lp: bool, tag: &str) -> (f64, f64, f64, f64) {
     // 80 Hz — the export's own shortfall, not the section's ring).
     let (b60, b100, a60, a100) = ring_samples(&h[..TAPS - TAPS / 32]);
     let ms = |n: usize| n as f64 / SR * 1000.0;
-    (ms(b60), ms(b100), ms(a60), ms(a100))
+    (ms(b60), ms(b100), ms(a60), ms(a100), first_pre_lobe_db(&h[..TAPS - TAPS / 32]))
 }
 
 #[test]
@@ -78,7 +78,7 @@ fn section_ring_matches_the_exported_impulse() {
     let mut fails = Vec::new();
     for (i, (name, c, is_lp)) in cases.iter().enumerate() {
         let calc = section_ring(c, *is_lp, SR).unwrap();
-        let (b60, b100, a60, a100) = measured(c, *is_lp, &i.to_string());
+        let (b60, b100, a60, a100, lobe) = measured(c, *is_lp, &i.to_string());
         println!("{name}: расчёт после {:.2}/{:.2} мс, до {:.2}/{:.2}; WAV после {a60:.2}/{a100:.2}, до {b60:.2}/{b100:.2}",
             calc.post_60_ms, calc.post_100_ms, calc.pre_60_ms, calc.pre_100_ms);
         let close = |a: f64, b: f64| (a - b).abs() <= (0.05 * b).max(0.3);
@@ -88,6 +88,15 @@ fn section_ring_matches_the_exported_impulse() {
             if !close(x, m) { fails.push(format!("{name}: {what}: расчёт {x:.2} мс, WAV {m:.2} мс")); }
         }
         assert!(!calc.lower_bound, "{name}: tail did not fit the grid");
+        // b141.152: the first pre-ring lobe of a linear section, as in the file.
+        if c.linear_phase {
+            println!("{name}: первый лепесток расчёт {:?}, WAV {lobe:?} дБ", calc.pre_lobe_db);
+            match (calc.pre_lobe_db, lobe) {
+                (Some(x), Some(m)) if (x - m).abs() <= 0.3 => {}
+                (None, m) if m.map_or(true, |m| m < -100.0) => {}
+                (x, m) => fails.push(format!("{name}: первый лепесток расчёт {x:?}, WAV {m:?} дБ")),
+            }
+        }
     }
     assert!(fails.is_empty(), "{}", fails.join("\n"));
 }

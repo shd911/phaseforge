@@ -37,6 +37,35 @@ pub struct SectionRing {
     pub pre_100_ms: f64,
     /// The tail outlived the longest grid: the values are lower bounds.
     pub lower_bound: bool,
+    /// b141.152: linear phase only — level (dB re the peak) of the first side
+    /// lobe before the main lobe, the loudest lobe of the pre-ring. None for
+    /// minimum phase and for a section without lobes (Gaussian).
+    pub pre_lobe_db: Option<f64>,
+}
+
+/// Lobes quieter than this are float noise, not ringing (a Gaussian has none).
+const LOBE_FLOOR_DB: f64 = -150.0;
+
+/// b141.152: level, dB re the absolute peak, of the first side lobe before
+/// the main lobe: walking back from the peak, the main lobe ends at the first
+/// sign change and the lobe runs to the next one. None when there is no lobe
+/// or it is under `LOBE_FLOOR_DB`.
+pub fn first_pre_lobe_db(h: &[f64]) -> Option<f64> {
+    let (p, peak) = h.iter().enumerate().fold((0, 0.0f64), |(i, m), (k, v)| if v.abs() > m { (k, v.abs()) } else { (i, m) });
+    if !(peak > 0.0) { return None; }
+    let s = h[p].signum();
+    let mut i = p;
+    while i > 0 && h[i - 1] * s > 0.0 { i -= 1; }
+    if i == 0 { return None; }
+    let mut j = i - 1;
+    let mut lobe = 0.0f64;
+    loop {
+        lobe = lobe.max(h[j].abs());
+        if j == 0 || h[j - 1] * s > 0.0 { break; }
+        j -= 1;
+    }
+    let db = 20.0 * (lobe / peak).log10();
+    (db > LOBE_FLOOR_DB).then_some(db)
 }
 
 /// Envelope reading of an impulse (any scale): (pre60, pre100, post60,
@@ -77,8 +106,9 @@ pub fn section_ring(cfg: &FilterConfig, is_low_pass: bool, sample_rate: f64) -> 
         let fits = b100 < n * 3 / 8 && a100 < n * 3 / 8 && edge <= peak * 1e-7;
         if fits || n >= N_MAX {
             let ms = |s: usize| s as f64 / sample_rate * 1000.0;
+            let pre_lobe_db = if cfg.linear_phase { first_pre_lobe_db(&h) } else { None };
             return Ok(SectionRing { post_60_ms: ms(a60), post_100_ms: ms(a100), pre_60_ms: ms(b60),
-                pre_100_ms: ms(b100), lower_bound: !fits });
+                pre_100_ms: ms(b100), lower_bound: !fits, pre_lobe_db });
         }
         n *= 2;
     }
@@ -154,6 +184,41 @@ mod tests {
         assert!((r.pre_60_ms - r.post_60_ms).abs() <= 0.05, "{r:?}");
         assert!((r.pre_100_ms - r.post_100_ms).abs() <= 0.05, "{r:?}");
         assert!(!r.lower_bound);
+    }
+
+    /// b141.152: the first pre-ring lobe — a sinc's is −13.3 dB, a single
+    /// sample has none; LR/BW slopes print theirs, a Gaussian has none.
+    #[test]
+    fn first_pre_lobe_reading() {
+        let n = 4097;
+        let sinc: Vec<f64> = (0..n).map(|i| { let x = (i as f64 - 2048.0) / 8.0 * PI; if x == 0.0 { 1.0 } else { x.sin() / x } }).collect();
+        let db = first_pre_lobe_db(&sinc).unwrap();
+        assert!((db + 13.26).abs() < 0.2, "sinc {db}"); // sampled 8×/period: −13.40
+        let mut neg = sinc.clone();
+        for v in neg.iter_mut() { *v = -*v; }
+        assert!((first_pre_lobe_db(&neg).unwrap() - db).abs() < 1e-12);
+        let mut d = vec![0.0; 64]; d[32] = 1.0;
+        assert_eq!(first_pre_lobe_db(&d), None);
+        let sr = 48_000.0;
+        for (ft, order, lin, lp) in [(FilterType::LinkwitzRiley, 2, true, true), (FilterType::LinkwitzRiley, 4, true, true),
+            (FilterType::LinkwitzRiley, 8, true, true), (FilterType::Butterworth, 8, true, false), (FilterType::LinkwitzRiley, 4, true, false),
+            (FilterType::Gaussian, 1, true, true), (FilterType::LinkwitzRiley, 4, false, true)] {
+            let mut c = cfg(ft.clone(), order, 100.0, lin);
+            if matches!(ft, FilterType::Gaussian) { c.shape = Some(1.0); }
+            let r = section_ring(&c, lp, sr).unwrap();
+            println!("{ft:?}{order} {} lin={lin}: first pre lobe {:?} dB", if lp { "LP" } else { "HP" }, r.pre_lobe_db);
+            match (lin, &ft, order) {
+                (false, ..) | (true, FilterType::Gaussian, _) => assert_eq!(r.pre_lobe_db, None),
+                // LR4 linear: −17.4 dB, the same on the HP (1 − HP = LP).
+                (true, FilterType::LinkwitzRiley, 4) => assert!((r.pre_lobe_db.unwrap() + 17.43).abs() < 0.1),
+                _ => assert!(r.pre_lobe_db.unwrap() > -30.0),
+            }
+        }
+        // A Gaussian (M ≤ 1) has no lobes; a super-Gaussian (M ≥ 2) has.
+        for (m, lobes) in [(1.0, false), (2.0, true)] {
+            let mut c = cfg(FilterType::Gaussian, 1, 100.0, true); c.shape = Some(m);
+            assert_eq!(section_ring(&c, true, sr).unwrap().pre_lobe_db.is_some(), lobes, "Gauss M{m}");
+        }
     }
 
     /// Ring scales as 1/fc and grows with the slope.

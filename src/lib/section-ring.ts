@@ -2,7 +2,28 @@
  *  `fir::section_ring::SectionRing`) for the FilterBlock line. */
 import { L } from "./i18n";
 
-export interface SectionRing { post60Ms: number; post100Ms: number; pre60Ms: number; pre100Ms: number; lowerBound: boolean }
+export interface SectionRing {
+  post60Ms: number; post100Ms: number; pre60Ms: number; pre100Ms: number; lowerBound: boolean;
+  /** b141.152: linear phase — first side lobe before the peak, dB re the peak;
+   *  null on minimum phase or without lobes (Gaussian). */
+  preLobeDb?: number | null;
+}
+
+/** b141.152: a first pre-ring lobe louder than this turns red. */
+export const PRE_LOBE_LIMIT_DB = -60;
+
+export const preLobeLoud = (r: SectionRing) => r.preLobeDb != null && r.preLobeDb > PRE_LOBE_LIMIT_DB;
+
+export function preLobeLabel(r: SectionRing): string {
+  return r.preLobeDb == null
+    ? L("Предзвон: боковых лепестков нет", "Pre-ring: no side lobes")
+    : L(`Предзвон: 1-й лепесток ${r.preLobeDb.toFixed(1).replace("-", "−")} дБ`,
+      `Pre-ring: 1st lobe ${r.preLobeDb.toFixed(1).replace("-", "−")} dB`);
+}
+
+export const preLobeTitle = () =>
+  L(`Уровень первого бокового лепестка перед пиком импульса, относительно пика (у ФВЧ — относительно отклонения от ровной АЧХ, как и звон). Он самый громкий в предзвоне; выше ${PRE_LOBE_LIMIT_DB} дБ предзвон может быть слышен — красный.`,
+    `Level of the first side lobe before the impulse peak, re the peak (for an HP — re the deviation from flat, as the ringing). It is the loudest of the pre-ring; above ${PRE_LOBE_LIMIT_DB} dB the pre-ring may be audible — red.`);
 
 export const fmtRingMs = (ms: number) => (ms < 10 ? ms.toFixed(1) : String(Math.round(ms)));
 
