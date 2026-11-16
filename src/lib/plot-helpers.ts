@@ -355,3 +355,17 @@ export function irDataCacheKey(opts: {
     opts.sampleRate,
   ].join("|");
 }
+
+/** b141.150: largest span the vertical zoom-out may reach — dB/% plots and GD (ms). */
+export const ZOOM_MAX_SPAN_DB = 500;
+export const ZOOM_MAX_SPAN_GD_MS = 20000;
+
+/**
+ * Whether a vertical zoom to `span` is allowed. The upper cap only stops
+ * zooming OUT: a GD plot opened at ~900 ms (a measurement's LF group delay)
+ * was over the old 500 cap, so even «+» was refused.
+ */
+export function zoomSpanAllowed(span: number, factor: number, maxSpan: number): boolean {
+  if (!(span >= 0.01)) return false;
+  return factor <= 1 || span <= maxSpan;
+}

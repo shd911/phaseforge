@@ -14,3 +14,18 @@ describe("plot scales", () => {
     expect(src.match(/range:\s*\[/g) ?? []).toEqual([]);
   });
 });
+
+import { zoomSpanAllowed, ZOOM_MAX_SPAN_DB, ZOOM_MAX_SPAN_GD_MS } from "../../lib/plot-helpers";
+
+describe("vertical zoom limits (b141.150)", () => {
+  it("zooming in is allowed from a range wider than the cap", () => {
+    // Real GD tab: −780..+124 ms; «+» (×0.6) gives 542 ms — refused before.
+    expect(zoomSpanAllowed(904 * 0.6, 0.6, ZOOM_MAX_SPAN_DB)).toBe(true);
+    expect(zoomSpanAllowed(904 * 0.6, 0.6, ZOOM_MAX_SPAN_GD_MS)).toBe(true);
+  });
+  it("zooming out stops at the cap, zooming in at 0.01", () => {
+    expect(zoomSpanAllowed(600, 1.6, ZOOM_MAX_SPAN_DB)).toBe(false);
+    expect(zoomSpanAllowed(1446, 1.6, ZOOM_MAX_SPAN_GD_MS)).toBe(true);
+    expect(zoomSpanAllowed(0.005, 0.6, ZOOM_MAX_SPAN_DB)).toBe(false);
+  });
+});

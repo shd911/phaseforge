@@ -30,7 +30,7 @@ import {
   STATUS_GOOD, STATUS_WARN, STATUS_BAD,
   DEFAULT_IR_COLORS, DEFAULT_GD_COLORS, DEFAULT_EXPORT_COLORS,
   irDataCacheKey,
-  keptLogXRange,
+  keptLogXRange, zoomSpanAllowed, ZOOM_MAX_SPAN_DB, ZOOM_MAX_SPAN_GD_MS,
   freqAxisTicks,
 } from "../lib/plot-helpers";
 import { hasActiveSubsonicProtect, cloneFilterConfig } from "../lib/types";
@@ -567,13 +567,13 @@ export default function FrequencyPlot() {
     if (pTab === "freq" || pTab === "export") {
       // Anchor 0 dB at 20% from top — zoom expands/contracts below
       const totalRange = (s.max - s.min) * factor;
-      if (totalRange < 0.01 || totalRange > 500) { zoomStack().pop(); return; }
+      if (!zoomSpanAllowed(totalRange, factor, ZOOM_MAX_SPAN_DB)) { zoomStack().pop(); return; }
       newMax = 0 + totalRange * 0.2;
       newMin = 0 - totalRange * 0.8;
     } else {
       const center = (s.min + s.max) / 2;
       const half = ((s.max - s.min) / 2) * factor;
-      if (half * 2 < 0.01 || half * 2 > 500) { zoomStack().pop(); return; }
+      if (!zoomSpanAllowed(half * 2, factor, pTab === "gd" ? ZOOM_MAX_SPAN_GD_MS : ZOOM_MAX_SPAN_DB)) { zoomStack().pop(); return; }
       newMin = center - half;
       newMax = center + half;
     }
