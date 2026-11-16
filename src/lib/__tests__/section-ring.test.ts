@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ringLabel, ringSymmetric, ringTooLong, preLobeLabel, preLobeLoud, type SectionRing } from "../section-ring";
+import { ringLabel, ringSymmetric, ringTooLong, preRingMargin, preRingLabel, type SectionRing } from "../section-ring";
 
 // Measured by Rust section_ring at 48 kHz (b141.115 audit probe).
 const gaussLinSub: SectionRing = { pre60Ms: 8.2, pre100Ms: 169.9, post60Ms: 53.0, post100Ms: 399.6, lowerBound: false };
@@ -35,18 +35,26 @@ describe("section ring line (b141.115)", () => {
   });
 });
 
-describe("first pre-ring lobe (b141.152)", () => {
-  // Rust section_ring at 48 kHz: LR4 linear −17.4 dB, Gaussian M1 none.
-  const lr4: SectionRing = { ...bw8Lin, preLobeDb: -17.43 };
-  it("prints the level and turns red above −60 dB", () => {
-    expect(preLobeLabel(lr4)).toBe("Предзвон: 1-й лепесток −17.4 дБ");
-    expect(preLobeLoud(lr4)).toBe(true);
-    expect(preLobeLoud({ ...lr4, preLobeDb: -60 })).toBe(false);
-    expect(preLobeLoud({ ...lr4, preLobeDb: -99.4 })).toBe(false);
+describe("pre-ring audibility (b141.153)", () => {
+  // relDb = M − L for LR 48 dB/oct linear at 300 Hz (Rust prering_audibility).
+  const lr48: SectionRing = { ...bw8Lin, preLobeDb: -17.43, audibility: { relDb: [-82.3, -88.6, -107.4], channelHz: 345 } };
+  it("adds the listening level and colours by the 1 ms and 5 ms windows", () => {
+    expect(preRingMargin(lr48, 105)!.verdict).toBe("maybe");   // M1 +22.7, M5 −2.4
+    expect(preRingMargin(lr48, 110)!.verdict).toBe("loud");    // M5 +2.6
+    expect(preRingMargin(lr48, 76)!.verdict).toBe("ok");       // M1 −6.3
+    expect(preRingLabel(preRingMargin(lr48, 105)!)).toBe("Предзвон на грани: +16.4 дБ к порогу (2 мс)");
   });
-  it("a section without lobes is quiet", () => {
-    const g: SectionRing = { ...bw8Lin, preLobeDb: null };
-    expect(preLobeLabel(g)).toBe("Предзвон: боковых лепестков нет");
-    expect(preLobeLoud(g)).toBe(false);
+  it("flags a verdict decided below 300 Hz as unvalidated", () => {
+    const lf: SectionRing = { ...lr48, audibility: { relDb: [-75, -78, -85], channelHz: 136 } };
+    const m = preRingMargin(lf, 105)!;
+    expect(m.verdict).toBe("loud");
+    expect(m.unvalidated).toBe(true);
+    expect(preRingLabel(m)).toBe("Предзвон слышен: +27.0 дБ к порогу (2 мс) *");
+  });
+  it("min phase has no verdict, a numerically clean pre-ring prints < −60", () => {
+    expect(preRingMargin({ ...bw8Lin, audibility: null }, 105)).toBeNull();
+    const clean = preRingMargin({ ...bw8Lin, audibility: { relDb: [-200, -200, -200], channelHz: 3000 } }, 105)!;
+    expect(clean.verdict).toBe("ok");
+    expect(preRingLabel(clean)).toBe("Предзвон не слышен: < −60 дБ к порогу (2 мс)");
   });
 });

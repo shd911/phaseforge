@@ -8,6 +8,7 @@ import {
   firFreqWeighting, setFirFreqWeighting,
   firMaxBoost, setFirMaxBoost,
   firNoiseFloor, setFirNoiseFloor,
+  preRingPeakSpl, setPreRingPeakSpl,
 } from "../stores/bands";
 
 // b141.105 (audit 2026-10-23 §1.6): «Ограничение узкополосного подъёма» and
@@ -22,6 +23,7 @@ import {
 const ITER = { min: 0, max: 20 };
 const BOOST = { min: 0, max: 60 };
 const FLOOR = { min: -200, max: -40 };
+const SPL = { min: 60, max: 130 };
 // b141.148: the noise floor is also shown and typed as a word length —
 // 1 bit = 20·log10(2) dB. Both fields edit the one dB value.
 const DB_PER_BIT = 20 * Math.log10(2);
@@ -41,12 +43,14 @@ export default function FirSettingsDialog() {
   const [freqWeight, setFreqWeight] = createSignal(true);
   const [maxBoost, setMaxBoost] = createSignal(24.0);
   const [noiseFloor, setNoiseFloor] = createSignal(-150.0);
+  const [peakSpl, setPeakSpl] = createSignal(105);
 
   function initFromStore() {
     setIterations(firIterations());
     setFreqWeight(firFreqWeighting());
     setMaxBoost(firMaxBoost());
     setNoiseFloor(firNoiseFloor());
+    setPeakSpl(preRingPeakSpl());
   }
 
   function handleApply() {
@@ -54,6 +58,7 @@ export default function FirSettingsDialog() {
     setFirFreqWeighting(freqWeight());
     setFirMaxBoost(clampNum(maxBoost(), BOOST.min, BOOST.max));
     setFirNoiseFloor(clampNum(noiseFloor(), FLOOR.min, FLOOR.max));
+    setPreRingPeakSpl(clampNum(peakSpl(), SPL.min, SPL.max));
     closeFirSettings();
   }
 
@@ -109,6 +114,15 @@ export default function FirSettingsDialog() {
             <span class="xo-unit">{L("бит", "bit")}</span>
           </div>
           <div class="xo-hint">{L("Коррекция ниже этого уровня игнорируется. Поднимите при шумном измерении. 1 бит = 6,02 дБ: 16 бит ≈ −96 дБ, 24 бита ≈ −144,5 дБ", "Correction below this level is ignored. Raise it for a noisy measurement. 1 bit = 6.02 dB: 16 bit ≈ −96 dB, 24 bit ≈ −144.5 dB")}</div>
+
+          {/* b141.153: pre-ring audibility level */}
+          <div class="xo-row">
+            <label class="xo-label" for="prering-peak-spl">{L("Пик у слушателя", "Peak at the listener")}</label>
+            <NumField id="prering-peak-spl" value={peakSpl()} onChange={setPeakSpl}
+              min={SPL.min} max={SPL.max} step={1} />
+            <span class="xo-unit">{L("дБ SPL", "dB SPL")}</span>
+          </div>
+          <div class="xo-hint">{L("Пиковый уровень транзиента в месте прослушивания. По нему оценивается слышимость предзвона фазолинейных фильтров (строка «Предзвон» в блоках ФВЧ/ФНЧ): на 6 дБ громче — на 6 дБ ближе к порогу", "Transient peak level at the listening seat. The pre-ring audibility of linear-phase filters («Pre-ring» line in the HP/LP blocks) is judged at it: 6 dB louder — 6 dB closer to the threshold")}</div>
 
           <div class="xo-buttons">
             <button class="dlg-btn" onClick={handleCancel}>{L("Отмена", "Cancel")}</button>

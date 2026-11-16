@@ -86,6 +86,9 @@ pub struct ProjectFile {
     pub fir_max_boost_db: Option<f64>,
     #[serde(default)]
     pub fir_noise_floor_db: Option<f64>,
+    /// b141.153: peak SPL at the listener for the pre-ring audibility.
+    #[serde(default)]
+    pub prering_peak_spl_db: Option<f64>,
 
     // Snapshot metadata: present only inside snapshots/<id>.pfproj copies.
     // Lets rebuild_snapshot_index reconstruct the index from orphan files.

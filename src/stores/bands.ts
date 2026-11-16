@@ -1070,6 +1070,9 @@ export const [firNbSmoothingOct, setFirNbSmoothingOct] = settingSignal(0.333);
 export const [firNbMaxExcess, setFirNbMaxExcess] = settingSignal(6.0);
 export const [firMaxBoost, setFirMaxBoost] = settingSignal(24.0);
 export const [firNoiseFloor, setFirNoiseFloor] = settingSignal(-150.0);
+/** b141.153: transient peak at the listener, dB SPL — the level the section
+ *  pre-ring audibility is judged at («5 полос» DG-016: 105 design, 98 working). */
+export const [preRingPeakSpl, setPreRingPeakSpl] = settingSignal(105);
 
 // ---------------------------------------------------------------------------
 // Snapshot overlays: frozen curves for visual A/B comparison.

@@ -7,23 +7,51 @@ export interface SectionRing {
   /** b141.152: linear phase — first side lobe before the peak, dB re the peak;
    *  null on minimum phase or without lobes (Gaussian). */
   preLobeDb?: number | null;
+  /** b141.153: linear phase — pre-ring over the hearing threshold, Rust
+   *  `fir::prering_audibility` (relDb at the 1/2/5 ms masking windows, re a
+   *  0 dB SPL peak; channelHz decides the 2 ms value). */
+  audibility?: { relDb: [number, number, number]; channelHz: number } | null;
 }
 
-/** b141.152: a first pre-ring lobe louder than this turns red. */
-export const PRE_LOBE_LIMIT_DB = -60;
+/** b141.153 («5 полос»): green when the pre-ring stays 6 dB under threshold
+ *  even with a 1 ms masking window, red when it is over threshold earlier
+ *  than any documented backward masking of a click (5 ms); amber between —
+ *  the verdict hangs on the unvalidated window. */
+export const PRERING_GREEN_MARGIN_DB = -6;
+/** Below this the masking window has no data (backward masking of clicks was
+ *  measured from 250 Hz): red there is a risk on an isolated transient. */
+export const PRERING_VALIDATED_HZ = 300;
+export type PreRingVerdict = "ok" | "maybe" | "loud";
 
-export const preLobeLoud = (r: SectionRing) => r.preLobeDb != null && r.preLobeDb > PRE_LOBE_LIMIT_DB;
+export interface PreRingMargin { m1: number; m2: number; m5: number; verdict: PreRingVerdict; channelHz: number; unvalidated: boolean }
 
-export function preLobeLabel(r: SectionRing): string {
-  return r.preLobeDb == null
-    ? L("Предзвон: боковых лепестков нет", "Pre-ring: no side lobes")
-    : L(`Предзвон: 1-й лепесток ${r.preLobeDb.toFixed(1).replace("-", "−")} дБ`,
-      `Pre-ring: 1st lobe ${r.preLobeDb.toFixed(1).replace("-", "−")} dB`);
+export function preRingMargin(r: SectionRing, peakSplDb: number): PreRingMargin | null {
+  const a = r.audibility;
+  if (!a) return null;
+  const [m1, m2, m5] = a.relDb.map((x) => x + peakSplDb);
+  const verdict: PreRingVerdict = m1 <= PRERING_GREEN_MARGIN_DB ? "ok" : m5 > 0 ? "loud" : "maybe";
+  return { m1, m2, m5, verdict, channelHz: a.channelHz, unvalidated: verdict !== "ok" && a.channelHz < PRERING_VALIDATED_HZ };
 }
 
-export const preLobeTitle = () =>
-  L(`Уровень первого бокового лепестка перед пиком импульса, относительно пика (у ФВЧ — относительно отклонения от ровной АЧХ, как и звон). Он самый громкий в предзвоне; выше ${PRE_LOBE_LIMIT_DB} дБ предзвон может быть слышен — красный.`,
-    `Level of the first side lobe before the impulse peak, re the peak (for an HP — re the deviation from flat, as the ringing). It is the loudest of the pre-ring; above ${PRE_LOBE_LIMIT_DB} dB the pre-ring may be audible — red.`);
+const fmtDb = (v: number) => (v < -60 ? "< −60" : `${v > 0 ? "+" : ""}${v.toFixed(1)}`.replace("-", "−"));
+const fmtHz = (f: number) => (f >= 1000 ? `${(f / 1000).toFixed(1)} ${L("кГц", "kHz")}` : `${Math.round(f)} ${L("Гц", "Hz")}`);
+
+export function preRingLabel(m: PreRingMargin): string {
+  const what = m.verdict === "ok" ? L("не слышен", "inaudible") : m.verdict === "loud" ? L("слышен", "audible") : L("на грани", "borderline");
+  return L(`Предзвон ${what}: ${fmtDb(m.m2)} дБ к порогу (2 мс)${m.unvalidated ? " *" : ""}`,
+    `Pre-ring ${what}: ${fmtDb(m.m2)} dB re threshold (2 ms)${m.unvalidated ? " *" : ""}`);
+}
+
+export function preRingTitle(m: PreRingMargin, r: SectionRing, peakSplDb: number): string {
+  const lobe = r.preLobeDb == null ? L("боковых лепестков нет", "no side lobes")
+    : L(`первый лепесток ${fmtDb(r.preLobeDb)} дБ от пика`, `first lobe ${fmtDb(r.preLobeDb)} dB re the peak`);
+  const note = m.unvalidated
+    ? L(` * Ниже ${PRERING_VALIDATED_HZ} Гц маскировка щелчка не измерена: красный здесь — риск на одиночном транзиенте после тишины, решает слепой тест.`,
+      ` * Below ${PRERING_VALIDATED_HZ} Hz backward masking of a click was never measured: red here is a risk on an isolated transient after silence; a blind test decides.`)
+    : "";
+  return L(`Насколько предзвон выше порога слышимости (ISO 226) в слуховом фильтре на ${fmtHz(m.channelHz)}, если пик у слушателя ${peakSplDb} дБ SPL (Настройки оптимизации). Учитывается энергия, пришедшая раньше окна обратной маскировки: 1 мс ${fmtDb(m.m1)}, 2 мс ${fmtDb(m.m2)}, 5 мс ${fmtDb(m.m5)} дБ. Зелёный — даже при 1 мс на 6 дБ ниже порога; красный — выше порога ещё за 5 мс до события; жёлтый — зависит от окна маскировки. Худший случай: щелчок после тишины. Справочно: ${lobe}.${note}`,
+    `How far the pre-ring is over the hearing threshold (ISO 226) in the ear's filter at ${fmtHz(m.channelHz)}, with a ${peakSplDb} dB SPL peak at the listener (Optimization settings). Energy arriving before the backward-masking window counts: 1 ms ${fmtDb(m.m1)}, 2 ms ${fmtDb(m.m2)}, 5 ms ${fmtDb(m.m5)} dB. Green — 6 dB under threshold even at 1 ms; red — over threshold 5 ms ahead of the event; amber — depends on the masking window. Worst case: a click after silence. For reference: ${lobe}.${note}`);
+}
 
 export const fmtRingMs = (ms: number) => (ms < 10 ? ms.toFixed(1) : String(Math.round(ms)));
 

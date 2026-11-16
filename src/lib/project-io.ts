@@ -29,6 +29,7 @@ import {
   firNbMaxExcess, setFirNbMaxExcess,
   firMaxBoost, setFirMaxBoost,
   firNoiseFloor, setFirNoiseFloor,
+  preRingPeakSpl, setPreRingPeakSpl,
   uniqueBandName,
 } from "../stores/bands";
 import { MEASUREMENT_COLORS, cloneFilterConfig, migrateDelayConvention } from "../lib/types";
@@ -206,6 +207,7 @@ export interface ProjectFile {
   fir_nb_max_excess_db?: number;
   fir_max_boost_db?: number;
   fir_noise_floor_db?: number;
+  prering_peak_spl_db?: number;
   snapshot_id?: string | null;
   snapshot_description?: string | null;
   snapshot_app_version?: string | null;
@@ -344,6 +346,7 @@ export function buildProjectData(): ProjectFile {
     fir_nb_max_excess_db: firNbMaxExcess(),
     fir_max_boost_db: firMaxBoost(),
     fir_noise_floor_db: firNoiseFloor(),
+    prering_peak_spl_db: preRingPeakSpl(),
   };
 }
 
@@ -597,6 +600,7 @@ export async function restoreState(project: ProjectFile, projDir: string | null)
     setFirNbMaxExcess(project.fir_nb_max_excess_db ?? 6.0);
     setFirMaxBoost(project.fir_max_boost_db ?? 24.0);
     setFirNoiseFloor(project.fir_noise_floor_db ?? -150.0);
+    setPreRingPeakSpl(project.prering_peak_spl_db ?? 105);
     setIsDirty(false);
   });
   if (missingMeasurements.length > 0) {
@@ -797,6 +801,7 @@ export async function newProject(): Promise<void> {
   setFirNbMaxExcess(6.0);
   setFirMaxBoost(24.0);
   setFirNoiseFloor(-150.0);
+  setPreRingPeakSpl(105);
   // Reset PEQ optimization signals to defaults
   setTolerance(1.0);
   setMaxBands(20);

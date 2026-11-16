@@ -3,12 +3,13 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render } from "solid-js/web";
 
-const store = vi.hoisted(() => ({ iter: 3, boost: 24, floor: -150, weight: true }));
+const store = vi.hoisted(() => ({ iter: 3, boost: 24, floor: -150, weight: true, spl: 105 }));
 vi.mock("../../stores/bands", () => ({
   firIterations: () => store.iter, setFirIterations: (v: number) => { store.iter = v; },
   firFreqWeighting: () => store.weight, setFirFreqWeighting: (v: boolean) => { store.weight = v; },
   firMaxBoost: () => store.boost, setFirMaxBoost: (v: number) => { store.boost = v; },
   firNoiseFloor: () => store.floor, setFirNoiseFloor: (v: number) => { store.floor = v; },
+  preRingPeakSpl: () => store.spl, setPreRingPeakSpl: (v: number) => { store.spl = v; },
 }));
 
 import FirSettingsDialog, { openFirSettings, closeFirSettings } from "../FirSettingsDialog";

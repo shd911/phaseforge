@@ -23,6 +23,7 @@ use serde::Serialize;
 use std::f64::consts::PI;
 
 use super::band::target_hilbert_phase;
+use super::prering_audibility::{pre_ring_audibility, PreRingAudibility};
 use crate::target::{self, FilterConfig, FilterType, TargetCurve};
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -41,6 +42,9 @@ pub struct SectionRing {
     /// lobe before the main lobe, the loudest lobe of the pre-ring. None for
     /// minimum phase and for a section without lobes (Gaussian).
     pub pre_lobe_db: Option<f64>,
+    /// b141.153: linear phase only — how far the pre-ring is over the hearing
+    /// threshold before the masking window (`prering_audibility`).
+    pub audibility: Option<PreRingAudibility>,
 }
 
 /// Lobes quieter than this are float noise, not ringing (a Gaussian has none).
@@ -107,8 +111,9 @@ pub fn section_ring(cfg: &FilterConfig, is_low_pass: bool, sample_rate: f64) -> 
         if fits || n >= N_MAX {
             let ms = |s: usize| s as f64 / sample_rate * 1000.0;
             let pre_lobe_db = if cfg.linear_phase { first_pre_lobe_db(&h) } else { None };
+            let audibility = cfg.linear_phase.then(|| pre_ring_audibility(&h, sample_rate, cfg.freq_hz));
             return Ok(SectionRing { post_60_ms: ms(a60), post_100_ms: ms(a100), pre_60_ms: ms(b60),
-                pre_100_ms: ms(b100), lower_bound: !fits, pre_lobe_db });
+                pre_100_ms: ms(b100), lower_bound: !fits, pre_lobe_db, audibility });
         }
         n *= 2;
     }

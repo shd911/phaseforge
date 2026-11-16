@@ -331,5 +331,6 @@
  "fir_nb_smoothing_oct": 0.333,
  "fir_nb_max_excess_db": 6,
  "fir_max_boost_db": 24,
- "fir_noise_floor_db": -150
+ "fir_noise_floor_db": -150,
+ "prering_peak_spl_db": 105
 }

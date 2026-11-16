@@ -264,6 +264,15 @@
   before/after apart (`lib/section-ring.ts`).
   Pinned by `tests/section_ring.rs` vs the exported WAV (it found the linear
   main's 0.95·Nyquist wall, fixed in b141.112).
+- **Pre-ring audibility of a linear section** (b141.153, `fir/prering_audibility.rs`,
+  algorithm from the «5 полос» project): the first-lobe level is fc-invariant, so
+  it is not the verdict (kept in the tooltip). The section impulse (peak 1, HP on
+  1 − HP) through 4th-order gammatones fc·2^−1.5…fc·2 in ½ ERB, energy before
+  t_peak − τ (1/2/5 ms) vs ISO 226 over 200 ms; the UI adds «Пик у слушателя»
+  (project setting, 105 dB SPL). Envelope = 2·|y| on EVERY bin, negative
+  frequencies included — an analytic signal is not causal (LP DC through the
+  skirt, −8 instead of −37 dB). Green M(1 ms) ≤ −6, red M(5 ms) > 0. Pinned by
+  `prering_audibility::matches_the_reference_table`.
 - **Complementary crossover «1 − H»** (b141.109, `FilterConfig::complementary`,
   `target::complement_active`): a section = 1 − |its mirror| (same type/order/
   Q/freq). Honoured only on linear phase and not for Custom Q > 0.708
