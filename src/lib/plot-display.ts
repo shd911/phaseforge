@@ -21,6 +21,13 @@ export function polarityPhase<T extends number | null>(phase: readonly T[], inve
   return phase.map((v) => (v == null ? v : ((v as number) + 180) as T));
 }
 
+/** b141.154: a band's phase as it enters a coherent Σ — polarity and the
+ *  alignment delay (`alignmentPhaseDeg`, positive = plays later), the same
+ *  rotation `coherentSum` applies. Unwrapped; the caller wraps. */
+export function phaseEnteringSum(freq: readonly number[], phase: readonly number[], inverted: boolean, delaySec: number): number[] {
+  return phase.map((v, k) => v + (inverted ? 180 : 0) + alignmentPhaseDeg(freq[k], delaySec));
+}
+
 /** Time-domain counterpart of `polarityPhase`: impulse/step negated. */
 export function polarityAmplitude(values: readonly number[], inverted: boolean): number[] {
   return inverted ? values.map((v) => -v) : (values as number[]);

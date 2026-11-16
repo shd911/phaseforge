@@ -40,7 +40,7 @@ import { buildCommonGrid, buildFirGrid, interpOnGrid, interpPhaseOnGrid, irTime,
 import { bandRequestKey } from "../lib/band-evaluator/cache";
 import SumStrip from "./SumStrip";
 import { L } from "../lib/i18n";
-import { polarityPhase, polarityAmplitude, sumGroupDelayMs, fitMagRange, fitExportMagRange, peqHandleDb, peqGainAfterDrag, pointInBox, type FitSeries } from "../lib/plot-display";
+import { polarityPhase, polarityAmplitude, phaseEnteringSum, sumGroupDelayMs, fitMagRange, fitExportMagRange, peqHandleDb, peqGainAfterDrag, pointInBox, type FitSeries } from "../lib/plot-display";
 import { newWheelAccumulator, wheelSteps } from "../lib/wheel-step";
 
 
@@ -901,7 +901,7 @@ export default function FrequencyPlot() {
         // b141.104 (audit 4.21): the band's target phase and FIR curve too.
         if (e.label === colName || e.label === colName + " \u00B0"
           || e.label === colName + " tgt" || e.label === colName + " tgt \u00B0"
-          || e.label === colName + " FIR"
+          || e.label === colName + " FIR" || e.label === colName + " FIR \u00B0"
           || e.label.startsWith(colName + " corr+XO") || e.label === colName + " corr+XO \u00B0") matching.push(i);
       }
     }
@@ -3705,6 +3705,14 @@ export default function FrequencyPlot() {
             visible: false, seriesIdx: sIdx, category: "corrected",
           });
           sIdx++;
+          // b141.154: the band's phase as it enters Σ corr (polarity + delay),
+          // toggled with its magnitude cell (pairing by the « °» suffix).
+          if (showPhase && result.correctedCoherent) {
+            uSeries.push({ label: `${bands[i].name} corr+XO °`, stroke: cf.correctedPhase, width: 1, dash: [4, 4], scale: "phase" });
+            uData.push(wrapPhase(phaseEnteringSum(freq, pb.phase, !!bands[i].inverted, bands[i].alignmentDelay ?? 0)));
+            legend.push({ label: `${bands[i].name} corr+XO °`, color: cf.correctedPhase, dash: true, visible: false, seriesIdx: sIdx, category: "corrected" });
+            sIdx++;
+          }
         }
 
         // b141.78: «FIR» = each band's corrected + what its exported FIR does
@@ -3733,6 +3741,12 @@ export default function FrequencyPlot() {
           uData.push(fp.mag);
           legend.push({ label: `${bands[i].name} FIR`, color: cf.corrected, dash: true, visible: false, seriesIdx: sIdx, category: "corrfir" });
           sIdx++;
+          if (showPhase && result.correctedCoherent) {
+            uSeries.push({ label: `${bands[i].name} FIR °`, stroke: cf.correctedPhase, width: 1, dash: [2, 3], scale: "phase" });
+            uData.push(wrapPhase(phaseEnteringSum(freq, fp.phase, fp.sign < 0, fp.delay)));
+            legend.push({ label: `${bands[i].name} FIR °`, color: cf.correctedPhase, dash: true, visible: false, seriesIdx: sIdx, category: "corrfir" });
+            sIdx++;
+          }
         }
         const firSum = result.correctedCoherent ? coherentSum(freq, firParts) : null;
         if (firSum) {

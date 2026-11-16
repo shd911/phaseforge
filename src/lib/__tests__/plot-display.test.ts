@@ -2,7 +2,7 @@
 import { describe, it, expect } from "vitest";
 import {
   polarityPhase, polarityAmplitude, peqHandleDb, peqGainAfterDrag, pointInBox,
-  fitMagRange, fitExportMagRange, sumGroupDelayMs, phaseSlopeDegPerHz,
+  fitMagRange, fitExportMagRange, sumGroupDelayMs, phaseSlopeDegPerHz, phaseEnteringSum,
 } from "../plot-display";
 import { exportPhaseLabel } from "../export-metrics";
 import { buildLogGrid } from "../band-evaluator/grid";
@@ -140,5 +140,21 @@ describe("Σ group delay (4.7)", () => {
     const inv = { ...band(0), sign: -1 as const };
     const gd = sumGroupDelayMs(freq, [band(0), inv]);
     expect(gd.every((v) => Number.isNaN(v))).toBe(true);
+  });
+});
+
+describe("phaseEnteringSum (b141.154)", () => {
+  it("is the phase a single band contributes to the coherent Σ", () => {
+    const freq = buildLogGrid(256, 20, 20000);
+    const phase = freq.map((f) => -90 * Math.log10(f / 20));
+    const mag = freq.map(() => 0);
+    for (const [inv, delay] of [[false, 0], [true, 0.0021], [false, -0.0007]] as const) {
+      const sum = coherentSum(freq, [{ mag, phase, sign: inv ? -1 : 1, delay }])!;
+      const mine = phaseEnteringSum(freq, phase, inv, delay);
+      for (let k = 0; k < freq.length; k++) {
+        const d = ((mine[k] - sum.phase[k]) % 360 + 540) % 360 - 180;
+        expect(Math.abs(d)).toBeLessThan(1e-6);
+      }
+    }
   });
 });
