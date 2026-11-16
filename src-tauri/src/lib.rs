@@ -408,7 +408,7 @@ async fn compute_target_hilbert_phase(
     fir::band::target_hilbert_phase(&freq, high_pass.as_ref(), low_pass.as_ref(), tilt, sample_rate)
 }
 
-/// b141.112: ring time of one crossover section at the export rate (b141.153: + first pre-ring lobe).
+/// b141.112: ring time of one crossover section at the export rate (b141.152: + first pre-ring lobe, b141.153: + its audibility).
 #[tauri::command]
 async fn compute_section_ring(
     config: target::FilterConfig,
